@@ -20,7 +20,7 @@
 
 NetBooster 是一款基于 **PySide6** 与 **QFluentWidgets** 开发的现代化 Windows 多网卡并发下载加速工具。
 
-通过动态调度系统的网络接口跃点数（Interface Metric），本工具能够引导多线程下载软件（如 IDM、迅雷、Steam、BT 等）同时利用多条网络线路（如：以太网 + Wi-Fi + 移动热点），实现带宽叠加与无感加速。
+通过动态调度系统的网络接口跃点数（Interface Metric），本工具能够引导多线程下载软件（如 IDM、迅雷、Steam、BT 等）同时利用多条 network 线路（如：以太网 + Wi-Fi + 移动热点），实现带宽叠加与无感加速。
 
 ---
 
@@ -100,6 +100,7 @@ nuitka --standalone --onefile --enable-plugin=pyside6 --windows-console-mode=dis
 1. **家庭宽带带宽峰值提醒**：若您的家庭宽带本身已达到物理带宽上限（如千兆光纤满速），单线路叠加可能无法带来明显的速率飞跃。**强烈建议将 PC 同时连接手机移动数据热点（或第二条独立宽带线路）进行多路并发测试**，以验证多网卡叠加加速效果。
 2. **游戏安全提示**：本工具仅通过 Windows 官方 PowerShell API 修改系统标准路由表，**不涉及任何内存注入、游戏封包拦截或篡改行为**，100% 安全，绝不触发反作弊封号（如 VAC、BattlEye、DMA 检测等）。
 3. **延迟敏感型应用**：并发加速模式会导致多网卡分流，可能引起部分电竞游戏路由抖动。**强烈建议在游玩竞技类游戏前，点击界面右下角的 🎮 [恢复默认] 按钮。**
+4. **技术边界与极客指南**：本项目仅供网络分流技术的学习与研究使用，定位为轻量级、零成本的临时下载加速方案。**硬核专业玩家若对全时段策略流聚合有更严苛的需求，可参考 Speedify 专业聚合软件或部署双 WAN 软路由（OpenWrt / iKuai）的多线负载均衡方案。**
 
 ---
 
@@ -203,6 +204,7 @@ nuitka --standalone --onefile --enable-plugin=pyside6 --windows-console-mode=dis
 1. **Bandwidth Peak Notice**: If your home broadband has already reached its physical bandwidth ceiling (e.g., gigabit fiber at full speed), stacking routes on the same line may not yield a significant speed boost. **It is highly recommended to connect your PC to a mobile data hotspot (or a second independent broadband line) simultaneously for multi-path concurrent testing** to verify the stacking effect.
 2. **Gaming Safety & Anti-Cheat**: This tool only modifies the system standard routing table through the official Windows PowerShell API. It **does not involve any memory injection, packet interception, or tampering behavior**. It is 100% safe and will never trigger anti-cheat bans (such as VAC, BattlEye, DMA detection, etc.).
 3. **Latency-Sensitive Applications**: Concurrent acceleration mode distributes traffic across multiple adapters, which may cause routing jitter in some esports games. **It is strongly recommended to click the 🎮 [Restore Default] button at the bottom right before playing competitive games.**
+4. **Technical Boundary & Power User Guide**: This project is only intended for the study and research of network traffic splitting, positioned as a lightweight, zero-cost temporary acceleration utility. **Power users or network geeks who require industrial-grade, full-time multi-line aggregation strategies may refer to commercial software like Speedify or deploy advanced Dual-WAN soft routers (OpenWrt / iKuai) for multi-line load balancing.**
 
 ---
 
