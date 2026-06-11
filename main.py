@@ -11,6 +11,7 @@ NetBooster - Windows 多网卡跃点数并发调度工具
 
 import sys
 import os
+import ctypes
 
 # 仅导入非 Qt 模块 - 严禁在此处导入任何 UI 相关模块
 from utils.network_utils import is_admin, elevate_privileges
@@ -69,19 +70,34 @@ def show_privilege_prompt_and_elevate(app):
         return False
 
 
+def register_windows_app_id():
+    """为 Windows 注册独立的 AppUserModelID，避免任务栏图标被系统合并。"""
+    try:
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+            "netbooster.dynamicmetric.accelerator.v1"
+        )
+    except Exception:
+        pass
+
+
 if __name__ == "__main__":
     # ========== 第一步：检测管理员权限（纯逻辑，无 Qt） ==========
     admin_check = check_admin_privileges()
     
     # ========== 第二步：立刻创建 QApplication（在任何 QWidget 之前）==========
+    register_windows_app_id()
     from PySide6.QtCore import QCoreApplication
+    from PySide6.QtGui import QIcon
     from PySide6.QtWidgets import QApplication, QMessageBox
     runtime_dir = os.path.dirname(os.path.abspath(__file__))
     qt_plugin_path = os.path.join(runtime_dir, "PySide6", "qt-plugins")
+    icon_path = os.path.join(runtime_dir, "assets", "icon.ico")
     if os.path.exists(qt_plugin_path):
         QCoreApplication.addLibraryPath(qt_plugin_path)
         os.environ["QT_QPA_PLATFORM_PLUGIN_PATH"] = os.path.join(qt_plugin_path, "platforms")
     app = QApplication(sys.argv)
+    if os.path.exists(icon_path):
+        app.setWindowIcon(QIcon(icon_path))
     
     # ========== 第三步：延迟导入 MainWindow（现在 QApplication 已存在）==========
     from ui.main_window import create_main_window
@@ -99,6 +115,8 @@ if __name__ == "__main__":
     # ========== 第六步：创建并显示主窗口（工厂函数模式）==========
     try:
         window = create_main_window()
+        if os.path.exists(icon_path):
+            window.setWindowIcon(QIcon(icon_path))
         window.show()
         print("[INFO] 主界面已启动")
     except Exception as e:
