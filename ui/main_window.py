@@ -25,6 +25,45 @@ DEFAULT_SOCKS_PORT = 10800
 DEFAULT_HTTP_PORT = 10801
 
 
+def get_steam_pids() -> List[int]:
+    """返回正在运行的 steam.exe PID，用于开启加速前提醒。"""
+    pids: List[int] = []
+
+    try:
+        import psutil
+        for proc in psutil.process_iter(["pid", "name"]):
+            try:
+                name = (proc.info.get("name") or "").lower()
+                if name == "steam.exe":
+                    pids.append(int(proc.info["pid"]))
+            except Exception:
+                continue
+    except Exception:
+        try:
+            import subprocess
+            startupinfo = None
+            if hasattr(subprocess, "STARTUPINFO"):
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                startupinfo.wShowWindow = 0
+            output = subprocess.run(
+                ["tasklist", "/FO", "CSV", "/NH"],
+                capture_output=True, text=True, timeout=5,
+                startupinfo=startupinfo,
+            ).stdout
+            for line in output.splitlines():
+                parts = [part.strip().strip('"') for part in line.split(",")]
+                if len(parts) >= 2 and parts[0].lower() == "steam.exe":
+                    try:
+                        pids.append(int(parts[1]))
+                    except ValueError:
+                        pass
+        except Exception:
+            pass
+
+    return sorted(pids)
+
+
 def set_system_proxy(
     enable: bool,
     socks_addr: str = f"127.0.0.1:{DEFAULT_SOCKS_PORT}",
@@ -42,6 +81,8 @@ def set_system_proxy(
         if enable:
             proxy_value = f"http={http_addr};https={http_addr};socks={socks_addr}"
             winreg.SetValueEx(key, "ProxyServer", 0, winreg.REG_SZ, proxy_value)
+        else:
+            winreg.SetValueEx(key, "ProxyServer", 0, winreg.REG_SZ, "")
 
     ctypes.windll.Wininet.InternetSetOptionW(0, 39, 0, 0)
     ctypes.windll.Wininet.InternetSetOptionW(0, 37, 0, 0)
@@ -54,10 +95,10 @@ def create_main_window():
         QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
         QTableWidget, QTableWidgetItem, QHeaderView, QSpinBox, QCheckBox,
         QFrame, QToolButton, QPlainTextEdit,
-        QAbstractItemView,
+        QAbstractItemView, QSystemTrayIcon, QMenu,
     )
     from PySide6.QtCore import Qt, QThread, Signal, Slot, QRectF, QTimer, QSettings
-    from PySide6.QtGui import QFont, QIcon, QPainterPath, QRegion
+    from PySide6.QtGui import QFont, QIcon, QPainterPath, QRegion, QAction
     from qfluentwidgets import (
         PushButton, PrimaryPushButton, InfoBar, InfoBarPosition,
         setThemeColor,
@@ -451,7 +492,7 @@ def create_main_window():
             super().__init__()
             self.setWindowTitle(mw_tr("window_title"))
             self.setWindowIcon(QIcon())
-            self.resize(1280, 820)
+            self.setFixedSize(1280, 820)
             self.setAttribute(Qt.WA_TranslucentBackground, True)
             self.setWindowFlags(Qt.FramelessWindowHint | Qt.Window)
             self._drag_pos = None
@@ -470,12 +511,93 @@ def create_main_window():
             self._stop_fallback_timer.setSingleShot(True)
             self._stop_fallback_timer.timeout.connect(self._force_finish_stop_ui)
 
+            # 系统托盘初始化
+            self._init_system_tray()
+
             self.connect_worker_signals()
             self.init_ui()
             self.load_adapters()
 
         def connect_worker_signals(self):
             self.scan_worker.scan_finished.connect(self.on_scan_finished)
+
+        def _init_system_tray(self):
+            """初始化系统托盘图标和右键菜单"""
+            import os
+            self.tray_icon = QSystemTrayIcon(self)
+
+            # 加载托盘图标（优先项目 icon，回退到默认）
+            icon_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "icon.ico")
+            if os.path.exists(icon_path):
+                self.tray_icon.setIcon(QIcon(icon_path))
+            else:
+                # 回退到应用窗口图标
+                self.tray_icon.setIcon(self.windowIcon())
+
+            self.tray_icon.setToolTip(mw_tr("tray_tooltip"))
+
+            # 创建托盘右键菜单
+            tray_menu = QMenu()
+            tray_menu.setStyleSheet("""
+                QMenu {
+                    background: white;
+                    border: 1px solid #d0d0d0;
+                    border-radius: 6px;
+                    padding: 4px;
+                }
+                QMenu::item {
+                    padding: 8px 24px 8px 12px;
+                    border-radius: 4px;
+                    color: #1a1a1a;
+                }
+                QMenu::item:selected {
+                    background: #e6f3ff;
+                    color: #0078d4;
+                }
+            """)
+
+            # 显示主界面
+            show_action = QAction(mw_tr("tray_show_main"), self)
+            show_action.triggered.connect(self._show_from_tray)
+            tray_menu.addAction(show_action)
+
+            tray_menu.addSeparator()
+
+            # 退出程序
+            exit_action = QAction(mw_tr("tray_exit"), self)
+            exit_action.triggered.connect(self._exit_from_tray)
+            tray_menu.addAction(exit_action)
+
+            self.tray_icon.setContextMenu(tray_menu)
+            # 双击托盘图标也显示主界面
+            self.tray_icon.activated.connect(self._on_tray_activated)
+
+            # 显示托盘图标
+            self.tray_icon.show()
+
+        def _on_tray_activated(self, reason):
+            """托盘图标被激活（双击）"""
+            if reason == QSystemTrayIcon.DoubleClick:
+                self._show_from_tray()
+
+        def _show_from_tray(self):
+            """从系统托盘恢复显示主窗口"""
+            self.show()
+            self.activateWindow()
+            self.raise_()
+
+        def _exit_from_tray(self):
+            """从系统托盘彻底退出程序（绕过托盘逻辑）"""
+            # 临时设置为直接退出，避免 closeEvent 再次隐藏窗口
+            settings = QSettings("Hypostasis-Cat", "HypoMux")
+            original_behavior = settings.value("close_behavior", "tray", type=str)
+            settings.setValue("close_behavior", "exit")
+
+            # 执行关闭（这次会走彻底退出逻辑）
+            self.close()
+
+            # 恢复原设置（虽然进程即将退出，但保持状态一致性）
+            settings.setValue("close_behavior", original_behavior)
 
         def init_ui(self):
             self.setStyleSheet("background: transparent;")
@@ -983,6 +1105,10 @@ def create_main_window():
             if self.proxy_worker is not None:
                 return
 
+            if get_steam_pids():
+                self.show_warning(mw_tr("warn_steam_running"))
+                self.append_log(mw_tr("log_steam_running"))
+
             socks_port = self.port_spinbox.value()
             http_port = socks_port + 1
             self._pending_socks_addr = f"127.0.0.1:{socks_port}"
@@ -1013,7 +1139,10 @@ def create_main_window():
                 self._set_status("status_starting")
                 self.proxy_worker.start()
             except Exception as e:
-                set_system_proxy(False)
+                try:
+                    set_system_proxy(False)
+                except Exception as cleanup_error:
+                    self.append_log(mw_tr("log_start_cleanup_error", error=cleanup_error))
                 self.proxy_worker = None
                 self._is_boosting = False
                 self._exit_boosting_ui()
@@ -1029,12 +1158,28 @@ def create_main_window():
                 self.append_log(mw_tr("log_stop_requested"))
                 self._set_status("status_stopping")
                 self.boost_btn.setEnabled(False)  # 停止完成（on_proxy_stopped）后再恢复
-                # ProxyWorker.stop() 内部用 loop.call_soon_threadsafe 安全叫停子线程的 asyncio loop
-                self.proxy_worker.stop()
-                self._stop_fallback_timer.start(6000)
-            finally:
+
+                # ===== 退出生命周期：严格按序，根治"停止加速后 Steam 离线"=====
+                # 步骤 1+2：先把注册表 ProxyEnable 置 0，并立即调用 WinINet
+                #          InternetSetOption(SETTINGS_CHANGED + REFRESH) 强刷全局网络栈缓存。
+                #          set_system_proxy(False) 内部已完成这两步。
                 set_system_proxy(False)
                 self.append_log(mw_tr("log_proxy_disabled"))
+
+                # 步骤 3：短暂保留本地监听，给 Steam 的重连与 WinINet 刷新留出窗口。
+                # 步骤 4：延时结束后再彻底关闭本地 Socket 监听、释放端口。
+                QTimer.singleShot(300, self._finish_stop_proxy)
+            except Exception:
+                # 兜底：即便上面异常，也要确保监听被叫停
+                self._finish_stop_proxy()
+
+        def _finish_stop_proxy(self):
+            """退出生命周期步骤 4：延时结束后安全关闭本地 Socket 监听服务。"""
+            if self.proxy_worker is None:
+                return
+            # ProxyWorker.stop() 内部用 loop.call_soon_threadsafe 安全叫停子线程的 asyncio loop
+            self.proxy_worker.stop()
+            self._stop_fallback_timer.start(6000)
 
         def _enter_boosting_ui(self):
             self.boost_btn.setText(mw_tr("boost_stop"))
@@ -1164,7 +1309,26 @@ def create_main_window():
                 pass
 
         def closeEvent(self, event):
-            """退出清理：安全停止正在运行的分流引擎。"""
+            """退出清理：根据用户设置决定最小化到托盘或彻底退出。"""
+            settings = QSettings("Hypostasis-Cat", "HypoMux")
+            close_behavior = settings.value("close_behavior", "tray", type=str)
+
+            # 如果设置为最小化到托盘，则隐藏窗口而不真正退出
+            if close_behavior == "tray":
+                event.ignore()  # 阻止默认关闭行为
+                self.hide()     # 隐藏主窗口
+                # 可选：首次最小化时提示用户
+                if not hasattr(self, '_tray_tip_shown'):
+                    self.tray_icon.showMessage(
+                        "HypoMux",
+                        mw_tr("tray_tooltip"),
+                        QSystemTrayIcon.Information,
+                        2000
+                    )
+                    self._tray_tip_shown = True
+                return
+
+            # 否则执行彻底退出
             try:
                 if self.proxy_worker is not None:
                     self.proxy_worker.stop()
@@ -1180,6 +1344,9 @@ def create_main_window():
                     set_system_proxy(False)
                 except Exception as e:
                     print(mw_tr("log_close_proxy_error", error=e))
+                # 清理系统托盘图标
+                if hasattr(self, 'tray_icon'):
+                    self.tray_icon.hide()
             super().closeEvent(event)
 
         # ========== InfoBar 提示 ==========

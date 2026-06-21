@@ -15,8 +15,10 @@ HypoMux 网络工具模块 - Step 2
 """
 
 import ctypes
+from ctypes import wintypes
 import os
 import sys
+import socket
 import subprocess
 import json
 import logging
@@ -42,6 +44,180 @@ def _get_windows_startupinfo():
         startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
         startupinfo.wShowWindow = 0
     return startupinfo
+
+
+# ========== 网卡接口索引（IfIndex）权威读取 ==========
+# 通过 Win32 IPHLPAPI 的 GetAdaptersAddresses 直接拿到每张活动网卡的
+# IfIndex（接口索引）与其上挂载的所有单播 IPv4 地址。
+#
+# 这是修复 WinError 10049（在同网段网卡上 bind 本地 IP 会随机命中错误网卡）的
+# 物理地基：拿到 IfIndex 后，上层即可用 IP_UNICAST_IF 把出站 socket 死锁在
+# 指定网卡上，彻底绕过 Windows 的默认路由查找，而不再依赖脆弱的 bind(local_ip)。
+
+# GetAdaptersAddresses 常量
+_AF_INET = 2                     # AF_INET
+_AF_UNSPEC = 0
+_GAA_FLAG_SKIP_ANYCAST = 0x0002
+_GAA_FLAG_SKIP_MULTICAST = 0x0004
+_GAA_FLAG_SKIP_DNS_SERVER = 0x0008
+_ERROR_BUFFER_OVERFLOW = 111
+_ERROR_SUCCESS = 0
+_IF_OPER_STATUS_UP = 1           # IfOperStatusUp
+
+
+class _SOCKADDR(ctypes.Structure):
+    _fields_ = [
+        ("sa_family", wintypes.USHORT),
+        ("sa_data", ctypes.c_ubyte * 14),
+    ]
+
+
+class _SOCKET_ADDRESS(ctypes.Structure):
+    _fields_ = [
+        ("lpSockaddr", ctypes.POINTER(_SOCKADDR)),
+        ("iSockaddrLength", ctypes.c_int),
+    ]
+
+
+class _IP_ADAPTER_UNICAST_ADDRESS(ctypes.Structure):
+    pass
+
+
+_IP_ADAPTER_UNICAST_ADDRESS._fields_ = [
+    ("Length", wintypes.ULONG),
+    ("Flags", wintypes.DWORD),
+    ("Next", ctypes.POINTER(_IP_ADAPTER_UNICAST_ADDRESS)),
+    ("Address", _SOCKET_ADDRESS),
+    ("PrefixOrigin", ctypes.c_int),
+    ("SuffixOrigin", ctypes.c_int),
+    ("DadState", ctypes.c_int),
+    ("ValidLifetime", wintypes.ULONG),
+    ("PreferredLifetime", wintypes.ULONG),
+    ("LeaseLifetime", wintypes.ULONG),
+    ("OnLinkPrefixLength", ctypes.c_ubyte),
+]
+
+
+class _IP_ADAPTER_ADDRESSES(ctypes.Structure):
+    pass
+
+
+_IP_ADAPTER_ADDRESSES._fields_ = [
+    ("Length", wintypes.ULONG),
+    ("IfIndex", wintypes.DWORD),
+    ("Next", ctypes.POINTER(_IP_ADAPTER_ADDRESSES)),
+    ("AdapterName", ctypes.c_char_p),
+    ("FirstUnicastAddress", ctypes.POINTER(_IP_ADAPTER_UNICAST_ADDRESS)),
+    ("FirstAnycastAddress", ctypes.c_void_p),
+    ("FirstMulticastAddress", ctypes.c_void_p),
+    ("FirstDnsServerAddress", ctypes.c_void_p),
+    ("DnsSuffix", wintypes.LPWSTR),
+    ("Description", wintypes.LPWSTR),
+    ("FriendlyName", wintypes.LPWSTR),
+    ("PhysicalAddress", ctypes.c_ubyte * 8),
+    ("PhysicalAddressLength", wintypes.DWORD),
+    ("Flags", wintypes.DWORD),
+    ("Mtu", wintypes.DWORD),
+    ("IfType", wintypes.DWORD),
+    ("OperStatus", ctypes.c_int),
+    ("Ipv6IfIndex", wintypes.DWORD),
+    ("ZoneIndices", wintypes.DWORD * 16),
+    ("FirstPrefix", ctypes.c_void_p),
+    # 以下字段在新版结构体中存在，这里无需逐一访问，但保留以保证 Length 对齐
+    ("TransmitLinkSpeed", ctypes.c_uint64),
+    ("ReceiveLinkSpeed", ctypes.c_uint64),
+    ("FirstWinsServerAddress", ctypes.c_void_p),
+    ("FirstGatewayAddress", ctypes.c_void_p),
+    ("Ipv4Metric", wintypes.ULONG),
+    ("Ipv6Metric", wintypes.ULONG),
+]
+
+
+def _sockaddr_to_ipv4(socket_address: _SOCKET_ADDRESS) -> Optional[str]:
+    """从 SOCKET_ADDRESS 中提取点分十进制 IPv4 字符串（仅处理 AF_INET）。"""
+    sockaddr_ptr = socket_address.lpSockaddr
+    if not sockaddr_ptr:
+        return None
+    sockaddr = sockaddr_ptr.contents
+    if sockaddr.sa_family != _AF_INET:
+        return None
+    # sockaddr_in: family(2) + port(2) + in_addr(4) ...
+    # sa_data[2:6] 即为 4 字节 IPv4 地址（网络字节序）
+    raw = bytes(sockaddr.sa_data[2:6])
+    return socket.inet_ntoa(raw)
+
+
+def get_adapter_if_indices() -> Dict[str, int]:
+    """
+    调用 GetAdaptersAddresses，返回 {IPv4 地址: IfIndex} 的映射。
+
+    上层在创建出站 socket 时，可用网卡的出口 IP 反查其真实 IfIndex，再用
+    IP_UNICAST_IF 把 socket 锁死在该网卡上。这样即使两张网卡处于同一网段，
+    也不会再发生 bind(local_ip) 命中错网卡导致的 WinError 10049。
+
+    Returns:
+        Dict[str, int]: 形如 {"192.168.31.80": 11, "10.20.236.208": 19}
+        失败时返回空字典（上层应有回退逻辑）。
+    """
+    ip_to_index: Dict[str, int] = {}
+    try:
+        iphlpapi = ctypes.windll.Iphlpapi
+        flags = _GAA_FLAG_SKIP_ANYCAST | _GAA_FLAG_SKIP_MULTICAST | _GAA_FLAG_SKIP_DNS_SERVER
+
+        buf_len = wintypes.ULONG(15 * 1024)  # 初始 15KB，按官方建议预分配
+        for _ in range(3):  # 缓冲区不足时按返回的 SizePointer 重试
+            buffer = ctypes.create_string_buffer(buf_len.value)
+            ret = iphlpapi.GetAdaptersAddresses(
+                _AF_INET,
+                flags,
+                None,
+                ctypes.cast(buffer, ctypes.POINTER(_IP_ADAPTER_ADDRESSES)),
+                ctypes.byref(buf_len),
+            )
+            if ret == _ERROR_BUFFER_OVERFLOW:
+                continue  # buf_len 已被写为所需大小，重试
+            break
+
+        if ret != _ERROR_SUCCESS:
+            logger.warning(f"GetAdaptersAddresses 返回错误码 {ret}")
+            return ip_to_index
+
+        adapter_ptr = ctypes.cast(buffer, ctypes.POINTER(_IP_ADAPTER_ADDRESSES))
+        while adapter_ptr:
+            adapter = adapter_ptr.contents
+            # 只采集处于 Up 状态的网卡
+            if adapter.OperStatus == _IF_OPER_STATUS_UP and adapter.IfIndex != 0:
+                unicast_ptr = adapter.FirstUnicastAddress
+                while unicast_ptr:
+                    unicast = unicast_ptr.contents
+                    ipv4 = _sockaddr_to_ipv4(unicast.Address)
+                    if ipv4:
+                        ip_to_index[ipv4] = int(adapter.IfIndex)
+                    unicast_ptr = unicast.Next
+            adapter_ptr = adapter.Next
+
+        logger.info(f"GetAdaptersAddresses 解析出 {len(ip_to_index)} 个 IPv4->IfIndex 映射")
+    except Exception as e:
+        logger.error(f"GetAdaptersAddresses 调用异常: {type(e).__name__}: {e}")
+
+    return ip_to_index
+
+
+def resolve_if_index(ipv4: str, fallback: Optional[int] = None) -> Optional[int]:
+    """
+    用出口 IPv4 地址反查其网卡的 IfIndex（接口索引）。
+
+    Args:
+        ipv4: 网卡的出口 IPv4 地址
+        fallback: 查不到时返回的回退值（通常是 UI 扫描阶段记录的 index）
+
+    Returns:
+        匹配到的 IfIndex；查不到时返回 fallback。
+    """
+    if not ipv4:
+        return fallback
+    mapping = get_adapter_if_indices()
+    return mapping.get(ipv4, fallback)
 
 
 # ========== 管理员权限检测与提权 ==========

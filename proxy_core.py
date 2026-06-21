@@ -76,15 +76,24 @@ async def handle_client(reader, writer):
         target_display = dst_domain if dst_domain else dst_addr
         print(f"[调度分配] 新连接 -> 指派给: 【{nic['name']}】 | 目标: {target_display}:{dst_port}")
 
-        # 4. 【L3 物理层绑定】
+        # 4. 【L3 物理层绑定 -- 接口索引强绑定，根治 WinError 10049】
+        #    先注入 IP_UNICAST_IF（IPPROTO_IP 级别，常量 31）把出口网卡锁死在
+        #    nic['index'] 上，再 bind 源地址。同网段双网卡也不会再命中错网卡。
         upstream_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         upstream_sock.setblocking(False)
-        
+
         try:
-            upstream_sock.bind((nic['ip'], 0))
-            upstream_sock.setsockopt(socket.IPPROTO_IP, IP_UNICAST_IF, struct.pack("!I", nic['index']))
+            # IPv4 下接口索引必须用网络字节序（大端）
+            upstream_sock.setsockopt(
+                socket.IPPROTO_IP, IP_UNICAST_IF, struct.pack("!I", nic['index'])
+            )
+            try:
+                upstream_sock.bind((nic['ip'], 0))
+            except OSError:
+                # 接口已由 IP_UNICAST_IF 锁定，bind 失败可降级忽略
+                pass
         except Exception as e:
-            print(f"[绑定崩溃] 网卡: {nic['name']} 绑定其 IP ({nic['ip']}) 时失败: {e}。请检查 IP 是否变动！")
+            print(f"[绑定崩溃] 网卡: {nic['name']} 接口强绑定 (IfIndex={nic['index']}) 失败: {e}。")
             writer.close()
             upstream_sock.close()
             return

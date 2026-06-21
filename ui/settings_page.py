@@ -12,10 +12,12 @@ HypoMux 设置面板 - SettingsWidget
 
 from PySide6.QtWidgets import (
     QFrame, QVBoxLayout, QHBoxLayout, QLabel,
-    QComboBox, QSpinBox, QGroupBox, QListView,
+    QComboBox, QSpinBox, QGroupBox, QListView, QRadioButton, QButtonGroup,
 )
-from PySide6.QtCore import Signal, QSettings
+from PySide6.QtCore import Signal, QSettings, Qt
+from PySide6.QtGui import QPixmap
 from qfluentwidgets import PushButton
+import os
 
 from ui.i18n import tr, get_language
 
@@ -139,6 +141,25 @@ class SettingsWidget(QFrame):
                 padding: 0 6px;
                 background: #f8fafc;
             }
+            QRadioButton {
+                spacing: 8px;
+                color: #334155;
+                font-weight: 500;
+            }
+            QRadioButton::indicator {
+                width: 16px;
+                height: 16px;
+                border-radius: 8px;
+                border: 2px solid #94a3b8;
+                background: white;
+            }
+            QRadioButton::indicator:hover {
+                border: 2px solid #3b82f6;
+            }
+            QRadioButton::indicator:checked {
+                border: 2px solid #0078d4;
+                background: #0078d4;
+            }
         """)
 
         layout = QVBoxLayout(self)
@@ -203,6 +224,41 @@ class SettingsWidget(QFrame):
         lang_row.addWidget(self.lang_combo)
         global_layout.addLayout(lang_row)
 
+        # 关闭行为选择
+        close_behavior_row = QVBoxLayout()
+        close_behavior_row.setSpacing(8)
+
+        self.close_behavior_label = QLabel("")
+        self.close_behavior_label.setStyleSheet("font-weight: 600; color: #526579;")
+        close_behavior_row.addWidget(self.close_behavior_label)
+
+        self.close_behavior_group = QButtonGroup(self)
+
+        radio_container = QHBoxLayout()
+        radio_container.setSpacing(24)
+
+        self.close_to_tray_radio = QRadioButton("")
+        self.close_to_exit_radio = QRadioButton("")
+
+        self.close_behavior_group.addButton(self.close_to_tray_radio, 0)
+        self.close_behavior_group.addButton(self.close_to_exit_radio, 1)
+
+        # 从设置读取当前关闭行为（默认最小化到托盘）
+        saved_close_behavior = settings.value("close_behavior", "tray", type=str)
+        if saved_close_behavior == "exit":
+            self.close_to_exit_radio.setChecked(True)
+        else:
+            self.close_to_tray_radio.setChecked(True)
+
+        self.close_behavior_group.buttonClicked.connect(self._on_close_behavior_changed)
+
+        radio_container.addWidget(self.close_to_tray_radio)
+        radio_container.addWidget(self.close_to_exit_radio)
+        radio_container.addStretch()
+
+        close_behavior_row.addLayout(radio_container)
+        global_layout.addLayout(close_behavior_row)
+
         # 本地代理端口
         port_row = QHBoxLayout()
         self.port_title = QLabel("")
@@ -257,6 +313,78 @@ class SettingsWidget(QFrame):
         self.repo_label.setStyleSheet("padding: 4px 0;")
         about_layout.addWidget(self.repo_label)
 
+        # === 赞助支持模块 - 左右双栏布局 ===
+        about_layout.addSpacing(12)
+
+        # 分隔线
+        separator = QFrame()
+        separator.setFrameShape(QFrame.HLine)
+        separator.setStyleSheet("background: rgba(0, 78, 140, 0.1); max-height: 1px;")
+        about_layout.addWidget(separator)
+        about_layout.addSpacing(10)
+
+        self.sponsorship_title = QLabel("")
+        self.sponsorship_title.setAlignment(Qt.AlignLeft)
+        self.sponsorship_title.setStyleSheet("color: #0078d4; font-weight: 700; font-size: 15px;")
+        about_layout.addWidget(self.sponsorship_title)
+
+        # 【左右双栏容器】
+        sponsorship_container = QHBoxLayout()
+        sponsorship_container.setSpacing(24)
+
+        # 左栏：说明文本（占 60% 宽度）
+        left_column = QVBoxLayout()
+        left_column.setSpacing(0)
+
+        self.sponsorship_text = QLabel("")
+        self.sponsorship_text.setWordWrap(True)
+        self.sponsorship_text.setStyleSheet("""
+            color: #526579;
+            font-size: 13px;
+            line-height: 1.5;
+            padding: 0;
+        """)
+        left_column.addWidget(self.sponsorship_text)
+        left_column.addStretch()
+
+        # 右栏：赞赏码图片保持足够大，同时避免撑高窗口
+        right_column = QVBoxLayout()
+        right_column.setSpacing(0)
+
+        self.sponsorship_image = QLabel()
+        self.sponsorship_image.setAlignment(Qt.AlignCenter)
+
+        # 动态适配图片路径（支持开发环境和打包环境）
+        current_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        image_path = os.path.join(current_dir, "assets", "Support", "wechat_pay.png")
+
+        if os.path.exists(image_path):
+            pixmap = QPixmap(image_path)
+            # 赞赏码需要足够大，避免扫码识别失败
+            if not pixmap.isNull():
+                scaled_pixmap = pixmap.scaled(300, 300, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                self.sponsorship_image.setPixmap(scaled_pixmap)
+                self.sponsorship_image.setStyleSheet("""
+                    padding: 10px;
+                    background: white;
+                    border: 1px solid rgba(0, 120, 212, 0.12);
+                    border-radius: 8px;
+                """)
+                self.sponsorship_image.setFixedSize(322, 322)  # 300px 图片 + 边距与边框
+        else:
+            self.sponsorship_image.setText("(赞赏码未找到)")
+            self.sponsorship_image.setStyleSheet("color: #94a3b8; font-style: italic; padding: 10px;")
+
+        right_column.addWidget(self.sponsorship_image)
+        right_column.addStretch()
+
+        # 组装左右栏（左栏 60%，右栏 40%）
+        sponsorship_container.addLayout(left_column, 1)
+        sponsorship_container.addLayout(right_column, 0)
+
+        about_layout.addLayout(sponsorship_container)
+        about_layout.addSpacing(4)
+
         layout.addWidget(self.about_group)
         layout.addStretch()
 
@@ -267,11 +395,16 @@ class SettingsWidget(QFrame):
         self.settings_title_label.setText(tr("settings_title"))
         self.global_group.setTitle(tr("settings_global"))
         self.lang_label.setText(tr("settings_language"))
+        self.close_behavior_label.setText(tr("settings_close_behavior"))
+        self.close_to_tray_radio.setText(tr("settings_close_to_tray"))
+        self.close_to_exit_radio.setText(tr("settings_close_to_exit"))
         self.port_title.setText(tr("settings_proxy_port"))
         self.http_label.setText(tr("settings_http_label"))
         self.socks_label.setText(tr("settings_socks_label"))
         self.about_group.setTitle(tr("settings_about"))
         self.version_label.setText(tr("settings_version"))
+        self.sponsorship_title.setText(tr("settings_sponsorship_title"))
+        self.sponsorship_text.setText(tr("settings_sponsorship_text"))
 
     # ---------- 交互逻辑 ----------
     def _on_language_changed(self, index):
@@ -296,3 +429,12 @@ class SettingsWidget(QFrame):
         settings.sync()
         self.ports_changed.emit(socks_port, http_port)
 
+    def _on_close_behavior_changed(self, button):
+        """关闭行为修改后持久化到注册表"""
+        settings = QSettings("Hypostasis-Cat", "HypoMux")
+        button_id = self.close_behavior_group.id(button)
+        if button_id == 0:  # 最小化到托盘
+            settings.setValue("close_behavior", "tray")
+        else:  # 直接退出
+            settings.setValue("close_behavior", "exit")
+        settings.sync()

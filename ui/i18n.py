@@ -53,6 +53,8 @@ I18N_MAP = {
         "warn_boosting_refresh": "加速运行中，请先停止再刷新网卡",
         "warn_no_adapters": "未找到任何可用的网卡",
         "warn_no_selection": "请先勾选至少一张拥有有效 IPv4 的网卡",
+        "warn_steam_running": "检测到 Steam 正在运行，请重启 Steam 客户端以使多链路加速完全生效。",
+        "log_steam_running": "[警告] 检测到 Steam 正在运行，请重启 Steam 客户端以使多链路加速完全生效。",
         "error_load_adapters": "加载网卡失败:\n\n{error}",
         "error_start_failed": "分流引擎启动失败:\n\n{error}",
         "error_proxy_write": "双协议引擎已监听，但无法写入 Windows 系统代理:\n\n{error}",
@@ -71,9 +73,19 @@ I18N_MAP = {
         "settings_proxy_port": "本地代理端口",
         "settings_http_label": "HTTP:",
         "settings_socks_label": "SOCKS5:",
+        "settings_close_behavior": "关闭行为",
+        "settings_close_to_tray": "最小化到系统托盘",
+        "settings_close_to_exit": "直接退出程序",
         "settings_about": "关于项目",
-        "settings_version": "当前版本: v1.2 (Stable)",
+        "settings_version": "当前版本: v1.2.1 (Stable)",
         "settings_lang_saved": "界面语言已切换",
+        "settings_sponsorship_title": "赞助支持",
+        "settings_sponsorship_text": "HypoMux 是一个完全出于技术热情、由作者在业余时间独立开发与维护的开源项目，作者目前仍是在校学生，项目的深度开发与日常维护（如高频使用 AI 工具辅助重构、API 测试等）存在一定的实际开销。如果你觉得这个工具对你有帮助，欢迎请作者喝杯咖啡，支持本项目的持续迭代！\n\n💡 温馨提示：量力而行。赞赏纯属自愿，无论是否赞赏，你都可以永久免费使用 HypoMux 的核心功能！\n\n赞助请留下您的昵称！",
+
+        # === 系统托盘 ===
+        "tray_show_main": "显示主界面",
+        "tray_exit": "退出程序",
+        "tray_tooltip": "HypoMux - 多网卡加速",
     },
 
     "en": {
@@ -118,6 +130,8 @@ I18N_MAP = {
         "warn_boosting_refresh": "Boosting in progress, stop first before refreshing",
         "warn_no_adapters": "No available network adapters found",
         "warn_no_selection": "Please select at least one adapter with a valid IPv4",
+        "warn_steam_running": "Steam is running. Please restart the Steam client for multi-link acceleration to take full effect.",
+        "log_steam_running": "[Warning] Steam is running. Please restart the Steam client for multi-link acceleration to take full effect.",
         "error_load_adapters": "Failed to load adapters:\n\n{error}",
         "error_start_failed": "Engine start failed:\n\n{error}",
         "error_proxy_write": "Engine is listening but cannot write system proxy:\n\n{error}",
@@ -136,9 +150,19 @@ I18N_MAP = {
         "settings_proxy_port": "Local Proxy Ports",
         "settings_http_label": "HTTP:",
         "settings_socks_label": "SOCKS5:",
+        "settings_close_behavior": "Close Behavior",
+        "settings_close_to_tray": "Minimize to system tray",
+        "settings_close_to_exit": "Exit program",
         "settings_about": "About",
         "settings_version": "Version: v1.2 (Stable)",
         "settings_lang_saved": "Language switched",
+        "settings_sponsorship_title": "Sponsorship",
+        "settings_sponsorship_text": "HypoMux is an open-source project developed and maintained independently by the author during their spare time, purely out of technical passion. The author is currently a student, and the in-depth development and daily maintenance of the project (such as high-frequency use of AI tools for refactoring, API testing, etc.) incur certain practical expenses. If you feel that this tool has effectively solved your network pain points, you are welcome to buy the author a cup of coffee to support the continuous iteration of this project!\n\n💡 Friendly Reminder: Please act within your means. Sponsorship is purely voluntary. Whether you sponsor or not, you can use the core functions of HypoMux for free permanently!\n\nPlease leave your nickname when sponsoring!",
+
+        # === System Tray ===
+        "tray_show_main": "Show Main Panel",
+        "tray_exit": "Exit",
+        "tray_tooltip": "HypoMux - Multi-NIC Acceleration",
     },
 }
 

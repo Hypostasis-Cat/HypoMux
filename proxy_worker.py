@@ -20,18 +20,37 @@ HypoMux 代理后端模块 - v2.0（SOCKS5 + HTTP 双协议无感接管）
 """
 
 import asyncio
+import ctypes
 import socket
 import struct
 import threading
-from typing import List, Dict, Optional
+from ctypes import wintypes
+from typing import List, Dict, Optional, Tuple
 from urllib.parse import urlsplit
 
 import psutil
 from PySide6.QtCore import QThread, Signal
 
+from utils.network_utils import get_adapter_if_indices
+
 
 # IPv4 下的 IP_UNICAST_IF：强制指定物理网卡出口，绕过 Windows 默认路由判定。
 IP_UNICAST_IF = 31
+AF_INET = 2
+TCP_TABLE_OWNER_PID_ALL = 5
+ERROR_INSUFFICIENT_BUFFER = 122
+NO_ERROR = 0
+
+
+class MIB_TCPROW_OWNER_PID(ctypes.Structure):
+    _fields_ = [
+        ("dwState", wintypes.DWORD),
+        ("dwLocalAddr", wintypes.DWORD),
+        ("dwLocalPort", wintypes.DWORD),
+        ("dwRemoteAddr", wintypes.DWORD),
+        ("dwRemotePort", wintypes.DWORD),
+        ("dwOwningPid", wintypes.DWORD),
+    ]
 
 
 # ==========================================
@@ -111,6 +130,10 @@ class ProxyWorker(QThread):
     ):
         super().__init__(parent)
         self._selected_nics = [dict(nic) for nic in selected_nics]
+        # 【WinError 10049 根治】用 GetAdaptersAddresses 把每张网卡的出口 IP 反查为
+        # 权威 IfIndex（接口索引），存到 nic['if_index']。出站 socket 将用
+        # IP_UNICAST_IF 死锁在该索引上，而非脆弱地 bind 到本地 IP。
+        self._resolve_if_indices()
         self._listen_host = listen_host
         self._listen_port = listen_port
         self._http_port = http_port if http_port is not None else listen_port + 1
@@ -129,6 +152,59 @@ class ProxyWorker(QThread):
         self._monitor_task: Optional[asyncio.Task] = None
         # 主线程在 loop 就绪前调用 stop() 的兜底标记
         self._stop_requested = False
+        self._passthrough_mode = False
+
+    # ---------- 网卡接口索引解析与 socket 接口强绑定 ----------
+    def _resolve_if_indices(self):
+        """用 GetAdaptersAddresses 把每张网卡的出口 IP 反查为权威 IfIndex。
+
+        UI 扫描阶段记录的 index 可能与底层 IfIndex 不一致（或网卡重插后变动），
+        这里用出口 IP 现场反查一次，查不到则回退到原 index。结果写入
+        nic['if_index']，供 IP_UNICAST_IF 接口强绑定使用。
+        """
+        try:
+            ip_to_index = get_adapter_if_indices()
+        except Exception:
+            ip_to_index = {}
+
+        for nic in self._selected_nics:
+            fallback = int(nic.get("index", 0) or 0)
+            resolved = ip_to_index.get(nic.get("ip", ""), fallback)
+            nic["if_index"] = int(resolved or fallback)
+
+    @staticmethod
+    def _create_bound_upstream_socket(nic) -> socket.socket:
+        """创建出站 TCP socket 并用 IP_UNICAST_IF 把它死锁在目标网卡上。
+
+        关键修复（WinError 10049）：先注入 IP_UNICAST_IF（IPPROTO_IP 级别，常量 31），
+        把出口物理网卡锁死在 nic['if_index'] 上，再执行 bind()。这样即便两张网卡
+        同处一个网段，内核也按接口索引而非默认路由选路，不会再 bind 命中错网卡。
+
+        IPv4 下 IP_UNICAST_IF 的接口索引必须为【网络字节序（大端）】，
+        故用 struct.pack('!I', if_index) 转换。
+        """
+        if_index = int(nic.get("if_index", nic.get("index", 0)) or 0)
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            sock.setblocking(False)
+            # 1) 先注入接口索引强绑定（必须在 bind() 之前）
+            sock.setsockopt(
+                socket.IPPROTO_IP,
+                IP_UNICAST_IF,
+                struct.pack("!I", if_index),  # 大端 / 网络字节序
+            )
+            # 2) 再尝试 bind 到本地出口 IP（仅用于固定源地址）。即便失败，
+            #    上面的 IP_UNICAST_IF 已保证出口网卡正确，故 bind 失败可降级忽略。
+            local_ip = nic.get("ip")
+            if local_ip:
+                try:
+                    sock.bind((local_ip, 0))
+                except OSError:
+                    pass
+        except Exception:
+            sock.close()
+            raise
+        return sock
 
     # ---------- QThread 入口 ----------
     def run(self):
@@ -192,6 +268,92 @@ class ProxyWorker(QThread):
             loop.call_soon_threadsafe(event.set)
             loop.call_soon_threadsafe(self._force_close_servers)
             loop.call_soon_threadsafe(self._force_close_connections)
+
+    def set_passthrough_mode(self, enabled: bool):
+        """切换为直连保活模式：继续提供代理入口，但不再多网卡分流。"""
+        self._passthrough_mode = enabled
+        if enabled:
+            self.log_signal.emit("[Steam] 已切换为直连保活模式，本地代理仅用于防止 Steam 离线")
+
+    @staticmethod
+    def _decode_tcp_port(raw_port: int) -> int:
+        return socket.ntohs(raw_port & 0xFFFF)
+
+    @staticmethod
+    def _decode_tcp_addr(raw_addr: int) -> str:
+        return socket.inet_ntoa(struct.pack("<L", raw_addr))
+
+    @staticmethod
+    def _pid_is_steam(pid: Optional[int]) -> bool:
+        if not pid:
+            return False
+        try:
+            name = (psutil.Process(int(pid)).name() or "").lower()
+            return name in {"steam.exe", "steamwebhelper.exe"}
+        except Exception:
+            return False
+
+    @classmethod
+    def _find_tcp_owner_pid(cls, local_addr: Tuple[str, int], peer_addr: Tuple[str, int]) -> Optional[int]:
+        """按 TCP 四元组反查连接所属客户端 PID。"""
+        try:
+            iphlpapi = ctypes.windll.Iphlpapi
+            get_table = iphlpapi.GetExtendedTcpTable
+            get_table.argtypes = [
+                ctypes.c_void_p,
+                ctypes.POINTER(wintypes.DWORD),
+                wintypes.BOOL,
+                wintypes.ULONG,
+                wintypes.ULONG,
+                wintypes.ULONG,
+            ]
+            get_table.restype = wintypes.DWORD
+
+            size = wintypes.DWORD(0)
+            ret = get_table(None, ctypes.byref(size), False, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0)
+            if ret not in (ERROR_INSUFFICIENT_BUFFER, NO_ERROR):
+                return None
+
+            buffer = ctypes.create_string_buffer(size.value)
+            ret = get_table(buffer, ctypes.byref(size), False, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0)
+            if ret != NO_ERROR:
+                return None
+
+            count = wintypes.DWORD.from_buffer_copy(buffer.raw[:ctypes.sizeof(wintypes.DWORD)]).value
+            row_size = ctypes.sizeof(MIB_TCPROW_OWNER_PID)
+            offset = ctypes.sizeof(wintypes.DWORD)
+            wanted_local_ip, wanted_local_port = local_addr
+            wanted_peer_ip, wanted_peer_port = peer_addr
+
+            for index in range(count):
+                row = MIB_TCPROW_OWNER_PID.from_buffer_copy(buffer, offset + index * row_size)
+                if (
+                    cls._decode_tcp_addr(row.dwLocalAddr) == wanted_peer_ip
+                    and cls._decode_tcp_port(row.dwLocalPort) == wanted_peer_port
+                    and cls._decode_tcp_addr(row.dwRemoteAddr) == wanted_local_ip
+                    and cls._decode_tcp_port(row.dwRemotePort) == wanted_local_port
+                ):
+                    return int(row.dwOwningPid)
+        except Exception:
+            return None
+        return None
+
+    def _allow_passthrough_client(self, writer) -> bool:
+        """保活模式下只允许 Steam/SteamWebHelper 继续使用本地代理。"""
+        if not self._passthrough_mode:
+            return True
+        try:
+            sock = writer.get_extra_info("socket")
+            if sock is None:
+                return False
+            local_addr = sock.getsockname()
+            peer_addr = sock.getpeername()
+            if not isinstance(local_addr, tuple) or not isinstance(peer_addr, tuple):
+                return False
+            pid = self._find_tcp_owner_pid(local_addr, peer_addr)
+            return self._pid_is_steam(pid)
+        except Exception:
+            return False
 
     def _force_close_servers(self):
         for server in (self.socks_server, self.http_server):
@@ -294,6 +456,10 @@ class ProxyWorker(QThread):
         upstream_sock = None
         relay_tasks = []
         try:
+            if not self._allow_passthrough_client(writer):
+                writer.close()
+                return
+
             # 1. SOCKS5 握手
             version, nmethods = await reader.readexactly(2)
             methods = await reader.readexactly(nmethods)
@@ -331,40 +497,50 @@ class ProxyWorker(QThread):
 
             dst_port = struct.unpack("!H", await reader.readexactly(2))[0]
 
-            # 3. 【L4 调度】在用户选中的网卡里轮询申请一张
-            nic = self.balancer.get_next_nic()
-            self.balancer.on_connect(nic["name"])
             target_display = dst_domain if dst_domain else dst_addr
-            self.log_signal.emit(
-                f"[调度分配] 新连接 -> [{nic['name']}] | 目标: {target_display}:{dst_port}"
-            )
-
-            # 4. 【L3 物理层绑定 -- 神圣地基，一字不差继承自 Phase 2】
-            upstream_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            upstream_sock.setblocking(False)
-            self._upstream_sockets.add(upstream_sock)
-
-            try:
-                upstream_sock.bind((nic['ip'], 0))
-                upstream_sock.setsockopt(socket.IPPROTO_IP, IP_UNICAST_IF, struct.pack("!I", nic['index']))
-            except Exception as e:
+            if self._passthrough_mode:
+                if not self._allow_passthrough_client(writer):
+                    writer.close()
+                    return
+                upstream_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                upstream_sock.setblocking(False)
+                self._upstream_sockets.add(upstream_sock)
+            else:
+                # 3. 【L4 调度】在用户选中的网卡里轮询申请一张
+                nic = self.balancer.get_next_nic()
+                self.balancer.on_connect(nic["name"])
                 self.log_signal.emit(
-                    f"[绑定崩溃] 网卡: {nic['name']} 绑定其 IP ({nic['ip']}) 时失败: {e}。"
-                    f"请检查该网卡 IP 是否已变动！"
+                    f"[调度分配] 新连接 -> [{nic['name']}] | 目标: {target_display}:{dst_port}"
                 )
-                writer.close()
-                upstream_sock.close()
-                self._upstream_sockets.discard(upstream_sock)
-                upstream_sock = None
-                return
+
+                # 4. 【L3 物理层绑定 -- 接口索引强绑定，根治 WinError 10049】
+                #    先 IP_UNICAST_IF 锁死出口网卡（if_index），再 bind 源地址。
+                try:
+                    upstream_sock = self._create_bound_upstream_socket(nic)
+                    self._upstream_sockets.add(upstream_sock)
+                except Exception as e:
+                    self.log_signal.emit(
+                        f"[绑定崩溃] 网卡: {nic['name']} 接口强绑定失败 "
+                        f"(IfIndex={nic.get('if_index', nic.get('index'))}): {e}。"
+                        f"请检查该网卡是否已被禁用或拔出！"
+                    )
+                    writer.close()
+                    if upstream_sock is not None:
+                        upstream_sock.close()
+                        self._upstream_sockets.discard(upstream_sock)
+                        upstream_sock = None
+                    return
 
             # 5. 连接目标
             try:
                 await loop.sock_connect(upstream_sock, (dst_addr, dst_port))
             except Exception as e:
-                self.log_signal.emit(
-                    f"[连通失败] 网卡: {nic['name']} 无法连接目标 {target_display}: {e}"
-                )
+                if nic is None:
+                    pass
+                else:
+                    self.log_signal.emit(
+                        f"[连通失败] 网卡: {nic['name']} 无法连接目标 {target_display}: {e}"
+                    )
                 writer.write(b"\x05\x05\x00\x01\x00\x00\x00\x00\x00\x00")
                 await writer.drain()
                 writer.close()
@@ -423,6 +599,10 @@ class ProxyWorker(QThread):
         upstream_sock = None
         relay_tasks = []
         try:
+            if not self._allow_passthrough_client(writer):
+                writer.close()
+                return
+
             try:
                 header_blob = await reader.readuntil(b"\r\n\r\n")
             except asyncio.LimitOverrunError:
@@ -469,13 +649,18 @@ class ProxyWorker(QThread):
                 await writer.drain()
                 return
 
+            if self._passthrough_mode and not self._allow_passthrough_client(writer):
+                writer.close()
+                return
+
             loop = asyncio.get_running_loop()
             try:
                 upstream_sock, nic, target_display = await self._open_bound_upstream(
                     dst_host, dst_port, "HTTP"
                 )
             except Exception as e:
-                self.log_signal.emit(f"[HTTP 连通失败] {dst_host}:{dst_port} -- {e}")
+                if not self._passthrough_mode:
+                    self.log_signal.emit(f"[HTTP 连通失败] {dst_host}:{dst_port} -- {e}")
                 writer.write(b"HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n")
                 await writer.drain()
                 return
@@ -531,30 +716,33 @@ class ProxyWorker(QThread):
         except Exception as e:
             raise RuntimeError(f"DNS 解析失败: {e}") from e
 
-        nic = self.balancer.get_next_nic()
-        self.balancer.on_connect(nic["name"])
-        upstream_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        upstream_sock.setblocking(False)
+        if self._passthrough_mode:
+            nic = None
+            upstream_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            upstream_sock.setblocking(False)
+        else:
+            nic = self.balancer.get_next_nic()
+            self.balancer.on_connect(nic["name"])
+            # 接口索引强绑定（IP_UNICAST_IF 先于 bind），根治同网段 WinError 10049
+            upstream_sock = self._create_bound_upstream_socket(nic)
         self._upstream_sockets.add(upstream_sock)
 
         try:
-            upstream_sock.bind((nic["ip"], 0))
-            upstream_sock.setsockopt(
-                socket.IPPROTO_IP,
-                IP_UNICAST_IF,
-                struct.pack("!I", nic["index"]),
-            )
             await loop.sock_connect(upstream_sock, (dst_addr, dst_port))
         except Exception:
-            self.balancer.on_disconnect(nic["name"])
+            if nic is not None:
+                self.balancer.on_disconnect(nic["name"])
             upstream_sock.close()
             self._upstream_sockets.discard(upstream_sock)
             raise
 
         target_display = f"{dst_host}({dst_addr})"
-        self.log_signal.emit(
-            f"[{protocol} 调度分配] 新连接 -> [{nic['name']}] | 目标: {target_display}:{dst_port}"
-        )
+        if nic is None:
+            pass
+        else:
+            self.log_signal.emit(
+                f"[{protocol} 调度分配] 新连接 -> [{nic['name']}] | 目标: {target_display}:{dst_port}"
+            )
         return upstream_sock, nic, target_display
 
     @staticmethod
