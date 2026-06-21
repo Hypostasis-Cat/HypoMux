@@ -47,6 +47,7 @@ jobs:
           nuitka --standalone --onefile `
             --assume-yes-for-downloads `
             --enable-plugin=pyside6 `
+            --include-qt-plugins=sensible `
             --windows-console-mode=disable `
             --windows-uac-admin `
             --windows-icon-from-ico=assets/icon.ico `
