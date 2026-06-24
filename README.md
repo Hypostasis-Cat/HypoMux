@@ -176,7 +176,7 @@ HypoMux 是一个完全出于技术热情、由作者在业余时间独立开发
 
 <a href="https://github.com/Hypostasis-Cat/HypoMux"><img src="https://img.shields.io/badge/鲸鱼-☕请喝咖啡-orange?style=for-the-badge&logo=coffeescript&logoColor=white" /></a> <a href="https://github.com/Hypostasis-Cat/HypoMux"><img src="https://img.shields.io/badge/匿名-☕请喝咖啡-orange?style=for-the-badge&logo=coffeescript&logoColor=white" /></a> <a href="https://github.com/Hypostasis-Cat/HypoMux"><img src="https://img.shields.io/badge/匿名-☕请喝咖啡-orange?style=for-the-badge&logo=coffeescript&logoColor=white" /></a> <a href="https://github.com/Hypostasis-Cat/HypoMux"><img src="https://img.shields.io/badge/匿名-给猫咪发电-DCD0FF?style=for-the-badge&logo=github-sponsors&logoColor=6A5ACD&labelColor=E6E6FA" /></a> <a href="https://github.com/Hypostasis-Cat/HypoMux">
   <img src="./assets/Support/1.svg" fill="none" alt="Sponsor Badge" />
-</a>
+</a> <a href="https://github.com/Hypostasis-Cat/HypoMux"><img src="https://img.shields.io/badge/鲸鱼-☕请喝咖啡-orange?style=for-the-badge&logo=coffeescript&logoColor=white" /></a>
 
 ## 📄 开源协议
 
