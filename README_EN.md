@@ -132,11 +132,13 @@ nuitka --standalone --onefile --enable-plugin=pyside6 --windows-console-mode=dis
 
 ---
 
-## 🤝 Acknowledgments
+## 🤝 Acknowledgments & Contributors
 
-Special thanks to the following developer for their outstanding contributions to the early core stability of this project:
+A special thanks to all the amazing developers who have contributed to the early core stability and engineering standardization of this project:
 
-@Requiem_ovo
+<a href="https://github.com/Hypostasis-Cat/HypoMux/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=Hypostasis-Cat/HypoMux" />
+</a>
 
 If you're also interested in multi-NIC traffic distribution and low-level network scheduling, feel free to submit a Pull Request and help improve HypoMux!
 
