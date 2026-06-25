@@ -171,6 +171,12 @@ Thanks to all supporters who have injected energy into HypoMux:
 
 Thank you again for your respect and support for the open-source community and independent developers!
 
+## 📈 Star History
+
+Join us on our journey to push Windows multi-adapter aggregation to its absolute limits!
+
+[![Star History Chart](https://api.star-history.com/svg?repos=Hypostasis-Cat/HypoMux&type=Date)](https://star-history.com/#Hypostasis-Cat/HypoMux&Date)
+
 ## 📄 License
 
 This project is licensed under the **AGPL-3.0** License.
