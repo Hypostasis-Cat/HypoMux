@@ -143,11 +143,13 @@ nuitka --standalone --onefile --enable-plugin=pyside6 --windows-console-mode=dis
 
 ## 🤝 特别鸣谢 / Acknowledgments
 
-特别感谢以下开发者对本项目早期核心稳定性作出的杰出贡献：
+特别感谢所有对本项目早期核心稳定性、工程规范化作出贡献的开发者们：
 
-@Requiem_ovo
+<a href="https://github.com/Hypostasis-Cat/HypoMux/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=Hypostasis-Cat/HypoMux" />
+</a>
 
-如果你也对多网卡分流、底层网络调度感兴趣，欢迎提交 Pull Request，一起完善 HypoMux！
+如果你也对多网卡分流、底层 network 调度感兴趣，欢迎提交 Pull Request，一起完善 HypoMux！
 
 ---
 
