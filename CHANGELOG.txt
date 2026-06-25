@@ -18,7 +18,7 @@
 
 由于本项目大部分代码是由 AI 辅助完成，且最近新功能的更新需求激增，版本迭代与网络测试的精力与时间成本也日渐上升。如果你觉得 HypoMux 确实帮到了你，欢迎投喂一杯咖啡！你的支持，是我持续用爱发电、将工具进化到底的最大动力！
 
-![微信赞赏](assets\Support\wechat_pay.png)
+![微信赞赏](https://raw.githubusercontent.com/Hypostasis-Cat/HypoMux/main/assets/Support/wechat_pay.png)
 
 
 ---
