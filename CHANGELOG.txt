@@ -1,0 +1,36 @@
+# 📝 HypoMux v1.2.1 更新日志
+
+## 🚀 新增
+
+- 初始化 CI/CD 流水线（GitHub Actions 构建与发布）
+
+## ✨ 功能更新
+
+- 添加了**最小化隐藏至系统托盘（System Tray）**的后台静默守护功能。支持关闭/最小化时无感缩进右下角托盘，不占用任务栏空间，并支持右键菜单一键唤醒主界面或彻底退出程序。
+
+## 🛠️ 性能与稳定性修复
+
+- 修复了多网卡绑定在同网段路由冲突时，偶发引发的 **WinError 10049** 核心网络层死锁大 Bug，将 `IP_UNICAST_IF` 流量选路策略优化至最稳固状态。
+- 修复了国际化（i18n）双语切换在特定网络控制流状态机切换时，部分界面文本渲染遗漏、未完全对齐翻译的细节缺陷。
+- 优化了偶现 Steam 正在运行时加速没有效果的 bug（但仍然建议先加速再打开 Steam，其他软件则不必先打开）。
+
+## ☕ 投喂与支持 (Support)
+
+由于本项目大部分代码是由 AI 辅助完成，且最近新功能的更新需求激增，版本迭代与网络测试的精力与时间成本也日渐上升。如果你觉得 HypoMux 确实帮到了你，欢迎投喂一杯咖啡！你的支持，是我持续用爱发电、将工具进化到底的最大动力！
+
+![微信赞赏](https://raw.githubusercontent.com/Hypostasis-Cat/HypoMux/main/assets/Support/wechat_pay.png)
+
+
+---
+
+# 📝 HypoMux v1.2.1 Changelog
+
+## ✨ New Features
+
+- Added a **background silent guard** feature to minimize the application to the System Tray. Closing or minimizing the app now seamlessly hides it in the bottom-right tray to free up valuable taskbar space, with full support for a right-click context menu to quickly restore the main window or exit the program completely.
+
+## 🛠️ Performance & Stability Fixes
+
+- Fixed a critical core network layer deadlock bug (**WinError 10049**) that occasionally triggered when multiple network adapters were bound under conflicting subnets. The `IP_UNICAST_IF` traffic routing strategy has been optimized to its most robust baseline state.
+- Fixed a minor UI rendering glitch within the Internationalization (i18n) bilingual system, where certain interface texts missed updates or failed to align with the translation during specific network control flow state machine transitions.
+- Optimized the handling of an occasional bug where network acceleration fails to take effect if Steam is already running. *(Note: It is still highly recommended to start HypoMux before launching Steam; other applications do not require this specific startup order.)*
