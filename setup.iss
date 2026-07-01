@@ -50,8 +50,8 @@ VersionInfoCopyright=Copyright (C) 2026 {#MyAppPublisher}
 ArchitecturesInstallIn64BitMode=x64compatible
 
 [Languages]
-; 简体中文和英文全部完美指向编译器系统语言目录
-Name: "chinesesimplified"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
+; 简体中文语言文件随仓库携带，避免 GitHub Actions runner 缺失语言包导致打包失败
+Name: "chinesesimplified"; MessagesFile: "Inno_Languages\ChineseSimplified.isl"
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
