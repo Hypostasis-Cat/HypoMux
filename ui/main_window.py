@@ -1365,6 +1365,14 @@ def create_main_window():
                         startupinfo=startupinfo,
                         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000),
                     )
+                    # 防御式清理：正常路径 force_kill 已删路由，此处兜底异常路径
+                    subprocess.run(
+                        ["route", "delete", "0.0.0.0", "mask", "0.0.0.0", "172.19.0.1"],
+                        capture_output=True,
+                        timeout=5,
+                        startupinfo=startupinfo,
+                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000),
+                    )
                 except Exception:
                     pass
 

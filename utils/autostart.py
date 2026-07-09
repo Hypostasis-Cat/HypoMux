@@ -23,7 +23,10 @@ def get_executable_path() -> str:
     """Return the executable command used by the scheduled task."""
     is_frozen = getattr(sys, "frozen", False) or ("__compiled__" in globals())
     if is_frozen:
-        return os.path.abspath(sys.executable or sys.argv[0])
+        # Nuitka onefile 会把自身解压到 %TEMP%\onefile_<pid>_<random>\ 然后运行，
+        # sys.executable 指向临时目录里的 python.exe，退出后即被删除。
+        # 必须用 sys.argv[0] 获取用户实际启动的原始 EXE 路径。
+        return os.path.abspath(sys.argv[0])
 
     script_path = Path(__file__).resolve().parents[1] / "main.py"
     return f'"{os.path.abspath(sys.executable)}" "{script_path}"'
