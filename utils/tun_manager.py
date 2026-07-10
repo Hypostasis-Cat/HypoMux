@@ -152,6 +152,7 @@ class TunManager(QThread):
 
         work_dir = os.path.dirname(exe)
         await self._preflight_cleanup_singbox()
+        await self._cleanup_tun_adapter()
         try:
             self._proc = await asyncio.create_subprocess_exec(
                 exe, "run", "-c", self._config_path,
@@ -281,6 +282,53 @@ class TunManager(QThread):
         except Exception as e:
             self.log_signal.emit(f"[TUN] 启动前清理 sing-box 残留进程异常: {e}")
 
+    async def _cleanup_tun_adapter(self):
+        """删除残留的 HypoMux-Tun 虚拟适配器（上次崩溃/强杀遗留的僵尸设备）。
+
+        匹配 InstanceId *WINTUN* → Disable-PnpDevice → pnputil /remove-device。
+        pnputil 是 Windows 内置工具始终可用，不依赖 PowerShell Remove-* cmdlet。
+        """
+        _PS_CLEANUP_CMD = (
+            "$targets = @(Get-PnpDevice -Class Net -ErrorAction SilentlyContinue | "
+            "Where-Object { $_.InstanceId -like '*WINTUN*' }); "
+            "if ($targets.Count -gt 0) { "
+            "Write-Output ('发现 ' + $targets.Count + ' 个残留 wintun 设备: ' + "
+            "[string]::Join(', ', ($targets | ForEach-Object { $_.FriendlyName }))); "
+            "$targets | Disable-PnpDevice -Confirm:$false -ErrorAction SilentlyContinue; "
+            "Start-Sleep -Milliseconds 800; "
+            "foreach ($d in $targets) { pnputil /remove-device $d.InstanceId 2>&1 | Out-Null } "
+            "}"
+        )
+        try:
+            si = None
+            if hasattr(subprocess, "STARTUPINFO"):
+                si = subprocess.STARTUPINFO()
+                si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                si.wShowWindow = 0
+            proc = await asyncio.create_subprocess_exec(
+                "powershell", "-NoProfile", "-Command", _PS_CLEANUP_CMD,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                startupinfo=si,
+                creationflags=_CREATE_NO_WINDOW,
+            )
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=12)
+            # 始终输出诊断信息（无论 returncode，诊断信息在 stdout 中）
+            for raw in (stdout, stderr):
+                if not raw:
+                    continue
+                text = self._decode_process_output(raw).strip()
+                if text:
+                    self.log_signal.emit(f"[TUN] 虚拟网卡适配器清理: {text}")
+            # 等待 Windows 完成异步设备移除
+            await asyncio.sleep(0.5)
+        except asyncio.TimeoutError:
+            self.log_signal.emit("[TUN] 虚拟网卡适配器清理超时，继续尝试拉起内核")
+        except FileNotFoundError:
+            self.log_signal.emit("[TUN] 未找到 PowerShell，跳过适配器清理")
+        except Exception as e:
+            self.log_signal.emit(f"[TUN] 虚拟网卡适配器清理异常: {e}")
+
     @staticmethod
     def _decode_process_output(raw: bytes) -> str:
         """解码 Windows 子进程输出，兼容 UTF-8 与系统 OEM 代码页。"""
@@ -374,3 +422,32 @@ class TunManager(QThread):
         """同步兜底强杀：用于 closeEvent 等必须立即清理的场景。"""
         self._taskkill_singbox()
         self._cleanup_routes()
+        self._force_cleanup_tun_adapter()
+
+    def _force_cleanup_tun_adapter(self):
+        """同步删除残留 HypoMux-Tun 适配器（force_kill 兜底路径）。
+
+        匹配 InstanceId *WINTUN* → Disable-PnpDevice → pnputil /remove-device。
+        """
+        try:
+            si = None
+            if hasattr(subprocess, "STARTUPINFO"):
+                si = subprocess.STARTUPINFO()
+                si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                si.wShowWindow = 0
+            subprocess.run(
+                [
+                    "powershell", "-NoProfile", "-Command",
+                    "$targets = @(Get-PnpDevice -Class Net -ErrorAction SilentlyContinue | "
+                    "Where-Object { $_.InstanceId -like '*WINTUN*' }); "
+                    "if ($targets.Count -gt 0) { "
+                    "$targets | Disable-PnpDevice -Confirm:$false -ErrorAction SilentlyContinue; "
+                    "Start-Sleep -Milliseconds 800; "
+                    "foreach ($d in $targets) { pnputil /remove-device $d.InstanceId 2>&1 | Out-Null } }",
+                ],
+                capture_output=True, timeout=10,
+                startupinfo=si,
+                creationflags=_CREATE_NO_WINDOW,
+            )
+        except Exception:
+            pass

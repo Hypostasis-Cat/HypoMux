@@ -64,8 +64,24 @@ def _run_silent_command(command: list[str], timeout: int = 5):
 
 
 def force_evict_zombie_backends():
-    """启动前只清理上轮崩溃遗留的 sing-box 后端进程。"""
+    """启动前清理上轮崩溃遗留的 sing-box 后端进程、TUN 虚拟适配器及残留路由。
+
+    清理顺序：进程 → 适配器 → 路由。
+    """
     _run_silent_command(["taskkill", "/F", "/IM", "sing-box.exe", "/T"], timeout=3)
+    _run_silent_command([
+        "powershell", "-NoProfile", "-Command",
+        "$targets = @(Get-PnpDevice -Class Net -ErrorAction SilentlyContinue | "
+        "Where-Object { $_.InstanceId -like '*WINTUN*' }); "
+        "if ($targets.Count -gt 0) { "
+        "$targets | Disable-PnpDevice -Confirm:$false -ErrorAction SilentlyContinue; "
+        "Start-Sleep -Milliseconds 800; "
+        "foreach ($d in $targets) { pnputil /remove-device $d.InstanceId 2>&1 | Out-Null } }",
+    ], timeout=10)
+    # 清理崩溃后残留的 TUN 默认路由（172.19.0.1 是 sing-box 配置中硬编码的 TUN 网关）
+    _run_silent_command(
+        ["route", "delete", "0.0.0.0", "mask", "0.0.0.0", "172.19.0.1"], timeout=5
+    )
 
 
 from utils.network_utils import is_admin

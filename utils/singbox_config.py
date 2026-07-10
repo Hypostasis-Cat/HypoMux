@@ -139,7 +139,7 @@ def build_config(
         },
         {"port": [53], "action": "hijack-dns"},
         {"protocol": ["dns"], "action": "hijack-dns"},
-        {"network": ["udp"], "action": "reject", "method": "default", "no_drop": True},
+        {"network": ["udp"], "action": "route", "outbound": "direct"},
     ])
     route_rules = defensive_route_rules + user_route_rules
 
@@ -191,7 +191,7 @@ def build_config(
                 "tag": "tun-in",
                 "interface_name": tun_name,
                 "address": ["172.19.0.1/30"],
-                "mtu": 9000,
+                "mtu": 1492,
                 "auto_route": True,
                 "strict_route": True,
                 "stack": "system",
