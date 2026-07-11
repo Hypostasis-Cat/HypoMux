@@ -86,6 +86,14 @@ ERROR_INSUFFICIENT_BUFFER = 122
 NO_ERROR = 0
 
 
+# 低延迟/反代理敏感游戏进程：这些客户端即使读取了 WinINet 系统代理，
+# 也不应参与多网卡聚合。双有线+无线且无 IPv6 的环境下，聚合导致的
+# 出口源地址/路由抖动会让《崩坏：星穹铁道》登录链路报连接错误。
+DIRECT_FALLBACK_PROCESS_NAMES = {
+    "starrail.exe",
+    "starrailbase.exe",
+}
+
 class MIB_TCPROW_OWNER_PID(ctypes.Structure):
     _fields_ = [
         ("dwState", wintypes.DWORD),
