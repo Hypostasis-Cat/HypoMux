@@ -5,9 +5,8 @@ HypoMux 单网卡被墙域名追踪器 - BlockedDomainTracker
 1. 当某网卡连接目标域名失败时，记录失败事件
 2. 异步用其他网卡测试同一域名（5 次，≥4 次成功即确认），逐次间隔 1s 避免触发限流
 3. 确认被墙 → 加入黑名单（30 分钟自动过期恢复）
-4. 未确认的域名 10 分钟内不再重复验证（冷却期）
-5. 后续轮询分配网卡时自动跳过黑名单中的网卡
-6. 持久化到 ~/.hypomux/blocked_domains.json
+4. 后续轮询分配网卡时自动跳过黑名单中的网卡
+5. 持久化到 ~/.hypomux/blocked_domains.json
 """
 
 from __future__ import annotations
@@ -176,40 +175,47 @@ class BlockedDomainTracker:
                 if not candidates:
                     return
 
-                # 快速否决：前 3 次全部失败 → 其他网卡也连不上，直接放弃
+                # 统一计数：attempts 为总尝试次数，严格不超过 _VERIFY_RETRIES(5)
                 success_count = 0
-                for attempt in range(3):
-                    if attempt > 0:
+                attempts = 0
+
+                # 快速否决：前 3 次尝试若全部失败，说明其他网卡也连不上，直接放弃
+                for _ in range(3):
+                    if attempts > 0:
                         await asyncio.sleep(_VERIFY_INTERVAL)
-                    test_nic = candidates[attempt % len(candidates)]
+                    test_nic = candidates[attempts % len(candidates)]
+                    attempts += 1
                     self._emit_log(
-                        f"[被墙检测] 快速验证 {attempt + 1}/3: "
+                        f"[被墙检测] 第 {attempts}/{_VERIFY_RETRIES} 次验证: "
                         f"用 [{test_nic.get('name')}] 测试 {domain}:{verify_port}"
                     )
                     if await self._test_connect(test_nic, domain, verify_port, loop):
-                        success_count = 1
+                        success_count += 1
                         break
+                    else:
+                        self._emit_log(
+                            f"[被墙检测] 第 {attempts} 次验证失败: [{test_nic.get('name')}] {domain}"
+                        )
                 else:
                     self._emit_log(
                         f"[被墙检测] 快速否决: 其他网卡也无法连接 {domain}，非单网卡被墙"
                     )
                     return
 
-                # 快速验证通过 → 其他网卡能通，跑满 5 次确认
-                for attempt in range(success_count, _VERIFY_RETRIES):
+                # 已有一次成功 → 补足到共 _VERIFY_RETRIES(5) 次，其中 ≥_VERIFY_MIN_SUCCESS(4) 次成功即确认
+                while attempts < _VERIFY_RETRIES and success_count < _VERIFY_MIN_SUCCESS:
                     await asyncio.sleep(_VERIFY_INTERVAL)
-                    test_nic = candidates[attempt % len(candidates)]
+                    test_nic = candidates[attempts % len(candidates)]
+                    attempts += 1
                     self._emit_log(
-                        f"[被墙检测] 第 {attempt + 1}/{_VERIFY_RETRIES} 次验证: "
+                        f"[被墙检测] 第 {attempts}/{_VERIFY_RETRIES} 次验证: "
                         f"用 [{test_nic.get('name')}] 测试 {domain}:{verify_port}"
                     )
                     if await self._test_connect(test_nic, domain, verify_port, loop):
                         success_count += 1
-                        if success_count >= _VERIFY_MIN_SUCCESS:
-                            break
                     else:
                         self._emit_log(
-                            f"[被墙检测] 第 {attempt + 1} 次验证失败: [{test_nic.get('name')}] {domain}"
+                            f"[被墙检测] 第 {attempts} 次验证失败: [{test_nic.get('name')}] {domain}"
                         )
 
                 confirmed = success_count >= _VERIFY_MIN_SUCCESS

@@ -231,7 +231,7 @@ I18N_MAP = {
 
         # === 单网卡被墙域名页 - 过期机制 ===
         "blocked_expiry_toggle": "黑名单自动过期",
-        "blocked_expiry_hint": "开启后黑名单条目 30 分钟后自动恢复，未确认域名 10 分钟冷却。关闭后条目永不自动移除。",
+        "blocked_expiry_hint": "开启后黑名单条目 30 分钟后自动恢复。关闭后条目永不自动移除。",
         "blocked_permanent": "永久拦截",
         "blocked_expire_min": "{min} 分后恢复",
         "blocked_expire_sec": "{sec} 秒后恢复",
@@ -463,7 +463,7 @@ I18N_MAP = {
 
         # === Blocked Domains Page - Expiry ===
         "blocked_expiry_toggle": "Auto-Expire Blacklist",
-        "blocked_expiry_hint": "When enabled, blocked entries auto-recover after 30 min; unconfirmed domains cool down for 10 min. When disabled, entries never expire automatically.",
+        "blocked_expiry_hint": "When enabled, blocked entries auto-recover after 30 min. When disabled, entries never expire automatically.",
         "blocked_permanent": "Permanent",
         "blocked_expire_min": "Recover in {min}m",
         "blocked_expire_sec": "Recover in {sec}s",
