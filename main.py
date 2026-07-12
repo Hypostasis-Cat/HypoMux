@@ -72,15 +72,22 @@ def force_evict_zombie_backends():
     _run_silent_command([
         "powershell", "-NoProfile", "-Command",
         "$targets = @(Get-PnpDevice -Class Net -ErrorAction SilentlyContinue | "
-        "Where-Object { $_.InstanceId -like '*WINTUN*' }); "
+        "Where-Object { $_.FriendlyName -eq 'HypoMux-Tun' -and $_.InstanceId -like '*WINTUN*' }); "
         "if ($targets.Count -gt 0) { "
         "$targets | Disable-PnpDevice -Confirm:$false -ErrorAction SilentlyContinue; "
         "Start-Sleep -Milliseconds 800; "
         "foreach ($d in $targets) { pnputil /remove-device $d.InstanceId 2>&1 | Out-Null } }",
     ], timeout=10)
-    # 清理崩溃后残留的 TUN 默认路由（172.19.0.1 是 sing-box 配置中硬编码的 TUN 网关）
+    # 仅删除 HypoMux-Tun 的默认路由，绝不按固定网关误删其他 VPN 的路由。
     _run_silent_command(
-        ["route", "delete", "0.0.0.0", "mask", "0.0.0.0", "172.19.0.1"], timeout=5
+        [
+            "powershell", "-NoProfile", "-Command",
+            "Get-NetRoute -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' "
+            "-ErrorAction SilentlyContinue | "
+            "Where-Object { $_.InterfaceAlias -eq 'HypoMux-Tun' } | "
+            "Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue",
+        ],
+        timeout=5,
     )
 
 

@@ -24,6 +24,20 @@ from PySide6.QtCore import QThread, Signal
 # CREATE_NO_WINDOW：彻底隐藏 sing-box 控制台黑窗口
 _CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
 _TUN_INTERFACE_NAME = "HypoMux-Tun"
+_PS_REMOVE_HYPOMUX_TUN_ADAPTER = (
+    "$targets = @(Get-PnpDevice -Class Net -ErrorAction SilentlyContinue | "
+    "Where-Object { $_.FriendlyName -eq 'HypoMux-Tun' -and $_.InstanceId -like '*WINTUN*' }); "
+    "if ($targets.Count -gt 0) { "
+    "$targets | Disable-PnpDevice -Confirm:$false -ErrorAction SilentlyContinue; "
+    "Start-Sleep -Milliseconds 800; "
+    "foreach ($d in $targets) { pnputil /remove-device $d.InstanceId 2>&1 | Out-Null } }"
+)
+_PS_REMOVE_HYPOMUX_TUN_ROUTES = (
+    "Get-NetRoute -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' "
+    "-ErrorAction SilentlyContinue | "
+    "Where-Object { $_.InterfaceAlias -eq 'HypoMux-Tun' } | "
+    "Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue"
+)
 
 
 def _is_winerror6_overlapped_cancel(context: dict) -> bool:
@@ -285,19 +299,13 @@ class TunManager(QThread):
     async def _cleanup_tun_adapter(self):
         """删除残留的 HypoMux-Tun 虚拟适配器（上次崩溃/强杀遗留的僵尸设备）。
 
-        匹配 InstanceId *WINTUN* → Disable-PnpDevice → pnputil /remove-device。
+        同时匹配 FriendlyName=HypoMux-Tun 和 InstanceId *WINTUN*，避免影响
+        其他软件（例如 Clash、WireGuard、Tailscale）创建的 Wintun 设备。
         pnputil 是 Windows 内置工具始终可用，不依赖 PowerShell Remove-* cmdlet。
         """
-        _PS_CLEANUP_CMD = (
-            "$targets = @(Get-PnpDevice -Class Net -ErrorAction SilentlyContinue | "
-            "Where-Object { $_.InstanceId -like '*WINTUN*' }); "
-            "if ($targets.Count -gt 0) { "
-            "Write-Output ('发现 ' + $targets.Count + ' 个残留 wintun 设备: ' + "
-            "[string]::Join(', ', ($targets | ForEach-Object { $_.FriendlyName }))); "
-            "$targets | Disable-PnpDevice -Confirm:$false -ErrorAction SilentlyContinue; "
-            "Start-Sleep -Milliseconds 800; "
-            "foreach ($d in $targets) { pnputil /remove-device $d.InstanceId 2>&1 | Out-Null } "
-            "}"
+        cleanup_command = (
+            "Write-Output '检查残留 HypoMux-Tun 设备'; "
+            + _PS_REMOVE_HYPOMUX_TUN_ADAPTER
         )
         try:
             si = None
@@ -306,7 +314,7 @@ class TunManager(QThread):
                 si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
                 si.wShowWindow = 0
             proc = await asyncio.create_subprocess_exec(
-                "powershell", "-NoProfile", "-Command", _PS_CLEANUP_CMD,
+                "powershell", "-NoProfile", "-Command", cleanup_command,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 startupinfo=si,
@@ -391,7 +399,7 @@ class TunManager(QThread):
         """清理 Windows 残留路由，防止 TUN 设备遗留导致断网挂死。
 
         sing-box auto_route 退出时通常会自清，这里做防御式兜底：
-        删除可能残留的指向 TUN 网段的默认路由。绝不抛异常。
+        仅删除接口别名为 HypoMux-Tun 的默认路由，绝不影响其他 VPN/TUN 的路由。
         """
         try:
             si = None
@@ -399,9 +407,8 @@ class TunManager(QThread):
                 si = subprocess.STARTUPINFO()
                 si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
                 si.wShowWindow = 0
-            # 删除 TUN 接管时可能写入的 0.0.0.0/0 经由 TUN 网关的残留默认路由
             subprocess.run(
-                ["route", "delete", "0.0.0.0", "mask", "0.0.0.0", "172.19.0.1"],
+                ["powershell", "-NoProfile", "-Command", _PS_REMOVE_HYPOMUX_TUN_ROUTES],
                 capture_output=True, timeout=5, startupinfo=si,
                 creationflags=_CREATE_NO_WINDOW,
             )
@@ -427,7 +434,8 @@ class TunManager(QThread):
     def _force_cleanup_tun_adapter(self):
         """同步删除残留 HypoMux-Tun 适配器（force_kill 兜底路径）。
 
-        匹配 InstanceId *WINTUN* → Disable-PnpDevice → pnputil /remove-device。
+        同时匹配 FriendlyName=HypoMux-Tun 和 InstanceId *WINTUN*，避免误删
+        其他应用创建的 Wintun 设备。
         """
         try:
             si = None
@@ -438,12 +446,7 @@ class TunManager(QThread):
             subprocess.run(
                 [
                     "powershell", "-NoProfile", "-Command",
-                    "$targets = @(Get-PnpDevice -Class Net -ErrorAction SilentlyContinue | "
-                    "Where-Object { $_.InstanceId -like '*WINTUN*' }); "
-                    "if ($targets.Count -gt 0) { "
-                    "$targets | Disable-PnpDevice -Confirm:$false -ErrorAction SilentlyContinue; "
-                    "Start-Sleep -Milliseconds 800; "
-                    "foreach ($d in $targets) { pnputil /remove-device $d.InstanceId 2>&1 | Out-Null } }",
+                    _PS_REMOVE_HYPOMUX_TUN_ADAPTER,
                 ],
                 capture_output=True, timeout=10,
                 startupinfo=si,
