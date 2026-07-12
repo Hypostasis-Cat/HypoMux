@@ -530,9 +530,6 @@ class HomePage(QWidget):
         self.mode_segment.blockSignals(False)
         self.kernel_metric.set_mode(key, self._engine_running)
 
-    def append_log(self, message: str):
-        return
-
     def get_checked_aliases(self) -> List[str]:
         return [a for a, row in self._cards.items() if row.is_checked()]
 

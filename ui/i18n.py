@@ -39,9 +39,6 @@ I18N_MAP = {
         "up_format": "上行 {value:.2f} MB/s",
         "conn_format": "总连接数 {value}",
 
-        # 控制台
-        "console_caption": "调度控制台",
-
         # 操作栏
         "select_all": "全选",
         "deselect_all": "取消全选",
@@ -228,9 +225,9 @@ I18N_MAP = {
         "blocked_nic_label": "网卡",
         "blocked_domain_count": "{count} 个被墙域名",
         "blocked_delete_domain": "移除此域名",
-        "blocked_clear_nic": "清空此网卡",
         "blocked_clear_all": "清空全部",
         "blocked_verify_blocked": "已确认被墙",
+        "blocked_refresh": "刷新",
 
         # === 单网卡被墙域名页 - 过期机制 ===
         "blocked_expiry_toggle": "黑名单自动过期",
@@ -270,9 +267,6 @@ I18N_MAP = {
         "speed_caption": "Combined Download Speed (MB/s)",
         "up_format": "Up {value:.2f} MB/s",
         "conn_format": "Connections {value}",
-
-        # Console
-        "console_caption": "Dispatch Console",
 
         # Action bar
         "select_all": "Select All",
@@ -460,9 +454,9 @@ I18N_MAP = {
         "blocked_nic_label": "NIC",
         "blocked_domain_count": "{count} blocked domain(s)",
         "blocked_delete_domain": "Remove this domain",
-        "blocked_clear_nic": "Clear this NIC",
         "blocked_clear_all": "Clear All",
         "blocked_verify_blocked": "Confirmed Blocked",
+        "blocked_refresh": "Refresh",
 
         # === Blocked Domains Page - Expiry ===
         "blocked_expiry_toggle": "Auto-Expire Blacklist",

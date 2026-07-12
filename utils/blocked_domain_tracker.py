@@ -30,7 +30,6 @@ _VERIFY_MIN_SUCCESS = 4
 _VERIFY_TIMEOUT = 5.0
 _VERIFY_INTERVAL = 1.0          # 逐次验证间隔，避免触发目标限流
 _EXPIRY_SECONDS = 1800          # 黑名单过期时间：30 分钟
-_COOLDOWN_SECONDS = 600         # 未确认域名的冷却期：10 分钟
 _PERSIST_DIR = Path.home() / ".hypomux"
 _PERSIST_FILE = _PERSIST_DIR / "blocked_domains.json"
 
@@ -43,17 +42,15 @@ class BlockedDomainTracker:
     """线程安全的单网卡被墙域名追踪器。
 
     _blocked: {nic_name: {domain: expiry_timestamp}}
-    _cooldown: {(nic_name, domain): cooldown_until_timestamp}
     """
 
     def __init__(self):
         self._lock = threading.Lock()
         self._blocked: Dict[str, Dict[str, float]] = {}
-        self._cooldown: Dict[str, Dict[str, float]] = {}
         self._pending_verifications: Dict[str, Set[str]] = {}
         self._enabled = True
         self._use_expiry = True
-        self._log_callback = None  # 可选：callable(str)，用于将日志输出到 UI 控制台
+        self._log_callback = None
         self._load()
 
     @property
@@ -87,7 +84,7 @@ class BlockedDomainTracker:
 
     # ----- 过期/冷却清理 -----
     def _purge_expired(self):
-        """清理所有已过期的黑名单和冷却记录（调用方必须持有 _lock）。"""
+        """清理所有已过期的黑名单记录（调用方必须持有 _lock）。"""
         if not self._use_expiry:
             return
         now = time.time()
@@ -98,13 +95,6 @@ class BlockedDomainTracker:
                 del domains[d]
             if not domains:
                 del self._blocked[nic_name]
-        for nic_name in list(self._cooldown):
-            cooldowns = self._cooldown[nic_name]
-            expired = [d for d, ts in cooldowns.items() if ts <= now]
-            for d in expired:
-                del cooldowns[d]
-            if not cooldowns:
-                del self._cooldown[nic_name]
 
     # ----- 查询 -----
     def is_blocked(self, nic_name: str, domain: str) -> bool:
@@ -117,11 +107,6 @@ class BlockedDomainTracker:
             self._purge_expired()
             entry = self._blocked.get(nic_name, {}).get(domain)
             return entry is not None
-
-    def get_blocked_domains(self, nic_name: str) -> List[str]:
-        with self._lock:
-            self._purge_expired()
-            return sorted(self._blocked.get(nic_name, {}).keys())
 
     def all_blocked(self) -> Dict[str, List[str]]:
         with self._lock:
@@ -148,18 +133,10 @@ class BlockedDomainTracker:
                 self._blocked[nic_name].pop(domain, None)
                 if not self._blocked[nic_name]:
                     del self._blocked[nic_name]
-            if nic_name in self._cooldown:
-                self._cooldown[nic_name].pop(domain, None)
-
-    def clear_nic(self, nic_name: str):
-        with self._lock:
-            self._blocked.pop(nic_name, None)
-            self._cooldown.pop(nic_name, None)
 
     def clear_all(self):
         with self._lock:
             self._blocked.clear()
-            self._cooldown.clear()
             self._pending_verifications.clear()
 
     # ----- 连接失败上报 + 异步验证 -----
@@ -182,13 +159,7 @@ class BlockedDomainTracker:
         if self.is_blocked(nic_name, domain):
             return
 
-        now = time.time()
         with self._lock:
-            self._purge_expired()
-            # 冷却期检查：未确认的域名 10 分钟内不重复验证
-            cooldown_until = self._cooldown.get(nic_name, {}).get(domain)
-            if cooldown_until and cooldown_until > now:
-                return
             # 防止并发验证
             pending = self._pending_verifications.setdefault(nic_name, set())
             if domain in pending:
@@ -233,11 +204,8 @@ class BlockedDomainTracker:
                         f"[被墙确认] 网卡 [{nic_name}] 无法访问 {domain}（其他网卡 {success_count}/{_VERIFY_RETRIES} 次成功，{_EXPIRY_SECONDS // 60} 分钟后自动恢复）"
                     )
                 else:
-                    cooldown_until = now + _COOLDOWN_SECONDS
-                    with self._lock:
-                        self._cooldown.setdefault(nic_name, {})[domain] = cooldown_until
                     self._emit_log(
-                        f"[被墙检测] 验证未达标: [{nic_name}] -> {domain} ({success_count}/{_VERIFY_RETRIES})，{_COOLDOWN_SECONDS // 60} 分钟冷却"
+                        f"[被墙检测] 验证未达标: [{nic_name}] -> {domain} ({success_count}/{_VERIFY_RETRIES})"
                     )
             except Exception as e:
                 self._emit_log(f"[被墙检测] 验证异常: [{nic_name}] -> {domain}: {type(e).__name__}: {e}")

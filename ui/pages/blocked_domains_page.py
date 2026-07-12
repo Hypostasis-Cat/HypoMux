@@ -5,10 +5,6 @@ HypoMux 单网卡被墙域名页 (BlockedDomainsPage) - 第五个导航选项卡
 删除单条记录、清空全部等管理功能。
 """
 
-from __future__ import annotations
-
-from typing import Dict, List
-
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QHeaderView
 from qfluentwidgets import (
@@ -74,7 +70,7 @@ class BlockedDomainsPage(QWidget):
         self._toolbar.setSpacing(12)
         self._clear_all_btn = PushButton(FluentIcon.DELETE, tr("blocked_clear_all"), self)
         self._clear_all_btn.clicked.connect(self._on_clear_all)
-        self._refresh_btn = TransparentPushButton(FluentIcon.SYNC, tr("home_refresh_tip"), self)
+        self._refresh_btn = PushButton(FluentIcon.SYNC, tr("blocked_refresh"), self)
         self._refresh_btn.clicked.connect(self._load_data)
         self._toolbar.addWidget(self._clear_all_btn)
         self._toolbar.addWidget(self._refresh_btn)
@@ -205,7 +201,7 @@ class BlockedDomainsPage(QWidget):
         self._expiry_card.titleLabel.setText(tr("blocked_expiry_toggle"))
         self._expiry_card.contentLabel.setText(tr("blocked_expiry_hint"))
         self._clear_all_btn.setText(tr("blocked_clear_all"))
-        self._refresh_btn.setText(tr("home_refresh_tip"))
+        self._refresh_btn.setText(tr("blocked_refresh"))
         self._empty_hint.setText(tr("blocked_no_data"))
         self._apply_headers()
 
