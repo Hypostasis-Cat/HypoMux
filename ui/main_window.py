@@ -700,10 +700,11 @@ def create_main_window():
         # ========== 配置持久化 ==========
         def _collect_config(self) -> dict:
             socks = int(self._app_config.get("socks_port", DEFAULT_SOCKS_PORT))
+            http = int(self._app_config.get("http_port", socks + 1))
             return {
                 "selected_adapters": sorted(self._checked_aliases),
                 "socks_port": socks,
-                "http_port": socks + 1,
+                "http_port": http,
                 "run_mode": self._run_mode,
                 "routing_rules": self._routing_rules,
                 "dns_server": self._app_config.get("dns_server", "223.5.5.5"),
@@ -1295,10 +1296,8 @@ def create_main_window():
                 self.show_warning(tr("diag_no_selection"))
                 return
             self.tools_page.begin_running()
-            self.append_log(mw_tr("log_starting", socks="-", http="-",
-                                  nics=", ".join(n["name"] for n in selected))
-                            if False else tr("diag_running",
-                                             name=", ".join(n["name"] for n in selected)))
+            self.append_log(tr("diag_running",
+                                name=", ".join(n["name"] for n in selected)))
             self.diag_worker = DiagnosticWorker(selected, DEFAULT_TARGET_IP)
             self.diag_worker.result_ready.connect(self.on_diag_result)
             self.diag_worker.all_finished.connect(self.on_diag_finished)

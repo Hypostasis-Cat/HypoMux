@@ -282,7 +282,7 @@ class BlockedDomainTracker:
 
             if len(data) < 12:
                 raise ValueError("short response")
-            resp_id, flags, qdcount, ancount = struct.unpack("!HHHHHH", data[:12])
+            resp_id, flags, qdcount, ancount, _nscount, _arcount = struct.unpack("!HHHHHH", data[:12])
             if resp_id != query_id or (flags & 0x8000) == 0:
                 raise ValueError("mismatched response")
             if (flags & 0x000F) != 0:

@@ -53,7 +53,7 @@ async def handle_client(reader, writer):
         loop = asyncio.get_running_loop()
 
         if atyp == 1:  # IPv4
-            dst_addr = socket.inet_ntoa(await reader.readexactly(4))
+            dst_addr = socket.inet_ntop(socket.AF_INET, await reader.readexactly(4))
         elif atyp == 3:  # 域名
             domain_len = ord(await reader.readexactly(1))
             dst_domain = (await reader.readexactly(domain_len)).decode()
@@ -66,6 +66,9 @@ async def handle_client(reader, writer):
                 writer.close()
                 return
         elif atyp == 4:
+            writer.close()
+            return
+        else:
             writer.close()
             return
             
