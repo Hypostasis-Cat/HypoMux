@@ -1404,9 +1404,15 @@ def create_main_window():
                         startupinfo=startupinfo,
                         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000),
                     )
-                    # 防御式清理：正常路径 force_kill 已删路由，此处兜底异常路径
+                    # 防御式清理：仅删除 HypoMux-Tun 的默认路由，避免影响其他 VPN。
                     subprocess.run(
-                        ["route", "delete", "0.0.0.0", "mask", "0.0.0.0", "172.19.0.1"],
+                        [
+                            "powershell", "-NoProfile", "-Command",
+                            "Get-NetRoute -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' "
+                            "-ErrorAction SilentlyContinue | "
+                            "Where-Object { $_.InterfaceAlias -eq 'HypoMux-Tun' } | "
+                            "Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue",
+                        ],
                         capture_output=True,
                         timeout=5,
                         startupinfo=startupinfo,
