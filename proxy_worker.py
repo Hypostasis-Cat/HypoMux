@@ -142,8 +142,10 @@ class RoundRobinBalancer:
                 self._current = (self._current + 1) % len(self.nics)
                 if not tracker.is_blocked(nic["name"], domain):
                     return nic
-            # 全部被墙，回退
-            return self.get_next_nic()
+            # 全部被墙：仍然返回下一张网卡，但避免在持锁状态下再次获取同一把锁
+            nic = self.nics[self._current]
+            self._current = (self._current + 1) % len(self.nics)
+            return nic
 
     def on_connect(self, nic_name: str):
         with self._lock:
