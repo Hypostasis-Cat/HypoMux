@@ -3,9 +3,11 @@ HypoMux 单网卡被墙域名追踪器 - BlockedDomainTracker
 
 核心机制：
 1. 当某网卡连接目标域名失败时，记录失败事件
-2. 异步用其他网卡测试同一域名（3 次），全部成功 → 确认域名对该网卡被墙
-3. 后续轮询分配网卡时自动跳过黑名单中的网卡
-4. 持久化到 ~/.hypomux/blocked_domains.json
+2. 异步用其他网卡测试同一域名（5 次，≥4 次成功即确认），逐次间隔 1s 避免触发限流
+3. 确认被墙 → 加入黑名单（30 分钟自动过期恢复）
+4. 未确认的域名 10 分钟内不再重复验证（冷却期）
+5. 后续轮询分配网卡时自动跳过黑名单中的网卡
+6. 持久化到 ~/.hypomux/blocked_domains.json
 """
 
 from __future__ import annotations
@@ -23,8 +25,12 @@ from typing import Dict, Optional, Set, List
 logger = logging.getLogger(__name__)
 
 IP_UNICAST_IF = 31
-_VERIFY_RETRIES = 3
+_VERIFY_RETRIES = 5
+_VERIFY_MIN_SUCCESS = 4
 _VERIFY_TIMEOUT = 5.0
+_VERIFY_INTERVAL = 1.0          # 逐次验证间隔，避免触发目标限流
+_EXPIRY_SECONDS = 1800          # 黑名单过期时间：30 分钟
+_COOLDOWN_SECONDS = 600         # 未确认域名的冷却期：10 分钟
 _PERSIST_DIR = Path.home() / ".hypomux"
 _PERSIST_FILE = _PERSIST_DIR / "blocked_domains.json"
 
@@ -36,19 +42,17 @@ def _normalize_domain(domain: str) -> str:
 class BlockedDomainTracker:
     """线程安全的单网卡被墙域名追踪器。
 
-    作为模块级单例使用，ProxyWorker 与 MultiPortProxyWorker 共享同一实例。
+    _blocked: {nic_name: {domain: expiry_timestamp}}
+    _cooldown: {(nic_name, domain): cooldown_until_timestamp}
     """
 
     def __init__(self):
         self._lock = threading.Lock()
-        # {nic_name: set[domain]}
-        self._blocked: Dict[str, Set[str]] = {}
-        # 验证中或待验证计数，防止重复触发
+        self._blocked: Dict[str, Dict[str, float]] = {}
+        self._cooldown: Dict[str, Dict[str, float]] = {}
         self._pending_verifications: Dict[str, Set[str]] = {}
-        # 验证失败计数（同一域名在同一网卡上的失败次数，累计 3 次即加入黑名单）
-        self._fail_counts: Dict[str, Dict[str, int]] = {}
-        # 全局开关：用户可在 UI 中关闭此功能
         self._enabled = True
+        self._use_expiry = True  # 用户可在 UI 中关闭过期机制
         self._load()
 
     @property
@@ -59,6 +63,35 @@ class BlockedDomainTracker:
     def enabled(self, value: bool):
         self._enabled = bool(value)
 
+    @property
+    def use_expiry(self) -> bool:
+        return self._use_expiry
+
+    @use_expiry.setter
+    def use_expiry(self, value: bool):
+        self._use_expiry = bool(value)
+
+    # ----- 过期/冷却清理 -----
+    def _purge_expired(self):
+        """清理所有已过期的黑名单和冷却记录（调用方必须持有 _lock）。"""
+        if not self._use_expiry:
+            return
+        now = time.time()
+        for nic_name in list(self._blocked):
+            domains = self._blocked[nic_name]
+            expired = [d for d, ts in domains.items() if ts <= now]
+            for d in expired:
+                del domains[d]
+            if not domains:
+                del self._blocked[nic_name]
+        for nic_name in list(self._cooldown):
+            cooldowns = self._cooldown[nic_name]
+            expired = [d for d, ts in cooldowns.items() if ts <= now]
+            for d in expired:
+                del cooldowns[d]
+            if not cooldowns:
+                del self._cooldown[nic_name]
+
     # ----- 查询 -----
     def is_blocked(self, nic_name: str, domain: str) -> bool:
         if not self._enabled:
@@ -67,36 +100,52 @@ class BlockedDomainTracker:
         if not domain or not nic_name:
             return False
         with self._lock:
-            return domain in self._blocked.get(nic_name, set())
+            self._purge_expired()
+            entry = self._blocked.get(nic_name, {}).get(domain)
+            return entry is not None
 
     def get_blocked_domains(self, nic_name: str) -> List[str]:
         with self._lock:
-            return sorted(self._blocked.get(nic_name, set()))
+            self._purge_expired()
+            return sorted(self._blocked.get(nic_name, {}).keys())
 
     def all_blocked(self) -> Dict[str, List[str]]:
-        """返回完整黑名单，供 UI 渲染。"""
         with self._lock:
-            return {name: sorted(domains) for name, domains in self._blocked.items() if domains}
+            self._purge_expired()
+            return {
+                name: sorted(domains.keys())
+                for name, domains in self._blocked.items()
+                if domains
+            }
+
+    def remaining_seconds(self, nic_name: str, domain: str) -> int:
+        """返回黑名单条目还剩多少秒过期，已过期或不存在返回 0。"""
+        domain = _normalize_domain(domain)
+        with self._lock:
+            ts = self._blocked.get(nic_name, {}).get(domain)
+            if ts is None:
+                return 0
+            return max(0, int(ts - time.time()))
 
     def remove_domain(self, nic_name: str, domain: str):
         domain = _normalize_domain(domain)
         with self._lock:
             if nic_name in self._blocked:
-                self._blocked[nic_name].discard(domain)
+                self._blocked[nic_name].pop(domain, None)
                 if not self._blocked[nic_name]:
                     del self._blocked[nic_name]
-            if nic_name in self._fail_counts:
-                self._fail_counts[nic_name].pop(domain, None)
+            if nic_name in self._cooldown:
+                self._cooldown[nic_name].pop(domain, None)
 
     def clear_nic(self, nic_name: str):
         with self._lock:
             self._blocked.pop(nic_name, None)
-            self._fail_counts.pop(nic_name, None)
+            self._cooldown.pop(nic_name, None)
 
     def clear_all(self):
         with self._lock:
             self._blocked.clear()
-            self._fail_counts.clear()
+            self._cooldown.clear()
             self._pending_verifications.clear()
 
     # ----- 连接失败上报 + 异步验证 -----
@@ -109,26 +158,24 @@ class BlockedDomainTracker:
         all_nics: List[Dict],
         loop: asyncio.AbstractEventLoop,
     ):
-        """连接失败时调用，在后台异步验证该域名是否被墙。
-
-        验证逻辑：
-        1. 用 all_nics 中除 failed_nic 以外的网卡尝试连接 domain:port（或用 443 兜底）
-        2. 连续 3 次成功 → 域名确认被墙 → 加入黑名单
-        3. 任何一次失败 → 不加入黑名单（可能是目标服务器本身挂了）
-        """
+        """连接失败时调用，在后台异步验证该域名是否被墙。"""
         if not self._enabled:
             return
         domain = _normalize_domain(domain)
         if not domain or not nic_name:
             return
 
-        # 如果已经确认被墙，不再重复验证
         if self.is_blocked(nic_name, domain):
             return
 
-        # 防止同一 (网卡, 域名) 并发验证 + 冷却期
-        key = f"{nic_name}:{domain}"
+        now = time.time()
         with self._lock:
+            self._purge_expired()
+            # 冷却期检查：未确认的域名 10 分钟内不重复验证
+            cooldown_until = self._cooldown.get(nic_name, {}).get(domain)
+            if cooldown_until and cooldown_until > now:
+                return
+            # 防止并发验证
             pending = self._pending_verifications.setdefault(nic_name, set())
             if domain in pending:
                 return
@@ -142,6 +189,8 @@ class BlockedDomainTracker:
             try:
                 success_count = 0
                 for attempt in range(_VERIFY_RETRIES):
+                    if attempt > 0:
+                        await asyncio.sleep(_VERIFY_INTERVAL)
                     candidates = [n for n in all_nics if n.get("name") != nic_name]
                     if not candidates:
                         break
@@ -153,23 +202,29 @@ class BlockedDomainTracker:
                     ok = await self._test_connect(test_nic, domain, verify_port, loop)
                     if ok:
                         success_count += 1
+                        if success_count >= _VERIFY_MIN_SUCCESS:
+                            break  # 提前达标，无需继续
                     else:
+                        # 不立即中断——允许偶发失败，只要总体 ≥ _VERIFY_MIN_SUCCESS 即可
                         logger.info(
-                            f"[被墙检测] 验证中断: [{test_nic.get('name')}] 也无法连接 {domain}，"
-                            f"非单网卡被墙，不加入黑名单"
+                            f"[被墙检测] 第 {attempt + 1} 次验证失败: [{test_nic.get('name')}] {domain}"
                         )
-                        break
 
-                confirmed = success_count >= _VERIFY_RETRIES
+                confirmed = success_count >= _VERIFY_MIN_SUCCESS
+                now = time.time()
                 if confirmed:
+                    expiry = now + _EXPIRY_SECONDS
                     with self._lock:
-                        self._blocked.setdefault(nic_name, set()).add(domain)
+                        self._blocked.setdefault(nic_name, {})[domain] = expiry
                     logger.info(
-                        f"[被墙确认] 网卡 [{nic_name}] 无法访问 {domain}（其他网卡 {_VERIFY_RETRIES} 次验证全部成功）"
+                        f"[被墙确认] 网卡 [{nic_name}] 无法访问 {domain}（其他网卡 {success_count}/{_VERIFY_RETRIES} 次成功，{_EXPIRY_SECONDS // 60} 分钟后自动恢复）"
                     )
                 else:
+                    cooldown_until = now + _COOLDOWN_SECONDS
+                    with self._lock:
+                        self._cooldown.setdefault(nic_name, {})[domain] = cooldown_until
                     logger.info(
-                        f"[被墙检测] 验证完成: [{nic_name}] -> {domain} 未确认被墙"
+                        f"[被墙检测] 验证未达标: [{nic_name}] -> {domain} ({success_count}/{_VERIFY_RETRIES})，{_COOLDOWN_SECONDS // 60} 分钟冷却"
                     )
             except Exception as e:
                 logger.warning(f"[被墙检测] 验证异常: [{nic_name}] -> {domain}: {type(e).__name__}: {e}")
@@ -191,7 +246,6 @@ class BlockedDomainTracker:
         nic_name = nic.get("name", "?")
         test_port = port if port > 0 else 443
         try:
-            # 先解析 DNS（系统默认 + 公共 DNS 兜底）
             dst_addr = None
             dns_error = ""
             try:
@@ -203,7 +257,6 @@ class BlockedDomainTracker:
             except Exception as e:
                 dns_error = f"系统DNS: {type(e).__name__}"
 
-            # 兜底：通过测试网卡向 223.5.5.5 发送 DNS 查询
             if dst_addr is None:
                 try:
                     dst_addr = await self._resolve_via_public_dns(domain, nic, loop)
@@ -253,12 +306,11 @@ class BlockedDomainTracker:
         import random
 
         def _skip_name(data: bytes, offset: int) -> int:
-            """跳过 DNS 名称（标签链或压缩指针）。返回指向名称结束后的偏移。"""
             while offset < len(data) and data[offset] != 0:
                 if data[offset] & 0xC0:
-                    return offset + 2  # 压缩指针 2 字节，名称到此结束
+                    return offset + 2
                 offset += 1 + data[offset]
-            return offset + 1  # 跳过 \x00 终止符
+            return offset + 1
 
         query_id = random.randint(0, 0xFFFF)
         labels = domain.rstrip(".").encode("idna").split(b".")
@@ -291,13 +343,12 @@ class BlockedDomainTracker:
             offset = 12
             for _ in range(qdcount):
                 offset = _skip_name(data, offset)
-                offset += 4  # TYPE(2) + CLASS(2)
+                offset += 4
 
             for _ in range(ancount):
                 offset = _skip_name(data, offset)
                 if offset + 10 > len(data):
                     break
-                # RR 固定头部: TYPE(2) + CLASS(2) + TTL(4) + RDLENGTH(2) = 10 字节
                 rtype, rclass, _ttl, rdlen = struct.unpack("!HHIH", data[offset:offset + 10])
                 offset += 10
                 if rtype == 1 and rclass == 1 and rdlen == 4 and offset + 4 <= len(data):
@@ -320,20 +371,35 @@ class BlockedDomainTracker:
             raw = json.loads(_PERSIST_FILE.read_text(encoding="utf-8"))
             if not isinstance(raw, dict):
                 return
+            now = time.time()
             with self._lock:
-                for nic_name, domains in raw.items():
-                    if isinstance(domains, list):
-                        self._blocked[nic_name] = {_normalize_domain(d) for d in domains if d}
-            logger.info(f"已加载被墙域名清单: {len(self._blocked)} 张网卡")
+                for nic_name, value in raw.items():
+                    if isinstance(value, dict):
+                        # 新格式: {domain: expiry_ts}
+                        entries = {}
+                        for domain, ts in value.items():
+                            if isinstance(ts, (int, float)) and ts > now:
+                                entries[_normalize_domain(domain)] = float(ts)
+                        if entries:
+                            self._blocked[nic_name] = entries
+                    elif isinstance(value, list):
+                        # 旧格式兼容: [domain, ...]，设置 30 分钟后过期
+                        expiry = now + _EXPIRY_SECONDS
+                        entries = {_normalize_domain(d): expiry for d in value if d}
+                        if entries:
+                            self._blocked[nic_name] = entries
+            logger.info(f"已加载被墙域名清单: {len(self._blocked)} 张网卡（过期项已自动清除）")
         except Exception as e:
             logger.warning(f"加载被墙域名清单失败: {e}")
 
     def save(self):
         try:
             _PERSIST_DIR.mkdir(parents=True, exist_ok=True)
+            now = time.time()
             with self._lock:
+                self._purge_expired()
                 payload = {
-                    name: sorted(domains)
+                    name: dict(domains)
                     for name, domains in self._blocked.items()
                     if domains
                 }

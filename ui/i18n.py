@@ -232,11 +232,15 @@ I18N_MAP = {
         "blocked_clear_all": "清空全部",
         "blocked_verify_blocked": "已确认被墙",
 
+        # === 单网卡被墙域名页 - 过期机制 ===
+        "blocked_expiry_toggle": "黑名单自动过期",
+        "blocked_expiry_hint": "开启后黑名单条目 30 分钟后自动恢复，未确认域名 10 分钟冷却。关闭后条目永不自动移除。",
+
         # === 权重调度器 ===
         "home_weighted_toggle": "使用权重调度器",
-        "home_weighted_hint": "按各网卡带宽上限做加权分配，快卡多吃、慢卡少吃。关闭则轮询均分。",
-        "home_bw_column": "带宽上限 (Mbps)",
-        "home_bw_column_hint": "该带宽上限仅作调度器计算权重之用，不对网卡限速",
+        "home_weighted_hint": "按各网卡调度权重做加权分配，权重越高分配越多连接。关闭则轮询均分。",
+        "home_bw_column": "调度权重 (Mbps)",
+        "home_bw_column_hint": "该数值仅作调度器计算权重之用，不对网卡限速",
     },
 
     "en": {
@@ -460,10 +464,14 @@ I18N_MAP = {
         "blocked_clear_all": "Clear All",
         "blocked_verify_blocked": "Confirmed Blocked",
 
+        # === Blocked Domains Page - Expiry ===
+        "blocked_expiry_toggle": "Auto-Expire Blacklist",
+        "blocked_expiry_hint": "When enabled, blocked entries auto-recover after 30 min; unconfirmed domains cool down for 10 min. When disabled, entries never expire automatically.",
+
         # === Weighted Scheduler ===
         "home_weighted_toggle": "Use Weighted Scheduler",
-        "home_weighted_hint": "Weighted distribution by NIC bandwidth limits. Fast NICs get more connections, slow NICs get fewer. Disable for equal round-robin.",
-        "home_bw_column": "Bandwidth Limit (Mbps)",
+        "home_weighted_hint": "Weighted distribution by NIC schedule weights. Higher weight gets more connections. Disable for equal round-robin.",
+        "home_bw_column": "Schedule Weight (Mbps)",
         "home_bw_column_hint": "Used only for scheduler weight calculation, does NOT rate-limit the NIC",
     },
 }

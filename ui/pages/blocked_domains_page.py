@@ -59,6 +59,16 @@ class BlockedDomainsPage(QWidget):
         self._enable_card.checkedChanged.connect(self._on_enable_changed)
         root.addWidget(self._enable_card)
 
+        self._expiry_card = SwitchSettingCard(
+            FluentIcon.HISTORY,
+            tr("blocked_expiry_toggle"),
+            tr("blocked_expiry_hint"),
+            parent=self,
+        )
+        self._expiry_card.setChecked(tracker.use_expiry)
+        self._expiry_card.checkedChanged.connect(self._on_expiry_changed)
+        root.addWidget(self._expiry_card)
+
         # 工具栏
         self._toolbar = QHBoxLayout()
         self._toolbar.setSpacing(12)
@@ -123,7 +133,12 @@ class BlockedDomainsPage(QWidget):
 
         for nic_name, domains in data.items():
             for domain in domains:
-                self._add_row(nic_name, domain)
+                remaining = get_tracker().remaining_seconds(nic_name, domain)
+                if remaining >= 60:
+                    display_text = f"{domain} ({remaining // 60} 分后恢复)"
+                else:
+                    display_text = f"{domain} ({remaining} 秒后恢复)"
+                self._add_row(nic_name, display_text)
 
     def _add_row(self, nic_name: str, domain: str):
         row = self.tableWidget.rowCount()
@@ -157,6 +172,12 @@ class BlockedDomainsPage(QWidget):
         tracker.enabled = checked
         tracker.save()
 
+    def _on_expiry_changed(self, checked: bool):
+        tracker = get_tracker()
+        tracker.use_expiry = checked
+        tracker.save()
+        self._load_data()
+
     def _on_remove_domain(self, nic_name: str, domain: str):
         get_tracker().remove_domain(nic_name, domain)
         get_tracker().save()
@@ -172,6 +193,7 @@ class BlockedDomainsPage(QWidget):
         """运行中锁死编辑入口，停止后恢复。"""
         self._controls_enabled = enabled
         self._enable_card.setEnabled(enabled)
+        self._expiry_card.setEnabled(enabled)
         self._clear_all_btn.setEnabled(enabled)
         self.tableWidget.setEnabled(enabled)
 
@@ -180,6 +202,8 @@ class BlockedDomainsPage(QWidget):
         self._hint.setText(tr("blocked_hint"))
         self._enable_card.titleLabel.setText(tr("blocked_enable"))
         self._enable_card.contentLabel.setText(tr("blocked_enable_hint"))
+        self._expiry_card.titleLabel.setText(tr("blocked_expiry_toggle"))
+        self._expiry_card.contentLabel.setText(tr("blocked_expiry_hint"))
         self._clear_all_btn.setText(tr("blocked_clear_all"))
         self._refresh_btn.setText(tr("home_refresh_tip"))
         self._empty_hint.setText(tr("blocked_no_data"))
