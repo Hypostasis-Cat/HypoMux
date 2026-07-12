@@ -112,6 +112,7 @@ I18N_MAP = {
         "nav_tools": "网络体检",
         "nav_settings": "系统设置",
         "nav_about": "关于",
+        "nav_blocked_domains": "单网卡被墙域名",
 
         # === 首页数据看板 ===
         "home_engine_title": "聚合分流引擎",
@@ -217,6 +218,25 @@ I18N_MAP = {
         "tray_show_main": "显示主界面",
         "tray_exit": "退出程序",
         "tray_tooltip": "HypoMux - 多网卡加速",
+
+        # === 单网卡被墙域名页 ===
+        "blocked_title": "单网卡被墙域名",
+        "blocked_hint": "当某网卡连接目标域名失败、但其他网卡可连通时，自动记录该域名为该网卡的黑名单。后续分流将自动规避。",
+        "blocked_enable": "启用自动分流清单",
+        "blocked_enable_hint": "开启后，与加速引擎捆绑生效；关闭后暂停规避功能",
+        "blocked_no_data": "暂无记录，在加速期间遇到连通失败的域名将在此显示",
+        "blocked_nic_label": "网卡",
+        "blocked_domain_count": "{count} 个被墙域名",
+        "blocked_delete_domain": "移除此域名",
+        "blocked_clear_nic": "清空此网卡",
+        "blocked_clear_all": "清空全部",
+        "blocked_verify_blocked": "已确认被墙",
+
+        # === 权重调度器 ===
+        "home_weighted_toggle": "使用权重调度器",
+        "home_weighted_hint": "按各网卡带宽上限做加权分配，快卡多吃、慢卡少吃。关闭则轮询均分。",
+        "home_bw_column": "带宽上限 (Mbps)",
+        "home_bw_column_hint": "该带宽上限仅作调度器计算权重之用，不对网卡限速",
     },
 
     "en": {
@@ -320,6 +340,7 @@ I18N_MAP = {
         "nav_tools": "Diagnostics",
         "nav_settings": "Settings",
         "nav_about": "About",
+        "nav_blocked_domains": "Blocked Domains",
 
         # === Home Dashboard ===
         "home_engine_title": "Aggregation Engine",
@@ -425,6 +446,25 @@ I18N_MAP = {
         "tray_show_main": "Show Main Panel",
         "tray_exit": "Exit",
         "tray_tooltip": "HypoMux - Multi-NIC Acceleration",
+
+        # === Blocked Domains Page ===
+        "blocked_title": "Per-NIC Blocked Domains",
+        "blocked_hint": "When a domain fails to connect on one NIC but works on others, it is automatically recorded as blocked for that NIC. Future connections will bypass the blocked NIC.",
+        "blocked_enable": "Enable Auto Bypass List",
+        "blocked_enable_hint": "Bundled with the acceleration engine; pause bypass when disabled",
+        "blocked_no_data": "No records yet. Domains that fail on some NICs during acceleration will appear here.",
+        "blocked_nic_label": "NIC",
+        "blocked_domain_count": "{count} blocked domain(s)",
+        "blocked_delete_domain": "Remove this domain",
+        "blocked_clear_nic": "Clear this NIC",
+        "blocked_clear_all": "Clear All",
+        "blocked_verify_blocked": "Confirmed Blocked",
+
+        # === Weighted Scheduler ===
+        "home_weighted_toggle": "Use Weighted Scheduler",
+        "home_weighted_hint": "Weighted distribution by NIC bandwidth limits. Fast NICs get more connections, slow NICs get fewer. Disable for equal round-robin.",
+        "home_bw_column": "Bandwidth Limit (Mbps)",
+        "home_bw_column_hint": "Used only for scheduler weight calculation, does NOT rate-limit the NIC",
     },
 }
 

@@ -8,9 +8,9 @@ HypoMux 首页数据看板 (HomePage)
 from typing import Dict, List
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QFrame, QSizePolicy
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QFrame, QSizePolicy, QSpinBox
 from qfluentwidgets import (
-    ElevatedCardWidget, SwitchButton, TitleLabel, StrongBodyLabel,
+    ElevatedCardWidget, SwitchButton, SwitchSettingCard, TitleLabel, StrongBodyLabel,
     BodyLabel, CaptionLabel, SubtitleLabel, DisplayLabel, CheckBox,
     PushButton, TransparentToolButton, InfoBadge, InfoLevel, IconWidget,
     SingleDirectionScrollArea, SmoothScrollArea, FluentIcon, themeColor, SegmentedWidget,
@@ -38,8 +38,9 @@ class AdapterRow(QWidget):
     """扁平化网卡行。"""
 
     toggled = Signal(str, bool)
+    bandwidth_changed = Signal(str, int)
 
-    def __init__(self, adapter: Dict, parent=None):
+    def __init__(self, adapter: Dict, bandwidth_mbps: int = 0, parent=None):
         super().__init__(parent)
         self.setFixedHeight(52)
         self._alias = adapter.get("alias", "")
@@ -65,6 +66,17 @@ class AdapterRow(QWidget):
         self._ip_label.setMinimumWidth(150)
         self._speed_label = BodyLabel(tr("home_row_traffic", speed=0.0, conn=0), self)
         self._speed_label.setMinimumWidth(180)
+
+        # 带宽上限输入
+        self._bw_unit = CaptionLabel(tr("home_bw_column"), self)
+        self._bw_unit.setToolTip(tr("home_bw_column_hint"))
+        self._bw_spin = QSpinBox(self)
+        self._bw_spin.setRange(0, 99999)
+        self._bw_spin.setValue(bandwidth_mbps)
+        self._bw_spin.setSuffix(" Mbps")
+        self._bw_spin.setToolTip(tr("home_bw_column_hint"))
+        self._bw_spin.valueChanged.connect(self._on_bw_changed)
+
         self._health_badge = InfoBadge.info(tr("home_health_unknown"), self)
 
         layout.addWidget(self.checkbox)
@@ -72,6 +84,8 @@ class AdapterRow(QWidget):
         layout.addWidget(self._name_label, 2)
         layout.addWidget(self._ip_label, 2)
         layout.addWidget(self._speed_label, 2)
+        layout.addWidget(self._bw_unit)
+        layout.addWidget(self._bw_spin)
         layout.addStretch()
         layout.addWidget(self._health_badge, 0, Qt.AlignRight)
         self._apply_active_style(False)
@@ -79,6 +93,13 @@ class AdapterRow(QWidget):
     @property
     def alias(self) -> str:
         return self._alias
+
+    @property
+    def bandwidth_mbps(self) -> int:
+        return self._bw_spin.value()
+
+    def _on_bw_changed(self, value: int):
+        self.bandwidth_changed.emit(self._alias, value)
 
     def _on_toggled(self, checked: bool):
         self._apply_active_style(checked)
@@ -131,6 +152,9 @@ class AdapterRow(QWidget):
             speed=self._last_speed_mbps,
             conn=self._last_connections,
         ))
+        self._bw_unit.setText(tr("home_bw_column"))
+        self._bw_unit.setToolTip(tr("home_bw_column_hint"))
+        self._bw_spin.setToolTip(tr("home_bw_column_hint"))
         self.update_health(self._last_status or "")
 
 
@@ -185,7 +209,9 @@ class HomePage(QWidget):
     deselect_all_clicked = Signal()
     refresh_clicked = Signal()
     adapter_checked = Signal(str, bool)
+    adapter_bandwidth_changed = Signal(str, int)
     mode_changed = Signal(str)
+    weighted_toggled = Signal(bool)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -218,6 +244,7 @@ class HomePage(QWidget):
         self._page_title = TitleLabel(tr("nav_home"), container)
         root.addWidget(self._page_title)
         root.addWidget(self._build_engine_card())
+        root.addWidget(self._build_weighted_card())
         root.addWidget(self._build_adapters_card(), 1)
         root.addLayout(self._build_metric_matrix())
 
@@ -300,6 +327,16 @@ class HomePage(QWidget):
         layout.addLayout(right)
         return card
 
+    def _build_weighted_card(self) -> QWidget:
+        self._weighted_card = SwitchSettingCard(
+            FluentIcon.SPEED_HIGH,
+            tr("home_weighted_toggle"),
+            tr("home_weighted_hint"),
+            parent=self,
+        )
+        self._weighted_card.checkedChanged.connect(self.weighted_toggled.emit)
+        return self._weighted_card
+
     def _build_adapters_card(self) -> QWidget:
         card = ElevatedCardWidget(self)
         layout = QVBoxLayout(card)
@@ -352,7 +389,7 @@ class HomePage(QWidget):
             row.addWidget(card, 1)
         return row
 
-    def rebuild_cards(self, adapters: List[Dict], checked_aliases: List[str]):
+    def rebuild_cards(self, adapters: List[Dict], checked_aliases: List[str], bandwidth_limits: Dict[str, int] = None):
         for row in self._cards.values():
             row.setParent(None)
             row.deleteLater()
@@ -363,13 +400,17 @@ class HomePage(QWidget):
             if widget is not None:
                 widget.setParent(None)
 
+        limits = bandwidth_limits or {}
         checked_set = set(checked_aliases or [])
         for index, adapter in enumerate(adapters):
-            row = AdapterRow(adapter, self._rows_host)
-            if adapter.get("alias", "") in checked_set:
+            alias = adapter.get("alias", "")
+            bw = limits.get(alias, 0)
+            row = AdapterRow(adapter, bandwidth_mbps=int(bw), parent=self._rows_host)
+            if alias in checked_set:
                 row.set_checked(True)
             row.checkbox.setEnabled(self._adapter_controls_enabled)
             row.toggled.connect(self.adapter_checked.emit)
+            row.bandwidth_changed.connect(self.adapter_bandwidth_changed.emit)
             self._rows_layout.addWidget(row)
             self._cards[row.alias] = row
             if index < len(adapters) - 1:
@@ -464,6 +505,7 @@ class HomePage(QWidget):
         self.mode_segment.setEnabled(enabled)
         self.engine_switch.setEnabled(not self._engine_busy)
         self.set_adapter_controls_enabled(enabled)
+        self._weighted_card.setEnabled(enabled)
 
     def set_engine_busy(self, busy: bool):
         """启动/停止过程中临时锁住总开关，避免重复点击堆叠后端操作。"""
@@ -518,6 +560,8 @@ class HomePage(QWidget):
         self.deselect_all_btn.setText(tr("home_deselect_all"))
         self.refresh_btn.setToolTip(tr("home_refresh_tip"))
         self._empty_label.setText(tr("home_no_adapters"))
+        self._weighted_card.titleLabel.setText(tr("home_weighted_toggle"))
+        self._weighted_card.contentLabel.setText(tr("home_weighted_hint"))
         self.conn_metric.set_value(tr("home_metric_connections_value", value=self._last_connections))
         self._engine_ports.setText(tr(
             "home_engine_ports",
@@ -528,4 +572,15 @@ class HomePage(QWidget):
             card.retranslate_ui()
         for row in self._cards.values():
             row.retranslate_ui()
+
+    def set_weighted_scheduler(self, enabled: bool):
+        self._weighted_card.blockSignals(True)
+        self._weighted_card.setChecked(enabled)
+        self._weighted_card.blockSignals(False)
+
+    def is_weighted_scheduler(self) -> bool:
+        return self._weighted_card.isChecked()
+
+    def get_bandwidth_limits(self) -> Dict[str, int]:
+        return {alias: row.bandwidth_mbps for alias, row in self._cards.items()}
         self.kernel_metric.set_mode(self._current_mode, self._engine_running)

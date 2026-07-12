@@ -77,6 +77,9 @@ def default_config() -> Dict[str, Any]:
         "routing_rules": [],
         "dns_server": DEFAULT_DNS_SERVER,
         "doh_provider": DEFAULT_DOH_PROVIDER,
+        "blocked_domain_bypass": True,  # 自动规避单网卡被墙域名
+        "weighted_scheduler": False,    # 权重调度器
+        "nic_bandwidth_limits": {},     # {nic_alias: mbps}
     }
 
 
@@ -124,6 +127,23 @@ def _coerce_config(raw: Any) -> Dict[str, Any]:
 
     raw_doh = str(raw.get("doh_provider", DEFAULT_DOH_PROVIDER)).strip().lower()
     cfg["doh_provider"] = raw_doh if raw_doh in VALID_DOH_PROVIDERS else DEFAULT_DOH_PROVIDER
+
+    # blocked_domain_bypass：自动规避单网卡被墙域名
+    raw_bypass = raw.get("blocked_domain_bypass", True)
+    cfg["blocked_domain_bypass"] = bool(raw_bypass)
+
+    # weighted_scheduler：权重调度器开关
+    cfg["weighted_scheduler"] = bool(raw.get("weighted_scheduler", False))
+
+    # nic_bandwidth_limits：网卡带宽上限 {alias: mbps}
+    raw_limits = raw.get("nic_bandwidth_limits")
+    if isinstance(raw_limits, dict):
+        cfg["nic_bandwidth_limits"] = {
+            str(k): int(v) for k, v in raw_limits.items()
+            if str(k) and isinstance(v, (int, float)) and int(v) > 0
+        }
+    else:
+        cfg["nic_bandwidth_limits"] = {}
 
     return cfg
 

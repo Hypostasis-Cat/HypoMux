@@ -35,6 +35,7 @@ import psutil
 from PySide6.QtCore import QThread, Signal
 
 from utils.network_utils import get_adapter_if_indices
+from utils.blocked_domain_tracker import get_tracker
 
 
 def _is_winerror6_overlapped_cancel(context: dict) -> bool:
@@ -125,6 +126,105 @@ class RoundRobinBalancer:
             self._current = (self._current + 1) % len(self.nics)
             return nic
 
+    def get_next_nic_for_domain(self, domain: str) -> Dict:
+        """为指定域名分配网卡，自动跳过被墙网卡。
+
+        如果所有网卡都被墙，回退到普通轮询（不阻断连接）。
+        """
+        tracker = get_tracker()
+        if not tracker.enabled or not domain:
+            return self.get_next_nic()
+
+        with self._lock:
+            attempts = len(self.nics)
+            for _ in range(attempts):
+                nic = self.nics[self._current]
+                self._current = (self._current + 1) % len(self.nics)
+                if not tracker.is_blocked(nic["name"], domain):
+                    return nic
+            # 全部被墙，回退
+            return self.get_next_nic()
+
+    def on_connect(self, nic_name: str):
+        with self._lock:
+            self._active[nic_name] = self._active.get(nic_name, 0) + 1
+
+    def on_disconnect(self, nic_name: str):
+        with self._lock:
+            if self._active.get(nic_name, 0) > 0:
+                self._active[nic_name] -= 1
+
+    def active_connections(self) -> Dict[str, int]:
+        with self._lock:
+            return dict(self._active)
+
+
+# ==========================================
+# L4 连接调度器 (WeightedBalancer)
+# ==========================================
+class WeightedBalancer:
+    """按用户设定的带宽上限做加权随机分配，快卡多吃、慢卡少吃。
+
+    权重计算：nic_weight = bandwidth_mbps / total_bandwidth_mbps
+    随机选择：按权重累计概率分布选取网卡。
+    兼容 RoundRobinBalancer 的全部接口（get_next_nic / get_next_nic_for_domain
+    / on_connect / on_disconnect / active_connections）。
+    """
+
+    def __init__(self, selected_nics: List[Dict], bandwidth_limits: Dict[str, int]):
+        if not selected_nics:
+            raise ValueError("WeightedBalancer 至少需要 1 张网卡")
+        self.nics: List[Dict] = [dict(nic) for nic in selected_nics]
+        self._lock = threading.Lock()
+        self._active: Dict[str, int] = {nic["name"]: 0 for nic in self.nics}
+        self._bandwidth: Dict[str, int] = {}
+        for nic in self.nics:
+            name = nic["name"]
+            self._bandwidth[name] = max(int(bandwidth_limits.get(name, 0) or 0), 1)
+        self._recalc_cdf()
+
+    def _recalc_cdf(self):
+        """重算累计概率分布（权重变化后调用）。"""
+        names = [n["name"] for n in self.nics]
+        total = sum(self._bandwidth.get(name, 1) for name in names)
+        if total <= 0:
+            total = len(names)
+        self._cdf: List[float] = []
+        cumulative = 0.0
+        for name in names:
+            cumulative += max(self._bandwidth.get(name, 1), 1) / total
+            self._cdf.append(cumulative)
+
+    def get_next_nic(self) -> Dict:
+        with self._lock:
+            r = random.random()
+            for idx, nic in enumerate(self.nics):
+                if r <= self._cdf[idx]:
+                    return nic
+            return self.nics[-1]
+
+    def get_next_nic_for_domain(self, domain: str) -> Dict:
+        """加权随机 + 自动跳过被墙网卡。"""
+        tracker = get_tracker()
+        if not tracker.enabled or not domain:
+            return self.get_next_nic()
+
+        with self._lock:
+            unblocked = [n for n in self.nics if not tracker.is_blocked(n["name"], domain)]
+            if not unblocked:
+                return self.get_next_nic()
+
+            total = sum(self._bandwidth.get(n["name"], 1) for n in unblocked)
+            if total <= 0:
+                total = len(unblocked)
+            r = random.random()
+            cumulative = 0.0
+            for nic in unblocked:
+                cumulative += max(self._bandwidth.get(nic["name"], 1), 1) / total
+                if r <= cumulative:
+                    return nic
+            return unblocked[-1]
+
     def on_connect(self, nic_name: str):
         with self._lock:
             self._active[nic_name] = self._active.get(nic_name, 0) + 1
@@ -163,6 +263,7 @@ class ProxyWorker(QThread):
     STOP_TASK_TIMEOUT = 2.0
     MONITOR_STOP_TIMEOUT = 0.5
     SERVER_CLOSE_TIMEOUT = 1.0
+    TCP_CONNECT_TIMEOUT = 6.0
 
     def __init__(
         self,
@@ -170,19 +271,21 @@ class ProxyWorker(QThread):
         listen_host: str = "127.0.0.1",
         listen_port: int = 10800,
         http_port: Optional[int] = None,
+        use_weighted: bool = False,
+        bandwidth_limits: Optional[Dict[str, int]] = None,
         parent=None,
     ):
         super().__init__(parent)
         self._selected_nics = [dict(nic) for nic in selected_nics]
-        # 【WinError 10049 根治】用 GetAdaptersAddresses 把每张网卡的出口 IP 反查为
-        # 权威 IfIndex（接口索引），存到 nic['if_index']。出站 socket 将用
-        # IP_UNICAST_IF 死锁在该索引上，而非脆弱地 bind 到本地 IP。
         self._resolve_if_indices()
         self._listen_host = listen_host
         self._listen_port = listen_port
         self._http_port = http_port if http_port is not None else listen_port + 1
 
-        self.balancer = RoundRobinBalancer(self._selected_nics)
+        if use_weighted and bandwidth_limits:
+            self.balancer = WeightedBalancer(self._selected_nics, bandwidth_limits)
+        else:
+            self.balancer = RoundRobinBalancer(self._selected_nics)
 
         # 以下三个对象都在子线程的 asyncio loop 内创建/使用
         self._loop: Optional[asyncio.AbstractEventLoop] = None
@@ -551,8 +654,9 @@ class ProxyWorker(QThread):
                 upstream_sock.setblocking(False)
                 self._upstream_sockets.add(upstream_sock)
             else:
-                # 3. 【L4 调度】在用户选中的网卡里轮询申请一张
-                nic = self.balancer.get_next_nic()
+                # 3. 【L4 调度】在用户选中的网卡里轮询申请一张（自动规避被墙域名）
+                domain_for_schedule = dst_domain or dst_addr
+                nic = self.balancer.get_next_nic_for_domain(domain_for_schedule)
                 self.balancer.on_connect(nic["name"])
                 self.log_signal.emit(
                     f"[调度分配] 新连接 -> [{nic['name']}] | 目标: {target_display}:{dst_port}"
@@ -578,7 +682,10 @@ class ProxyWorker(QThread):
 
             # 5. 连接目标
             try:
-                await loop.sock_connect(upstream_sock, (dst_addr, dst_port))
+                await asyncio.wait_for(
+                    loop.sock_connect(upstream_sock, (dst_addr, dst_port)),
+                    timeout=self.TCP_CONNECT_TIMEOUT,
+                )
             except Exception as e:
                 if nic is None:
                     pass
@@ -586,6 +693,16 @@ class ProxyWorker(QThread):
                     self.log_signal.emit(
                         f"[连通失败] 网卡: {nic['name']} 无法连接目标 {target_display}: {e}"
                     )
+                    # 触发被墙域名后台验证
+                    if dst_domain:
+                        get_tracker().on_connect_failure(
+                            nic_name=nic["name"],
+                            domain=dst_domain,
+                            port=dst_port,
+                            failed_nic=nic,
+                            all_nics=self._selected_nics,
+                            loop=self._loop,
+                        )
                 writer.write(b"\x05\x05\x00\x01\x00\x00\x00\x00\x00\x00")
                 await writer.drain()
                 writer.close()
@@ -766,17 +883,28 @@ class ProxyWorker(QThread):
             upstream_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             upstream_sock.setblocking(False)
         else:
-            nic = self.balancer.get_next_nic()
+            nic = self.balancer.get_next_nic_for_domain(dst_host)
             self.balancer.on_connect(nic["name"])
             # 接口索引强绑定（IP_UNICAST_IF 先于 bind），根治同网段 WinError 10049
             upstream_sock = self._create_bound_upstream_socket(nic)
         self._upstream_sockets.add(upstream_sock)
 
         try:
-            await loop.sock_connect(upstream_sock, (dst_addr, dst_port))
+            await asyncio.wait_for(
+                loop.sock_connect(upstream_sock, (dst_addr, dst_port)),
+                timeout=self.TCP_CONNECT_TIMEOUT,
+            )
         except Exception:
             if nic is not None:
                 self.balancer.on_disconnect(nic["name"])
+                get_tracker().on_connect_failure(
+                    nic_name=nic["name"],
+                    domain=dst_host,
+                    port=dst_port,
+                    failed_nic=nic,
+                    all_nics=self._selected_nics,
+                    loop=self._loop,
+                )
             upstream_sock.close()
             self._upstream_sockets.discard(upstream_sock)
             raise
@@ -1048,11 +1176,12 @@ class MultiPortProxyWorker(QThread):
         ethernet_port: int = PORT_ETHERNET,
         wifi_port: int = PORT_WIFI,
         aggregation_port: int = PORT_AGGREGATION,
+        use_weighted: bool = False,
+        bandwidth_limits: Optional[Dict[str, int]] = None,
         parent=None,
     ):
         super().__init__(parent)
         self._selected_nics = [dict(nic) for nic in selected_nics]
-        # 复用 ProxyWorker 的接口索引解析逻辑
         ProxyWorker._resolve_if_indices(self)
         self._listen_host = listen_host
         self._ports = {
@@ -1062,16 +1191,14 @@ class MultiPortProxyWorker(QThread):
         }
 
         wired, wifi = classify_nics(self._selected_nics)
-        # 有线/无线组若为空则回退到全部选中网卡，保证端口始终可用
         self._wired = wired or self._selected_nics
         self._wifi = wifi or self._selected_nics
 
-        # 每个端口一个独立 balancer
-        self.bal_ethernet = RoundRobinBalancer(self._wired)
-        self.bal_wifi = RoundRobinBalancer(self._wifi)
-        self.bal_aggregation = RoundRobinBalancer(self._selected_nics)
-        # 复用 ProxyWorker._traffic_monitor 需要 self.balancer.active_connections()，
-        # 这里提供一个合并三通道实时连接数的轻量聚合视图。
+        bal_cls = WeightedBalancer if (use_weighted and bandwidth_limits) else RoundRobinBalancer
+        bal_kwargs = {"bandwidth_limits": bandwidth_limits} if bal_cls is WeightedBalancer else {}
+        self.bal_ethernet = bal_cls(self._wired, **bal_kwargs)
+        self.bal_wifi = bal_cls(self._wifi, **bal_kwargs)
+        self.bal_aggregation = bal_cls(self._selected_nics, **bal_kwargs)
         self.balancer = _MergedBalancerView(
             [self.bal_ethernet, self.bal_wifi, self.bal_aggregation]
         )
@@ -1625,7 +1752,7 @@ class MultiPortProxyWorker(QThread):
                 await self._start_udp_associate(reader, writer, balancer, channel)
                 return
 
-            nic = balancer.get_next_nic()
+            nic = balancer.get_next_nic_for_domain(dst_domain) if dst_domain else balancer.get_next_nic()
             balancer.on_connect(nic["name"])
             if dst_domain:
                 try:
@@ -1657,6 +1784,15 @@ class MultiPortProxyWorker(QThread):
                     f"[出站池-{channel}][连通失败] {nic['name']} -> {target_display}:{dst_port} "
                     f"({dst_addr}) | {type(e).__name__}: {e}"
                 )
+                if dst_domain:
+                    get_tracker().on_connect_failure(
+                        nic_name=nic["name"],
+                        domain=dst_domain,
+                        port=dst_port,
+                        failed_nic=nic,
+                        all_nics=self._selected_nics,
+                        loop=self._loop,
+                    )
                 writer.write(b"\x05\x05\x00\x01\x00\x00\x00\x00\x00\x00")
                 await writer.drain()
                 writer.close()

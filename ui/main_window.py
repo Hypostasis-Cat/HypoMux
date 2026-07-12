@@ -28,6 +28,7 @@ from utils.network_utils import scan_network_adapters
 from utils.config_manager import load_config, save_config
 from utils.diagnostic_runner import run_diagnostic, DEFAULT_TARGET_IP
 from proxy_worker import ProxyWorker, MultiPortProxyWorker
+from utils.blocked_domain_tracker import get_tracker
 from utils.tun_manager import TunManager
 from utils import singbox_config
 
@@ -190,6 +191,7 @@ def create_main_window():
     from ui.pages.tools_page import ToolsPage
     from ui.pages.settings_page import SettingsPage
     from ui.pages.about_page import AboutPage
+    from ui.pages.blocked_domains_page import BlockedDomainsPage
 
     def _patch_navigation_icon_paint():
         try:
@@ -419,6 +421,9 @@ def create_main_window():
             self._adapters: List[Dict] = []           # 扫描得到的网卡原始列表
             self._checked_aliases = set(self._app_config.get("selected_adapters", []))
 
+            # 同步被墙域名自动规避开关到全局追踪器
+            get_tracker().enabled = bool(self._app_config.get("blocked_domain_bypass", True))
+
             self.scan_worker = ScanWorker()
             self.diag_worker = None
             self.proxy_worker = None
@@ -496,6 +501,7 @@ def create_main_window():
                 self.tools_page,
                 self.settings_page,
                 self.about_page,
+                self.blocked_page,
             ):
                 refresh = getattr(page, "refresh_theme", None)
                 if callable(refresh):
@@ -516,6 +522,7 @@ def create_main_window():
             self.tools_page = ToolsPage(self)
             self.settings_page = SettingsPage(self)
             self.about_page = AboutPage(self)
+            self.blocked_page = BlockedDomainsPage(self)
 
         def _init_navigation(self):
             # 图标方案（用户确认）：HOME / GLOBAL(回退 GLOBE/IOT) / SPEED_HIGH / SETTING
@@ -535,6 +542,9 @@ def create_main_window():
             # 关于页归入主业务导航流，保持左下角视觉清爽
             self.addSubInterface(
                 self.about_page, FluentIcon.INFO, tr("nav_about")
+            )
+            self.addSubInterface(
+                self.blocked_page, resolve_icon("BLOCK", "CANCEL", "CLOSE"), tr("nav_blocked_domains")
             )
 
         def _refine_navigation_appearance(self):
@@ -578,6 +588,8 @@ def create_main_window():
             self.home_page.deselect_all_clicked.connect(self.on_deselect_all_clicked)
             self.home_page.refresh_clicked.connect(self.load_adapters)
             self.home_page.adapter_checked.connect(self.on_adapter_checked)
+            self.home_page.adapter_bandwidth_changed.connect(self.on_bandwidth_changed)
+            self.home_page.weighted_toggled.connect(self.on_weighted_toggled)
             self.home_page.mode_changed.connect(self.on_mode_changed)
             # 工具页（任务2：体检页也能勾选网卡，并入选择流）
             self.tools_page.start_clicked.connect(self.on_diagnose_clicked)
@@ -597,6 +609,9 @@ def create_main_window():
             try:
                 self.home_page.set_mode(self._run_mode)
                 self.routing_page.load_rules(self._routing_rules)
+                self.home_page.set_weighted_scheduler(
+                    bool(self._app_config.get("weighted_scheduler", False))
+                )
             except Exception:
                 pass
 
@@ -660,6 +675,7 @@ def create_main_window():
             self.tools_page.retranslate_ui()
             self.settings_page.retranslate_ui()
             self.about_page.retranslate_ui()
+            self.blocked_page.retranslate_ui()
             self.tray_icon.setToolTip(tr("tray_tooltip"))
 
         # ---------- 端口同步 ----------
@@ -692,6 +708,9 @@ def create_main_window():
                 "routing_rules": self._routing_rules,
                 "dns_server": self._app_config.get("dns_server", "223.5.5.5"),
                 "doh_provider": self._app_config.get("doh_provider", "auto"),
+                "blocked_domain_bypass": get_tracker().enabled,
+                "weighted_scheduler": self.home_page.is_weighted_scheduler(),
+                "nic_bandwidth_limits": self.home_page.get_bandwidth_limits(),
             }
 
         def _persist_config(self):
@@ -709,6 +728,12 @@ def create_main_window():
             # 任务2：跨屏双向同步——首页与体检页勾选状态实时一致
             self.home_page.set_card_checked(alias, checked)
             self.tools_page.set_card_checked(alias, checked)
+            self._persist_config()
+
+        def on_bandwidth_changed(self, alias: str, mbps: int):
+            self._persist_config()
+
+        def on_weighted_toggled(self, enabled: bool):
             self._persist_config()
 
         def on_select_all_clicked(self):
@@ -771,7 +796,8 @@ def create_main_window():
             existing = {a["alias"] for a in self._adapters}
             self._checked_aliases &= existing
             # 任务2：首页 + 体检页同步重建网卡卡片（同一份数据 + 勾选态）
-            self.home_page.rebuild_cards(self._adapters, sorted(self._checked_aliases))
+            bw_limits = self._app_config.get("nic_bandwidth_limits", {})
+            self.home_page.rebuild_cards(self._adapters, sorted(self._checked_aliases), bw_limits)
             self.tools_page.rebuild_cards(self._adapters, sorted(self._checked_aliases))
             self.routing_page.set_available_adapters(self._adapters)
 
@@ -934,7 +960,13 @@ def create_main_window():
 
             # 1) 先拉起 Python 多端口出站池（2001/2002/2003）
             try:
-                self._pool_worker = MultiPortProxyWorker(selected_nics=selected)
+                use_weighted = self.home_page.is_weighted_scheduler()
+                bw_limits = self.home_page.get_bandwidth_limits() if use_weighted else None
+                self._pool_worker = MultiPortProxyWorker(
+                    selected_nics=selected,
+                    use_weighted=use_weighted,
+                    bandwidth_limits=bw_limits,
+                )
                 self._pool_worker.set_dns_servers([self._app_config.get("dns_server", "223.5.5.5")])
                 self._pool_worker.set_doh_provider(self._app_config.get("doh_provider", "auto"))
                 self._pool_worker.log_signal.connect(self.on_proxy_log)
@@ -947,6 +979,7 @@ def create_main_window():
                 self.routing_page.set_controls_enabled(False)
                 self.settings_page.set_controls_enabled(False)
                 self.tools_page.set_controls_enabled(False)
+                self.blocked_page.set_controls_enabled(False)
                 self._tun_pool_start_timer.start(5000)
                 self._pool_worker.start()
             except Exception as e:
@@ -1080,6 +1113,8 @@ def create_main_window():
             http_port = socks_port + 1
             self._pending_socks_addr = f"127.0.0.1:{socks_port}"
             self._pending_http_addr = f"127.0.0.1:{http_port}"
+            use_weighted = self.home_page.is_weighted_scheduler()
+            bw_limits = self.home_page.get_bandwidth_limits() if use_weighted else None
 
             try:
                 self.proxy_worker = ProxyWorker(
@@ -1087,6 +1122,8 @@ def create_main_window():
                     listen_host="127.0.0.1",
                     listen_port=socks_port,
                     http_port=http_port,
+                    use_weighted=use_weighted,
+                    bandwidth_limits=bw_limits,
                 )
                 self.proxy_worker.log_signal.connect(self.on_proxy_log)
                 self.proxy_worker.traffic_signal.connect(self.on_proxy_traffic)
@@ -1141,6 +1178,7 @@ def create_main_window():
             self.routing_page.set_controls_enabled(False)
             self.settings_page.set_controls_enabled(False)
             self.tools_page.set_controls_enabled(False)
+            self.blocked_page.set_controls_enabled(False)
 
         def _exit_boosting_ui(self):
             self.home_page.engine_switch.setEnabled(True)
@@ -1149,6 +1187,7 @@ def create_main_window():
             self.routing_page.set_controls_enabled(True)
             self.settings_page.set_controls_enabled(True)
             self.tools_page.set_controls_enabled(True)
+            self.blocked_page.set_controls_enabled(True)
             self.home_page.reset_telemetry()
             self._last_up_mbps = 0.0
             self._last_conn_count = 0
@@ -1308,6 +1347,7 @@ def create_main_window():
             self._shutdown_started = True
             try:
                 self._persist_config()
+                get_tracker().save()
             except Exception:
                 pass
             try:

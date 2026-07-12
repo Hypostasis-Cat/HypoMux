@@ -100,7 +100,10 @@ async def handle_client(reader, writer):
 
         # 5. 连接目标
         try:
-            await loop.sock_connect(upstream_sock, (dst_addr, dst_port))
+            await asyncio.wait_for(
+                loop.sock_connect(upstream_sock, (dst_addr, dst_port)),
+                timeout=6.0,
+            )
         except Exception as e:
             print(f"[连通失败] 网卡: {nic['name']} 无法连接目标 {target_display}: {e}")
             writer.write(b'\x05\x05\x00\x01\x00\x00\x00\x00\x00\x00')
