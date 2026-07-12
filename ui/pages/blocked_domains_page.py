@@ -5,7 +5,7 @@ HypoMux 单网卡被墙域名页 (BlockedDomainsPage) - 第五个导航选项卡
 删除单条记录、清空全部等管理功能。
 """
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QHeaderView
 from qfluentwidgets import (
     TableWidget, TitleLabel, BodyLabel, PushButton, TransparentPushButton,
@@ -31,6 +31,12 @@ class BlockedDomainsPage(QWidget):
         self.setObjectName("blockedDomainsPage")
         self._controls_enabled = True
         self._init_ui()
+
+        # 加速运行期间定时自动刷新，实时展示后台确认的被墙域名
+        self._auto_refresh_timer = QTimer(self)
+        self._auto_refresh_timer.setInterval(3000)
+        self._auto_refresh_timer.timeout.connect(self._on_auto_refresh)
+
         # 首次显示时加载数据
         self._load_data()
 
@@ -192,6 +198,16 @@ class BlockedDomainsPage(QWidget):
         get_tracker().save()
         self._load_data()
 
+    def _on_auto_refresh(self):
+        # 仅在本页可见时刷新，被切走时跳过以省资源
+        if self.isVisible():
+            self._load_data()
+
+    def showEvent(self, event):
+        # 切换到本页时立即刷新，确保看到最新的被墙记录
+        super().showEvent(event)
+        self._load_data()
+
     # ----- 状态机 -----
     def set_controls_enabled(self, enabled: bool):
         """运行中锁死编辑入口，停止后恢复。"""
@@ -200,6 +216,14 @@ class BlockedDomainsPage(QWidget):
         self._expiry_card.setEnabled(enabled)
         self._clear_all_btn.setEnabled(enabled)
         self.tableWidget.setEnabled(enabled)
+        # enabled=False 表示加速引擎运行中：开启自动刷新；enabled=True：停止时关闭
+        if not enabled:
+            self._load_data()
+            if not self._auto_refresh_timer.isActive():
+                self._auto_refresh_timer.start()
+        else:
+            self._auto_refresh_timer.stop()
+            self._load_data()
 
     def retranslate_ui(self):
         self._title.setText(tr("blocked_title"))

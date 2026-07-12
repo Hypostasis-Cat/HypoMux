@@ -216,10 +216,19 @@ class BlockedDomainTracker:
                 if confirmed:
                     expiry = time.time() + _EXPIRY_SECONDS
                     with self._lock:
-                        self._blocked.setdefault(nic_name, {})[domain] = expiry
-                    self._emit_log(
-                        f"[被墙确认] 网卡 [{nic_name}] 无法访问 {domain}（其他网卡 {success_count}/{_VERIFY_RETRIES} 次成功，{_EXPIRY_SECONDS // 60} 分钟后自动恢复）"
-                    )
+                        # 若验证期间用户清空了清单（pending 被 clear_all 清除），
+                        # 尊重用户操作，放弃写回，避免刚清空又冒出条目
+                        committed = domain in self._pending_verifications.get(nic_name, set())
+                        if committed:
+                            self._blocked.setdefault(nic_name, {})[domain] = expiry
+                    if committed:
+                        self._emit_log(
+                            f"[被墙确认] 网卡 [{nic_name}] 无法访问 {domain}（其他网卡 {success_count}/{_VERIFY_RETRIES} 次成功，{_EXPIRY_SECONDS // 60} 分钟后自动恢复）"
+                        )
+                    else:
+                        self._emit_log(
+                            f"[被墙检测] 验证期间清单已被清空，放弃写入 [{nic_name}] -> {domain}"
+                        )
                 else:
                     self._emit_log(
                         f"[被墙检测] 验证未达标: [{nic_name}] -> {domain} ({success_count}/{_VERIFY_RETRIES})"

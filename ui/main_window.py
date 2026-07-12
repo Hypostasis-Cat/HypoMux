@@ -706,6 +706,11 @@ def create_main_window():
         def _collect_config(self) -> dict:
             socks = int(self._app_config.get("socks_port", DEFAULT_SOCKS_PORT))
             http = int(self._app_config.get("http_port", socks + 1))
+            # 网卡扫描完成前 home_page._cards 为空，get_bandwidth_limits() 返回 {}，
+            # 此时回退到已保存值，避免用空字典覆盖用户设置的调度权重
+            bw_limits = self.home_page.get_bandwidth_limits()
+            if not bw_limits:
+                bw_limits = self._app_config.get("nic_bandwidth_limits", {})
             return {
                 "selected_adapters": sorted(self._checked_aliases),
                 "socks_port": socks,
@@ -717,7 +722,7 @@ def create_main_window():
                 "blocked_domain_bypass": get_tracker().enabled,
                 "blocked_domain_expiry": get_tracker().use_expiry,
                 "weighted_scheduler": self.home_page.is_weighted_scheduler(),
-                "nic_bandwidth_limits": self.home_page.get_bandwidth_limits(),
+                "nic_bandwidth_limits": bw_limits,
             }
 
         def _persist_config(self):
