@@ -67,14 +67,17 @@ class AdapterRow(QWidget):
         self._speed_label = BodyLabel(tr("home_row_traffic", speed=0.0, conn=0), self)
         self._speed_label.setMinimumWidth(180)
 
-        # 带宽上限输入
+        # 调度权重输入
         self._bw_unit = CaptionLabel(tr("home_bw_column"), self)
-        self._bw_unit.setToolTip(tr("home_bw_column_hint"))
         self._bw_spin = QSpinBox(self)
         self._bw_spin.setRange(0, 99999)
         self._bw_spin.setValue(bandwidth_mbps)
         self._bw_spin.setSuffix(" Mbps")
         self._bw_spin.setToolTip(tr("home_bw_column_hint"))
+        self._bw_spin.setStyleSheet(
+            "QSpinBox QToolTip { color: #1a1a1a; background-color: #f0f0f0; "
+            "border: 1px solid #c0c0c0; padding: 4px 8px; }"
+        )
         self._bw_spin.valueChanged.connect(self._on_bw_changed)
 
         self._health_badge = InfoBadge.info(tr("home_health_unknown"), self)
@@ -153,7 +156,6 @@ class AdapterRow(QWidget):
             conn=self._last_connections,
         ))
         self._bw_unit.setText(tr("home_bw_column"))
-        self._bw_unit.setToolTip(tr("home_bw_column_hint"))
         self._bw_spin.setToolTip(tr("home_bw_column_hint"))
         self.update_health(self._last_status or "")
 
