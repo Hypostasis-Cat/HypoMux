@@ -220,7 +220,15 @@ HypoMux 是一个完全出于技术热情、由作者在业余时间独立开发
 
 随着新功能不断解锁，欢迎见证 HypoMux 的成长！
 
-[![Star History Chart](https://api.star-history.com/svg?repos=Hypostasis-Cat/HypoMux&type=Date)](https://star-history.com/#Hypostasis-Cat/HypoMux&Date)
+## Star History
+
+<a href="https://www.star-history.com/?repos=Hypostasis-Cat%2FHypoMux&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=Hypostasis-Cat/HypoMux&type=date&theme=dark&legend=top-left&sealed_token=chlrefBFmP-lcM91OVUBYY-HWQDuIyeAHctCG-0aJxGRIpPCdZRehSD4_BZAOquAFdlWyWET1FzwgnItWLaeBgBWMy1IKTtSPi5V9RF43xxk78Rjpd1tmilk9A5yu9fv3VBvrIxZrr7sgA4ARA6cq5rr4AHez4yrzFer9S6qyypotZ_ao67M1h9rm6OT" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=Hypostasis-Cat/HypoMux&type=date&legend=top-left&sealed_token=chlrefBFmP-lcM91OVUBYY-HWQDuIyeAHctCG-0aJxGRIpPCdZRehSD4_BZAOquAFdlWyWET1FzwgnItWLaeBgBWMy1IKTtSPi5V9RF43xxk78Rjpd1tmilk9A5yu9fv3VBvrIxZrr7sgA4ARA6cq5rr4AHez4yrzFer9S6qyypotZ_ao67M1h9rm6OT" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=Hypostasis-Cat/HypoMux&type=date&legend=top-left&sealed_token=chlrefBFmP-lcM91OVUBYY-HWQDuIyeAHctCG-0aJxGRIpPCdZRehSD4_BZAOquAFdlWyWET1FzwgnItWLaeBgBWMy1IKTtSPi5V9RF43xxk78Rjpd1tmilk9A5yu9fv3VBvrIxZrr7sgA4ARA6cq5rr4AHez4yrzFer9S6qyypotZ_ao67M1h9rm6OT" />
+ </picture>
+</a>
 
 ##  开源协议
 
