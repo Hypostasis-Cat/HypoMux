@@ -77,7 +77,7 @@ def default_config() -> Dict[str, Any]:
         "routing_rules": [],
         "dns_server": DEFAULT_DNS_SERVER,
         "doh_provider": DEFAULT_DOH_PROVIDER,
-        "blocked_domain_bypass": True,  # 自动规避单网卡被墙域名
+        "blocked_domain_bypass": False,  # 自动规避单网卡被墙域名（默认关闭，仅特殊网络环境建议开启）
         "blocked_domain_expiry": True,  # 被墙黑名单自动过期
         "weighted_scheduler": False,    # 权重调度器
         "nic_bandwidth_limits": {},     # {nic_alias: mbps}
@@ -144,7 +144,7 @@ def _coerce_config(raw: Any) -> Dict[str, Any]:
     cfg["doh_provider"] = raw_doh if raw_doh in VALID_DOH_PROVIDERS else DEFAULT_DOH_PROVIDER
 
     # blocked_domain_bypass：自动规避单网卡被墙域名
-    cfg["blocked_domain_bypass"] = _coerce_bool(raw.get("blocked_domain_bypass"), True)
+    cfg["blocked_domain_bypass"] = _coerce_bool(raw.get("blocked_domain_bypass"), False)
 
     # blocked_domain_expiry：被墙黑名单自动过期开关
     cfg["blocked_domain_expiry"] = _coerce_bool(raw.get("blocked_domain_expiry"), True)

@@ -47,7 +47,7 @@ class BlockedDomainTracker:
         self._lock = threading.Lock()
         self._blocked: Dict[str, Dict[str, float]] = {}
         self._pending_verifications: Dict[str, Set[str]] = {}
-        self._enabled = True
+        self._enabled = False
         self._use_expiry = True
         self._log_callback = None
         self._load()
