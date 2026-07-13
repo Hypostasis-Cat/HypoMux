@@ -15,7 +15,7 @@ from qfluentwidgets import (
     BodyLabel, CaptionLabel, SubtitleLabel, DisplayLabel, CheckBox,
     PushButton, TransparentToolButton, InfoBadge, InfoLevel, IconWidget,
     SingleDirectionScrollArea, SmoothScrollArea, FluentIcon, themeColor, SegmentedWidget,
-    HorizontalSeparator,
+    HorizontalSeparator, ToolTipFilter,
 )
 
 from ui.i18n import tr
@@ -76,6 +76,7 @@ class AdapterRow(QWidget):
         # Fluent SpinBox 内置独立的上下按钮，需要保留足够宽度给数字编辑区。
         self._bw_spin.setFixedWidth(142)
         self._bw_spin.setToolTip(tr("home_bw_column_hint"))
+        self._bw_spin.installEventFilter(ToolTipFilter(self._bw_spin))
         self._bw_spin.valueChanged.connect(self._on_bw_changed)
 
         self._health_badge = InfoBadge.info(tr("home_health_unknown"), self)
