@@ -422,7 +422,7 @@ def create_main_window():
             self._checked_aliases = set(self._app_config.get("selected_adapters", []))
 
             # 同步被墙域名自动规避开关到全局追踪器
-            get_tracker().enabled = bool(self._app_config.get("blocked_domain_bypass", True))
+            get_tracker().enabled = bool(self._app_config.get("blocked_domain_bypass", False))
             get_tracker().use_expiry = bool(self._app_config.get("blocked_domain_expiry", True))
             # 将追踪器日志桥接到主窗口日志文件
             get_tracker().set_log_callback(self.append_log)
