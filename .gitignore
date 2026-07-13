@@ -19,6 +19,4 @@ config.json
 # Rust 诊断内核：忽略编译中间产物，但保留根目录待打包的 diagnostic.exe
 hypomux-diagnostic/target/
 
-# 本地开发参考，不应提交至仓库
-AGENTS.md
 
