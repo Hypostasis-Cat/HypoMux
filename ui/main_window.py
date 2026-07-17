@@ -943,10 +943,19 @@ def create_main_window():
         def _regenerate_singbox_config(self) -> bool:
             """据当前路由规则重新序列化 sing-box config.json。"""
             try:
+                port_kwargs = {}
+                if self._pool_worker is not None:
+                    ports = self._pool_worker.listen_ports()
+                    port_kwargs = {
+                        "ethernet_port": int(ports["nic_ethernet"]),
+                        "wifi_port": int(ports["nic_wifi"]),
+                        "aggregation_port": int(ports["aggregation"]),
+                    }
                 return singbox_config.generate_config_file(
                     self._routing_rules,
                     self._singbox_config_path(),
                     app_process_path=self._app_process_paths(),
+                    **port_kwargs,
                 )
             except Exception as e:
                 self.append_log(mw_tr("log_tun_config_failed", error=e))
@@ -1001,7 +1010,7 @@ def create_main_window():
                 paths=", ".join(self._app_process_paths()),
             ))
 
-            # 1) 先拉起 Python 多端口出站池（2001/2002/2003）
+            # 1) 先拉起 Python 多端口出站池（默认 2001/2002/2003；冲突时自动换端口）
             try:
                 use_weighted = self.home_page.is_weighted_scheduler()
                 bw_limits = self.home_page.get_schedule_weights() if use_weighted else None

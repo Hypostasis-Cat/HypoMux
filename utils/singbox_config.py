@@ -7,10 +7,8 @@ sing-box 兼容 config.json。
 架构映射：
 - inbounds : 单一 tun 入站（interface_name=HypoMux-Tun，auto_route + strict_route），
   全局吸入系统 TCP/UDP 流量。
-- outbounds: 三个 socks 出站，分别对接 Python 本地多端口出站池：
-    nic_ethernet -> 127.0.0.1:2001  （有线/PPP 强制单网卡）
-    nic_wifi     -> 127.0.0.1:2002  （无线 Wi-Fi 强制单网卡）
-    aggregation  -> 127.0.0.1:2003  （多网卡 Round-Robin 聚合叠加）
+- outbounds: 三个 socks 出站，分别对接 Python 本地多端口出站池。
+  默认端口为 2001/2002/2003；端口受 HNS/Hyper-V 限制时使用运行时回退端口。
   另含 direct（保底直连）。
 - route.rules: 顶部按固定顺序强插后端自流量防环、DNS 劫持、ICMP 网络
   直连防御矩阵，再按用户表格逐条生成 {process_name:[...], outbound:...}；
@@ -70,12 +68,16 @@ def _is_valid_outbound_tag(tag: str) -> bool:
     return tag.startswith("nic_") and len(tag) > 4
 
 
-def _dynamic_nic_port(tag: str) -> int:
+def _dynamic_nic_port(
+    tag: str,
+    ethernet_port: int = PORT_ETHERNET,
+    wifi_port: int = PORT_WIFI,
+) -> int:
     """把动态网卡别名标签映射到当前三通道出站池端口。"""
     alias = tag[4:].lower()
     if any(key in alias for key in ("wlan", "wi-fi", "wifi", "wireless", "无线")):
-        return PORT_WIFI
-    return PORT_ETHERNET
+        return wifi_port
+    return ethernet_port
 
 
 def build_config(
@@ -159,7 +161,10 @@ def build_config(
         {"type": "direct", "tag": OUTBOUND_DIRECT},
     ]
     for tag in dynamic_outbound_tags:
-        outbounds.append(_socks_outbound(tag, _dynamic_nic_port(tag)))
+        outbounds.append(_socks_outbound(
+            tag,
+            _dynamic_nic_port(tag, ethernet_port, wifi_port),
+        ))
 
     dns_server_config: Dict[str, Any] = {
         "type": "local",

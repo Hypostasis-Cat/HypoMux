@@ -1059,10 +1059,9 @@ class ProxyWorker(QThread):
 # ==========================================
 # 任务1：多端口多出站池 (MultiPortProxyWorker)
 # ==========================================
-# 在同一个子线程的 asyncio loop 内同时开启三个隔离的本地 SOCKS5 监听：
-#   127.0.0.1:2001 -> 出站强制锁定【有线/PPP 拨号网卡】（组内轮询）
-#   127.0.0.1:2002 -> 出站强制锁定【无线 Wi-Fi 网卡】（组内轮询）
-#   127.0.0.1:2003 -> 多网卡 Round-Robin 聚合叠加（全部选中网卡轮询）
+# 在同一个子线程的 asyncio loop 内同时开启三个隔离的本地 SOCKS5 监听。
+# 默认优先使用 2001/2002/2003；若被 Hyper-V/HNS 排除或被其他程序占用，
+# 自动回退到 Windows 分配的可用端口，并把实际端口同步给 sing-box。
 # 供 sing-box TUN 的三个 socks 出站对接，实现进程级分流 + 物理多卡叠加。
 PORT_ETHERNET = 2001
 PORT_WIFI = 2002
@@ -1226,6 +1225,10 @@ class MultiPortProxyWorker(QThread):
         self._dns_cache: Dict[Tuple[int, str], Tuple[float, str]] = {}
         self._dns_inflight: Dict[Tuple[int, str], asyncio.Task] = {}
 
+    def listen_ports(self) -> Dict[str, int]:
+        """返回三个通道当前实际监听端口的快照。"""
+        return dict(self._ports)
+
     # 复用 ProxyWorker 的静态/实例方法，避免重复实现
     _create_bound_upstream_socket = staticmethod(ProxyWorker._create_bound_upstream_socket)
     _relay_to_sock = staticmethod(ProxyWorker._relay_to_sock)
@@ -1270,21 +1273,16 @@ class MultiPortProxyWorker(QThread):
             return
 
         try:
-            # 三个隔离监听：每个绑定不同 balancer
-            self._servers = [
-                await asyncio.start_server(
-                    self._make_handler(self.bal_ethernet, "nic_ethernet"),
-                    self._listen_host, self._ports["nic_ethernet"],
-                ),
-                await asyncio.start_server(
-                    self._make_handler(self.bal_wifi, "nic_wifi"),
-                    self._listen_host, self._ports["nic_wifi"],
-                ),
-                await asyncio.start_server(
-                    self._make_handler(self.bal_aggregation, "aggregation"),
-                    self._listen_host, self._ports["aggregation"],
-                ),
-            ]
+            # 三个隔离监听：每个绑定不同 balancer。逐个加入列表，确保后续
+            # 通道失败时，前面已经创建的 server 也能被 _teardown() 关闭。
+            self._servers = []
+            for channel, balancer in (
+                ("nic_ethernet", self.bal_ethernet),
+                ("nic_wifi", self.bal_wifi),
+                ("aggregation", self.bal_aggregation),
+            ):
+                server = await self._start_channel_server(channel, balancer)
+                self._servers.append(server)
         except Exception as e:
             await self._teardown()
             self.error_signal.emit(f"多端口出站池监听失败: {e}")
@@ -1312,6 +1310,45 @@ class MultiPortProxyWorker(QThread):
         finally:
             await self._teardown()
             self.log_signal.emit("[出站池] 收到停止指令，已关闭三通道并清理在途连接")
+
+    @staticmethod
+    def _can_fallback_bind_error(error: OSError) -> bool:
+        """识别端口被占用或被 Windows/HNS 排除导致的可恢复监听错误。"""
+        codes = {
+            getattr(error, "errno", None),
+            getattr(error, "winerror", None),
+        }
+        # 13/EACCES、98/10048/EADDRINUSE、10013/WSAEACCES。
+        return bool(codes & {13, 98, 10013, 10048})
+
+    async def _start_channel_server(
+        self,
+        channel: str,
+        balancer: "RoundRobinBalancer",
+    ):
+        preferred_port = int(self._ports[channel])
+        handler = self._make_handler(balancer, channel)
+        try:
+            server = await asyncio.start_server(
+                handler, self._listen_host, preferred_port,
+            )
+        except OSError as error:
+            if preferred_port <= 0 or not self._can_fallback_bind_error(error):
+                raise
+            # port=0 让 Windows 原子选择一个当前可绑定且不在排除范围内的端口，
+            # 避免“先探测、后绑定”之间被其他进程抢占的竞态。
+            server = await asyncio.start_server(handler, self._listen_host, 0)
+            actual_port = int(server.sockets[0].getsockname()[1])
+            self._ports[channel] = actual_port
+            self.log_signal.emit(
+                f"[出站池] 本地端口 {preferred_port} 不可用（{error}），"
+                f"{channel} 已自动改用 {actual_port}"
+            )
+            return server
+
+        actual_port = int(server.sockets[0].getsockname()[1])
+        self._ports[channel] = actual_port
+        return server
 
     def _make_handler(self, balancer: "RoundRobinBalancer", channel: str):
         async def handler(reader, writer):
