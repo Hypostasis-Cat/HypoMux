@@ -599,6 +599,7 @@ def create_main_window():
             self.tools_page.refresh_clicked.connect(self.load_adapters)
             # 路由页（任务2：规则变更即持久化）
             self.routing_page.rules_changed.connect(self.on_routing_rules_changed)
+            self.routing_page.duplicate_detected.connect(self.show_warning)
             # 设置页
             self.settings_page.language_changed.connect(self._on_language_changed)
             self.settings_page.ports_changed.connect(self._on_settings_ports_changed)
@@ -1386,6 +1387,10 @@ def create_main_window():
                 return
             self._shutdown_started = True
             try:
+                self.routing_page.prepare_for_shutdown()
+            except Exception:
+                pass
+            try:
                 get_tracker().save()
             except Exception:
                 pass
@@ -1465,6 +1470,11 @@ def create_main_window():
             settings = QSettings("Hypostasis-Cat", "HypoMux")
             close_behavior = settings.value("close_behavior", "tray", type=str)
 
+            # 直接从当前编辑控件读取一次，避免最后一次输入尚未同步到缓存。
+            try:
+                self._routing_rules = self.routing_page.get_rules()
+            except Exception:
+                pass
             # 关闭前持久化配置（确保托盘收起也保存）
             self._persist_config()
 
