@@ -106,7 +106,7 @@ class DiagResultCard(ElevatedCardWidget):
         latency = result.get("avg_latency_ms", 0)
         jitter = result.get("jitter_ms", 0)
 
-        self.setFixedHeight(96)
+        self.setFixedHeight(184)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(20, 14, 20, 14)
         layout.setSpacing(16)
@@ -133,6 +133,24 @@ class DiagResultCard(ElevatedCardWidget):
             f"{tr('diag_metric_jitter')} {jitter}ms", self
         ))
         metrics.addWidget(CaptionLabel(tr(f"diag_desc_{status}"), self))
+        checks = result.get("checks") or []
+        if checks:
+            check_lines = []
+            for check in checks:
+                key = str(check.get("key", ""))
+                label = tr(f"diag_check_{key}")
+                level = str(check.get("level", "warn"))
+                marker = {"pass": "✓", "warn": "⚠", "fail": "✕"}.get(level, "•")
+                detail = str(check.get("detail", "")).strip()
+                if key == "metric" and detail:
+                    metric_mode = "auto" if check.get("mode") == "auto" else "fixed"
+                    detail = f"{tr(f'diag_check_metric_{metric_mode}')} {detail}"
+                elif not detail:
+                    detail = tr("diag_check_missing")
+                check_lines.append(f"{marker} {label}: {detail}")
+            checks_label = CaptionLabel("\n".join(check_lines), self)
+            checks_label.setWordWrap(True)
+            metrics.addWidget(checks_label)
         layout.addLayout(metrics)
 
         # 右：三色徽标

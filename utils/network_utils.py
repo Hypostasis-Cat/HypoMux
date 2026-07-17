@@ -199,6 +199,25 @@ def _adapter_dns_servers_ipv4(adapter: _IP_ADAPTER_ADDRESSES) -> List[str]:
     return servers
 
 
+def _adapter_gateways_ipv4(adapter: _IP_ADAPTER_ADDRESSES) -> List[str]:
+    """读取网卡的 IPv4 默认网关（原生回退扫描也可用，无需 CIM 权限）。"""
+    gateways: List[str] = []
+    gateway_ptr = None
+    if adapter.FirstGatewayAddress:
+        # IP_ADAPTER_GATEWAY_ADDRESS_LH 与 DNS 地址节点的内存布局相同：
+        # Length / Reserved / Next / SOCKET_ADDRESS。
+        gateway_ptr = ctypes.cast(
+            adapter.FirstGatewayAddress,
+            ctypes.POINTER(_IP_ADAPTER_DNS_SERVER_ADDRESS),
+        )
+    while gateway_ptr:
+        gateway = _sockaddr_to_ipv4(gateway_ptr.contents.Address)
+        if gateway and gateway not in gateways:
+            gateways.append(gateway)
+        gateway_ptr = gateway_ptr.contents.Next
+    return gateways
+
+
 def get_adapter_if_indices() -> Dict[str, int]:
     """
     调用 GetAdaptersAddresses，返回 {IPv4 地址: IfIndex} 的映射。
@@ -345,6 +364,7 @@ def get_adapter_full_info() -> List[Dict]:
             if oper_up and adapter.IfIndex != 0 and iftype not in _EXCLUDED_IF_TYPES:
                 ipv4_list: List[str] = []
                 dns_servers = _adapter_dns_servers_ipv4(adapter)
+                gateways = _adapter_gateways_ipv4(adapter)
                 unicast_ptr = adapter.FirstUnicastAddress
                 while unicast_ptr:
                     unicast = unicast_ptr.contents
@@ -362,6 +382,8 @@ def get_adapter_full_info() -> List[Dict]:
                         "friendly": friendly,
                         "ipv4_list": ipv4_list,
                         "dns_servers": dns_servers,
+                        "gateways": gateways,
+                        "metric": int(adapter.Ipv4Metric),
                     })
             adapter_ptr = adapter.Next
 
@@ -493,6 +515,8 @@ def _parse_adapter_from_json(adapter_json: Dict) -> Optional[Dict]:
             "metric": int(adapter_json.get("InterfaceMetric") or -1),
             "iftype": iftype,
             "is_ppp": is_ppp,
+            "gateway": str(adapter_json.get("DefaultGateway") or "").strip(),
+            "connection_state": str(adapter_json.get("ConnectionState") or "").strip(),
         }
         return adapter_info
     except Exception as e:
@@ -550,6 +574,11 @@ def scan_network_adapters() -> Tuple[bool, List[Dict], str]:
         $ifAlias = $interface.InterfaceAlias
         $autoMetric = $interface.AutomaticMetric
         $ifMetric = $interface.InterfaceMetric
+        $netConfig = Get-NetIPConfiguration -InterfaceIndex $ifIndex -ErrorAction SilentlyContinue
+        $gateway = @(
+            $netConfig.IPv4DefaultGateway |
+            Select-Object -ExpandProperty NextHop -ErrorAction SilentlyContinue
+        ) -join ', '
 
         $ipv4Addr = (Get-NetIPAddress -InterfaceIndex $ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue).IPAddress
         $dnsServers = @(
@@ -575,6 +604,8 @@ def scan_network_adapters() -> Tuple[bool, List[Dict], str]:
                 AutomaticMetric = $autoMetric
                 InterfaceMetric = $ifMetric
                 Status = $status
+                ConnectionState = $interface.ConnectionState
+                DefaultGateway = $gateway
                 IfType = $ifType
             }
         }
@@ -627,9 +658,11 @@ def scan_network_adapters() -> Tuple[bool, List[Dict], str]:
                     "ipv4": ", ".join(n["ipv4_list"]),
                     "dns_servers": n.get("dns_servers", []),
                     "is_auto": True,
-                    "metric": -1,
+                    "metric": n.get("metric", -1),
                     "iftype": n["iftype"],
                     "is_ppp": n["is_ppp"],
+                    "gateway": ", ".join(n.get("gateways", [])),
+                    "connection_state": "Connected",
                 })
                 seen_indices.add(n["index"])
                 logger.info(
