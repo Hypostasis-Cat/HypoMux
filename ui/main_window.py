@@ -641,6 +641,10 @@ def create_main_window():
             self._tun_health_generation = 0
             self._tun_health_failures = 0
             self._tun_last_connectivity_at = 0.0
+            # TUN 内核运行时允许编辑分流规则，但 sing-box 当前版本没有
+            # 可用的配置热重载入口。该标记用于合并提示，避免每次输入字符
+            # 都重复弹出“重启后生效”的通知。
+            self._routing_restart_needed = False
             self._shutdown_started = False
             self._force_exit = False
             self._engine_transitioning = False
@@ -1172,9 +1176,13 @@ def create_main_window():
         def on_routing_rules_changed(self):
             self._routing_rules = self.routing_page.get_rules()
             self._persist_config()
-            # 若 TUN 正在运行，热重生成配置（下次重启内核生效）
-            if self._tun_active:
-                self._regenerate_singbox_config()
+            # 当前 sing-box 内核不支持运行中重载 route.rules。配置已持久化，
+            # 下次启动 TUN 时会重新生成并加载；运行中的内核保持原规则，避免
+            # 为一次编辑强制重启虚拟网卡而造成短暂断网。
+            if self._tun_active and not self._routing_restart_needed:
+                self._routing_restart_needed = True
+                self.append_log("[分流规则] 已保存，重启加速后生效")
+                self.show_info(tr("routing_restart_required"))
 
         def _singbox_config_path(self):
             # 固定写入 ~/.hypomux/singbox-config.json：该目录对当前用户始终可写，
@@ -1247,6 +1255,7 @@ def create_main_window():
             self._tun_health_failures = 0
             self._tun_last_connectivity_at = 0.0
             self._tun_kernel_ready = False
+            self._routing_restart_needed = False
             self._tun_health_timer.stop()
             self._tun_starting = True
             self.home_page.set_engine_startup_status(tr("tun_preflighting"))
@@ -1779,7 +1788,9 @@ def create_main_window():
 
         def _enter_boosting_ui(self):
             self.home_page.set_controls_enabled(False)
-            self.routing_page.set_controls_enabled(False)
+            # 仅 TUN 能根据进程名匹配流量；加速运行中允许继续维护规则，
+            # 变更会保存并在用户下次重启加速时加载。
+            self.routing_page.set_controls_enabled(self._run_mode == "tun")
             self.settings_page.set_controls_enabled(False)
             self.tools_page.set_controls_enabled(False)
             self._set_blocked_domains_controls_enabled(False)

@@ -174,6 +174,7 @@ I18N_MAP = {
         "routing_placeholder_process": "例如 cs2.exe",
         "routing_duplicate_hint": "检测到重复进程规则：{names}。运行时将以第一条为准，请删除或修改重复项。",
         "routing_duplicate_process": "进程 {name} 已存在，请直接编辑原规则。",
+        "routing_restart_required": "分流规则已保存，重启加速后生效。",
 
         # === 运行模式 / TUN 虚拟网卡 ===
         "mode_label": "运行模式",
@@ -429,6 +430,7 @@ I18N_MAP = {
         "routing_placeholder_process": "e.g. cs2.exe",
         "routing_duplicate_hint": "Duplicate process rules detected: {names}. The first rule takes precedence; remove or edit the duplicates.",
         "routing_duplicate_process": "Process {name} already exists. Edit the existing rule instead.",
+        "routing_restart_required": "Split rules were saved and will apply after acceleration is restarted.",
 
         # === Run Mode / TUN ===
         "mode_label": "Run Mode",
