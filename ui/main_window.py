@@ -16,13 +16,13 @@ QApplication 已存在，避免 "Must construct a QApplication before a QWidget"
 """
 
 import ctypes
-import logging
+import json
 import subprocess
 import sys
 import time
-from logging.handlers import RotatingFileHandler
+from datetime import datetime
 from pathlib import Path
-from typing import List, Dict
+from typing import Any, List, Dict
 import winreg
 
 from utils.network_utils import scan_network_adapters
@@ -32,37 +32,11 @@ from proxy_worker import ProxyWorker, MultiPortProxyWorker
 from utils.blocked_domain_tracker import get_tracker
 from utils.tun_manager import TunManager
 from utils import singbox_config
+from utils.acceleration_log import AccelerationLogStore
 
 
 DEFAULT_SOCKS_PORT = 10800
 DEFAULT_HTTP_PORT = 10801
-
-
-def _build_app_logger() -> logging.Logger:
-    """构建用户目录滚动日志，替代首页可视控制台。"""
-    logger = logging.getLogger("hypomux.app")
-    if logger.handlers:
-        return logger
-    logger.setLevel(logging.INFO)
-    log_dir = Path.home() / ".hypomux" / "logs"
-    log_dir.mkdir(parents=True, exist_ok=True)
-    handler = RotatingFileHandler(
-        log_dir / "app.log",
-        maxBytes=2 * 1024 * 1024,
-        backupCount=3,
-        encoding="utf-8",
-    )
-    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
-    logger.addHandler(handler)
-    try:
-        handler.doRollover()
-    except Exception:
-        pass
-    logger.propagate = False
-    return logger
-
-
-APP_LOGGER = _build_app_logger()
 
 
 def detect_foreign_tun_default_route() -> str:
@@ -173,7 +147,7 @@ def create_main_window():
     """工厂函数：创建 MainWindow 实例（此时 QApplication 已存在）"""
     from PySide6.QtCore import Qt, QThread, Signal, Slot, QTimer, QSettings, QRect, QRectF, QPoint
     from PySide6.QtGui import QIcon, QAction, QFont, QPainter, QColor, QCursor
-    from PySide6.QtWidgets import QApplication, QSystemTrayIcon, QMenu, QWidget, QDialog, QVBoxLayout
+    from PySide6.QtWidgets import QApplication, QSystemTrayIcon, QMenu, QWidget, QDialog, QVBoxLayout, QFileDialog
     from qfluentwidgets import (
         FluentWindow, NavigationItemPosition, InfoBar, InfoBarPosition,
         setThemeColor, setTheme, Theme, FluentIcon, qconfig, MessageBox,
@@ -188,7 +162,12 @@ def create_main_window():
     from ui.i18n import tr
     from ui.pages import resolve_icon
     from ui.pages.home_page import HomePage
-    from ui.pages.routing_page import RoutingPage
+    from ui.pages.routing_page import (
+        ROUTING_BACKUP_FORMAT,
+        ROUTING_BACKUP_VERSION,
+        RoutingPage,
+        parse_routing_rules_backup,
+    )
     from ui.pages.tools_page import ToolsPage
     from ui.pages.settings_page import SettingsPage
     from ui.pages.about_page import AboutPage
@@ -648,6 +627,7 @@ def create_main_window():
             self._shutdown_started = False
             self._force_exit = False
             self._engine_transitioning = False
+            self._acceleration_log = AccelerationLogStore()
             self._adapter_snapshot = ()
             self._no_adapter_warning_shown = False
 
@@ -820,6 +800,8 @@ def create_main_window():
             # 路由页（任务2：规则变更即持久化）
             self.routing_page.rules_changed.connect(self.on_routing_rules_changed)
             self.routing_page.duplicate_detected.connect(self.show_warning)
+            self.routing_page.export_requested.connect(self.on_export_routing_rules)
+            self.routing_page.import_requested.connect(self.on_import_routing_rules)
             # 设置页
             self.settings_page.language_changed.connect(self._on_language_changed)
             self.settings_page.ports_changed.connect(self._on_settings_ports_changed)
@@ -1104,6 +1086,11 @@ def create_main_window():
                 already_running = self._is_boosting or self.proxy_worker is not None
             if checked == already_running:
                 return
+            if checked:
+                self._acceleration_log.start(
+                    tr("mode_tun") if self._run_mode == "tun" else tr("mode_proxy"),
+                    (adapter["name"] for adapter in self.get_selected_adapters()),
+                )
             self._engine_transitioning = True
             self.home_page.set_adapter_controls_enabled(False)
             # 立即给出加载反馈，并仅留极短时间给 SwitchButton 完成自身动画。
@@ -1132,6 +1119,14 @@ def create_main_window():
         def _finish_engine_transition(self):
             self._engine_transitioning = False
             self.home_page.set_engine_busy(False)
+            if (
+                self._acceleration_log.active
+                and not self._tun_active
+                and not self._tun_starting
+                and not self._is_boosting
+                and self.proxy_worker is None
+            ):
+                self._acceleration_log.finish("start_failed_or_stopped")
 
         # ========== 任务4：运行模式切换 + UAC 防御 ==========
         def on_mode_changed(self, mode: str):
@@ -1183,6 +1178,69 @@ def create_main_window():
                 self._routing_restart_needed = True
                 self.append_log("[分流规则] 已保存，重启加速后生效")
                 self.show_info(tr("routing_restart_required"))
+
+        def on_export_routing_rules(self):
+            """把当前规则表导出为可分享、可长期备份的 JSON 文件。"""
+            default_path = Path.home() / "Documents" / "hypomux-routing-rules.json"
+            file_path, _ = QFileDialog.getSaveFileName(
+                self,
+                tr("routing_export_title"),
+                str(default_path),
+                tr("routing_backup_file_filter"),
+            )
+            if not file_path:
+                return
+            target = Path(file_path)
+            if target.suffix.lower() != ".json":
+                target = target.with_suffix(".json")
+            payload = {
+                "format": ROUTING_BACKUP_FORMAT,
+                "version": ROUTING_BACKUP_VERSION,
+                "exported_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+                "rules": self.routing_page.get_rules(),
+            }
+            try:
+                target.write_text(
+                    json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+                    encoding="utf-8",
+                )
+            except (OSError, TypeError, ValueError) as e:
+                self.show_error(tr("routing_export_failed", error=e))
+                return
+            self.append_log(f"[分流规则] 已导出 {len(payload['rules'])} 条规则: {target}")
+            self.show_success(tr("routing_export_success", count=len(payload["rules"])))
+
+        def on_import_routing_rules(self):
+            """校验备份后再原子替换规则表，避免错误文件破坏现有规则。"""
+            file_path, _ = QFileDialog.getOpenFileName(
+                self,
+                tr("routing_import_title"),
+                str(Path.home() / "Documents"),
+                tr("routing_backup_file_filter"),
+            )
+            if not file_path:
+                return
+            try:
+                payload: Any = json.loads(Path(file_path).read_text(encoding="utf-8-sig"))
+                imported_rules = parse_routing_rules_backup(payload)
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as e:
+                self.show_error(tr("routing_import_failed", error=e))
+                return
+
+            box = MessageBox(
+                tr("routing_import_confirm_title"),
+                tr("routing_import_confirm_content", count=len(imported_rules)),
+                self,
+            )
+            box.yesButton.setText(tr("routing_import_confirm"))
+            box.cancelButton.setText(tr("routing_dialog_cancel"))
+            if not box.exec():
+                return
+
+            self.routing_page.load_rules(imported_rules)
+            self.on_routing_rules_changed()
+            self.append_log(f"[分流规则] 已导入 {len(imported_rules)} 条规则: {file_path}")
+            self.show_success(tr("routing_import_success", count=len(imported_rules)))
 
         def _singbox_config_path(self):
             # 固定写入 ~/.hypomux/singbox-config.json：该目录对当前用户始终可写，
@@ -1467,7 +1525,7 @@ def create_main_window():
                 worker.cancel()
             self._tun_starting = False
             self._tun_health_failures = 0
-            self.append_log(f"[TUN][联网验证] 通过: {detail}")
+            self.append_log(f"[TUN][联网验证] 通过: {detail}", force=True)
             self._enter_boosting_ui()
             self.home_page.set_engine_state(True)
             self._finish_engine_transition()
@@ -1856,6 +1914,7 @@ def create_main_window():
             except Exception as e:
                 self.append_log(mw_tr("log_start_cleanup_error", error=e))
             self.show_error(message)
+            self._acceleration_log.finish("proxy_error")
             self._finish_engine_transition()
 
         @Slot(str)
@@ -1874,6 +1933,7 @@ def create_main_window():
                 if self.proxy_worker.isRunning():
                     self.proxy_worker.wait(3000)
                 self.proxy_worker = None
+            self._acceleration_log.finish("stopped")
 
         def _force_finish_stop_ui(self):
             if self.proxy_worker is None or not self._is_boosting:
@@ -1894,6 +1954,7 @@ def create_main_window():
                 pass
             self._retired_proxy_workers.append(worker)
             worker.finished.connect(lambda w=worker: self._cleanup_retired_proxy_worker(w))
+            self._acceleration_log.finish("stop_timeout")
 
         def _cleanup_retired_proxy_worker(self, worker):
             try:
@@ -1950,8 +2011,8 @@ def create_main_window():
             self.diag_worker = None
 
         # ========== 日志 ==========
-        def append_log(self, message: str):
-            APP_LOGGER.info(str(message))
+        def append_log(self, message: str, *, force: bool = False):
+            self._acceleration_log.record(message, force=force)
 
         # ========== 退出清理 ==========
         def shutdown_backend_workers(self):
@@ -2064,6 +2125,8 @@ def create_main_window():
                     )
                 except Exception:
                     pass
+                finally:
+                    self._acceleration_log.finish("application_exit")
 
         def closeEvent(self, event):
             settings = QSettings("Hypostasis-Cat", "HypoMux")

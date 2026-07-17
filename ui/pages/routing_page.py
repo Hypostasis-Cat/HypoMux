@@ -11,20 +11,78 @@ from __future__ import annotations
 import csv
 import subprocess
 from io import StringIO
-from typing import Iterable, List, Optional
+from typing import Any, Iterable, List, Optional
 
 from PySide6.QtCore import Qt, QEvent, Signal, QThread, Slot
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QHeaderView
 from qfluentwidgets import (
     TableWidget, TitleLabel, BodyLabel, PushButton, TransparentPushButton,
     LineEdit, ComboBox, FluentIcon, MessageBoxBase, SearchLineEdit, ListWidget,
-    SubtitleLabel,
+    SubtitleLabel, CaptionLabel, ElevatedCardWidget, PrimaryPushButton,
 )
 
 from ui.i18n import tr
 
 
 _CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+ROUTING_BACKUP_FORMAT = "hypomux-routing-rules"
+ROUTING_BACKUP_VERSION = 1
+
+
+def parse_routing_rules_backup(payload: Any) -> list:
+    """校验并规整导入的分流规则备份，失败时不修改现有规则表。"""
+    if isinstance(payload, list):
+        raw_rules = payload
+    elif isinstance(payload, dict):
+        format_name = payload.get("format")
+        if format_name not in (None, ROUTING_BACKUP_FORMAT):
+            raise ValueError("unsupported backup format")
+        if format_name == ROUTING_BACKUP_FORMAT:
+            try:
+                version = int(payload.get("version", 0))
+            except (TypeError, ValueError):
+                version = 0
+            if version != ROUTING_BACKUP_VERSION:
+                raise ValueError("unsupported backup version")
+        raw_rules = payload.get("rules", payload.get("routing_rules"))
+    else:
+        raw_rules = None
+
+    if not isinstance(raw_rules, list):
+        raise ValueError("rules must be a list")
+
+    rules = []
+    seen = set()
+    for index, item in enumerate(raw_rules, start=1):
+        if not isinstance(item, dict):
+            raise ValueError(f"invalid rule at index {index}")
+        names = item.get("process_name", [])
+        if isinstance(names, str):
+            names = [names]
+        if not isinstance(names, list) or not names:
+            raise ValueError(f"missing process name at index {index}")
+
+        outbound = str(item.get("outbound", "aggregation") or "").strip()
+        if (
+            outbound not in ("aggregation", "direct")
+            and (not outbound.startswith("nic_") or len(outbound) == 4)
+        ):
+            raise ValueError(f"invalid outbound at index {index}")
+
+        has_valid_name = False
+        for raw_name in names:
+            name = str(raw_name or "").strip()
+            if not name or len(name) > 260 or any(ch in name for ch in ("/", "\\", ":", "\0")):
+                raise ValueError(f"invalid process name at index {index}")
+            has_valid_name = True
+            normalized = name.casefold()
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            rules.append({"process_name": [name], "outbound": outbound})
+        if not has_valid_name:
+            raise ValueError(f"missing process name at index {index}")
+    return rules
 
 
 def _decode_process_output(raw: bytes) -> str:
@@ -143,6 +201,8 @@ class RoutingPage(QWidget):
 
     rules_changed = Signal()
     duplicate_detected = Signal(str)
+    export_requested = Signal()
+    import_requested = Signal()
 
     COL_PROCESS = 0
     COL_OUTBOUND = 1
@@ -168,22 +228,44 @@ class RoutingPage(QWidget):
         root.addWidget(self._title)
         root.addWidget(self._hint)
 
-        self._toolbar = QHBoxLayout()
-        self._toolbar.setSpacing(12)
-        self.add_btn = PushButton(FluentIcon.ADD, tr("routing_add"), self)
+        # 将操作收纳进卡片，避免少量按钮散落在整行两端。
+        self._toolbar_card = ElevatedCardWidget(self)
+        self._toolbar = QHBoxLayout(self._toolbar_card)
+        self._toolbar.setContentsMargins(14, 10, 14, 10)
+        self._toolbar.setSpacing(10)
+        self.add_btn = PrimaryPushButton(FluentIcon.ADD, tr("routing_add"), self._toolbar_card)
         self.add_btn.clicked.connect(self._on_add_rule)
-        self.select_process_btn = TransparentPushButton(
-            FluentIcon.APPLICATION, tr("routing_select_process"), self
+        self.select_process_btn = PushButton(
+            FluentIcon.APPLICATION, tr("routing_select_process"), self._toolbar_card
         )
         self.select_process_btn.clicked.connect(self._on_select_process)
-        self.remove_btn = PushButton(FluentIcon.DELETE, tr("routing_remove"), self)
+        self.remove_btn = TransparentPushButton(
+            FluentIcon.DELETE, tr("routing_remove"), self._toolbar_card
+        )
         self.remove_btn.clicked.connect(self._on_remove_selected)
+        self._backup_label = CaptionLabel(tr("routing_backup_group"), self._toolbar_card)
+        self.export_btn = PushButton(tr("routing_export"), self._toolbar_card)
+        self.export_btn.clicked.connect(self.export_requested.emit)
+        self.import_btn = PushButton(tr("routing_import"), self._toolbar_card)
+        self.import_btn.clicked.connect(self.import_requested.emit)
 
         self._toolbar.addWidget(self.add_btn)
         self._toolbar.addWidget(self.select_process_btn)
         self._toolbar.addWidget(self.remove_btn)
         self._toolbar.addStretch()
-        root.addLayout(self._toolbar)
+        self._toolbar.addWidget(self._backup_label)
+        self._toolbar.addWidget(self.export_btn)
+        self._toolbar.addWidget(self.import_btn)
+        root.addWidget(self._toolbar_card)
+
+        table_bar = QHBoxLayout()
+        table_bar.setContentsMargins(2, 4, 2, 0)
+        self._list_title = SubtitleLabel(tr("routing_list_title"), self)
+        self._rule_count = CaptionLabel("", self)
+        table_bar.addWidget(self._list_title)
+        table_bar.addWidget(self._rule_count)
+        table_bar.addStretch()
+        root.addLayout(table_bar)
 
         self.tableWidget = TableWidget(self)
         self.table = self.tableWidget
@@ -192,6 +274,8 @@ class RoutingPage(QWidget):
         self.tableWidget.setWordWrap(False)
         self.tableWidget.setColumnCount(2)
         self.tableWidget.setRowCount(0)
+        self.tableWidget.setMinimumHeight(260)
+        self.tableWidget.setMaximumHeight(460)
         self.tableWidget.verticalHeader().hide()
         self.tableWidget.verticalHeader().setDefaultSectionSize(self.ROW_HEIGHT)
         self.tableWidget.setSelectionBehavior(TableWidget.SelectRows)
@@ -210,7 +294,9 @@ class RoutingPage(QWidget):
         self._duplicate_hint.setStyleSheet("color: #c42b1c;")
         self._duplicate_hint.hide()
         root.addWidget(self._duplicate_hint)
-        root.addWidget(self.tableWidget, 1)
+        root.addWidget(self.tableWidget)
+        root.addStretch(1)
+        self._update_rule_count()
 
     def _apply_headers(self):
         self.tableWidget.setHorizontalHeaderLabels([
@@ -281,6 +367,12 @@ class RoutingPage(QWidget):
         combo = self._make_outbound_combo(outbound)
         self.tableWidget.setCellWidget(row, self.COL_OUTBOUND, combo)
         self._update_duplicate_state()
+        self._update_rule_count()
+
+    def _update_rule_count(self):
+        self._rule_count.setText(
+            tr("routing_rule_count", count=self.tableWidget.rowCount())
+        )
 
     def eventFilter(self, watched, event):
         """只有实际点击单元格控件时才选择所在行，鼠标经过不改变选择。"""
@@ -373,6 +465,7 @@ class RoutingPage(QWidget):
             self.tableWidget.removeRow(row)
         if rows:
             self._update_duplicate_state()
+            self._update_rule_count()
             self.rules_changed.emit()
 
     def _on_select_process(self):
@@ -430,6 +523,8 @@ class RoutingPage(QWidget):
         self.add_btn.setEnabled(enabled)
         self.select_process_btn.setEnabled(enabled)
         self.remove_btn.setEnabled(enabled)
+        self.export_btn.setEnabled(enabled)
+        self.import_btn.setEnabled(enabled)
         self.tableWidget.setEnabled(enabled)
         for row in range(self.tableWidget.rowCount()):
             for col in (self.COL_PROCESS, self.COL_OUTBOUND):
@@ -506,6 +601,7 @@ class RoutingPage(QWidget):
             if name:
                 self._insert_row(str(name), str(outbound))
         self._update_duplicate_state()
+        self._update_rule_count()
 
     def retranslate_ui(self):
         self._title.setText(tr("routing_title"))
@@ -513,6 +609,11 @@ class RoutingPage(QWidget):
         self.add_btn.setText(tr("routing_add"))
         self.select_process_btn.setText(tr("routing_select_process"))
         self.remove_btn.setText(tr("routing_remove"))
+        self._backup_label.setText(tr("routing_backup_group"))
+        self.export_btn.setText(tr("routing_export"))
+        self.import_btn.setText(tr("routing_import"))
+        self._list_title.setText(tr("routing_list_title"))
+        self._update_rule_count()
         self._update_duplicate_state()
         self._apply_headers()
         for row in range(self.tableWidget.rowCount()):
