@@ -50,6 +50,40 @@ TUN_INTERFACE_NAME = "HypoMux-Tun"
 DNS_LOCAL_TAG = "dns-local"
 DNS_FAKEIP_TAG = "dns-fakeip"
 
+# 常见游戏加速器的核心进程。它们负责隧道、分流驱动或本地转发；让这些
+# 进程经过 HypoMux TUN 容易造成递归接管、路由冲突或使加速器失效。
+#
+# 这是一条内置安全兼容规则，而不是用户的分流偏好，因此不会出现在路由
+# 规则页面，也不会写入用户配置。刻意不包含 steam.exe / steamservice.exe：
+# Steam 下载仍可使用默认 aggregation 出站。游戏本体是否直连，仍由用户
+# 在可见规则页自行决定。
+BUILTIN_ACCELERATOR_PROCESS_NAMES = (
+    # 奇游（QiYou）
+    "qiyou.exe",
+    "networkdaemon.exe",
+    "qeetm.exe",
+    "injhelper.exe",
+    "injhelper64.exe",
+    "lsphelper64.exe",
+    # 网易 UU
+    "uu.exe",
+    "uu_agent.exe",
+    "uu_launcher.exe",
+    "uu_ball.exe",
+    "uu_neths_helper.exe",
+    "uu_neth_helper.exe",
+    # 迅游
+    "xunyou.exe",
+    "xylauncher.exe",
+    "xyprotectservice.exe",
+    "xyservicelink.exe",
+    # 雷神
+    "leigod.exe",
+    "leigod_launcher.exe",
+    "leishensdk.exe",
+    "leigod-tool.exe",
+)
+
 
 def _socks_outbound(tag: str, port: int) -> Dict[str, Any]:
     """构造一个指向本地 Python 出站池端口的 socks 出站块。"""
@@ -138,6 +172,10 @@ def build_config(
             "process_name": [
                 "sing-box.exe",
             ],
+            "outbound": OUTBOUND_DIRECT,
+        },
+        {
+            "process_name": list(BUILTIN_ACCELERATOR_PROCESS_NAMES),
             "outbound": OUTBOUND_DIRECT,
         },
         {"port": [53], "action": "hijack-dns"},

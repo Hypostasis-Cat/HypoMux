@@ -275,7 +275,6 @@ class RoutingPage(QWidget):
         self.tableWidget.setColumnCount(2)
         self.tableWidget.setRowCount(0)
         self.tableWidget.setMinimumHeight(260)
-        self.tableWidget.setMaximumHeight(460)
         self.tableWidget.verticalHeader().hide()
         self.tableWidget.verticalHeader().setDefaultSectionSize(self.ROW_HEIGHT)
         self.tableWidget.setSelectionBehavior(TableWidget.SelectRows)
@@ -294,8 +293,8 @@ class RoutingPage(QWidget):
         self._duplicate_hint.setStyleSheet("color: #c42b1c;")
         self._duplicate_hint.hide()
         root.addWidget(self._duplicate_hint)
-        root.addWidget(self.tableWidget)
-        root.addStretch(1)
+        # 规则表填满页面剩余空间；规则较多时由表格自身滚动，而非把下半页留白。
+        root.addWidget(self.tableWidget, 1)
         self._update_rule_count()
 
     def _apply_headers(self):
