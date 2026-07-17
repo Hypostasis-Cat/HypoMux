@@ -19,7 +19,7 @@ import json
 import os
 import sys
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -100,6 +100,54 @@ def _normalize(raw: Any, src_ip: str, target_ip: str) -> Dict[str, Any]:
         "target_ip": str(raw.get("target_ip", target_ip)),
         "note": str(raw.get("note", "")),
     }
+
+
+def build_configuration_checks(adapter: Dict[str, Any], result: Dict[str, Any]) -> List[Dict[str, str]]:
+    """补充 ICMP 无法区分的本机链路配置问题。
+
+    ICMP 结果只能说明目标是否可达；默认网关、DNS 和跃点配置缺失时，用户仍会
+    感到“网络异常”。这些字段来自同一次网卡扫描，不额外发起网络请求，也不会
+    延长体检时间。界面根据 key 本地化展示名称和状态。
+    """
+    note = str(result.get("note", "")).strip()
+    bind_failed = "bind failed" in note.lower() or "1231" in note
+    src_ip = str(result.get("src_ip") or adapter.get("ip") or "")
+    gateway = str(adapter.get("gateway") or "").strip()
+    dns_servers = adapter.get("dns_servers") or []
+    if not isinstance(dns_servers, list):
+        dns_servers = [dns_servers]
+    dns_text = ", ".join(str(item).strip() for item in dns_servers if str(item).strip())
+
+    try:
+        metric = int(adapter.get("metric", -1))
+    except (TypeError, ValueError):
+        metric = -1
+    automatic_metric = bool(adapter.get("is_auto", True))
+
+    checks: List[Dict[str, str]] = [
+        {
+            "key": "source_binding",
+            "level": "fail" if bind_failed else "pass",
+            "detail": note if bind_failed else src_ip,
+        },
+        {
+            "key": "gateway",
+            "level": "pass" if gateway else "warn",
+            "detail": gateway,
+        },
+        {
+            "key": "dns",
+            "level": "pass" if dns_text else "warn",
+            "detail": dns_text,
+        },
+        {
+            "key": "metric",
+            "level": "pass" if metric >= 0 else "warn",
+            "detail": str(metric) if metric >= 0 else "",
+            "mode": "auto" if automatic_metric else "fixed",
+        },
+    ]
+    return checks
 
 
 async def run_diagnostic(

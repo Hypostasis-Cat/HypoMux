@@ -27,7 +27,7 @@ import winreg
 
 from utils.network_utils import scan_network_adapters
 from utils.config_manager import load_config, save_config
-from utils.diagnostic_runner import run_diagnostic, DEFAULT_TARGET_IP
+from utils.diagnostic_runner import build_configuration_checks, run_diagnostic, DEFAULT_TARGET_IP
 from proxy_worker import ProxyWorker, MultiPortProxyWorker
 from utils.blocked_domain_tracker import get_tracker
 from utils.tun_manager import TunManager
@@ -406,6 +406,7 @@ def create_main_window():
                     }
                 result["name"] = nic.get("name", nic.get("ip", ""))
                 result["ip"] = nic.get("ip", "")
+                result["checks"] = build_configuration_checks(nic, result)
                 self.result_ready.emit(result)
             self.all_finished.emit()
 
@@ -578,6 +579,22 @@ def create_main_window():
                         False, False, f"probe exception: {type(e).__name__}: {e}"
                     )
 
+    class TunPreflightWorker(QThread):
+        """在后台检测第三方 TUN 路由，避免阻塞启动加载动画。"""
+
+        def __init__(self, generation: int, selected_nics: list, parent=None):
+            super().__init__(parent)
+            self.generation = generation
+            self.selected_nics = [dict(nic) for nic in (selected_nics or [])]
+            self._cancelled = False
+            self.foreign_tun = ""
+
+        def cancel(self):
+            self._cancelled = True
+
+        def run(self):
+            self.foreign_tun = detect_foreign_tun_default_route()
+
     # ========== 主窗口 ==========
     class MainWindow(FluentWindow):
         """HypoMux 主窗口（FluentWindow 侧边导航）"""
@@ -608,23 +625,27 @@ def create_main_window():
             self._last_conn_count = 0
 
             # 任务1/3：运行模式与多端口出站池 / TUN 内核
-            self._run_mode = self._app_config.get("run_mode", "proxy")
+            self._run_mode = self._app_config.get("run_mode", "tun")
             self._routing_rules = self._app_config.get("routing_rules", [])
             self._pool_worker = None      # MultiPortProxyWorker（TUN 模式下的出站池）
             self._tun_manager = None      # sing-box 内核侧车
             self._retired_pool_workers = []
             self._retired_tun_managers = []
             self._retired_tun_health_workers = []
+            self._retired_tun_preflight_workers = []
             self._tun_active = False
             self._tun_starting = False
             self._tun_kernel_ready = False
             self._tun_health_worker = None
+            self._tun_preflight_worker = None
             self._tun_health_generation = 0
             self._tun_health_failures = 0
             self._tun_last_connectivity_at = 0.0
             self._shutdown_started = False
             self._force_exit = False
             self._engine_transitioning = False
+            self._adapter_snapshot = ()
+            self._no_adapter_warning_shown = False
 
             self._stop_fallback_timer = QTimer(self)
             self._stop_fallback_timer.setSingleShot(True)
@@ -632,6 +653,9 @@ def create_main_window():
             self._tun_pool_start_timer = QTimer(self)
             self._tun_pool_start_timer.setSingleShot(True)
             self._tun_pool_start_timer.timeout.connect(self._on_tun_pool_start_timeout)
+            self._tun_preflight_poll_timer = QTimer(self)
+            self._tun_preflight_poll_timer.setSingleShot(True)
+            self._tun_preflight_poll_timer.timeout.connect(self._poll_tun_preflight)
             self._tun_health_timer = QTimer(self)
             self._tun_health_timer.setInterval(30000)
             self._tun_health_timer.timeout.connect(self._run_periodic_tun_health_check)
@@ -640,6 +664,11 @@ def create_main_window():
             self._tun_health_deadline_timer.timeout.connect(
                 self._on_tun_health_startup_timeout
             )
+            # Windows 没有可靠的跨版本网卡变更 Qt 信号；用轻量后台扫描兜底。
+            # 扫描只在列表实际改变时重建控件，不影响用户正在进行的操作。
+            self._adapter_watch_timer = QTimer(self)
+            self._adapter_watch_timer.setInterval(5000)
+            self._adapter_watch_timer.timeout.connect(self._poll_adapters)
 
             self._InfoBar = InfoBar
             self._InfoBarPosition = InfoBarPosition
@@ -676,6 +705,7 @@ def create_main_window():
 
             # ===== 启动扫描 =====
             self.load_adapters()
+            self._adapter_watch_timer.start()
             self._sync_engine_ports()
 
         def _on_theme_changed(self, *args):
@@ -774,7 +804,7 @@ def create_main_window():
             self.home_page.engine_toggled.connect(self.on_engine_toggled)
             self.home_page.select_all_clicked.connect(self.on_select_all_clicked)
             self.home_page.deselect_all_clicked.connect(self.on_deselect_all_clicked)
-            self.home_page.refresh_clicked.connect(self.load_adapters)
+            self.home_page.refresh_clicked.connect(lambda: self.load_adapters(manual=True))
             self.home_page.adapter_checked.connect(self.on_adapter_checked)
             self.home_page.adapter_weight_changed.connect(self.on_weight_changed)
             self.home_page.weighted_toggled.connect(self.on_weighted_toggled)
@@ -782,7 +812,7 @@ def create_main_window():
             # 工具页（任务2：体检页也能勾选网卡，并入选择流）
             self.tools_page.start_clicked.connect(self.on_diagnose_clicked)
             self.tools_page.adapter_checked.connect(self.on_adapter_checked)
-            self.tools_page.refresh_clicked.connect(self.load_adapters)
+            self.tools_page.refresh_clicked.connect(lambda: self.load_adapters(manual=True))
             # 路由页（任务2：规则变更即持久化）
             self.routing_page.rules_changed.connect(self.on_routing_rules_changed)
             self.routing_page.duplicate_detected.connect(self.show_warning)
@@ -995,32 +1025,61 @@ def create_main_window():
                     "iftype": a.get("iftype", -1),
                     "is_ppp": bool(a.get("is_ppp", False)),
                     "metric": a.get("metric", -1),
+                    "is_auto": bool(a.get("is_auto", True)),
+                    "gateway": a.get("gateway", ""),
+                    "connection_state": a.get("connection_state", ""),
                 })
             return selected
 
         # ========== 网卡扫描 ==========
-        def load_adapters(self):
-            if self._is_boosting:
-                self.show_warning(tr("warn_boosting_refresh"))
+        def _poll_adapters(self):
+            """后台更新网卡状态；运行中的加速池保留启动时的稳定快照。"""
+            self.load_adapters(manual=False)
+
+        def load_adapters(self, manual: bool = False):
+            if self._shutdown_started:
+                return
+            if self._is_boosting or self._tun_active or self._tun_starting:
+                if manual:
+                    self.show_warning(tr("warn_boosting_refresh"))
+                return
+            if self.scan_worker.isRunning():
                 return
             self.home_page.refresh_btn.setEnabled(False)
-            if self.scan_worker.isRunning():
-                self.scan_worker.wait()
+            self.tools_page.refresh_btn.setEnabled(False)
             self.scan_worker.start()
 
         @Slot(bool, list, str)
         def on_scan_finished(self, success: bool, adapters: list, error_msg: str):
             self.home_page.refresh_btn.setEnabled(True)
+            self.tools_page.refresh_btn.setEnabled(True)
             if not success:
-                self.show_error(tr("error_load_adapters", error=error_msg))
+                # 周期扫描失败不打断用户；手动刷新仍可在下一轮恢复。
+                if not self._adapters:
+                    self.show_error(tr("error_load_adapters", error=error_msg))
                 return
-            if not adapters:
+            if not adapters and not self._no_adapter_warning_shown:
                 self.show_warning(tr("warn_no_adapters"))
+                self._no_adapter_warning_shown = True
+            elif adapters:
+                self._no_adapter_warning_shown = False
+
+            # 预先为每张网卡补一个 'ip' 字段（首个有效 IPv4），供卡片显示
+            for a in adapters:
+                a["ip"] = _first_valid_ipv4(a.get("ipv4", ""))
+            snapshot = tuple(sorted(
+                (
+                    str(a.get("alias", "")), str(a.get("index", -1)), str(a.get("ipv4", "")),
+                    str(a.get("gateway", "")), tuple(a.get("dns_servers", []) or []),
+                    str(a.get("metric", -1)), bool(a.get("is_auto", True)),
+                )
+                for a in adapters
+            ))
+            if self._adapters and snapshot == self._adapter_snapshot:
+                return
 
             self._adapters = adapters
-            # 预先为每张网卡补一个 'ip' 字段（首个有效 IPv4），供卡片显示
-            for a in self._adapters:
-                a["ip"] = _first_valid_ipv4(a.get("ipv4", ""))
+            self._adapter_snapshot = snapshot
             # 仅保留仍存在的勾选别名
             existing = {a["alias"] for a in self._adapters}
             self._checked_aliases &= existing
@@ -1043,10 +1102,10 @@ def create_main_window():
                 return
             self._engine_transitioning = True
             self.home_page.set_adapter_controls_enabled(False)
-            # Give qfluentwidgets' SwitchButton animation time to finish before
-            # running heavier startup/teardown work on the UI thread.
-            QTimer.singleShot(280, lambda: self.home_page.set_engine_busy(True))
-            QTimer.singleShot(340, lambda state=checked: self._apply_engine_toggle(state))
+            # 立即给出加载反馈，并仅留极短时间给 SwitchButton 完成自身动画。
+            # 原先 340ms 的纯等待会放大“按钮灰住”的体感。
+            self.home_page.set_engine_busy(True)
+            QTimer.singleShot(120, lambda state=checked: self._apply_engine_toggle(state))
 
         def _apply_engine_toggle(self, checked: bool):
             # 任务3/4：虚拟网卡模式走 TUN 内核分支
@@ -1178,13 +1237,6 @@ def create_main_window():
                 self._finish_engine_transition()
                 return
 
-            foreign_tun = detect_foreign_tun_default_route()
-            if foreign_tun:
-                self.show_warning(tr("warn_foreign_tun_route", name=foreign_tun))
-                self.home_page.set_engine_state(False)
-                self._finish_engine_transition()
-                return
-
             selected = self.get_selected_adapters()
             if not selected:
                 self.show_warning(tr("warn_no_selection"))
@@ -1196,11 +1248,70 @@ def create_main_window():
             self._tun_last_connectivity_at = 0.0
             self._tun_kernel_ready = False
             self._tun_health_timer.stop()
+            self._tun_starting = True
+            self.home_page.set_engine_startup_status(tr("tun_preflighting"))
+            self.home_page.engine_switch.setEnabled(False)
+            self.home_page.set_adapter_controls_enabled(False)
+            self.routing_page.set_controls_enabled(False)
+            self.settings_page.set_controls_enabled(False)
+            self.tools_page.set_controls_enabled(False)
+            self._set_blocked_domains_controls_enabled(False)
+
+            # 第三方 TUN 路由检测会调用 PowerShell；移到后台以保证加载圈持续流畅。
+            worker = TunPreflightWorker(
+                self._tun_health_generation, selected, parent=self
+            )
+            self._tun_preflight_worker = worker
+            try:
+                worker.start()
+                self._tun_preflight_poll_timer.start(50)
+            except Exception as e:
+                self._tun_preflight_worker = None
+                worker.deleteLater()
+                self._tun_starting = False
+                self.show_error(tr("error_start_failed", error=e))
+                self._exit_boosting_ui()
+                self._finish_engine_transition()
+                return
+
+        def _poll_tun_preflight(self):
+            """在主线程读取后台预检结果，避免跨线程信号投递造成启动卡死。"""
+            worker = self._tun_preflight_worker
+            if worker is None:
+                return
+            if worker.isRunning():
+                self._tun_preflight_poll_timer.start(50)
+                return
+
+            self._tun_preflight_worker = None
+            generation = worker.generation
+            foreign_tun = worker.foreign_tun
+            selected_nics = worker.selected_nics
+            worker.deleteLater()
+            if (
+                generation != self._tun_health_generation
+                or not self._tun_starting
+                or self._shutdown_started
+            ):
+                return
+            if foreign_tun:
+                self.show_warning(tr("warn_foreign_tun_route", name=foreign_tun))
+                self._tun_starting = False
+                self._exit_boosting_ui()
+                self.home_page.set_engine_state(False)
+                self._finish_engine_transition()
+                return
+
             self.append_log(mw_tr(
                 "log_tun_dns_plan",
                 paths=", ".join(self._app_process_paths()),
             ))
+            self._launch_tun_pool(selected_nics)
 
+        def _launch_tun_pool(self, selected: list):
+            """通过后台路由预检后，再启动 Python 出站池。"""
+            if not self._tun_starting or self._shutdown_started:
+                return
             # 1) 先拉起 Python 多端口出站池（默认 2001/2002/2003；冲突时自动换端口）
             try:
                 use_weighted = self.home_page.is_weighted_scheduler()
@@ -1220,13 +1331,6 @@ def create_main_window():
                 )
                 self._pool_worker.started_ok.connect(self._on_tun_pool_started)
                 self._pool_worker.error_signal.connect(self._on_tun_pool_error)
-                self._tun_starting = True
-                self.home_page.engine_switch.setEnabled(False)
-                self.home_page.set_adapter_controls_enabled(False)
-                self.routing_page.set_controls_enabled(False)
-                self.settings_page.set_controls_enabled(False)
-                self.tools_page.set_controls_enabled(False)
-                self._set_blocked_domains_controls_enabled(False)
                 # 包含全部选中网卡的 DoH/DNS 预检，弱网环境留出足够时间。
                 self._tun_pool_start_timer.start(15000)
                 self._pool_worker.start()
@@ -1236,7 +1340,6 @@ def create_main_window():
                 self._teardown_pool()
                 self._exit_boosting_ui()
                 self._finish_engine_transition()
-                return
 
         def _on_tun_pool_started(self, info: str):
             sender = self.sender()
@@ -1249,6 +1352,7 @@ def create_main_window():
                 return
             self._tun_pool_start_timer.stop()
             self.append_log(mw_tr("log_tun_pool_ready", info=info))
+            self.home_page.set_engine_startup_status(tr("tun_starting"))
 
             # 2) 生成 sing-box 配置
             if not self._regenerate_singbox_config():
@@ -1321,6 +1425,7 @@ def create_main_window():
             if isinstance(sender, TunManager) and sender is not self._tun_manager:
                 return
             self._tun_kernel_ready = True
+            self.home_page.set_engine_startup_status(tr("tun_validating"))
             self.append_log(f"[TUN] {tr('tun_validating')}: {info}")
             if time.monotonic() - self._tun_last_connectivity_at < 30.0:
                 self._complete_tun_startup("内核稳定期间已收到真实上游数据")
@@ -1495,7 +1600,22 @@ def create_main_window():
             self._stop_tun_mode()
 
         def _on_tun_stopped(self, message: str):
-            self.append_log(localize_runtime_message(message) or tr("tun_stopped"))
+            sender = self.sender()
+            localized = localize_runtime_message(message) or tr("tun_stopped")
+            # _stop_tun_mode() 会先撤销当前 manager 身份，再请求线程退出；
+            # 因此该路径收到的是旧线程的正常停止通知，只记录即可。
+            if isinstance(sender, TunManager) and sender is not self._tun_manager:
+                self.append_log(localized)
+                return
+
+            self.append_log(localized)
+            # sing-box 也可能以 exit code 0 自行退出，此时 TunManager 不会发
+            # error_signal。若只记录 stopped，界面和出站池会错误保留“运行中”
+            # 状态，且残留路由异常时可能表现为已开启却无法联网。当前所属内核
+            # 停止时统一进入事务式回滚，收口路由、虚拟适配器、出站池与 UI 状态。
+            if self._tun_active or self._tun_starting:
+                self.show_error(tr("tun_unexpected_stop"))
+                self._stop_tun_mode()
 
         def _teardown_pool(self):
             if self._pool_worker is not None:
@@ -1536,14 +1656,21 @@ def create_main_window():
         def _stop_tun_mode(self):
             self._tun_health_timer.stop()
             self._tun_health_deadline_timer.stop()
+            self._tun_preflight_poll_timer.stop()
             self._tun_health_generation += 1
             self._tun_health_failures = 0
             self._tun_last_connectivity_at = 0.0
             self._tun_kernel_ready = False
+            if self._tun_preflight_worker is not None:
+                worker = self._tun_preflight_worker
+                self._tun_preflight_worker = None
+                worker.cancel()
+                self._retire_tun_thread(worker, self._retired_tun_preflight_workers)
             if self._tun_health_worker is not None:
                 self._tun_health_worker.cancel()
             try:
                 self._tun_pool_start_timer.stop()
+                self._tun_preflight_poll_timer.stop()
             except Exception:
                 pass
             # 1) 杀 sing-box 内核 + 清路由
@@ -1820,6 +1947,7 @@ def create_main_window():
             if self._shutdown_started:
                 return
             self._shutdown_started = True
+            self._adapter_watch_timer.stop()
             try:
                 self.routing_page.prepare_for_shutdown()
             except Exception:
@@ -1844,7 +1972,7 @@ def create_main_window():
             except Exception:
                 pass
             try:
-                if self._tun_active or self._tun_manager is not None:
+                if self._tun_active or self._tun_starting or self._tun_manager is not None:
                     self._stop_tun_mode()
                 elif self._pool_worker is not None:
                     self._teardown_pool()
@@ -1889,6 +2017,10 @@ def create_main_window():
                     if worker.isRunning():
                         worker.cancel()
                         worker.wait(3000)
+                for worker in list(self._retired_tun_preflight_workers):
+                    if worker.isRunning():
+                        worker.cancel()
+                        worker.wait(4000)
             except Exception as e:
                 print(mw_tr("log_close_cleanup_error", error=e))
             finally:

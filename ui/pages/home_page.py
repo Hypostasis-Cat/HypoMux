@@ -15,7 +15,7 @@ from qfluentwidgets import (
     BodyLabel, CaptionLabel, SubtitleLabel, DisplayLabel, CheckBox,
     PushButton, TransparentToolButton, InfoBadge, InfoLevel, IconWidget,
     SingleDirectionScrollArea, SmoothScrollArea, FluentIcon, themeColor, SegmentedWidget,
-    HorizontalSeparator, ToolTipFilter,
+    HorizontalSeparator, ToolTipFilter, IndeterminateProgressRing,
 )
 
 from ui.i18n import tr
@@ -223,7 +223,7 @@ class HomePage(QWidget):
         self._last_down_mbps = 0.0
         self._last_up_mbps = 0.0
         self._last_connections = 0
-        self._current_mode = "proxy"
+        self._current_mode = "tun"
         self._last_socks_port = 10800
         self._last_http_port = 10801
         self._engine_running = False
@@ -268,7 +268,7 @@ class HomePage(QWidget):
         self.mode_segment = SegmentedWidget(card)
         self.mode_segment.addItem("proxy", tr("mode_proxy"))
         self.mode_segment.addItem("tun", tr("mode_tun"))
-        self.mode_segment.setCurrentItem("proxy")
+        self.mode_segment.setCurrentItem("tun")
         self.mode_segment.currentItemChanged.connect(self._on_mode_changed)
         mode_row.addWidget(self._mode_label)
         mode_row.addWidget(self.mode_segment)
@@ -291,11 +291,17 @@ class HomePage(QWidget):
         # 说明文字已固定展示在右侧，避免悬停 Tooltip 在部分主题下出现黑色空框。
         self.engine_switch.setToolTip("")
         self.engine_switch.checkedChanged.connect(self.engine_toggled.emit)
+        self._engine_loading = IndeterminateProgressRing(card)
+        self._engine_loading.setFixedSize(18, 18)
+        self._engine_loading.setVisible(False)
         self._engine_status = CaptionLabel(tr("home_engine_switch_off"), card)
-        self._engine_status.setMinimumWidth(42)
+        # 两行共用同一右侧状态列：加载圈位于列外，不会推挤状态文字。
+        self._engine_status.setFixedWidth(128)
+        self._engine_status.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         switch_row.addWidget(self.engine_switch)
         switch_row.addLayout(engine_text)
         switch_row.addStretch()
+        switch_row.addWidget(self._engine_loading)
         switch_row.addWidget(self._engine_status)
 
         scheduler_row = QHBoxLayout()
@@ -312,7 +318,8 @@ class HomePage(QWidget):
         scheduler_text.addWidget(self._weighted_label)
         scheduler_text.addWidget(self._weighted_hint)
         self._weighted_status = CaptionLabel(tr("home_engine_switch_off"), card)
-        self._weighted_status.setMinimumWidth(42)
+        self._weighted_status.setFixedWidth(128)
+        self._weighted_status.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         scheduler_row.addWidget(self._weighted_switch)
         scheduler_row.addLayout(scheduler_text)
         scheduler_row.addStretch()
@@ -532,9 +539,22 @@ class HomePage(QWidget):
         self._weighted_switch.setEnabled(enabled)
 
     def set_engine_busy(self, busy: bool):
-        """启动/停止过程中临时锁住总开关，避免重复点击堆叠后端操作。"""
+        """启动/停止过程中锁住开关，同时明确展示加载态而非静默置灰。"""
         self._engine_busy = busy
         self.engine_switch.setEnabled(not busy)
+        self._engine_loading.setVisible(busy)
+        if busy:
+            self._engine_status.setText(tr("home_engine_transitioning"))
+        else:
+            self._engine_status.setText(
+                tr("home_engine_switch_on" if self._engine_running else "home_engine_switch_off")
+            )
+
+    def set_engine_startup_status(self, text: str):
+        """更新虚拟网卡启动阶段文字；仅在加载态中覆盖状态。"""
+        if self._engine_busy:
+            self._engine_loading.setVisible(True)
+            self._engine_status.setText(str(text))
 
     def _on_mode_changed(self, key: str):
         self._current_mode = key
@@ -547,7 +567,7 @@ class HomePage(QWidget):
         self.weighted_toggled.emit(enabled)
 
     def current_mode(self) -> str:
-        return self.mode_segment.currentRouteKey() or "proxy"
+        return self.mode_segment.currentRouteKey() or "tun"
 
     def set_mode(self, key: str):
         self._current_mode = key
@@ -579,7 +599,10 @@ class HomePage(QWidget):
         self.engine_switch.setOnText("")
         self.engine_switch.setOffText("")
         self.engine_switch.setToolTip("")
-        self._engine_status.setText(tr("home_engine_switch_on" if self.engine_switch.isChecked() else "home_engine_switch_off"))
+        if self._engine_busy:
+            self._engine_status.setText(tr("home_engine_transitioning"))
+        else:
+            self._engine_status.setText(tr("home_engine_switch_on" if self.engine_switch.isChecked() else "home_engine_switch_off"))
         self._speed_caption.setText(tr("home_total_speed"))
         self._speed_unit.setText(tr("home_speed_unit"))
         self._up_conn.setText(tr("home_up_conn", up=self._last_up_mbps, conn=self._last_connections))

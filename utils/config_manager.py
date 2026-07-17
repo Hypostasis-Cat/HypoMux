@@ -73,7 +73,9 @@ def default_config() -> Dict[str, Any]:
         "socks_port": DEFAULT_SOCKS_PORT,
         "http_port": DEFAULT_HTTP_PORT,
         # 第三阶段下半场：运行模式与进程级分流规则
-        "run_mode": "proxy",          # proxy | tun
+        # 新安装默认采用 TUN，避免用户在不知情时只启用覆盖面有限的系统代理。
+        # 已保存的 proxy 选择会在下方迁移逻辑中原样保留。
+        "run_mode": "tun",            # proxy | tun
         "routing_rules": [],
         "dns_server": DEFAULT_DNS_SERVER,
         "doh_provider": DEFAULT_DOH_PROVIDER,
@@ -128,9 +130,10 @@ def _coerce_config(raw: Any) -> Dict[str, Any]:
     cfg["socks_port"] = _coerce_port(raw.get("socks_port"), DEFAULT_SOCKS_PORT)
     cfg["http_port"] = _coerce_port(raw.get("http_port"), DEFAULT_HTTP_PORT)
 
-    # run_mode：仅允许 proxy/tun，非法回退 proxy
-    raw_mode = str(raw.get("run_mode", "proxy")).strip().lower()
-    cfg["run_mode"] = raw_mode if raw_mode in ("proxy", "tun") else "proxy"
+    # run_mode：已有用户的显式选择保持不变；旧配置缺少该字段及非法值时回退到
+    # 当前默认 TUN，确保新用户首次启动即可获得全局接管体验。
+    raw_mode = str(raw.get("run_mode", "tun")).strip().lower()
+    cfg["run_mode"] = raw_mode if raw_mode in ("proxy", "tun") else "tun"
 
     # routing_rules：进程级分流规则列表，轻量结构校验，具体合法性由 singbox_config 规整
     raw_rules = raw.get("routing_rules")
