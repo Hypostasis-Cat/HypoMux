@@ -862,6 +862,10 @@ def create_main_window():
 
         def _exit_from_tray(self):
             self._force_exit = True
+            # 先让窗口消失，再执行可能需要数秒的网络内核回收，避免用户感到
+            # 点击“退出”后界面卡住。
+            self.hide()
+            QApplication.processEvents()
             try:
                 self.shutdown_backend_workers()
             finally:
@@ -2019,6 +2023,13 @@ def create_main_window():
             if self._shutdown_started:
                 return
             self._shutdown_started = True
+            # 有 manager 时 _stop_tun_mode() 会调用 force_kill 完成进程、路由及
+            # HypoMux-Tun 适配器清理。只有异常缺少 manager 但状态仍显示 TUN 时，
+            # 才保留最后一轮独立兜底，避免正常关闭重复执行 PowerShell。
+            needs_emergency_tun_sweep = (
+                self._tun_manager is None
+                and (self._tun_active or self._tun_starting)
+            )
             self._adapter_watch_timer.stop()
             try:
                 self.routing_page.prepare_for_shutdown()
@@ -2096,37 +2107,37 @@ def create_main_window():
             except Exception as e:
                 print(mw_tr("log_close_cleanup_error", error=e))
             finally:
-                try:
-                    startupinfo = None
-                    if hasattr(subprocess, "STARTUPINFO"):
-                        startupinfo = subprocess.STARTUPINFO()
-                        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                        startupinfo.wShowWindow = 0
-                    subprocess.run(
-                        ["taskkill", "/F", "/IM", "sing-box.exe", "/T"],
-                        capture_output=True,
-                        timeout=5,
-                        startupinfo=startupinfo,
-                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000),
-                    )
-                    # 防御式清理：仅删除 HypoMux-Tun 的默认路由，避免影响其他 VPN。
-                    subprocess.run(
-                        [
-                            "powershell", "-NoProfile", "-Command",
-                            "Get-NetRoute -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' "
-                            "-ErrorAction SilentlyContinue | "
-                            "Where-Object { $_.InterfaceAlias -eq 'HypoMux-Tun' } | "
-                            "Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue",
-                        ],
-                        capture_output=True,
-                        timeout=5,
-                        startupinfo=startupinfo,
-                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000),
-                    )
-                except Exception:
-                    pass
-                finally:
-                    self._acceleration_log.finish("application_exit")
+                if needs_emergency_tun_sweep:
+                    try:
+                        startupinfo = None
+                        if hasattr(subprocess, "STARTUPINFO"):
+                            startupinfo = subprocess.STARTUPINFO()
+                            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                            startupinfo.wShowWindow = 0
+                        subprocess.run(
+                            ["taskkill", "/F", "/IM", "sing-box.exe", "/T"],
+                            capture_output=True,
+                            timeout=5,
+                            startupinfo=startupinfo,
+                            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000),
+                        )
+                        # 防御式清理：仅删除 HypoMux-Tun 的默认路由，避免影响其他 VPN。
+                        subprocess.run(
+                            [
+                                "powershell", "-NoProfile", "-Command",
+                                "Get-NetRoute -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' "
+                                "-ErrorAction SilentlyContinue | "
+                                "Where-Object { $_.InterfaceAlias -eq 'HypoMux-Tun' } | "
+                                "Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue",
+                            ],
+                            capture_output=True,
+                            timeout=5,
+                            startupinfo=startupinfo,
+                            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000),
+                        )
+                    except Exception:
+                        pass
+                self._acceleration_log.finish("application_exit")
 
         def closeEvent(self, event):
             settings = QSettings("Hypostasis-Cat", "HypoMux")
@@ -2151,6 +2162,9 @@ def create_main_window():
                     self._tray_tip_shown = True
                 return
 
+            # 先隐藏界面，后面的安全收尾（TUN/代理/路由）不会阻塞视觉退出。
+            self.hide()
+            QApplication.processEvents()
             try:
                 self.shutdown_backend_workers()
             finally:

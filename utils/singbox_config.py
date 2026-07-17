@@ -84,6 +84,43 @@ BUILTIN_ACCELERATOR_PROCESS_NAMES = (
     "leigod-tool.exe",
 )
 
+# 常见 Windows 代理客户端及其核心进程。仅在这些客户端使用「系统代理」
+# 或本地 SOCKS/HTTP 端口时提供兼容：核心进程直连，避免其连接机场节点时
+# 被 HypoMux 再次接管而形成回环。若客户端启用了自己的 TUN/虚拟网卡，
+# 仍必须与 HypoMux TUN 二选一。
+BUILTIN_PROXY_PROCESS_NAMES = (
+    # Clash / Mihomo 系
+    "clash.exe",
+    "clash-meta.exe",
+    "clash-win64.exe",
+    "mihomo.exe",
+    "mihomo-core.exe",
+    "clash-verge.exe",
+    "clash verge.exe",
+    "clash-verge-rev.exe",
+    "clash-verge-service.exe",
+    "clash for windows.exe",
+    "cfw.exe",
+    "clashnyanpasu.exe",
+    "flclash.exe",
+    # V2Ray / Xray 系
+    "v2rayn.exe",
+    "v2ray.exe",
+    "xray.exe",
+    "nekoray.exe",
+    "qv2ray.exe",
+    "hiddify.exe",
+    "hiddify-cli.exe",
+    # Shadowsocks 与传统代理工具
+    "shadowsocks.exe",
+    "shadowsocksr.exe",
+    "ss-local.exe",
+    "surge.exe",
+    "proxifier.exe",
+    "sstap.exe",
+    "tun2socks.exe",
+)
+
 
 def _socks_outbound(tag: str, port: int) -> Dict[str, Any]:
     """构造一个指向本地 Python 出站池端口的 socks 出站块。"""
@@ -176,6 +213,10 @@ def build_config(
         },
         {
             "process_name": list(BUILTIN_ACCELERATOR_PROCESS_NAMES),
+            "outbound": OUTBOUND_DIRECT,
+        },
+        {
+            "process_name": list(BUILTIN_PROXY_PROCESS_NAMES),
             "outbound": OUTBOUND_DIRECT,
         },
         {"port": [53], "action": "hijack-dns"},
