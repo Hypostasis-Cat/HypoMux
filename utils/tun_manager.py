@@ -164,9 +164,18 @@ class TunManager(QThread):
             self.error_signal.emit(f"sing-box 配置不存在: {self._config_path}")
             return
 
+        if not self._validate_config(exe):
+            return
+        if self._stop_requested:
+            return
+
         work_dir = os.path.dirname(exe)
         await self._preflight_cleanup_singbox()
+        if self._stop_requested:
+            return
         await self._cleanup_tun_adapter()
+        if self._stop_requested:
+            return
         try:
             self._proc = await asyncio.create_subprocess_exec(
                 exe, "run", "-c", self._config_path,
@@ -224,6 +233,35 @@ class TunManager(QThread):
                 t.cancel()
         self._cleanup_routes()
         self._reader_tasks = []
+
+    def _validate_config(self, exe: str) -> bool:
+        """接管默认路由前先让 sing-box 自检配置，失败时保持系统网络不变。"""
+        try:
+            proc = subprocess.run(
+                [exe, "check", "--disable-color", "-c", self._config_path],
+                cwd=os.path.dirname(exe),
+                capture_output=True,
+                timeout=10,
+                creationflags=_CREATE_NO_WINDOW,
+            )
+        except subprocess.TimeoutExpired:
+            self.error_signal.emit("sing-box 配置检查超时，已取消虚拟网卡接管")
+            return False
+        except Exception as e:
+            self.error_signal.emit(f"无法检查 sing-box 配置: {type(e).__name__}: {e}")
+            return False
+
+        if proc.returncode == 0:
+            self.log_signal.emit("[TUN] sing-box 配置检查通过")
+            return True
+
+        output = (proc.stderr or proc.stdout or b"").decode(
+            "utf-8", errors="replace"
+        ).strip()
+        self.error_signal.emit(
+            f"sing-box 配置检查失败 (code={proc.returncode}): {output[-500:]}"
+        )
+        return False
 
     async def _cancel_reader_tasks(self):
         """先取消 stdout/stderr 读取任务，再释放 sing-box 进程句柄。"""

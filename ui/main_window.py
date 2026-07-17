@@ -19,6 +19,7 @@ import ctypes
 import logging
 import subprocess
 import sys
+import time
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import List, Dict
@@ -408,6 +409,175 @@ def create_main_window():
                 self.result_ready.emit(result)
             self.all_finished.emit()
 
+    class TunConnectivityWorker(QThread):
+        """用未被默认直连规则排除的 curl.exe 验证真实 TUN 上网链路。"""
+
+        result_ready = Signal(bool, bool, str)
+        PROBE_URLS = (
+            "http://www.msftconnecttest.com/connecttest.txt",
+            "https://www.baidu.com/",
+        )
+        PHYSICAL_ENDPOINTS = (
+            ("223.5.5.5", 443),
+            ("1.12.12.12", 443),
+            ("8.8.8.8", 443),
+        )
+
+        def __init__(self, adapters: list, generation: int, startup: bool, parent=None):
+            super().__init__(parent)
+            self.adapters = [dict(item) for item in (adapters or [])]
+            self.generation = generation
+            self.startup = startup
+            self._cancelled = False
+            self._probe_process = None
+
+        def cancel(self):
+            self._cancelled = True
+            proc = self._probe_process
+            if proc is not None and proc.poll() is None:
+                try:
+                    proc.terminate()
+                except Exception:
+                    pass
+
+        @staticmethod
+        def _hidden_startupinfo():
+            if not hasattr(subprocess, "STARTUPINFO"):
+                return None
+            info = subprocess.STARTUPINFO()
+            info.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            info.wShowWindow = 0
+            return info
+
+        @staticmethod
+        def _curl_path() -> str:
+            import os
+            import shutil
+            candidate = Path(
+                os.environ.get("SystemRoot", r"C:\Windows")
+            ) / "System32" / "curl.exe"
+            if candidate.is_file():
+                return str(candidate)
+            return shutil.which("curl.exe") or shutil.which("curl") or ""
+
+        def _probe_tun(self) -> tuple[bool, str]:
+            import os
+            curl = self._curl_path()
+            if not curl:
+                # Windows 10/11 正常都自带 curl；缺失时返回不通过，启动流程会
+                # 安全回滚，而不是在未经验证的情况下接管默认路由。
+                return False, "curl.exe unavailable"
+
+            env = os.environ.copy()
+            for key in list(env):
+                if key.lower() in {
+                    "http_proxy", "https_proxy", "all_proxy", "no_proxy"
+                }:
+                    env.pop(key, None)
+
+            failures = []
+            for url in self.PROBE_URLS:
+                if self._cancelled:
+                    return False, "cancelled"
+                try:
+                    proc = subprocess.Popen(
+                        [
+                            curl, "--disable", "--silent", "--show-error",
+                            "--insecure", "--noproxy", "*", "--output", "NUL",
+                            "--connect-timeout", "2", "--max-time", "4",
+                            "--write-out", "%{http_code}", url,
+                        ],
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        env=env,
+                        startupinfo=self._hidden_startupinfo(),
+                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000),
+                    )
+                    self._probe_process = proc
+                    if self._cancelled:
+                        proc.terminate()
+                    stdout, stderr = proc.communicate(timeout=6)
+                    code = stdout.decode("ascii", errors="ignore").strip()[-3:]
+                    if proc.returncode == 0 and code.isdigit() and code != "000":
+                        return True, f"TUN HTTPS {url} -> HTTP {code}"
+                    error = stderr.decode("utf-8", errors="replace").strip()
+                    failures.append(f"{url}: rc={proc.returncode} http={code or '000'} {error[-100:]}")
+                except subprocess.TimeoutExpired as e:
+                    proc = self._probe_process
+                    if proc is not None:
+                        try:
+                            proc.kill()
+                            proc.communicate(timeout=1)
+                        except Exception:
+                            pass
+                    failures.append(f"{url}: TimeoutExpired: {e}")
+                except Exception as e:
+                    failures.append(f"{url}: {type(e).__name__}: {e}")
+                finally:
+                    self._probe_process = None
+            return False, " | ".join(failures[-3:])
+
+        def _probe_physical(self) -> tuple[bool, str]:
+            """用接口索引强绑定探测物理出口，作为 TUN 故障的对照组。"""
+            import socket
+            import struct
+            failures = []
+            for nic in self.adapters:
+                if self._cancelled:
+                    return False, "cancelled"
+                name = str(nic.get("name") or nic.get("ip") or "unknown")
+                if_index = int(nic.get("if_index", nic.get("index", 0)) or 0)
+                local_ip = str(nic.get("ip") or "").strip()
+                for endpoint in self.PHYSICAL_ENDPOINTS:
+                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    try:
+                        sock.settimeout(2.0)
+                        if if_index > 0:
+                            sock.setsockopt(
+                                socket.IPPROTO_IP, 31, struct.pack("!I", if_index)
+                            )
+                        if local_ip:
+                            sock.bind((local_ip, 0))
+                        sock.connect(endpoint)
+                        return True, f"physical {name} -> {endpoint[0]}:{endpoint[1]}"
+                    except Exception as e:
+                        failures.append(f"{name}/{endpoint[0]}: {type(e).__name__}")
+                    finally:
+                        try:
+                            sock.close()
+                        except Exception:
+                            pass
+            return False, "; ".join(failures[-6:]) or "no physical adapter"
+
+        def run(self):
+            try:
+                tun_ok, tun_detail = self._probe_tun()
+                if self._cancelled:
+                    return
+                if tun_ok:
+                    self.result_ready.emit(True, True, tun_detail)
+                    return
+
+                # 首次启动无论物理出口是否正常都必须回滚，不再额外等待对照
+                # 探测；物理出口仅用于运行期判断是 TUN 故障还是外部断网。
+                if self.startup:
+                    self.result_ready.emit(False, False, tun_detail)
+                    return
+
+                physical_ok, physical_detail = self._probe_physical()
+                if not self._cancelled:
+                    self.result_ready.emit(
+                        False, physical_ok,
+                        f"{tun_detail} || comparison: {physical_detail}",
+                    )
+            except Exception as e:
+                # QThread.run() 若静默异常退出，启动状态会永久卡在“验证中”。
+                # 无论何种探测器异常都返回失败，由主线程执行安全回滚。
+                if not self._cancelled:
+                    self.result_ready.emit(
+                        False, False, f"probe exception: {type(e).__name__}: {e}"
+                    )
+
     # ========== 主窗口 ==========
     class MainWindow(FluentWindow):
         """HypoMux 主窗口（FluentWindow 侧边导航）"""
@@ -442,8 +612,16 @@ def create_main_window():
             self._routing_rules = self._app_config.get("routing_rules", [])
             self._pool_worker = None      # MultiPortProxyWorker（TUN 模式下的出站池）
             self._tun_manager = None      # sing-box 内核侧车
+            self._retired_pool_workers = []
+            self._retired_tun_managers = []
+            self._retired_tun_health_workers = []
             self._tun_active = False
             self._tun_starting = False
+            self._tun_kernel_ready = False
+            self._tun_health_worker = None
+            self._tun_health_generation = 0
+            self._tun_health_failures = 0
+            self._tun_last_connectivity_at = 0.0
             self._shutdown_started = False
             self._force_exit = False
             self._engine_transitioning = False
@@ -454,6 +632,14 @@ def create_main_window():
             self._tun_pool_start_timer = QTimer(self)
             self._tun_pool_start_timer.setSingleShot(True)
             self._tun_pool_start_timer.timeout.connect(self._on_tun_pool_start_timeout)
+            self._tun_health_timer = QTimer(self)
+            self._tun_health_timer.setInterval(30000)
+            self._tun_health_timer.timeout.connect(self._run_periodic_tun_health_check)
+            self._tun_health_deadline_timer = QTimer(self)
+            self._tun_health_deadline_timer.setSingleShot(True)
+            self._tun_health_deadline_timer.timeout.connect(
+                self._on_tun_health_startup_timeout
+            )
 
             self._InfoBar = InfoBar
             self._InfoBarPosition = InfoBarPosition
@@ -1005,6 +1191,11 @@ def create_main_window():
                 self.home_page.set_engine_state(False)
                 self._finish_engine_transition()
                 return
+            self._tun_health_generation += 1
+            self._tun_health_failures = 0
+            self._tun_last_connectivity_at = 0.0
+            self._tun_kernel_ready = False
+            self._tun_health_timer.stop()
             self.append_log(mw_tr(
                 "log_tun_dns_plan",
                 paths=", ".join(self._app_process_paths()),
@@ -1018,11 +1209,15 @@ def create_main_window():
                     selected_nics=selected,
                     use_weighted=use_weighted,
                     bandwidth_limits=bw_limits,
+                    parent=self,
                 )
                 self._pool_worker.set_dns_servers([self._app_config.get("dns_server", "223.5.5.5")])
                 self._pool_worker.set_doh_provider(self._app_config.get("doh_provider", "auto"))
                 self._pool_worker.log_signal.connect(self.on_proxy_log)
                 self._pool_worker.traffic_signal.connect(self.on_proxy_traffic)
+                self._pool_worker.connectivity_signal.connect(
+                    self._on_tun_pool_connectivity
+                )
                 self._pool_worker.started_ok.connect(self._on_tun_pool_started)
                 self._pool_worker.error_signal.connect(self._on_tun_pool_error)
                 self._tun_starting = True
@@ -1032,17 +1227,24 @@ def create_main_window():
                 self.settings_page.set_controls_enabled(False)
                 self.tools_page.set_controls_enabled(False)
                 self._set_blocked_domains_controls_enabled(False)
-                self._tun_pool_start_timer.start(5000)
+                # 包含全部选中网卡的 DoH/DNS 预检，弱网环境留出足够时间。
+                self._tun_pool_start_timer.start(15000)
                 self._pool_worker.start()
             except Exception as e:
-                self._pool_worker = None
                 self._tun_starting = False
                 self.show_error(tr("error_start_failed", error=e))
-                self.home_page.set_engine_state(False)
+                self._teardown_pool()
+                self._exit_boosting_ui()
                 self._finish_engine_transition()
                 return
 
         def _on_tun_pool_started(self, info: str):
+            sender = self.sender()
+            if (
+                isinstance(sender, MultiPortProxyWorker)
+                and sender is not self._pool_worker
+            ):
+                return
             if not self._tun_starting or self._pool_worker is None:
                 return
             self._tun_pool_start_timer.stop()
@@ -1059,7 +1261,7 @@ def create_main_window():
 
             # 3) 拉起 sing-box TUN 内核侧车
             self.append_log(tr("tun_starting"))
-            self._tun_manager = TunManager(self._singbox_config_path())
+            self._tun_manager = TunManager(self._singbox_config_path(), parent=self)
             self._tun_manager.log_signal.connect(self.on_proxy_log)
             self._tun_manager.started_ok.connect(self._on_tun_started)
             self._tun_manager.error_signal.connect(self._on_tun_error)
@@ -1069,15 +1271,34 @@ def create_main_window():
             self.routing_page.set_controls_enabled(False)
             self.settings_page.set_controls_enabled(False)
             self.tools_page.set_controls_enabled(False)
-            self._tun_manager.start()
+            try:
+                self._tun_manager.start()
+            except Exception as e:
+                self.append_log(
+                    f"[TUN] 无法启动内核线程: {type(e).__name__}: {e}"
+                )
+                self.show_error(tr("error_start_failed", error=e))
+                self._stop_tun_mode()
 
         def _on_tun_pool_error(self, message: str):
+            sender = self.sender()
+            if (
+                isinstance(sender, MultiPortProxyWorker)
+                and sender is not self._pool_worker
+            ):
+                return
             if not self._tun_starting and not self._tun_active:
                 return
             self._tun_pool_start_timer.stop()
             message = localize_runtime_message(message)
             self.append_log(mw_tr("log_tun_pool_failed", message=message))
             self.show_error(message)
+            if self._tun_active:
+                # TUN 已接管默认路由后，出站池就是唯一上游。此时仅关闭
+                # 出站池会留下“有默认路由、无可用出口”的全局断网状态，
+                # 必须连同 sing-box 一起事务式回滚。
+                self._stop_tun_mode()
+                return
             self._tun_starting = False
             self._teardown_pool()
             self._exit_boosting_ui()
@@ -1096,13 +1317,178 @@ def create_main_window():
             self._finish_engine_transition()
 
         def _on_tun_started(self, info: str):
+            sender = self.sender()
+            if isinstance(sender, TunManager) and sender is not self._tun_manager:
+                return
+            self._tun_kernel_ready = True
+            self.append_log(f"[TUN] {tr('tun_validating')}: {info}")
+            if time.monotonic() - self._tun_last_connectivity_at < 30.0:
+                self._complete_tun_startup("内核稳定期间已收到真实上游数据")
+                return
+            self._start_tun_health_check(startup=True)
+
+        @Slot(str)
+        def _on_tun_pool_connectivity(self, detail: str):
+            sender = self.sender()
+            if (
+                isinstance(sender, MultiPortProxyWorker)
+                and sender is not self._pool_worker
+            ):
+                return
+            self._tun_last_connectivity_at = time.monotonic()
+            if self._tun_starting and self._tun_active and self._tun_kernel_ready:
+                self._complete_tun_startup(f"真实上游响应: {detail}")
+
+        def _complete_tun_startup(self, detail: str):
+            """只在获得 HTTPS 探测或真实上游响应后完成启动事务。"""
+            if (
+                not self._tun_starting
+                or not self._tun_active
+                or not self._tun_kernel_ready
+            ):
+                return
+            self._tun_health_deadline_timer.stop()
+            worker = self._tun_health_worker
+            if worker is not None and worker.startup:
+                worker.cancel()
             self._tun_starting = False
+            self._tun_health_failures = 0
+            self.append_log(f"[TUN][联网验证] 通过: {detail}")
             self._enter_boosting_ui()
             self.home_page.set_engine_state(True)
             self._finish_engine_transition()
+            self._tun_health_timer.start()
             self.show_success(tr("tun_started"))
 
+        def _start_tun_health_check(self, startup: bool = False):
+            if not self._tun_active or self._tun_manager is None:
+                return
+            if self._tun_health_worker is not None:
+                if self._tun_health_worker.isRunning():
+                    if (
+                        self._tun_health_worker.generation
+                        == self._tun_health_generation
+                    ):
+                        return
+                    # 快速停止后重新启动时，旧 generation 的探测可能仍在
+                    # 收尾；让它自行退出，同时允许新一轮启动验证立即进行。
+                    self._tun_health_worker.cancel()
+                    self._retire_tun_thread(
+                        self._tun_health_worker,
+                        self._retired_tun_health_workers,
+                    )
+                else:
+                    self._tun_health_worker.deleteLater()
+                self._tun_health_worker = None
+
+            adapters = self.get_selected_adapters()
+            if self._pool_worker is not None:
+                adapters = self._pool_worker.selected_nics_snapshot()
+            worker = TunConnectivityWorker(
+                adapters,
+                self._tun_health_generation,
+                startup,
+                self,
+            )
+            self._tun_health_worker = worker
+            worker.result_ready.connect(self._on_tun_health_result)
+            worker.finished.connect(self._on_tun_health_finished)
+            if startup:
+                # 两个轻量节点最坏约 14 秒；20 秒仅作最后的安全边界。
+                self._tun_health_deadline_timer.start(20000)
+            try:
+                worker.start()
+            except Exception as e:
+                self._tun_health_deadline_timer.stop()
+                self._tun_health_worker = None
+                worker.deleteLater()
+                self.append_log(
+                    f"[TUN][联网验证] 无法启动探测线程: {type(e).__name__}: {e}"
+                )
+                if startup:
+                    self.show_error(tr("tun_validation_failed"))
+                    self._stop_tun_mode()
+
+        def _on_tun_health_startup_timeout(self):
+            if not self._tun_starting or not self._tun_active:
+                return
+            if time.monotonic() - self._tun_last_connectivity_at < 30.0:
+                self._complete_tun_startup("启动期间已收到真实上游数据")
+                return
+            self.append_log("[TUN][联网验证] 启动验证超时，正在安全回滚")
+            self.show_error(tr("tun_validation_timeout"))
+            self._stop_tun_mode()
+
+        def _run_periodic_tun_health_check(self):
+            if self._tun_active and not self._tun_starting:
+                self._start_tun_health_check(startup=False)
+
+        @Slot(bool, bool, str)
+        def _on_tun_health_result(
+            self, tun_ok: bool, physical_ok: bool, detail: str
+        ):
+            worker = self.sender()
+            if not isinstance(worker, TunConnectivityWorker):
+                return
+            if worker.generation != self._tun_health_generation or not self._tun_active:
+                return
+            if worker.startup and not self._tun_starting:
+                # 真实流量可能已先一步完成启动；忽略随后排队到达的旧探测结果。
+                return
+
+            if worker.startup:
+                self._tun_health_deadline_timer.stop()
+
+            if tun_ok:
+                self._tun_health_failures = 0
+                if worker.startup:
+                    self._complete_tun_startup(detail)
+                else:
+                    self.append_log(f"[TUN][联网验证] 通过: {detail}")
+                return
+
+            self.append_log(
+                f"[TUN][联网验证] 失败 | physical_ok={physical_ok} | {detail}"
+            )
+            if worker.startup:
+                if time.monotonic() - self._tun_last_connectivity_at < 30.0:
+                    self._complete_tun_startup("启动期间已收到真实上游数据")
+                    return
+                self.show_error(tr("tun_validation_failed"))
+                self._stop_tun_mode()
+                return
+
+            if time.monotonic() - self._tun_last_connectivity_at < 60.0:
+                self.append_log(
+                    "[TUN][联网验证] 外部探测失败，但近期存在真实上游响应，忽略本次误判"
+                )
+                self._tun_health_failures = 0
+                return
+
+            if not physical_ok:
+                # 对照组也失败，说明更可能是物理网络本身中断，不自动停 TUN。
+                self._tun_health_failures = 0
+                return
+
+            self._tun_health_failures += 1
+            if self._tun_health_failures >= 3:
+                self.show_error(tr("tun_watchdog_rollback"))
+                self._stop_tun_mode()
+
+        @Slot()
+        def _on_tun_health_finished(self):
+            worker = self.sender()
+            if worker is self._tun_health_worker:
+                self._tun_health_worker = None
+            if worker is not None and worker not in self._retired_tun_health_workers:
+                worker.deleteLater()
+
         def _on_tun_error(self, message: str):
+            sender = self.sender()
+            if isinstance(sender, TunManager) and sender is not self._tun_manager:
+                return
+            if self._tun_manager is None and not self._tun_active:
+                return
             message = localize_runtime_message(message)
             self.append_log(f"[TUN] {message}")
             self.show_error(message)
@@ -1113,30 +1499,69 @@ def create_main_window():
 
         def _teardown_pool(self):
             if self._pool_worker is not None:
+                worker = self._pool_worker
+                # 先移除“当前”身份，屏蔽停止期间可能排队到达的旧错误信号。
+                self._pool_worker = None
                 try:
-                    self._pool_worker.stop()
-                    if self._pool_worker.isRunning():
-                        self._pool_worker.wait(3000)
+                    worker.stop()
+                    if worker.isRunning():
+                        worker.wait(3000)
                 except Exception:
                     pass
-                self._pool_worker = None
+                self._retire_tun_thread(worker, self._retired_pool_workers)
+
+        def _retire_tun_thread(self, worker, collection):
+            """保留未完全退出的 QThread 引用，防止销毁运行中线程。"""
+            if worker is None:
+                return
+            if not worker.isRunning():
+                worker.deleteLater()
+                return
+            if worker in collection:
+                return
+            collection.append(worker)
+            worker.finished.connect(
+                lambda w=worker, items=collection: self._cleanup_retired_tun_thread(
+                    w, items
+                )
+            )
+
+        def _cleanup_retired_tun_thread(self, worker, collection):
+            try:
+                collection.remove(worker)
+            except ValueError:
+                pass
+            worker.deleteLater()
 
         def _stop_tun_mode(self):
+            self._tun_health_timer.stop()
+            self._tun_health_deadline_timer.stop()
+            self._tun_health_generation += 1
+            self._tun_health_failures = 0
+            self._tun_last_connectivity_at = 0.0
+            self._tun_kernel_ready = False
+            if self._tun_health_worker is not None:
+                self._tun_health_worker.cancel()
             try:
                 self._tun_pool_start_timer.stop()
             except Exception:
                 pass
             # 1) 杀 sing-box 内核 + 清路由
             if self._tun_manager is not None:
+                manager = self._tun_manager
+                # 先清除当前身份，避免停止流程产生的延迟信号重复进入回滚。
+                self._tun_manager = None
                 try:
-                    self._tun_manager.stop()
-                    if self._tun_manager.isRunning():
-                        self._tun_manager.wait(6000)
+                    manager.stop()
+                    if manager.isRunning():
+                        manager.wait(6000)
                     # 兜底强杀，杜绝残留导致断网
-                    self._tun_manager.force_kill()
+                    manager.force_kill()
+                    if manager.isRunning():
+                        manager.wait(2000)
                 except Exception:
                     pass
-                self._tun_manager = None
+                self._retire_tun_thread(manager, self._retired_tun_managers)
             # 2) 关 Python 出站池
             self._teardown_pool()
             self._tun_active = False
@@ -1412,6 +1837,13 @@ def create_main_window():
             except Exception:
                 pass
             try:
+                self._tun_health_timer.stop()
+                self._tun_health_deadline_timer.stop()
+                if self._tun_health_worker is not None:
+                    self._tun_health_worker.cancel()
+            except Exception:
+                pass
+            try:
                 if self._tun_active or self._tun_manager is not None:
                     self._stop_tun_mode()
                 elif self._pool_worker is not None:
@@ -1442,6 +1874,21 @@ def create_main_window():
                     self.scan_worker.wait(3000)
                 if self.diag_worker is not None and self.diag_worker.isRunning():
                     self.diag_worker.wait(3000)
+                if self._tun_health_worker is not None and self._tun_health_worker.isRunning():
+                    self._tun_health_worker.wait(8000)
+                for worker in list(self._retired_pool_workers):
+                    if worker.isRunning():
+                        worker.stop()
+                        worker.wait(5000)
+                for manager in list(self._retired_tun_managers):
+                    if manager.isRunning():
+                        manager.stop()
+                        manager.force_kill()
+                        manager.wait(5000)
+                for worker in list(self._retired_tun_health_workers):
+                    if worker.isRunning():
+                        worker.cancel()
+                        worker.wait(3000)
             except Exception as e:
                 print(mw_tr("log_close_cleanup_error", error=e))
             finally:

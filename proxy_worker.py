@@ -1148,6 +1148,7 @@ class MultiPortProxyWorker(QThread):
 
     log_signal = Signal(str)
     traffic_signal = Signal(dict)
+    connectivity_signal = Signal(str)
     started_ok = Signal(str)
     stopped = Signal(str)
     error_signal = Signal(str)
@@ -1176,6 +1177,8 @@ class MultiPortProxyWorker(QThread):
         ("8.8.4.4", "dns.google", "/dns-query"),
     )
     DNS_CACHE_TTL = 180.0
+    DNS_PREFLIGHT_DOMAIN = "www.msftconnecttest.com"
+    DNS_PREFLIGHT_DOH_LIMIT = 2
 
     def __init__(
         self,
@@ -1224,10 +1227,43 @@ class MultiPortProxyWorker(QThread):
         self._doh_endpoints: Tuple[Tuple[str, str, str], ...] = self.DEFAULT_DOH_ENDPOINTS
         self._dns_cache: Dict[Tuple[int, str], Tuple[float, str]] = {}
         self._dns_inflight: Dict[Tuple[int, str], asyncio.Task] = {}
+        self._last_connectivity_emit = 0.0
 
     def listen_ports(self) -> Dict[str, int]:
         """返回三个通道当前实际监听端口的快照。"""
         return dict(self._ports)
+
+    def selected_nics_snapshot(self) -> List[Dict]:
+        """返回已解析权威接口索引的网卡快照，供 TUN 健康探测复用。"""
+        return [dict(nic) for nic in self._selected_nics]
+
+    def _emit_connectivity(self, detail: str):
+        """节流上报真实上游响应，作为 TUN 双向数据链路已打通的证据。"""
+        now = time.monotonic()
+        if now - self._last_connectivity_emit < 0.5:
+            return
+        self._last_connectivity_emit = now
+        self.connectivity_signal.emit(detail)
+
+    async def _relay_from_sock_with_health(self, sock, writer, loop, detail: str):
+        first_response = True
+        try:
+            while True:
+                data = await loop.sock_recv(sock, 65536)
+                if not data:
+                    break
+                if first_response:
+                    first_response = False
+                    self._emit_connectivity(detail)
+                writer.write(data)
+                await writer.drain()
+        except Exception:
+            pass
+        finally:
+            try:
+                sock.close()
+            except Exception:
+                pass
 
     # 复用 ProxyWorker 的静态/实例方法，避免重复实现
     _create_bound_upstream_socket = staticmethod(ProxyWorker._create_bound_upstream_socket)
@@ -1286,6 +1322,20 @@ class MultiPortProxyWorker(QThread):
         except Exception as e:
             await self._teardown()
             self.error_signal.emit(f"多端口出站池监听失败: {e}")
+            return
+
+        dns_ready, dns_details = await self._preflight_selected_nics_dns()
+        for detail in dns_details:
+            self.log_signal.emit(f"[出站池][DNS预检] {detail}")
+        if self._stop_requested:
+            await self._teardown()
+            return
+        if not dns_ready:
+            await self._teardown()
+            self.error_signal.emit(
+                "多端口出站池 DNS 预检失败：至少一张已选网卡无法完成域名解析，"
+                "已取消 TUN 接管"
+            )
             return
 
         self.log_signal.emit(
@@ -1540,6 +1590,8 @@ class MultiPortProxyWorker(QThread):
         endpoint_ip: str,
         host: str,
         path: str,
+        connect_timeout: float = 4.0,
+        io_timeout: float = 8.0,
     ) -> str:
         query_id = random.randint(0, 0xFFFF)
         packet = self._build_dns_query(domain, query_id)
@@ -1547,11 +1599,11 @@ class MultiPortProxyWorker(QThread):
         ssl_sock = None
         try:
             sock = self._create_bound_upstream_socket(nic)
-            sock.settimeout(4.0)
+            sock.settimeout(connect_timeout)
             sock.connect((endpoint_ip, 443))
             context = ssl.create_default_context()
             ssl_sock = context.wrap_socket(sock, server_hostname=host)
-            ssl_sock.settimeout(8.0)
+            ssl_sock.settimeout(io_timeout)
             sock = None
             request = (
                 f"POST {path} HTTP/1.1\r\n"
@@ -1691,6 +1743,55 @@ class MultiPortProxyWorker(QThread):
         finally:
             if self._dns_inflight.get(cache_key) is task and task.done():
                 self._dns_inflight.pop(cache_key, None)
+
+    async def _preflight_dns_for_nic(self, nic: Dict, loop) -> Tuple[bool, str]:
+        """在 TUN 接管前快速验证指定物理网卡的 DNS 可用性。"""
+        name = str(nic.get("name") or nic.get("ip") or "unknown")
+        errors: List[str] = []
+        for endpoint_ip, host, path in self._doh_endpoints[:self.DNS_PREFLIGHT_DOH_LIMIT]:
+            if self._stop_requested:
+                return False, f"{name}: cancelled"
+            try:
+                ip = await asyncio.wait_for(
+                    loop.run_in_executor(
+                        None,
+                        self._query_dns_doh_sync,
+                        self.DNS_PREFLIGHT_DOMAIN,
+                        nic,
+                        endpoint_ip,
+                        host,
+                        path,
+                        2.0,
+                        3.0,
+                    ),
+                    timeout=4.0,
+                )
+                return True, f"{name}: DoH {host} -> {ip}"
+            except Exception as e:
+                errors.append(f"DoH {host}: {type(e).__name__}")
+
+        # DoH 暂不可用时仅用传统 DNS 判断该网卡是否仍具备基本解析能力；
+        # 正式连接阶段依旧保持 DoH 优先和多节点回退。
+        for dns_server in self._dns_servers_for_nic(nic)[:2]:
+            if self._stop_requested:
+                return False, f"{name}: cancelled"
+            try:
+                ip = await self._query_dns_udp(
+                    self.DNS_PREFLIGHT_DOMAIN, nic, loop, dns_server
+                )
+                return True, f"{name}: DNS {dns_server} -> {ip} (DoH preflight unavailable)"
+            except Exception as e:
+                errors.append(f"DNS {dns_server}: {type(e).__name__}")
+        return False, f"{name}: " + "; ".join(errors[-4:])
+
+    async def _preflight_selected_nics_dns(self) -> Tuple[bool, List[str]]:
+        """并行预热全部选中网卡；任一卡完全无法解析时拒绝 TUN 接管。"""
+        loop = asyncio.get_running_loop()
+        results = await asyncio.gather(*(
+            self._preflight_dns_for_nic(nic, loop) for nic in self._selected_nics
+        ))
+        details = [detail for _ok, detail in results]
+        return all(ok for ok, _detail in results), details
 
     async def _start_udp_associate(self, reader, writer, balancer, channel):
         """为一个 SOCKS5 UDP ASSOCIATE TCP 控制连接启动本地 UDP relay。"""
@@ -1853,7 +1954,12 @@ class MultiPortProxyWorker(QThread):
 
             relay_tasks = [
                 asyncio.create_task(self._relay_to_sock(reader, upstream_sock, loop)),
-                asyncio.create_task(self._relay_from_sock(upstream_sock, writer, loop)),
+                asyncio.create_task(self._relay_from_sock_with_health(
+                    upstream_sock,
+                    writer,
+                    loop,
+                    f"{nic['name']} -> {target_display}:{dst_port}",
+                )),
             ]
             self._client_tasks.update(relay_tasks)
             _, pending = await asyncio.wait(relay_tasks, return_when=asyncio.FIRST_COMPLETED)

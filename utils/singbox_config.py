@@ -11,7 +11,8 @@ sing-box 兼容 config.json。
   默认端口为 2001/2002/2003；端口受 HNS/Hyper-V 限制时使用运行时回退端口。
   另含 direct（保底直连）。
 - route.rules: 顶部按固定顺序强插后端自流量防环、DNS 劫持、ICMP 网络
-  直连防御矩阵，再按用户表格逐条生成 {process_name:[...], outbound:...}；
+  直连防御矩阵，并让 QUIC 快速回退到 TCP（规避 FakeIP/QUIC 会话不稳定），
+  再按用户表格逐条生成 {process_name:[...], outbound:...}；
   未命中规则的默认兜底 final 一律指向 aggregation，实现 TCP/UDP 全局聚合叠加。
 
 纯逻辑模块，零 Qt 依赖，防御式编程，绝不抛出未捕获异常。
@@ -141,6 +142,11 @@ def build_config(
         },
         {"port": [53], "action": "hijack-dns"},
         {"protocol": ["dns"], "action": "hijack-dns"},
+        # 当前 Python SOCKS UDP relay 尚不能为 QUIC 保持稳定的五元组，
+        # FakeIP 下直接放行还会尝试访问 198.18.0.0/15。仅拒绝 sniff 已
+        # 识别的 QUIC，令浏览器立即回退 TCP/HTTPS，同时避免误伤其他恰好
+        # 使用 UDP/443 的应用；其余 UDP 暂维持物理出口直连。
+        {"protocol": ["quic"], "action": "reject"},
         {"network": ["udp"], "action": "route", "outbound": "direct"},
     ])
     route_rules = defensive_route_rules + user_route_rules
