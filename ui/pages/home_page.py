@@ -119,11 +119,13 @@ class AdapterRow(QWidget):
     def _apply_active_style(self, active: bool):
         if active:
             accent = themeColor().name()
-            self._name_label.setStyleSheet(f"color: {accent};")
-            self._speed_label.setStyleSheet(f"color: {accent};")
+            self._name_label.setTextColor(accent, accent)
+            self._speed_label.setTextColor(accent, accent)
         else:
-            self._name_label.setStyleSheet("")
-            self._speed_label.setStyleSheet("")
+            # 不用 setStyleSheet("") 清空：那会覆盖 qfluentwidgets
+            # 为深浅主题维护的文字颜色，导致深色模式回退成黑字。
+            self._name_label.setTextColor()
+            self._speed_label.setTextColor()
 
     def refresh_theme(self):
         self._apply_active_style(self.is_checked())
@@ -329,7 +331,7 @@ class HomePage(QWidget):
         controls.addLayout(scheduler_row)
 
         self._engine_ports = CaptionLabel("", card)
-        self._engine_ports.setStyleSheet("padding-top: 2px;")
+        self._engine_ports.setContentsMargins(0, 2, 0, 0)
         left.addWidget(self._engine_title)
         left.addLayout(mode_row)
         left.addLayout(controls)
@@ -401,7 +403,10 @@ class HomePage(QWidget):
         self._rows_scroll.setAlignment(Qt.AlignTop)
         self._rows_scroll.setFrameShape(QFrame.NoFrame)
         self._rows_scroll.setStyleSheet("background: transparent;")
-        self._rows_scroll.setFixedHeight(260)
+        # 列表随卡片可用空间伸缩；网卡较多时保留内部滚动，避免固定高度
+        # 在少量网卡时留下生硬的大块空白。
+        self._rows_scroll.setMinimumHeight(112)
+        self._rows_scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self._rows_scroll.setWidget(self._rows_host)
         self._empty_label = BodyLabel(tr("home_no_adapters"), card)
         self._empty_label.setAlignment(Qt.AlignCenter)
@@ -462,8 +467,8 @@ class HomePage(QWidget):
 
     def _apply_hero_color(self):
         accent = themeColor().name()
-        self._speed_value.setStyleSheet(f"color: {accent};")
-        self._speed_unit.setStyleSheet(f"color: {accent};")
+        self._speed_value.setTextColor(accent, accent)
+        self._speed_unit.setTextColor(accent, accent)
 
     def refresh_theme(self):
         self._apply_hero_color()

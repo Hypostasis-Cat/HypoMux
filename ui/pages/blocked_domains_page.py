@@ -64,7 +64,7 @@ class BlockedDomainsPage(QWidget):
         # 空数据提示
         self._empty_hint = BodyLabel(tr("blocked_no_data"), self)
         self._empty_hint.setAlignment(Qt.AlignCenter)
-        self._empty_hint.setStyleSheet("color: #888888; padding: 60px;")
+        self._apply_theme_colors()
 
         # 表格
         self.tableWidget = TableWidget(self)
@@ -196,5 +196,9 @@ class BlockedDomainsPage(QWidget):
         self._apply_headers()
 
     def refresh_theme(self):
-        """主题切换时重设表格样式。"""
-        pass
+        self._apply_theme_colors()
+
+    def _apply_theme_colors(self):
+        """独立云母窗口中的空状态提示使用主题次级前景色。"""
+        self._empty_hint.setTextColor("#737373", "#b3b3b3")
+        self._empty_hint.setContentsMargins(0, 60, 0, 60)

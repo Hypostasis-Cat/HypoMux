@@ -59,6 +59,7 @@ class SettingsPage(QWidget):
     success_message = Signal(str)
     warning_message = Signal(str)
     dns_changed = Signal(str, str)
+    mica_effect_changed = Signal(bool)
     blocked_domain_settings_changed = Signal()
     blocked_domains_requested = Signal()
 
@@ -120,6 +121,17 @@ class SettingsPage(QWidget):
         self.theme_card.hBoxLayout.addWidget(self.theme_combo, 0, Qt.AlignRight)
         self.theme_card.hBoxLayout.addSpacing(16)
         self.global_group.addSettingCard(self.theme_card)
+
+        # Windows 11 云母材质：默认开启；不支持的系统由主窗口安全降级。
+        self.mica_card = SwitchSettingCard(
+            resolve_icon("BRUSH", "PALETTE", "CONSTRACT"),
+            tr("settings_mica_effect"),
+            tr("settings_mica_effect_hint"),
+            parent=self.global_group,
+        )
+        self.mica_card.setChecked(settings.value("mica_enabled", True, type=bool))
+        self.mica_card.checkedChanged.connect(self._on_mica_effect_changed)
+        self.global_group.addSettingCard(self.mica_card)
 
         # 关闭行为（两个单选）
         self.close_card = SettingCard(
@@ -298,6 +310,12 @@ class SettingsPage(QWidget):
         settings.sync()
         setTheme(_THEME_MAP.get(index, Theme.AUTO))
 
+    def _on_mica_effect_changed(self, enabled: bool):
+        settings = QSettings("Hypostasis-Cat", "HypoMux")
+        settings.setValue("mica_enabled", bool(enabled))
+        settings.sync()
+        self.mica_effect_changed.emit(bool(enabled))
+
     def _on_close_behavior_changed(self, button):
         settings = QSettings("Hypostasis-Cat", "HypoMux")
         bid = self.close_group.id(button)
@@ -407,6 +425,8 @@ class SettingsPage(QWidget):
         self.theme_combo.setItemText(0, tr("settings_theme_auto"))
         self.theme_combo.setItemText(1, tr("settings_theme_light"))
         self.theme_combo.setItemText(2, tr("settings_theme_dark"))
+        self.mica_card.titleLabel.setText(tr("settings_mica_effect"))
+        self.mica_card.contentLabel.setText(tr("settings_mica_effect_hint"))
         self.close_card.titleLabel.setText(tr("settings_close_behavior"))
         self.close_tray_radio.setText(tr("settings_close_to_tray"))
         self.close_exit_radio.setText(tr("settings_close_to_exit"))

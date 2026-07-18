@@ -10,10 +10,10 @@ HypoMux 关于页 (AboutPage) - 第四阶段任务3
 
 import os
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QFrame,
+    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QFrame,
 )
 from qfluentwidgets import (
     CardWidget, ElevatedCardWidget, TitleLabel, SubtitleLabel, StrongBodyLabel, BodyLabel,
@@ -94,8 +94,9 @@ class AboutPage(QWidget):
         root.addWidget(self._page_title)
         root.addSpacing(4)
 
-        top_row = QHBoxLayout()
-        top_row.setSpacing(14)
+        self._top_grid = QGridLayout()
+        self._top_grid.setHorizontalSpacing(14)
+        self._top_grid.setVerticalSpacing(14)
 
         # ===== 项目信息卡 =====
         info_card = CardWidget(container)
@@ -123,7 +124,7 @@ class AboutPage(QWidget):
         self._repo_link = HyperlinkButton(REPO_URL, REPO_URL, info_card)
         info_layout.addWidget(self._repo_link, 0, Qt.AlignLeft)
 
-        top_row.addWidget(info_card, 1)
+        self._info_card = info_card
 
         # ===== 网络与合规声明 =====
         notice_card = CardWidget(container)
@@ -139,8 +140,8 @@ class AboutPage(QWidget):
         notice_layout.addWidget(self._notice_text)
         notice_layout.addStretch()
 
-        top_row.addWidget(notice_card, 1)
-        root.addLayout(top_row)
+        self._notice_card = notice_card
+        root.addLayout(self._top_grid)
 
         # ===== 赞助模块 =====
         sponsor_card = CardWidget(container)
@@ -155,14 +156,12 @@ class AboutPage(QWidget):
         sponsor_layout.addWidget(self._sponsor_text)
 
         # 两张收款码卡片水平并排
-        qr_row = QHBoxLayout()
-        qr_row.setSpacing(20)
+        self._qr_grid = QGridLayout()
+        self._qr_grid.setHorizontalSpacing(20)
+        self._qr_grid.setVerticalSpacing(20)
         self._wechat_card = PaymentCard(tr("about_wechat"), "support/wei.png", sponsor_card)
         self._alipay_card = PaymentCard(tr("about_alipay"), "support/zhi.jpg", sponsor_card)
-        qr_row.addWidget(self._wechat_card)
-        qr_row.addWidget(self._alipay_card)
-        qr_row.addStretch()
-        sponsor_layout.addLayout(qr_row)
+        sponsor_layout.addLayout(self._qr_grid)
         root.addWidget(sponsor_card)
 
         root.addStretch()
@@ -174,11 +173,47 @@ class AboutPage(QWidget):
 
         # 任务4：用 themeColor 给赞助标题着色（主题切换安全）
         self.refresh_theme()
+        QTimer.singleShot(0, self._update_responsive_layout)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._update_responsive_layout()
+
+    def _update_responsive_layout(self):
+        """窄窗口自动由双列切换为单列，避免文字和二维码被挤压。"""
+        compact = self.width() < 860
+        if compact == getattr(self, "_compact_layout", None):
+            return
+        self._compact_layout = compact
+
+        for grid, widgets in (
+            (self._top_grid, (self._info_card, self._notice_card)),
+            (self._qr_grid, (self._wechat_card, self._alipay_card)),
+        ):
+            for widget in widgets:
+                grid.removeWidget(widget)
+            grid.setColumnStretch(0, 0)
+            grid.setColumnStretch(1, 0)
+
+        if compact:
+            self._top_grid.addWidget(self._info_card, 0, 0)
+            self._top_grid.addWidget(self._notice_card, 1, 0)
+            self._qr_grid.addWidget(self._wechat_card, 0, 0)
+            self._qr_grid.addWidget(self._alipay_card, 1, 0)
+        else:
+            self._top_grid.addWidget(self._info_card, 0, 0)
+            self._top_grid.addWidget(self._notice_card, 0, 1)
+            self._top_grid.setColumnStretch(0, 1)
+            self._top_grid.setColumnStretch(1, 1)
+            self._qr_grid.addWidget(self._wechat_card, 0, 0)
+            self._qr_grid.addWidget(self._alipay_card, 0, 1)
+            self._qr_grid.setColumnStretch(0, 1)
+            self._qr_grid.setColumnStretch(1, 1)
 
     def refresh_theme(self):
         """任务4：主题切换时用最新 themeColor 重绘高亮标题。"""
         accent = themeColor().name()
-        self._sponsor_title.setStyleSheet(f"color: {accent};")
+        self._sponsor_title.setTextColor(accent, accent)
 
     def retranslate_ui(self):
         self._page_title.setText(tr("nav_about"))

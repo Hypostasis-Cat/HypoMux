@@ -149,7 +149,7 @@ def create_main_window():
     from PySide6.QtGui import QIcon, QAction, QFont, QPainter, QColor, QCursor
     from PySide6.QtWidgets import QApplication, QSystemTrayIcon, QMenu, QWidget, QDialog, QVBoxLayout, QFileDialog
     from qfluentwidgets import (
-        FluentWindow, NavigationItemPosition, InfoBar, InfoBarPosition,
+        FluentWindow, FluentWidget, NavigationItemPosition, InfoBar, InfoBarPosition,
         setThemeColor, setTheme, Theme, FluentIcon, qconfig, MessageBox,
     )
     setThemeColor("#0078d4")
@@ -172,6 +172,31 @@ def create_main_window():
     from ui.pages.settings_page import SettingsPage
     from ui.pages.about_page import AboutPage
     from ui.pages.blocked_domains_page import BlockedDomainsPage
+    from ui.popup_material import apply_mica_popup
+
+    class BlockedDomainsWindow(FluentWidget):
+        """单网卡被墙域名的独立云母窗口。"""
+
+        def __init__(self, on_closed, mica_enabled: bool):
+            super().__init__()
+            self._on_closed = on_closed
+            # 不复用已经关闭的原生云母窗口。Windows 在 hide/show 同一个
+            # 顶层 Mica 句柄时偶尔会遗失非客户区命中测试，表现为第二次无法
+            # 拖动或关闭；销毁后下次重新创建是 qfluentwidgets 更稳定的用法。
+            self.setAttribute(Qt.WA_DeleteOnClose, True)
+            self.set_material_enabled(mica_enabled)
+
+        def set_material_enabled(self, enabled: bool):
+            """让独立窗口与设置页的云母开关保持一致。"""
+            try:
+                self.setMicaEffectEnabled(bool(enabled))
+            except Exception:
+                pass
+
+        def closeEvent(self, event):
+            super().closeEvent(event)
+            if event.isAccepted():
+                self._on_closed()
 
     def _patch_navigation_icon_paint():
         try:
@@ -662,12 +687,12 @@ def create_main_window():
             self.setWindowTitle("HypoMux")
             self.apply_standard_geometry()
 
-            # 任务1：开启 Windows 11 原生 Mica/云母毛玻璃材质。
-            # 不硬编码窗口背景 QSS，使浅色/深色模式均呈现高阶半透明质感。
-            try:
-                self.setMicaEffectEnabled(True)
-            except Exception:
-                pass
+            # Windows 11 原生 Mica/云母材质默认开启；不支持的系统安全降级。
+            self._set_mica_effect_enabled(
+                QSettings("Hypostasis-Cat", "HypoMux").value(
+                    "mica_enabled", True, type=bool
+                )
+            )
 
             # ===== 构建页面与导航 =====
             self._init_pages()
@@ -696,6 +721,49 @@ def create_main_window():
             """主题切换回调：延迟重绘高亮控件，避免取到旧主题色。"""
             self._refresh_theme_sensitive_pages()
             QTimer.singleShot(80, self._refresh_theme_sensitive_pages)
+            QTimer.singleShot(100, self._apply_mica_visual_state)
+
+        def _apply_popup_material(self, dialog):
+            """为项目内自定义弹窗应用统一云母材质。"""
+            return apply_mica_popup(
+                dialog, enabled=getattr(self, "_mica_effect_enabled", True)
+            )
+
+        def _set_mica_effect_enabled(self, enabled: bool):
+            """即时切换云母视觉层，不重建 DWM 背景以避免深色模式闪屏。"""
+            self._mica_effect_enabled = bool(enabled)
+            try:
+                # qfluentwidgets 的 Mica 开关在关闭时会调用
+                # removeBackgroundEffect()，Windows 会重建合成表面并白闪。
+                # 底层始终保留 Mica；关闭时仅绘制不透明主题背景，视觉上即为
+                # 普通窗口材质，且整个切换过程不会触发 DWM 闪烁。
+                if not self.isMicaEffectEnabled():
+                    self.setMicaEffectEnabled(True)
+            except Exception:
+                pass
+            self._apply_mica_visual_state()
+            dialog = getattr(self, "_blocked_domains_dialog", None)
+            if dialog is not None:
+                dialog.set_material_enabled(enabled)
+
+        def _apply_mica_visual_state(self):
+            """按当前主题更新云母/纯色背景的视觉状态。"""
+            try:
+                if getattr(self, "_mica_effect_enabled", True):
+                    self.setBackgroundColor(QColor(0, 0, 0, 0))
+                else:
+                    self.setBackgroundColor(self._normalBackgroundColor())
+                self.update()
+            except Exception:
+                pass
+
+        def _normalBackgroundColor(self):
+            """交互动画重绘时也必须尊重用户的云母开关。"""
+            if getattr(self, "_mica_effect_enabled", True):
+                return super()._normalBackgroundColor()
+
+            from qfluentwidgets.common.config import isDarkTheme
+            return self._darkBackgroundColor if isDarkTheme() else self._lightBackgroundColor
 
         def _refresh_theme_sensitive_pages(self):
             for page in (
@@ -732,21 +800,22 @@ def create_main_window():
         def _init_navigation(self):
             # 图标方案（用户确认）：HOME / GLOBAL(回退 GLOBE/IOT) / SPEED_HIGH / SETTING
             self.addSubInterface(
-                self.home_page, FluentIcon.HOME, tr("nav_home")
+                self.home_page, FluentIcon.HOME, tr("nav_home"), isTransparent=True
             )
             self.addSubInterface(
-                self.routing_page, resolve_icon("GLOBAL", "GLOBE", "IOT"), tr("nav_routing")
+                self.routing_page, resolve_icon("GLOBAL", "GLOBE", "IOT"),
+                tr("nav_routing"), isTransparent=True
             )
             self.addSubInterface(
-                self.tools_page, FluentIcon.SPEED_HIGH, tr("nav_tools")
+                self.tools_page, FluentIcon.SPEED_HIGH, tr("nav_tools"), isTransparent=True
             )
             # 任务3：系统设置挪到顶部主功能组（移除 BOTTOM）
             self.addSubInterface(
-                self.settings_page, FluentIcon.SETTING, tr("nav_settings")
+                self.settings_page, FluentIcon.SETTING, tr("nav_settings"), isTransparent=True
             )
             # 关于页归入主业务导航流，保持左下角视觉清爽
             self.addSubInterface(
-                self.about_page, FluentIcon.INFO, tr("nav_about")
+                self.about_page, FluentIcon.INFO, tr("nav_about"), isTransparent=True
             )
 
         def _refine_navigation_appearance(self):
@@ -809,6 +878,7 @@ def create_main_window():
             self.settings_page.success_message.connect(self.show_success)
             self.settings_page.warning_message.connect(self.show_warning)
             self.settings_page.dns_changed.connect(self._on_dns_changed)
+            self.settings_page.mica_effect_changed.connect(self._set_mica_effect_enabled)
             self.settings_page.blocked_domain_settings_changed.connect(self._on_blocked_domain_settings_changed)
             self.settings_page.blocked_domains_requested.connect(self._open_blocked_domains_dialog)
 
@@ -919,12 +989,27 @@ def create_main_window():
         def _open_blocked_domains_dialog(self):
             """从设置页打开单网卡被墙域名记录管理窗口。"""
             if self._blocked_domains_dialog is None:
-                dialog = QDialog(self)
+                # 每次关闭后销毁窗口，而不是 hide 后复用同一个原生 Mica
+                # 句柄。这样标题栏的拖动、最小化和关闭按钮每次都会由
+                # qfluentwidgets 重新初始化。
+                dialog = None
+
+                def on_dialog_closed():
+                    if self._blocked_domains_dialog is dialog:
+                        self._blocked_domains_dialog = None
+                        self.blocked_page = None
+
+                dialog = BlockedDomainsWindow(
+                    on_dialog_closed,
+                    getattr(self, "_mica_effect_enabled", True),
+                )
                 dialog.setWindowTitle(tr("blocked_title"))
+                dialog.setWindowIcon(self.windowIcon())
                 dialog.setMinimumSize(680, 480)
                 dialog.resize(780, 580)
                 layout = QVBoxLayout(dialog)
-                layout.setContentsMargins(0, 0, 0, 0)
+                layout.setContentsMargins(0, dialog.titleBar.height(), 0, 0)
+                layout.setSpacing(0)
                 self.blocked_page = BlockedDomainsPage(dialog)
                 self.blocked_page.set_controls_enabled(self._blocked_domains_controls_enabled)
                 layout.addWidget(self.blocked_page)
@@ -1150,6 +1235,7 @@ def create_main_window():
                     )
                     box.yesButton.setText(tr("mode_proxy"))
                     box.cancelButton.hide()
+                    self._apply_popup_material(box)
                     box.exec()
                     self._run_mode = "proxy"
                     self.home_page.set_mode("proxy")
@@ -1238,6 +1324,7 @@ def create_main_window():
             )
             box.yesButton.setText(tr("routing_import_confirm"))
             box.cancelButton.setText(tr("routing_dialog_cancel"))
+            self._apply_popup_material(box)
             if not box.exec():
                 return
 
@@ -1302,6 +1389,7 @@ def create_main_window():
                     tr("tun_need_admin_title"), tr("tun_need_admin_content"), self
                 )
                 box.cancelButton.hide()
+                self._apply_popup_material(box)
                 box.exec()
                 self.home_page.set_engine_state(False)
                 self._finish_engine_transition()

@@ -180,7 +180,15 @@ class ToolsPage(QWidget):
         self._init_ui()
 
     def _init_ui(self):
-        root = QVBoxLayout(self)
+        # 让整页统一滚动。网卡较多时不会挤压下方体检结果，也避免嵌套滚动。
+        scroll = SingleDirectionScrollArea(self, orient=Qt.Vertical)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setStyleSheet("background: transparent;")
+
+        container = QWidget()
+        container.setStyleSheet("background: transparent;")
+        root = QVBoxLayout(container)
         # 大留白 + 干净大号加粗标题
         root.setContentsMargins(36, 28, 36, 28)
         root.setSpacing(8)
@@ -235,13 +243,8 @@ class ToolsPage(QWidget):
         root.addWidget(self._nic_host)
         root.addSpacing(8)
 
-        # 结果滚动区
-        scroll = SingleDirectionScrollArea(self, orient=Qt.Vertical)
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setStyleSheet("background: transparent;")
-
-        self._result_host = QWidget()
+        # 体检结果跟随整页滚动，避免多层竖向滚动条抢占滚轮事件。
+        self._result_host = QWidget(container)
         self._result_host.setStyleSheet("background: transparent;")
         self._result_layout = QVBoxLayout(self._result_host)
         self._result_layout.setContentsMargins(0, 8, 0, 8)
@@ -252,8 +255,13 @@ class ToolsPage(QWidget):
         self._result_layout.addWidget(self._empty_label)
         self._result_layout.addStretch()
 
-        scroll.setWidget(self._result_host)
-        root.addWidget(scroll, 1)
+        root.addWidget(self._result_host)
+        root.addStretch()
+        scroll.setWidget(container)
+
+        page_layout = QVBoxLayout(self)
+        page_layout.setContentsMargins(0, 0, 0, 0)
+        page_layout.addWidget(scroll)
 
     def _on_start(self):
         self.start_clicked.emit()

@@ -22,6 +22,8 @@ from qfluentwidgets import (
 )
 
 from ui.i18n import tr
+from ui.popup_material import apply_mica_popup
+from qfluentwidgets.common.color import FluentSystemColor
 
 
 _CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
@@ -142,6 +144,7 @@ class ProcessSelectDialog(MessageBoxBase):
 
     def __init__(self, processes: List[str], parent=None):
         super().__init__(parent)
+        apply_mica_popup(self)
         self._all_processes = list(processes or [])
         self._selected_process = ""
 
@@ -290,7 +293,7 @@ class RoutingPage(QWidget):
 
         self._duplicate_hint = BodyLabel("", self)
         self._duplicate_hint.setWordWrap(True)
-        self._duplicate_hint.setStyleSheet("color: #c42b1c;")
+        self._apply_theme_colors()
         self._duplicate_hint.hide()
         root.addWidget(self._duplicate_hint)
         # 规则表填满页面剩余空间；规则较多时由表格自身滚动，而非把下半页留白。
@@ -302,6 +305,14 @@ class RoutingPage(QWidget):
             tr("routing_col_process"),
             tr("routing_col_nic"),
         ])
+
+    def _apply_theme_colors(self):
+        """使用 qfluentwidgets 的语义色，避免深色主题下错误提示变暗。"""
+        light, dark = FluentSystemColor.CRITICAL_FOREGROUND.value
+        self._duplicate_hint.setTextColor(light, dark)
+
+    def refresh_theme(self):
+        self._apply_theme_colors()
 
     # ---------- 网卡出口选项 ----------
     def set_available_adapters(self, adapters: Iterable):
