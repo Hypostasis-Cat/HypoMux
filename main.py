@@ -1,6 +1,6 @@
 """
 HypoMux - Windows 多网卡跃点数并发调度工具
-主应用入口 (v2.0.0)
+主应用入口 (v2.1.0)
 
 启动生命周期：
 1. 在任何 UI 导入前纠偏工作目录
@@ -153,7 +153,7 @@ if __name__ == "__main__":
 
     app = QApplication(sys.argv)
     app.setApplicationName("HypoMux")
-    app.setApplicationVersion("2.0.0")
+    app.setApplicationVersion("2.1.0")
     app.setStyle("Fusion")
 
     if os.path.exists(icon_path):
