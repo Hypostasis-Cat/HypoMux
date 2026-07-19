@@ -108,3 +108,28 @@ jobs:
           name: HypoMux-Installer-${{ steps.version.outputs.VERSION }}
           path: Output/*.exe 
           if-no-files-found: error
+
+  release:
+    name: Upload Installer to Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download installer
+        uses: actions/download-artifact@v5
+        with:
+          name: HypoMux-Installer-${{ github.ref_name }}
+          path: ./output_dir
+
+      # 若用户已在网页手动发布同标签 Release，action 只补充安装包，
+      # 不传 name/body/generate_release_notes，以保留用户填写的标题和更新日志。
+      - name: Upload installer to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ./output_dir/*.exe
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
