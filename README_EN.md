@@ -27,6 +27,14 @@ In simpler terms, as long as your computer is connected to multiple networks at 
 
 ---
 
+## ⬇️ Download
+
+> **Windows installer:** [Download the latest release](https://github.com/Hypostasis-Cat/HypoMux/releases/latest)
+>
+> On the latest release page, download `HypoMux_Setup_*.exe` from the **Assets** section.
+
+---
+
 ##  UI Preview
 
 <p align="center">

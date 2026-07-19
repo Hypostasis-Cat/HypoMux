@@ -27,6 +27,14 @@ HypoMux v2.0 是一款专为 Windows 平台打造的**多网卡带宽并发聚�
 
 ---
 
+## ⬇️ 下载
+
+> **Windows 安装包：**[点击前往 Releases 下载最新版本](https://github.com/Hypostasis-Cat/HypoMux/releases/latest)
+>
+> 打开后，在最新版本页面的 **Assets** 区域下载 `HypoMux_Setup_*.exe` 即可安装。
+
+---
+
 ##  界面预览
 
 >  **视觉说明**：Windows 11 风格的轻量化主视窗，移除了高干扰的半透明叠层，采用微光蓝（`#0078d4`）与浅灰监控控制台风格。
@@ -212,12 +220,29 @@ HypoMux 是一个完全出于技术热情、由作者在业余时间独立开发
 
 感谢以下所有为 HypoMux 注入能量的支持者：
 
-<a href="https://github.com/Hypostasis-Cat/HypoMux"><img src="https://img.shields.io/badge/鲸鱼-请喝咖啡-orange?style=for-the-badge&logo=coffeescript&logoColor=white" /></a> <a href="https://github.com/Hypostasis-Cat/HypoMux"><img src="https://img.shields.io/badge/匿名-请喝咖啡-orange?style=for-the-badge&logo=coffeescript&logoColor=white" /></a> <a href="https://github.com/Hypostasis-Cat/HypoMux"><img src="https://img.shields.io/badge/匿名-请喝咖啡-orange?style=for-the-badge&logo=coffeescript&logoColor=white" /></a> <a href="https://github.com/Hypostasis-Cat/HypoMux"><img src="https://img.shields.io/badge/匿名-给猫咪发电-DCD0FF?style=for-the-badge&logo=github-sponsors&logoColor=6A5ACD&labelColor=E6E6FA" /></a> <a href="https://github.com/Hypostasis-Cat/HypoMux">
-  <img src="./assets/Support/1.svg" fill="none" alt="Sponsor Badge" />
-</a> <a href="https://github.com/Hypostasis-Cat/HypoMux"><img src="https://img.shields.io/badge/匿名-请喝咖啡-orange?style=for-the-badge&logo=coffeescript&logoColor=white" /></a> <a href="https://github.com/Hypostasis-Cat/HypoMux"><img src="https://img.shields.io/badge/廾阁-请喝咖啡-orange?style=for-the-badge&logo=coffeescript&logoColor=white" /></a> <a href="https://github.com/Hypostasis-Cat/HypoMux"><img src="https://img.shields.io/badge/六花dy-给猫咪发电-DCD0FF?style=for-the-badge&logo=github-sponsors&logoColor=6A5ACD&labelColor=E6E6FA" /></a> <a href="https://github.com/Hypostasis-Cat/HypoMux"><img src="https://img.shields.io/badge/匿名-请喝咖啡-orange?style=for-the-badge&logo=coffeescript&logoColor=white" /></a> <a href="https://github.com/Hypostasis-Cat/HypoMux"><img src="https://img.shields.io/badge/匿名-请喝咖啡-orange?style=for-the-badge&logo=coffeescript&logoColor=white" /></a> <a href="https://github.com/Hypostasis-Cat/HypoMux"><img src="https://img.shields.io/badge/匿名-请喝咖啡-orange?style=for-the-badge&logo=coffeescript&logoColor=white" /></a> <a href="https://github.com/Hypostasis-Cat/HypoMux"><img src="https://img.shields.io/badge/匿名-请喝咖啡-orange?style=for-the-badge&logo=coffeescript&logoColor=white" /></a> <a href="https://github.com/Hypostasis-Cat/HypoMux"><img src="https://img.shields.io/badge/匿名-请喝咖啡-orange?style=for-the-badge&logo=coffeescript&logoColor=white" /></a> <a href="https://github.com/Hypostasis-Cat/HypoMux"><img src="https://img.shields.io/badge/匿名-请喝咖啡-orange?style=for-the-badge&logo=coffeescript&logoColor=white" /></a> <a href="https://github.com/Hypostasis-Cat/HypoMux"><img src="https://img.shields.io/badge/sk-请喝咖啡-orange?style=for-the-badge&logo=coffeescript&logoColor=white" /></a> <a href="https://github.com/Hypostasis-Cat/HypoMux"><img src="https://img.shields.io/badge/wzln-请喝咖啡-orange?style=for-the-badge&logo=coffeescript&logoColor=white" /></a> <a href="https://github.com/Hypostasis-Cat/HypoMux"><img src="https://img.shields.io/badge/幸運上上簽-请喝咖啡-orange?style=for-the-badge&logo=coffeescript&logoColor=white" /></a> <a href="https://github.com/Hypostasis-Cat/HypoMux">
-  <img src="./assets/Support/1.svg" fill="none" alt="Sponsor Badge" />
-</a>
-<a href="https://github.com/Hypostasis-Cat/HypoMux"><img src="https://img.shields.io/badge/匿名-请喝咖啡-orange?style=for-the-badge&logo=coffeescript&logoColor=white" /></a> <a href="https://github.com/Hypostasis-Cat/HypoMux"><img src="https://img.shields.io/badge/Hede Wang-请喝咖啡-orange?style=for-the-badge&logo=coffeescript&logoColor=white" /></a>
+<p>
+  <a href="https://github.com/Hypostasis-Cat/HypoMux"><img alt="鲸鱼，咖啡支持" src="https://img.shields.io/badge/%E9%B2%B8%E9%B1%BC-%E8%AF%B7%E5%96%9D%E5%92%96%E5%95%A1-orange?style=for-the-badge&logo=coffeescript&logoColor=white" /></a>
+  <a href="https://github.com/Hypostasis-Cat/HypoMux"><img alt="匿名，咖啡支持" src="https://img.shields.io/badge/%E5%8C%BF%E5%90%8D-%E8%AF%B7%E5%96%9D%E5%92%96%E5%95%A1-orange?style=for-the-badge&logo=coffeescript&logoColor=white" /></a>
+  <a href="https://github.com/Hypostasis-Cat/HypoMux"><img alt="匿名，咖啡支持" src="https://img.shields.io/badge/%E5%8C%BF%E5%90%8D-%E8%AF%B7%E5%96%9D%E5%92%96%E5%95%A1-orange?style=for-the-badge&logo=coffeescript&logoColor=white" /></a>
+  <a href="https://github.com/Hypostasis-Cat/HypoMux"><img alt="匿名，特别鸣谢" src="https://img.shields.io/badge/%E5%8C%BF%E5%90%8D-%E7%BB%99%E7%8C%AB%E5%92%AA%E5%8F%91%E7%94%B5-DCD0FF?style=for-the-badge&logo=github-sponsors&logoColor=6A5ACD&labelColor=E6E6FA" /></a>
+  <a href="https://github.com/Hypostasis-Cat/HypoMux"><img alt="匿名，特别鸣谢" src="https://img.shields.io/badge/%E5%8C%BF%E5%90%8D-%E7%BB%99%E7%8C%AB%E5%92%AA%E5%8F%91%E7%94%B5-DCD0FF?style=for-the-badge&logo=github-sponsors&logoColor=6A5ACD&labelColor=E6E6FA" /></a>
+  <a href="https://github.com/Hypostasis-Cat/HypoMux"><img alt="匿名，咖啡支持" src="https://img.shields.io/badge/%E5%8C%BF%E5%90%8D-%E8%AF%B7%E5%96%9D%E5%92%96%E5%95%A1-orange?style=for-the-badge&logo=coffeescript&logoColor=white" /></a>
+  <a href="https://github.com/Hypostasis-Cat/HypoMux"><img alt="廾阁，咖啡支持" src="https://img.shields.io/badge/%E5%BB%BE%E9%98%81-%E8%AF%B7%E5%96%9D%E5%92%96%E5%95%A1-orange?style=for-the-badge&logo=coffeescript&logoColor=white" /></a>
+  <a href="https://github.com/Hypostasis-Cat/HypoMux"><img alt="六花 DY，特别鸣谢" src="https://img.shields.io/badge/%E5%85%AD%E8%8A%B1%20DY-%E7%BB%99%E7%8C%AB%E5%92%AA%E5%8F%91%E7%94%B5-DCD0FF?style=for-the-badge&logo=github-sponsors&logoColor=6A5ACD&labelColor=E6E6FA" /></a>
+  <a href="https://github.com/Hypostasis-Cat/HypoMux"><img alt="匿名，咖啡支持" src="https://img.shields.io/badge/%E5%8C%BF%E5%90%8D-%E8%AF%B7%E5%96%9D%E5%92%96%E5%95%A1-orange?style=for-the-badge&logo=coffeescript&logoColor=white" /></a>
+  <a href="https://github.com/Hypostasis-Cat/HypoMux"><img alt="匿名，咖啡支持" src="https://img.shields.io/badge/%E5%8C%BF%E5%90%8D-%E8%AF%B7%E5%96%9D%E5%92%96%E5%95%A1-orange?style=for-the-badge&logo=coffeescript&logoColor=white" /></a>
+  <a href="https://github.com/Hypostasis-Cat/HypoMux"><img alt="匿名，咖啡支持" src="https://img.shields.io/badge/%E5%8C%BF%E5%90%8D-%E8%AF%B7%E5%96%9D%E5%92%96%E5%95%A1-orange?style=for-the-badge&logo=coffeescript&logoColor=white" /></a>
+  <a href="https://github.com/Hypostasis-Cat/HypoMux"><img alt="匿名，咖啡支持" src="https://img.shields.io/badge/%E5%8C%BF%E5%90%8D-%E8%AF%B7%E5%96%9D%E5%92%96%E5%95%A1-orange?style=for-the-badge&logo=coffeescript&logoColor=white" /></a>
+  <a href="https://github.com/Hypostasis-Cat/HypoMux"><img alt="匿名，咖啡支持" src="https://img.shields.io/badge/%E5%8C%BF%E5%90%8D-%E8%AF%B7%E5%96%9D%E5%92%96%E5%95%A1-orange?style=for-the-badge&logo=coffeescript&logoColor=white" /></a>
+  <a href="https://github.com/Hypostasis-Cat/HypoMux"><img alt="匿名，咖啡支持" src="https://img.shields.io/badge/%E5%8C%BF%E5%90%8D-%E8%AF%B7%E5%96%9D%E5%92%96%E5%95%A1-orange?style=for-the-badge&logo=coffeescript&logoColor=white" /></a>
+  <a href="https://github.com/Hypostasis-Cat/HypoMux"><img alt="SK，咖啡支持" src="https://img.shields.io/badge/SK-%E8%AF%B7%E5%96%9D%E5%92%96%E5%95%A1-orange?style=for-the-badge&logo=coffeescript&logoColor=white" /></a>
+  <a href="https://github.com/Hypostasis-Cat/HypoMux"><img alt="WZLN，咖啡支持" src="https://img.shields.io/badge/WZLN-%E8%AF%B7%E5%96%9D%E5%92%96%E5%95%A1-orange?style=for-the-badge&logo=coffeescript&logoColor=white" /></a>
+  <a href="https://github.com/Hypostasis-Cat/HypoMux"><img alt="幸運上上簽，咖啡支持" src="https://img.shields.io/badge/%E5%B9%B8%E9%81%8B%E4%B8%8A%E4%B8%8A%E7%B1%A4-%E8%AF%B7%E5%96%9D%E5%92%96%E5%95%A1-orange?style=for-the-badge&logo=coffeescript&logoColor=white" /></a>
+  <a href="https://github.com/Hypostasis-Cat/HypoMux"><img alt="匿名，特别鸣谢" src="https://img.shields.io/badge/%E5%8C%BF%E5%90%8D-%E7%BB%99%E7%8C%AB%E5%92%AA%E5%8F%91%E7%94%B5-DCD0FF?style=for-the-badge&logo=github-sponsors&logoColor=6A5ACD&labelColor=E6E6FA" /></a>
+  <a href="https://github.com/Hypostasis-Cat/HypoMux"><img alt="匿名，特别鸣谢" src="https://img.shields.io/badge/%E5%8C%BF%E5%90%8D-%E7%BB%99%E7%8C%AB%E5%92%AA%E5%8F%91%E7%94%B5-DCD0FF?style=for-the-badge&logo=github-sponsors&logoColor=6A5ACD&labelColor=E6E6FA" /></a>
+  <a href="https://github.com/Hypostasis-Cat/HypoMux"><img alt="匿名，咖啡支持" src="https://img.shields.io/badge/%E5%8C%BF%E5%90%8D-%E8%AF%B7%E5%96%9D%E5%92%96%E5%95%A1-orange?style=for-the-badge&logo=coffeescript&logoColor=white" /></a>
+  <a href="https://github.com/Hypostasis-Cat/HypoMux"><img alt="HEDE WANG，咖啡支持" src="https://img.shields.io/badge/HEDE%20WANG-%E8%AF%B7%E5%96%9D%E5%92%96%E5%95%A1-orange?style=for-the-badge&logo=coffeescript&logoColor=white" /></a>
+</p>
 
 ##  Star 历史趋势 / Star History
 
