@@ -28,7 +28,7 @@ import struct
 import threading
 import time
 from ctypes import wintypes
-from typing import List, Dict, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 from urllib.parse import urlsplit
 
 import psutil
@@ -86,6 +86,18 @@ TCP_TABLE_OWNER_PID_ALL = 5
 ERROR_INSUFFICIENT_BUFFER = 122
 NO_ERROR = 0
 
+# 这些 WinSock 错误代表本地接口/路由已失效，而不是目标网站拒绝连接。
+# 仅对它们执行短时熔断，避免单个 CDN 或远端服务故障被误判为整张网卡故障。
+_LOCAL_LINK_FAILURE_CODES = {10049, 10050, 10051, 10065, 1231, 1232}
+_LINK_FAILURE_COOLDOWN_SECONDS = 15.0
+
+
+def _is_local_link_failure(error: Exception) -> bool:
+    """判断连接失败是否明确由本地网卡断开或路由消失引起。"""
+    if not isinstance(error, OSError):
+        return False
+    return getattr(error, "winerror", None) in _LOCAL_LINK_FAILURE_CODES
+
 
 class MIB_TCPROW_OWNER_PID(ctypes.Structure):
     _fields_ = [
@@ -119,33 +131,57 @@ class RoundRobinBalancer:
         self._lock = threading.Lock()
         # 按网卡 name 统计实时活跃连接数
         self._active: Dict[str, int] = {nic["name"]: 0 for nic in self.nics}
+        self._unavailable_until: Dict[str, float] = {}
 
     def get_next_nic(self) -> Dict:
         with self._lock:
-            nic = self.nics[self._current]
-            self._current = (self._current + 1) % len(self.nics)
-            return nic
+            now = time.monotonic()
+            fallback = None
+            for _ in range(len(self.nics)):
+                nic = self.nics[self._current]
+                self._current = (self._current + 1) % len(self.nics)
+                fallback = fallback or nic
+                if self._unavailable_until.get(nic["name"], 0) <= now:
+                    return nic
+            return fallback
 
-    def get_next_nic_for_domain(self, domain: str) -> Dict:
+    def get_next_nic_for_domain(
+        self,
+        domain: str,
+        exclude_names: Optional[set[str]] = None,
+    ) -> Optional[Dict]:
         """为指定域名分配网卡，自动跳过被墙网卡。
 
-        如果所有网卡都被墙，回退到普通轮询（不阻断连接）。
+        `exclude_names` 仅供尚未建立的连接故障切换使用；调用方可以据此
+        安全地请求另一张物理网卡，绝不会影响已经建立的会话。
         """
         tracker = get_tracker()
-        if not tracker.enabled or not domain:
-            return self.get_next_nic()
+        excluded = exclude_names or set()
 
         with self._lock:
+            fallback = None
+            unavailable_fallback = None
+            now = time.monotonic()
             attempts = len(self.nics)
             for _ in range(attempts):
                 nic = self.nics[self._current]
                 self._current = (self._current + 1) % len(self.nics)
-                if not tracker.is_blocked(nic["name"], domain):
+                if nic["name"] in excluded:
+                    continue
+                if self._unavailable_until.get(nic["name"], 0) > now:
+                    unavailable_fallback = unavailable_fallback or nic
+                    continue
+                if fallback is None:
+                    fallback = nic
+                if (
+                    not tracker.enabled
+                    or not domain
+                    or not tracker.is_blocked(nic["name"], domain)
+                ):
                     return nic
-            # 全部被墙，不回退 get_next_nic()（避免重入锁死锁），直接取下一张
-            nic = self.nics[self._current]
-            self._current = (self._current + 1) % len(self.nics)
-            return nic
+            # 全部被墙时仍允许首选候选尝试；但故障切换排除了所有网卡时，
+            # 返回 None，防止把同一张失败网卡再次交给当前连接。
+            return fallback or unavailable_fallback
 
     def on_connect(self, nic_name: str):
         with self._lock:
@@ -155,6 +191,17 @@ class RoundRobinBalancer:
         with self._lock:
             if self._active.get(nic_name, 0) > 0:
                 self._active[nic_name] -= 1
+
+    def mark_temporarily_unavailable(self, nic_name: str):
+        """本地链路断开时暂时跳过该网卡；无需后台探测，超时后自动恢复。"""
+        with self._lock:
+            self._unavailable_until[nic_name] = (
+                time.monotonic() + _LINK_FAILURE_COOLDOWN_SECONDS
+            )
+
+    def on_connect_success(self, nic_name: str):
+        with self._lock:
+            self._unavailable_until.pop(nic_name, None)
 
     def active_connections(self) -> Dict[str, int]:
         with self._lock:
@@ -165,11 +212,12 @@ class RoundRobinBalancer:
 # L4 连接调度器 (WeightedBalancer)
 # ==========================================
 class WeightedBalancer:
-    """按用户设定的相对权重做加权随机分配。
+    """按用户设定的相对权重做平滑加权轮询。
 
     权重计算：nic_weight = schedule_weight / total_schedule_weight。
     该值只影响新连接的分配概率，不会对网卡进行带宽限速。
-    随机选择：按权重累计概率分布选取网卡。
+    平滑轮询会在短窗口内稳定地贴近用户比例，避免加权随机在少量并发
+    连接时连续命中同一张网卡而造成瞬时拥塞。
     兼容 RoundRobinBalancer 的全部接口（get_next_nic / get_next_nic_for_domain
     / on_connect / on_disconnect / active_connections）。
     """
@@ -180,58 +228,63 @@ class WeightedBalancer:
         self.nics: List[Dict] = [dict(nic) for nic in selected_nics]
         self._lock = threading.Lock()
         self._active: Dict[str, int] = {nic["name"]: 0 for nic in self.nics}
+        self._unavailable_until: Dict[str, float] = {}
         self._bandwidth: Dict[str, int] = {}
         for nic in self.nics:
             name = nic["name"]
             self._bandwidth[name] = max(int(bandwidth_limits.get(name, 0) or 0), 1)
-        self._recalc_cdf()
+        self._current_weight: Dict[str, int] = {nic["name"]: 0 for nic in self.nics}
 
-    def _recalc_cdf(self):
-        """重算累计概率分布（权重变化后调用）。"""
-        names = [n["name"] for n in self.nics]
-        total = sum(self._bandwidth.get(name, 1) for name in names)
-        if total <= 0:
-            total = len(names)
-        self._cdf: List[float] = []
-        cumulative = 0.0
-        for name in names:
-            cumulative += max(self._bandwidth.get(name, 1), 1) / total
-            self._cdf.append(cumulative)
+    def _select_smooth_locked(self, candidates: List[Dict]) -> Optional[Dict]:
+        if not candidates:
+            return None
+        total = 0
+        selected = None
+        for nic in candidates:
+            name = nic["name"]
+            weight = self._bandwidth.get(name, 1)
+            total += weight
+            self._current_weight[name] = self._current_weight.get(name, 0) + weight
+            if selected is None or self._current_weight[name] > self._current_weight[selected["name"]]:
+                selected = nic
+        self._current_weight[selected["name"]] -= total
+        return selected
 
     def get_next_nic(self) -> Dict:
         with self._lock:
-            r = random.random()
-            for idx, nic in enumerate(self.nics):
-                if r <= self._cdf[idx]:
-                    return nic
-            return self.nics[-1]
+            now = time.monotonic()
+            candidates = [
+                nic for nic in self.nics
+                if self._unavailable_until.get(nic["name"], 0) <= now
+            ]
+            return self._select_smooth_locked(candidates or self.nics)
 
-    def get_next_nic_for_domain(self, domain: str) -> Dict:
-        """加权随机 + 自动跳过被墙网卡。"""
+    def get_next_nic_for_domain(
+        self,
+        domain: str,
+        exclude_names: Optional[set[str]] = None,
+    ) -> Optional[Dict]:
+        """平滑加权轮询，并自动跳过被墙或已失败的网卡。"""
         tracker = get_tracker()
-        if not tracker.enabled or not domain:
-            return self.get_next_nic()
+        excluded = exclude_names or set()
 
         with self._lock:
-            unblocked = [n for n in self.nics if not tracker.is_blocked(n["name"], domain)]
-            if not unblocked:
-                # 全部被墙，加权随机回退（不调用 get_next_nic() 避免重入锁死锁）
-                r = random.random()
-                for idx, nic in enumerate(self.nics):
-                    if r <= self._cdf[idx]:
-                        return nic
-                return self.nics[-1]
+            candidates = [n for n in self.nics if n["name"] not in excluded]
+            if not candidates:
+                return None
+            now = time.monotonic()
+            available = [
+                nic for nic in candidates
+                if self._unavailable_until.get(nic["name"], 0) <= now
+            ]
+            candidates = available or candidates
+            if not tracker.enabled or not domain:
+                return self._select_smooth_locked(candidates)
 
-            total = sum(self._bandwidth.get(n["name"], 1) for n in unblocked)
-            if total <= 0:
-                total = len(unblocked)
-            r = random.random()
-            cumulative = 0.0
-            for nic in unblocked:
-                cumulative += max(self._bandwidth.get(nic["name"], 1), 1) / total
-                if r <= cumulative:
-                    return nic
-            return unblocked[-1]
+            unblocked = [n for n in candidates if not tracker.is_blocked(n["name"], domain)]
+            if not unblocked:
+                return self._select_smooth_locked(candidates)
+            return self._select_smooth_locked(unblocked)
 
     def on_connect(self, nic_name: str):
         with self._lock:
@@ -242,9 +295,96 @@ class WeightedBalancer:
             if self._active.get(nic_name, 0) > 0:
                 self._active[nic_name] -= 1
 
+    def mark_temporarily_unavailable(self, nic_name: str):
+        with self._lock:
+            self._unavailable_until[nic_name] = (
+                time.monotonic() + _LINK_FAILURE_COOLDOWN_SECONDS
+            )
+
+    def on_connect_success(self, nic_name: str):
+        with self._lock:
+            self._unavailable_until.pop(nic_name, None)
+
     def active_connections(self) -> Dict[str, int]:
         with self._lock:
             return dict(self._active)
+
+
+async def _connect_with_one_failover(
+    *,
+    loop: asyncio.AbstractEventLoop,
+    balancer,
+    schedule_target: str,
+    dst_addr: str,
+    dst_port: int,
+    create_socket: Callable[[Dict], socket.socket],
+    upstream_sockets: set,
+    timeout: float,
+    on_failure: Callable[[Dict, Exception, str], None],
+    on_retry: Callable[[Dict, Exception], None],
+    first_nic: Optional[Dict] = None,
+) -> Tuple[socket.socket, Dict]:
+    """在业务数据尚未转发前，最多尝试两张不同网卡建立 TCP 连接。
+
+    这不是连接迁移：SOCKS/HTTP 成功响应会在本函数返回后才发送。因此失败
+    时释放的是尚未承载业务数据的半成品 socket，不会重复提交 HTTP 请求或
+    打断既有会话。
+    """
+    excluded: set[str] = set()
+    max_attempts = min(2, max(1, len(getattr(balancer, "nics", ()))))
+    last_error: Optional[Exception] = None
+
+    for attempt in range(max_attempts):
+        nic = first_nic if attempt == 0 and first_nic is not None else (
+            balancer.get_next_nic_for_domain(schedule_target, excluded)
+        )
+        if nic is None:
+            break
+
+        sock = None
+        balancer.on_connect(nic["name"])
+        failure_stage = "bind"
+        try:
+            sock = create_socket(nic)
+            upstream_sockets.add(sock)
+            failure_stage = "connect"
+            await asyncio.wait_for(
+                loop.sock_connect(sock, (dst_addr, dst_port)), timeout=timeout
+            )
+            balancer.on_connect_success(nic["name"])
+            return sock, nic
+        except asyncio.CancelledError:
+            if sock is not None:
+                try:
+                    sock.close()
+                except Exception:
+                    pass
+                upstream_sockets.discard(sock)
+            balancer.on_disconnect(nic["name"])
+            raise
+        except Exception as error:
+            last_error = error
+            excluded.add(nic["name"])
+            if _is_local_link_failure(error):
+                balancer.mark_temporarily_unavailable(nic["name"])
+            if sock is not None:
+                try:
+                    sock.close()
+                except Exception:
+                    pass
+                upstream_sockets.discard(sock)
+            balancer.on_disconnect(nic["name"])
+            try:
+                on_failure(nic, error, failure_stage)
+            except Exception:
+                pass
+            if attempt + 1 < max_attempts:
+                try:
+                    on_retry(nic, error)
+                except Exception:
+                    pass
+
+    raise ConnectionError("all selected adapters failed to connect") from last_error
 
 
 # ==========================================
@@ -661,64 +801,56 @@ class ProxyWorker(QThread):
                 upstream_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 upstream_sock.setblocking(False)
                 self._upstream_sockets.add(upstream_sock)
-            else:
-                # 3. 【L4 调度】在用户选中的网卡里轮询申请一张（自动规避被墙域名）
-                domain_for_schedule = dst_domain or dst_addr
-                nic = self.balancer.get_next_nic_for_domain(domain_for_schedule)
-                self.balancer.on_connect(nic["name"])
-                self.log_signal.emit(
-                    f"[调度分配] 新连接 -> [{nic['name']}] | 目标: {target_display}:{dst_port}"
-                )
-
-                # 4. 【L3 物理层绑定 -- 接口索引强绑定，根治 WinError 10049】
-                #    先 IP_UNICAST_IF 锁死出口网卡（if_index），再 bind 源地址。
-                try:
-                    upstream_sock = self._create_bound_upstream_socket(nic)
-                    self._upstream_sockets.add(upstream_sock)
-                except Exception as e:
-                    self.log_signal.emit(
-                        f"[绑定崩溃] 网卡: {nic['name']} 接口强绑定失败 "
-                        f"(IfIndex={nic.get('if_index', nic.get('index'))}): {e}。"
-                        f"请检查该网卡是否已被禁用或拔出！"
-                    )
-                    writer.close()
-                    if upstream_sock is not None:
-                        upstream_sock.close()
-                        self._upstream_sockets.discard(upstream_sock)
-                        upstream_sock = None
-                    return
-
-            # 5. 连接目标
-            try:
                 await asyncio.wait_for(
                     loop.sock_connect(upstream_sock, (dst_addr, dst_port)),
                     timeout=self.TCP_CONNECT_TIMEOUT,
                 )
-            except Exception as e:
-                if nic is None:
-                    pass
-                else:
+            else:
+                # 3. 【L4 调度】仅在建连成功前允许切换一次备用网卡。
+                domain_for_schedule = dst_domain or dst_addr
+                def on_failure(failed_nic, error, stage):
                     self.log_signal.emit(
-                        f"[连通失败] 网卡: {nic['name']} 无法连接目标 {target_display}: {e}"
+                        f"[{'连接' if stage == 'connect' else '绑定'}失败] 网卡: "
+                        f"{failed_nic['name']} -> {target_display}: "
+                        f"{type(error).__name__}: {error}"
                     )
-                    # 触发被墙目标后台验证（域名或纯 IP 均检测）
-                    target_for_check = dst_domain or dst_addr
-                    if target_for_check:
+                    if stage == "connect":
                         get_tracker().on_connect_failure(
-                            nic_name=nic["name"],
-                            domain=target_for_check,
+                            nic_name=failed_nic["name"],
+                            domain=domain_for_schedule,
                             port=dst_port,
-                            failed_nic=nic,
+                            failed_nic=failed_nic,
                             all_nics=self._selected_nics,
                             loop=self._loop,
                         )
-                writer.write(b"\x05\x05\x00\x01\x00\x00\x00\x00\x00\x00")
-                await writer.drain()
-                writer.close()
-                upstream_sock.close()
-                self._upstream_sockets.discard(upstream_sock)
-                upstream_sock = None
-                return
+
+                def on_retry(failed_nic, _error):
+                    self.log_signal.emit(
+                        f"[故障切换] [{failed_nic['name']}] 建连失败，"
+                        f"正在尝试另一张网卡: {target_display}:{dst_port}"
+                    )
+
+                try:
+                    upstream_sock, nic = await _connect_with_one_failover(
+                        loop=loop,
+                        balancer=self.balancer,
+                        schedule_target=domain_for_schedule,
+                        dst_addr=dst_addr,
+                        dst_port=dst_port,
+                        create_socket=self._create_bound_upstream_socket,
+                        upstream_sockets=self._upstream_sockets,
+                        timeout=self.TCP_CONNECT_TIMEOUT,
+                        on_failure=on_failure,
+                        on_retry=on_retry,
+                    )
+                except Exception:
+                    writer.write(b"\x05\x05\x00\x01\x00\x00\x00\x00\x00\x00")
+                    await writer.drain()
+                    writer.close()
+                    return
+                self.log_signal.emit(
+                    f"[调度分配] 新连接 -> [{nic['name']}] | 目标: {target_display}:{dst_port}"
+                )
 
             # 连接成功，回应 SOCKS5 客户端
             writer.write(b"\x05\x00\x00\x01\x00\x00\x00\x00\x00\x00")
@@ -891,32 +1023,46 @@ class ProxyWorker(QThread):
             nic = None
             upstream_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             upstream_sock.setblocking(False)
-        else:
-            nic = self.balancer.get_next_nic_for_domain(dst_host)
-            self.balancer.on_connect(nic["name"])
-            # 接口索引强绑定（IP_UNICAST_IF 先于 bind），根治同网段 WinError 10049
-            upstream_sock = self._create_bound_upstream_socket(nic)
-        self._upstream_sockets.add(upstream_sock)
-
-        try:
-            await asyncio.wait_for(
-                loop.sock_connect(upstream_sock, (dst_addr, dst_port)),
-                timeout=self.TCP_CONNECT_TIMEOUT,
-            )
-        except Exception:
-            if nic is not None:
-                self.balancer.on_disconnect(nic["name"])
-                get_tracker().on_connect_failure(
-                    nic_name=nic["name"],
-                    domain=dst_host,
-                    port=dst_port,
-                    failed_nic=nic,
-                    all_nics=self._selected_nics,
-                    loop=self._loop,
+            self._upstream_sockets.add(upstream_sock)
+            try:
+                await asyncio.wait_for(
+                    loop.sock_connect(upstream_sock, (dst_addr, dst_port)),
+                    timeout=self.TCP_CONNECT_TIMEOUT,
                 )
-            upstream_sock.close()
-            self._upstream_sockets.discard(upstream_sock)
-            raise
+            except Exception:
+                upstream_sock.close()
+                self._upstream_sockets.discard(upstream_sock)
+                raise
+        else:
+            def on_failure(failed_nic, _error, stage):
+                if stage == "connect":
+                    get_tracker().on_connect_failure(
+                        nic_name=failed_nic["name"],
+                        domain=dst_host,
+                        port=dst_port,
+                        failed_nic=failed_nic,
+                        all_nics=self._selected_nics,
+                        loop=self._loop,
+                    )
+
+            def on_retry(failed_nic, error):
+                self.log_signal.emit(
+                    f"[{protocol} 故障切换] [{failed_nic['name']}] 建连失败 "
+                    f"({type(error).__name__})，正在尝试另一张网卡"
+                )
+
+            upstream_sock, nic = await _connect_with_one_failover(
+                loop=loop,
+                balancer=self.balancer,
+                schedule_target=dst_host,
+                dst_addr=dst_addr,
+                dst_port=dst_port,
+                create_socket=self._create_bound_upstream_socket,
+                upstream_sockets=self._upstream_sockets,
+                timeout=self.TCP_CONNECT_TIMEOUT,
+                on_failure=on_failure,
+                on_retry=on_retry,
+            )
 
         target_display = f"{dst_host}({dst_addr})"
         if nic is None:
@@ -1899,8 +2045,13 @@ class MultiPortProxyWorker(QThread):
                 await self._start_udp_associate(reader, writer, balancer, channel)
                 return
 
+            # 域名解析必须先选定一张网卡，避免 FakeIP/系统 DNS 让解析走错出口；
+            # TCP 建连本身随后仍可在未转发业务数据前切换一次备用网卡。
             nic = balancer.get_next_nic_for_domain(dst_domain or dst_addr)
-            balancer.on_connect(nic["name"])
+            if nic is None:
+                writer.close()
+                return
+            preferred_nic_name = nic["name"]
             if dst_domain:
                 try:
                     dst_addr = await self._resolve_domain_via_nic(dst_domain, nic, loop)
@@ -1913,41 +2064,54 @@ class MultiPortProxyWorker(QThread):
             self.log_signal.emit(
                 f"[出站池-{channel}][TCP] {nic['name']} -> {target_display}:{dst_port} ({dst_addr})"
             )
-            try:
-                upstream_sock = self._create_bound_upstream_socket(nic)
-                self._upstream_sockets.add(upstream_sock)
-            except Exception as e:
-                self.log_signal.emit(f"[出站池-{channel}][绑定崩溃] {nic['name']}: {e}")
-                writer.close()
-                return
 
-            try:
-                await asyncio.wait_for(
-                    loop.sock_connect(upstream_sock, (dst_addr, dst_port)),
-                    timeout=self.TCP_CONNECT_TIMEOUT,
-                )
-            except Exception as e:
+            def on_failure(failed_nic, error, stage):
                 self.log_signal.emit(
-                    f"[出站池-{channel}][连通失败] {nic['name']} -> {target_display}:{dst_port} "
-                    f"({dst_addr}) | {type(e).__name__}: {e}"
+                    f"[出站池-{channel}][{'连通' if stage == 'connect' else '绑定'}失败] "
+                    f"{failed_nic['name']} -> {target_display}:{dst_port} ({dst_addr}) | "
+                    f"{type(error).__name__}: {error}"
                 )
-                target_for_check = dst_domain or dst_addr
-                if target_for_check:
+                if stage == "connect":
                     get_tracker().on_connect_failure(
-                        nic_name=nic["name"],
-                        domain=target_for_check,
+                        nic_name=failed_nic["name"],
+                        domain=dst_domain or dst_addr,
                         port=dst_port,
-                        failed_nic=nic,
+                        failed_nic=failed_nic,
                         all_nics=self._selected_nics,
                         loop=self._loop,
                     )
+
+            def on_retry(failed_nic, _error):
+                self.log_signal.emit(
+                    f"[出站池-{channel}][故障切换] [{failed_nic['name']}] 建连失败，"
+                    "正在尝试另一张网卡"
+                )
+
+            try:
+                upstream_sock, nic = await _connect_with_one_failover(
+                    loop=loop,
+                    balancer=balancer,
+                    schedule_target=dst_domain or dst_addr,
+                    dst_addr=dst_addr,
+                    dst_port=dst_port,
+                    create_socket=self._create_bound_upstream_socket,
+                    upstream_sockets=self._upstream_sockets,
+                    timeout=self.TCP_CONNECT_TIMEOUT,
+                    on_failure=on_failure,
+                    on_retry=on_retry,
+                    first_nic=nic,
+                )
+            except Exception:
                 writer.write(b"\x05\x05\x00\x01\x00\x00\x00\x00\x00\x00")
                 await writer.drain()
                 writer.close()
-                self._close_socket(upstream_sock)
-                self._upstream_sockets.discard(upstream_sock)
-                upstream_sock = None
                 return
+            if nic["name"] != preferred_nic_name:
+                self.log_signal.emit(
+                    f"[出站池-{channel}][故障切换成功] "
+                    f"{preferred_nic_name} -> {nic['name']} | "
+                    f"{target_display}:{dst_port}"
+                )
 
             writer.write(b"\x05\x00\x00\x01\x00\x00\x00\x00\x00\x00")
             await writer.drain()

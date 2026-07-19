@@ -10,22 +10,65 @@ HypoMux 关于页 (AboutPage) - 第四阶段任务3
 
 import os
 
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QPixmap
+from PySide6.QtCore import Qt, QThread, QTimer, QUrl, Signal
+from PySide6.QtGui import QDesktopServices, QPixmap
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QFrame,
+    QApplication, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QFrame,
 )
 from qfluentwidgets import (
     CardWidget, ElevatedCardWidget, TitleLabel, SubtitleLabel, StrongBodyLabel, BodyLabel,
-    HyperlinkButton, IconWidget, ImageLabel, SingleDirectionScrollArea,
+    IconWidget, ImageLabel, SingleDirectionScrollArea, PrimaryPushButton, PushButton, MessageBox,
     themeColor,
 )
 
 from ui.i18n import tr
 from ui.pages import resolve_icon
+from ui.popup_material import apply_mica_popup
+from utils.update_checker import (
+    ReleaseInfo, UpdateError, download_installer, fetch_latest_release, is_newer_version,
+)
 
 REPO_URL = "https://github.com/Hypostasis-Cat/HypoMux"
 QR_MAX_WIDTH = 180
+
+
+class ReleaseCheckWorker(QThread):
+    """Fetch GitHub release metadata off the GUI thread."""
+
+    release_ready = Signal(object)
+    failed = Signal(str)
+
+    def run(self):
+        try:
+            self.release_ready.emit(fetch_latest_release())
+        except UpdateError as exc:
+            self.failed.emit(str(exc))
+        except Exception:
+            self.failed.emit(tr("about_update_unknown_error"))
+
+
+class ReleaseDownloadWorker(QThread):
+    """Download the selected installer without blocking the About page."""
+
+    progress_changed = Signal(int, int)
+    installer_ready = Signal(str)
+    failed = Signal(str)
+
+    def __init__(self, release: ReleaseInfo, parent=None):
+        super().__init__(parent)
+        self._release = release
+
+    def run(self):
+        try:
+            installer = download_installer(
+                self._release,
+                progress=lambda downloaded, total: self.progress_changed.emit(downloaded, total),
+            )
+            self.installer_ready.emit(installer)
+        except UpdateError as exc:
+            self.failed.emit(str(exc))
+        except Exception:
+            self.failed.emit(tr("about_update_unknown_error"))
 
 
 def _project_root() -> str:
@@ -72,9 +115,15 @@ class PaymentCard(ElevatedCardWidget):
 class AboutPage(QWidget):
     """关于页：项目信息 + 赞助收款码。"""
 
+    info_message = Signal(str)
+    error_message = Signal(str)
+    install_ready = Signal(str)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("aboutPage")
+        self._check_worker = None
+        self._download_worker = None
         self._init_ui()
 
     def _init_ui(self):
@@ -114,15 +163,35 @@ class AboutPage(QWidget):
         name_row.addStretch()
         info_layout.addLayout(name_row)
 
-        self._version_label = BodyLabel(tr("settings_version"), info_card)
-        info_layout.addWidget(self._version_label)
+        version_row = QHBoxLayout()
+        version_row.setSpacing(8)
+        self._version_label = StrongBodyLabel(
+            tr("settings_version", version=self._current_version()), info_card
+        )
+        version_row.addWidget(self._version_label)
+        version_row.addStretch()
+        self._github_btn = PushButton(
+            resolve_icon("GITHUB", "LINK"), tr("about_open_github"), info_card
+        )
+        self._github_btn.setToolTip(REPO_URL)
+        self._github_btn.clicked.connect(
+            lambda: QDesktopServices.openUrl(QUrl(REPO_URL))
+        )
+        version_row.addWidget(self._github_btn)
+        self._check_update_btn = PrimaryPushButton(
+            resolve_icon("SYNC", "UPDATE"), tr("about_check_update"), info_card
+        )
+        self._check_update_btn.clicked.connect(self._check_for_updates)
+        version_row.addWidget(self._check_update_btn)
+        info_layout.addLayout(version_row)
+
+        self._update_status = BodyLabel("", info_card)
+        self._update_status.setVisible(False)
+        info_layout.addWidget(self._update_status)
 
         self._intro_label = BodyLabel(tr("about_intro"), info_card)
         self._intro_label.setWordWrap(True)
         info_layout.addWidget(self._intro_label)
-
-        self._repo_link = HyperlinkButton(REPO_URL, REPO_URL, info_card)
-        info_layout.addWidget(self._repo_link, 0, Qt.AlignLeft)
 
         self._info_card = info_card
 
@@ -215,9 +284,105 @@ class AboutPage(QWidget):
         accent = themeColor().name()
         self._sponsor_title.setTextColor(accent, accent)
 
+    @staticmethod
+    def _current_version() -> str:
+        app = QApplication.instance()
+        return (app.applicationVersion() if app is not None else "") or "0.0.0"
+
+    def _set_update_state(self, text: str = "", *, checking: bool = False):
+        self._check_update_btn.setEnabled(not checking)
+        self._check_update_btn.setText(
+            tr("about_checking_update") if checking else tr("about_check_update")
+        )
+        self._update_status.setText(text)
+        self._update_status.setVisible(bool(text))
+
+    def _check_for_updates(self):
+        if self._check_worker is not None:
+            return
+        self._set_update_state(tr("about_checking_update"), checking=True)
+        worker = ReleaseCheckWorker(self)
+        worker.release_ready.connect(self._on_release_checked)
+        worker.failed.connect(self._on_update_check_failed)
+        worker.finished.connect(self._finish_update_check)
+        worker.finished.connect(worker.deleteLater)
+        self._check_worker = worker
+        worker.start()
+
+    def _finish_update_check(self):
+        self._check_worker = None
+        if self._download_worker is None:
+            self._set_update_state()
+
+    def _on_update_check_failed(self, reason: str):
+        self.error_message.emit(tr("about_update_check_failed", error=reason))
+
+    def _on_release_checked(self, release: ReleaseInfo):
+        current = self._current_version()
+        if not is_newer_version(release.tag_name, current):
+            self.info_message.emit(tr("about_update_current", version=current))
+            return
+
+        notes = release.notes.strip()
+        if len(notes) > 900:
+            notes = f"{notes[:900].rstrip()}…"
+        content = tr(
+            "about_update_available_content",
+            current=current,
+            latest=release.tag_name.lstrip("vV"),
+            notes=notes or tr("about_update_notes_empty"),
+        )
+        dialog = MessageBox(tr("about_update_available_title"), content, self)
+        dialog.yesButton.setText(tr("about_update_now"))
+        dialog.cancelButton.setText(tr("about_update_later"))
+        apply_mica_popup(dialog)
+        if dialog.exec():
+            self._download_release(release)
+
+    def _download_release(self, release: ReleaseInfo):
+        if self._download_worker is not None:
+            return
+        self._set_update_state(tr("about_update_downloading", percent=0), checking=True)
+        worker = ReleaseDownloadWorker(release, self)
+        worker.progress_changed.connect(self._on_download_progress)
+        worker.installer_ready.connect(self._on_installer_ready)
+        worker.failed.connect(self._on_download_failed)
+        worker.finished.connect(self._finish_update_download)
+        worker.finished.connect(worker.deleteLater)
+        self._download_worker = worker
+        worker.start()
+
+    def _on_download_progress(self, downloaded: int, total: int):
+        if total <= 0:
+            return
+        percent = min(99, int(downloaded * 100 / total))
+        self._update_status.setText(tr("about_update_downloading", percent=percent))
+
+    def _on_installer_ready(self, installer_path: str):
+        self._update_status.setText(tr("about_update_installing"))
+        self.install_ready.emit(installer_path)
+
+    def _on_download_failed(self, reason: str):
+        self.error_message.emit(tr("about_update_download_failed", error=reason))
+
+    def _finish_update_download(self):
+        self._download_worker = None
+        self._set_update_state()
+
+    def prepare_for_shutdown(self):
+        """Avoid Qt destroying a still-running update worker during app exit."""
+        for worker in (self._check_worker, self._download_worker):
+            if worker is not None and worker.isRunning():
+                worker.wait(9000)
+
     def retranslate_ui(self):
         self._page_title.setText(tr("nav_about"))
-        self._version_label.setText(tr("settings_version"))
+        self._version_label.setText(
+            tr("settings_version", version=self._current_version())
+        )
+        if self._check_worker is None and self._download_worker is None:
+            self._check_update_btn.setText(tr("about_check_update"))
+        self._github_btn.setText(tr("about_open_github"))
         self._intro_label.setText(tr("about_intro"))
         self._notice_title.setText(tr("about_notice_title"))
         self._notice_text.setText(tr("about_notice_text"))

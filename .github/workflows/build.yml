@@ -1,4 +1,4 @@
-name: Build and Release
+name: Build Installer
 
 on:
   push:
@@ -57,6 +57,8 @@ jobs:
       - name: Build with Nuitka
         shell: pwsh
         run: |
+          # 让运行中的应用版本与 Git tag 一致，供 GitHub Release 更新检查比较。
+          Set-Content -Path "hypomux-version.txt" -Value "${{ steps.version.outputs.DISPLAY_VERSION }}" -NoNewline -Encoding ascii
           python -m nuitka `
             --standalone `
             --enable-plugin=pyside6 `
@@ -68,6 +70,7 @@ jobs:
             --file-description=HypoMux `
             --file-version=${{ steps.version.outputs.INNO_VERSION }} `
             --product-version=${{ steps.version.outputs.INNO_VERSION }} `
+            --include-data-file=hypomux-version.txt=hypomux-version.txt `
             --copyright="Copyright (C) 2026 Hypostasis-Cat" `
             --include-package-data=qfluentwidgets `
             --clean-cache=all `
@@ -105,30 +108,3 @@ jobs:
           name: HypoMux-Installer-${{ steps.version.outputs.VERSION }}
           path: Output/*.exe 
           if-no-files-found: error
-
-  release:
-    name: Create Release
-    needs: build
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v5
-
-      - name: Download artifact
-        uses: actions/download-artifact@v5
-        with:
-          name: HypoMux-Installer-${{ github.ref_name }}
-          path: ./output_dir
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          name: HypoMux ${{ github.ref_name }}
-          generate_release_notes: true
-          files: ./output_dir/*.exe 
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -217,6 +217,7 @@ class RoutingPage(QWidget):
         self._available_aliases: List[str] = []
         self._controls_enabled = True
         self._shutting_down = False
+        self._sorting_rules = False
         self._process_worker: Optional[ProcessListWorker] = None
         self._init_ui()
 
@@ -370,6 +371,8 @@ class RoutingPage(QWidget):
         edit.setPlaceholderText(tr("routing_placeholder_process"))
         edit.setText(process_name)
         edit.textChanged.connect(self._on_process_text_changed)
+        # 输入完成后再排序，避免用户每敲一个字符就跳动行位置。
+        edit.editingFinished.connect(self._sort_rules)
         edit.installEventFilter(self)
         edit.setEnabled(self._controls_enabled)
         self.tableWidget.setCellWidget(row, self.COL_PROCESS, edit)
@@ -444,6 +447,59 @@ class RoutingPage(QWidget):
         self._update_duplicate_state()
         self.rules_changed.emit()
 
+    def _sort_rules(self):
+        """按进程名排序，同时保留当前编辑/选中的规则。"""
+        if self._shutting_down or self._sorting_rules or self.tableWidget.rowCount() < 2:
+            return
+
+        rows = []
+        selected_names = set()
+        focused_name = ""
+        selected_rows = {index.row() for index in self.tableWidget.selectedIndexes()}
+        for row, edit in self._process_edits():
+            combo = self.tableWidget.cellWidget(row, self.COL_OUTBOUND)
+            if combo is None:
+                continue
+            name = edit.text().strip()
+            normalized = self._normalize_process_name(name)
+            if row in selected_rows:
+                selected_names.add(normalized)
+            if edit.hasFocus():
+                focused_name = normalized
+            rows.append((row, name, combo.currentData() or "aggregation"))
+
+        # 空白的新规则始终排在末尾；同名规则维持原先相对顺序，方便用户修复重复项。
+        sorted_rows = sorted(
+            rows,
+            key=lambda item: (
+                not self._normalize_process_name(item[1]),
+                self._normalize_process_name(item[1]),
+                item[0],
+            ),
+        )
+        if rows == sorted_rows:
+            return
+
+        self._sorting_rules = True
+        self.tableWidget.setUpdatesEnabled(False)
+        try:
+            self.tableWidget.setRowCount(0)
+            for _old_row, name, outbound in sorted_rows:
+                self._insert_row(name, outbound)
+        finally:
+            self.tableWidget.setUpdatesEnabled(True)
+            self._sorting_rules = False
+
+        for row, edit in self._process_edits():
+            normalized = self._normalize_process_name(edit.text())
+            if normalized == focused_name and focused_name:
+                self._focus_process_row(row)
+                break
+            if normalized in selected_names:
+                self.tableWidget.selectRow(row)
+        self._update_duplicate_state()
+        self._update_rule_count()
+
     def _find_process_row(self, process_name: str) -> int:
         target = self._normalize_process_name(process_name)
         if not target:
@@ -504,6 +560,7 @@ class RoutingPage(QWidget):
                     ))
                     return
                 self._insert_row(process, "aggregation")
+                self._sort_rules()
                 self.rules_changed.emit()
 
     @Slot(str)
@@ -595,11 +652,15 @@ class RoutingPage(QWidget):
             seen.add(normalized)
             tag = combo.currentData() or "aggregation"
             rules.append({"process_name": [name], "outbound": tag})
-        return rules
+        return sorted(
+            rules,
+            key=lambda rule: self._normalize_process_name(rule["process_name"][0]),
+        )
 
     def load_rules(self, rules: list):
         """从持久化配置恢复规则到表格。"""
         self.tableWidget.setRowCount(0)
+        normalized_rules = []
         for rule in (rules or []):
             if not isinstance(rule, dict):
                 continue
@@ -609,7 +670,12 @@ class RoutingPage(QWidget):
             )
             outbound = rule.get("outbound", "aggregation")
             if name:
-                self._insert_row(str(name), str(outbound))
+                normalized_rules.append((str(name), str(outbound)))
+        for name, outbound in sorted(
+            normalized_rules,
+            key=lambda item: self._normalize_process_name(item[0]),
+        ):
+            self._insert_row(name, outbound)
         self._update_duplicate_state()
         self._update_rule_count()
 

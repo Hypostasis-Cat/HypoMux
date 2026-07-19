@@ -1,16 +1,16 @@
 ; ============================================================================
-;  HypoMux 2.0 完全体最高规格标准安装脚本 (Inno Setup) - 最终完美修正版
+;  HypoMux 标准安装脚本
 ; ============================================================================
 
 #define MyAppName "HypoMux"
 ; 版本号优先由 CI 通过 iscc /D 注入；本地手动编译时回退到下方默认值。
-; MyAppVersion 为显示版本（可为 v2.0.0 / dev-abc123 等任意字符串）
+; MyAppVersion 为显示版本（可为 v2.1.1 / dev-abc123 等任意字符串）
 ; MyAppVersionInfo 为写入 EXE 文件版本信息的纯数字版本（必须是 x.x.x[.x]）
 #ifndef MyAppVersion
-  #define MyAppVersion "2.0.0"
+  #define MyAppVersion "2.1.1"
 #endif
 #ifndef MyAppVersionInfo
-  #define MyAppVersionInfo "2.0.0"
+  #define MyAppVersionInfo "2.1.1"
 #endif
 #define MyAppPublisher "Hypostasis-Cat"
 #define MyAppURL "https://github.com/Hypostasis-Cat/HypoMux"

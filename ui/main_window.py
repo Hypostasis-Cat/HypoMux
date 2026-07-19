@@ -17,6 +17,7 @@ QApplication 已存在，避免 "Must construct a QApplication before a QWidget"
 
 import ctypes
 import json
+import os
 import subprocess
 import sys
 import time
@@ -33,6 +34,7 @@ from utils.blocked_domain_tracker import get_tracker
 from utils.tun_manager import TunManager
 from utils import singbox_config
 from utils.acceleration_log import AccelerationLogStore
+from utils.update_checker import UpdateError, launch_installer_after_exit
 
 
 DEFAULT_SOCKS_PORT = 10800
@@ -145,7 +147,7 @@ def _first_valid_ipv4(raw) -> str:
 
 def create_main_window():
     """工厂函数：创建 MainWindow 实例（此时 QApplication 已存在）"""
-    from PySide6.QtCore import Qt, QThread, Signal, Slot, QTimer, QSettings, QRect, QRectF, QPoint
+    from PySide6.QtCore import Qt, QThread, Signal, Slot, QTimer, QSettings, QRect, QRectF, QPoint, QEvent
     from PySide6.QtGui import QIcon, QAction, QFont, QPainter, QColor, QCursor
     from PySide6.QtWidgets import QApplication, QSystemTrayIcon, QMenu, QWidget, QDialog, QVBoxLayout, QFileDialog
     from qfluentwidgets import (
@@ -712,6 +714,12 @@ def create_main_window():
             except Exception:
                 pass
 
+            # Qt 会在 Windows 外观切换时先更新应用调色板；但 QFluentWidgets
+            # 不会据此重载已注册控件的 QSS。安装应用级事件过滤器，确保
+            # “跟随系统”模式下的背景、文字、边框和云母效果同步切换。
+            self._system_theme_sync_pending = False
+            QApplication.instance().installEventFilter(self)
+
             # ===== 启动扫描 =====
             self.load_adapters()
             self._adapter_watch_timer.start()
@@ -722,6 +730,34 @@ def create_main_window():
             self._refresh_theme_sensitive_pages()
             QTimer.singleShot(80, self._refresh_theme_sensitive_pages)
             QTimer.singleShot(100, self._apply_mica_visual_state)
+
+        def eventFilter(self, watched, event):
+            """补全 QFluentWidgets 对 Windows 系统主题实时切换的样式刷新。"""
+            if (
+                watched is QApplication.instance()
+                and event.type() == QEvent.ApplicationPaletteChange
+            ):
+                self._queue_system_theme_sync()
+            return super().eventFilter(watched, event)
+
+        def _queue_system_theme_sync(self):
+            """在 Qt 完成系统调色板更新后，再按当前系统主题重建 QSS。"""
+            if self._system_theme_sync_pending or self._shutdown_started:
+                return
+            self._system_theme_sync_pending = True
+            QTimer.singleShot(0, self._sync_system_theme)
+
+        def _sync_system_theme(self):
+            self._system_theme_sync_pending = False
+            if qconfig.themeMode.value != Theme.AUTO:
+                return
+
+            # qconfig 的 AUTO 值本身没有变化时，setTheme() 不会重新解析
+            # darkdetect 的实际深浅色。先刷新实际主题，再发出标准主题信号，
+            # 最后调用 setTheme() 重载所有 QFluentWidgets 样式表并重设 Mica。
+            qconfig.theme = Theme.AUTO
+            qconfig.themeChanged.emit(Theme.AUTO)
+            setTheme(Theme.AUTO)
 
         def _apply_popup_material(self, dialog):
             """为项目内自定义弹窗应用统一云母材质。"""
@@ -881,6 +917,11 @@ def create_main_window():
             self.settings_page.mica_effect_changed.connect(self._set_mica_effect_enabled)
             self.settings_page.blocked_domain_settings_changed.connect(self._on_blocked_domain_settings_changed)
             self.settings_page.blocked_domains_requested.connect(self._open_blocked_domains_dialog)
+            # 关于页：更新检查只走 GitHub Release；下载完成后由主窗口负责
+            # 先安全回收网络内核、再退出并交给独立安装器替换文件。
+            self.about_page.info_message.connect(self.show_info)
+            self.about_page.error_message.connect(self.show_error)
+            self.about_page.install_ready.connect(self._install_downloaded_update)
 
             # 启动恢复：运行模式分段控件 + 路由规则表
             try:
@@ -943,6 +984,19 @@ def create_main_window():
                     self.tray_icon.hide()
                 self.close()
                 QApplication.quit()
+
+        def _install_downloaded_update(self, installer_path: str):
+            """安排已校验的安装包在主程序彻底退出后执行。"""
+            try:
+                launch_installer_after_exit(installer_path, os.getpid())
+            except UpdateError as exc:
+                self.show_error(tr("about_update_install_failed", error=exc))
+                return
+            except OSError as exc:
+                self.show_error(tr("about_update_install_failed", error=exc))
+                return
+            self._force_exit = True
+            self._exit_from_tray()
 
         # ---------- 国际化刷新 ----------
         def _on_language_changed(self, lang_code: str):
@@ -2121,6 +2175,10 @@ def create_main_window():
             self._adapter_watch_timer.stop()
             try:
                 self.routing_page.prepare_for_shutdown()
+            except Exception:
+                pass
+            try:
+                self.about_page.prepare_for_shutdown()
             except Exception:
                 pass
             try:
