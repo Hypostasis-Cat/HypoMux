@@ -16,14 +16,12 @@ HypoMux 网络工具模块 - Step 2
 
 import ctypes
 from ctypes import wintypes
-import os
 import sys
 import socket
 import subprocess
 import json
 import logging
 from typing import List, Dict, Optional, Tuple
-from pathlib import Path
 
 
 # ========== 日志配置 ==========

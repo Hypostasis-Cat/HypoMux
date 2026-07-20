@@ -18,7 +18,7 @@ import os
 
 from PySide6.QtCore import Qt, Signal, QSettings
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QFrame, QButtonGroup,
+    QWidget, QVBoxLayout, QFrame, QButtonGroup,
 )
 from qfluentwidgets import (
     SettingCard, SettingCardGroup, SwitchSettingCard, ComboBox, SpinBox,

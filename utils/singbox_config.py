@@ -254,6 +254,10 @@ def build_config(
     dns_server_config: Dict[str, Any] = {
         "type": "local",
         "tag": DNS_LOCAL_TAG,
+        # Do not let hijacked TUN DNS follow the Windows default NIC.  The
+        # aggregation SOCKS outbound reaches the Python pool, whose resolver
+        # sockets are pinned with IP_UNICAST_IF per selected adapter.
+        "detour": OUTBOUND_AGGREGATION,
     }
     fakeip_server_config: Dict[str, Any] = {
         "type": "fakeip",

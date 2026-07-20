@@ -57,7 +57,14 @@ def version_key(value: str) -> tuple[int, int, int, int] | None:
 def is_newer_version(candidate: str, current: str) -> bool:
     candidate_key = version_key(candidate)
     current_key = version_key(current)
-    return bool(candidate_key and current_key and candidate_key > current_key)
+    if candidate_key is None:
+        return False
+    # GitHub Actions 对 main 分支构建使用 dev-<commit> 版本。它不是正式
+    # 语义化版本，但应当可以升级到任意有效的正式 Release，既符合测试包
+    # 预期，也让更新流程可在发布前验证。
+    if (current or "").strip().lower().startswith("dev-"):
+        return True
+    return bool(current_key and candidate_key > current_key)
 
 
 def _request(url: str) -> Request:

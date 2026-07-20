@@ -15,6 +15,7 @@ MainWindow 仅作「后端宿主 + 调度中枢」：
 QApplication 已存在，避免 "Must construct a QApplication before a QWidget"。
 """
 
+import asyncio
 import ctypes
 import json
 import os
@@ -29,6 +30,7 @@ import winreg
 from utils.network_utils import scan_network_adapters
 from utils.config_manager import load_config, save_config
 from utils.diagnostic_runner import build_configuration_checks, run_diagnostic, DEFAULT_TARGET_IP
+from utils.socket_binding import probe_bound_tcp
 from proxy_worker import ProxyWorker, MultiPortProxyWorker
 from utils.blocked_domain_tracker import get_tracker
 from utils.tun_manager import TunManager
@@ -149,9 +151,9 @@ def create_main_window():
     """工厂函数：创建 MainWindow 实例（此时 QApplication 已存在）"""
     from PySide6.QtCore import Qt, QThread, Signal, Slot, QTimer, QSettings, QRect, QRectF, QPoint, QEvent
     from PySide6.QtGui import QIcon, QAction, QFont, QPainter, QColor, QCursor
-    from PySide6.QtWidgets import QApplication, QSystemTrayIcon, QMenu, QWidget, QDialog, QVBoxLayout, QFileDialog
+    from PySide6.QtWidgets import QApplication, QSystemTrayIcon, QMenu, QWidget, QVBoxLayout, QFileDialog
     from qfluentwidgets import (
-        FluentWindow, FluentWidget, NavigationItemPosition, InfoBar, InfoBarPosition,
+        FluentWindow, FluentWidget, InfoBar, InfoBarPosition,
         setThemeColor, setTheme, Theme, FluentIcon, qconfig, MessageBox,
     )
     setThemeColor("#0078d4")
@@ -283,7 +285,7 @@ def create_main_window():
             "log_steam_running": "[警告] 检测到 Steam 正在运行，请重启 Steam 客户端以使多链路加速完全生效。",
             "log_mode_changed": "[模式] 已切换为 {mode}",
             "log_tun_config_failed": "[TUN] 生成 sing-box 配置失败: {error}",
-            "log_tun_dns_plan": "[TUN] DNS 上游: 系统自动出口 | 进程直连规则: {paths}",
+            "log_tun_dns_plan": "[TUN] DNS 上游: aggregation 出站池（按网卡强绑定） | 进程直连规则: {paths}",
             "log_tun_pool_ready": "[TUN] 出站池 ready: {info}",
             "log_tun_pool_failed": "[TUN] 出站池启动失败: {message}",
             "log_tun_pool_timeout": "[TUN] 出站池启动超时，已取消虚拟网卡接管",
@@ -310,7 +312,7 @@ def create_main_window():
             "log_steam_running": "[Warning] Steam is running. Please restart the Steam client for multi-link acceleration to take full effect.",
             "log_mode_changed": "[Mode] Switched to {mode}",
             "log_tun_config_failed": "[TUN] Failed to generate sing-box config: {error}",
-            "log_tun_dns_plan": "[TUN] DNS upstream: automatic system outbound | Process direct rules: {paths}",
+            "log_tun_dns_plan": "[TUN] DNS upstream: aggregation outbound pool (NIC-pinned) | Process direct rules: {paths}",
             "log_tun_pool_ready": "[TUN] Outbound pool ready: {info}",
             "log_tun_pool_failed": "[TUN] Outbound pool startup failed: {message}",
             "log_tun_pool_timeout": "[TUN] Outbound pool startup timed out; Virtual NIC takeover was cancelled",
@@ -382,6 +384,7 @@ def create_main_window():
         result_ready = Signal(dict)
         all_finished = Signal()
         diag_error = Signal(str)
+        trace_ready = Signal(str)
 
         def __init__(self, adapters, target_ip=DEFAULT_TARGET_IP, parent=None):
             super().__init__(parent)
@@ -389,10 +392,9 @@ def create_main_window():
             self._target_ip = target_ip
 
         def run(self):
-            import asyncio as _asyncio
             try:
-                loop = _asyncio.new_event_loop()
-                _asyncio.set_event_loop(loop)
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
                 try:
                     loop.run_until_complete(self._run_all())
                 finally:
@@ -410,6 +412,28 @@ def create_main_window():
                         "avg_latency_ms": 0, "jitter_ms": 0,
                         "src_ip": nic.get("ip", ""), "note": str(e),
                     }
+                # IcmpSendEcho2Ex only accepts a source address.  A separate
+                # selected-interface TCP connect is the authoritative health
+                # result on multi-homed Windows hosts.
+                loop = asyncio.get_running_loop()
+                probe_ok, probe_detail = await loop.run_in_executor(
+                    None,
+                    probe_bound_tcp,
+                    nic,
+                    TunConnectivityWorker.PHYSICAL_ENDPOINTS,
+                    2.0,
+                    self.trace_ready.emit,
+                )
+                result["bound_tcp_ok"] = probe_ok
+                result["bound_tcp_detail"] = probe_detail
+                if probe_ok:
+                    result["status"] = "available"
+                    result["loss_rate"] = 0
+                    result["note"] = f"{result.get('note', '')}; bound TCP: {probe_detail}".strip("; ")
+                else:
+                    result["status"] = "unavailable"
+                    result["loss_rate"] = 100
+                    result["note"] = f"{result.get('note', '')}; bound TCP failed: {probe_detail}".strip("; ")
                 result["name"] = nic.get("name", nic.get("ip", ""))
                 result["ip"] = nic.get("ip", "")
                 result["checks"] = build_configuration_checks(nic, result)
@@ -526,34 +550,15 @@ def create_main_window():
 
         def _probe_physical(self) -> tuple[bool, str]:
             """用接口索引强绑定探测物理出口，作为 TUN 故障的对照组。"""
-            import socket
-            import struct
             failures = []
             for nic in self.adapters:
                 if self._cancelled:
                     return False, "cancelled"
                 name = str(nic.get("name") or nic.get("ip") or "unknown")
-                if_index = int(nic.get("if_index", nic.get("index", 0)) or 0)
-                local_ip = str(nic.get("ip") or "").strip()
-                for endpoint in self.PHYSICAL_ENDPOINTS:
-                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                    try:
-                        sock.settimeout(2.0)
-                        if if_index > 0:
-                            sock.setsockopt(
-                                socket.IPPROTO_IP, 31, struct.pack("!I", if_index)
-                            )
-                        if local_ip:
-                            sock.bind((local_ip, 0))
-                        sock.connect(endpoint)
-                        return True, f"physical {name} -> {endpoint[0]}:{endpoint[1]}"
-                    except Exception as e:
-                        failures.append(f"{name}/{endpoint[0]}: {type(e).__name__}")
-                    finally:
-                        try:
-                            sock.close()
-                        except Exception:
-                            pass
+                ok, detail = probe_bound_tcp(nic, self.PHYSICAL_ENDPOINTS)
+                if ok:
+                    return True, f"physical {name}: {detail}"
+                failures.append(f"{name}: {detail}")
             return False, "; ".join(failures[-6:]) or "no physical adapter"
 
         def run(self):
@@ -655,6 +660,7 @@ def create_main_window():
             self._force_exit = False
             self._engine_transitioning = False
             self._acceleration_log = AccelerationLogStore()
+            self._diagnostic_log_session = False
             self._adapter_snapshot = ()
             self._no_adapter_warning_shown = False
 
@@ -2116,11 +2122,22 @@ def create_main_window():
             if not selected:
                 self.show_warning(tr("diag_no_selection"))
                 return
+            self._diagnostic_log_session = False
+            if not self._acceleration_log.active:
+                self._acceleration_log.start(
+                    "adapter-diagnostic", (adapter["name"] for adapter in selected)
+                )
+                self._diagnostic_log_session = True
             self.tools_page.begin_running()
-            self.append_log(tr("diag_running",
-                                name=", ".join(n["name"] for n in selected)))
+            self.append_log(
+                tr("diag_running", name=", ".join(n["name"] for n in selected)),
+                force=True,
+            )
             self.diag_worker = DiagnosticWorker(selected, DEFAULT_TARGET_IP)
             self.diag_worker.result_ready.connect(self.on_diag_result)
+            self.diag_worker.trace_ready.connect(
+                lambda message: self.append_log(message, force=True)
+            )
             self.diag_worker.all_finished.connect(self.on_diag_finished)
             self.diag_worker.diag_error.connect(self.on_diag_error)
             self.diag_worker.start()
@@ -2140,7 +2157,11 @@ def create_main_window():
                 loss=result.get("loss_rate", 0),
                 jitter_label=tr("diag_metric_jitter"),
                 jitter=result.get("jitter_ms", 0),
-            ))
+            ), force=True)
+            self.append_log(
+                f"[health-tcp] adapter={name} result={result.get('bound_tcp_detail', '')}",
+                force=True,
+            )
 
         @Slot()
         def on_diag_finished(self):
@@ -2149,12 +2170,18 @@ def create_main_window():
                 if self.diag_worker.isRunning():
                     self.diag_worker.wait(2000)
                 self.diag_worker = None
+            if self._diagnostic_log_session:
+                self._acceleration_log.finish("diagnostic_completed")
+                self._diagnostic_log_session = False
 
         @Slot(str)
         def on_diag_error(self, message: str):
             self.tools_page.end_running()
             self.show_error(localize_runtime_message(message))
             self.diag_worker = None
+            if self._diagnostic_log_session:
+                self._acceleration_log.finish("diagnostic_error")
+                self._diagnostic_log_session = False
 
         # ========== 日志 ==========
         def append_log(self, message: str, *, force: bool = False):

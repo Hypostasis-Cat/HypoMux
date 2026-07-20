@@ -1,8 +1,7 @@
 """
 HypoMux 代理后端模块 - v2.0（SOCKS5 + HTTP 双协议无感接管）
 
-将 Phase 2 手搓验证通过的 asyncio SOCKS5 分发内核（proxy_core.py），
-重构为可无缝接入 PySide6 UI 的 QThread 后端。
+将 asyncio SOCKS5 分发内核重构为可无缝接入 PySide6 UI 的 QThread 后端。
 
 核心设计：
 - 网卡参数由 UI 在启动时通过 selected_nics 传入，绝不写死。
@@ -13,10 +12,9 @@ HypoMux 代理后端模块 - v2.0（SOCKS5 + HTTP 双协议无感接管）
     * traffic_signal(dict) -- 每秒发出一次各选中网卡的实时下行速度与连接数
 - 提供 stop()，从主线程安全地叫停子线程里的 asyncio loop（"停止加速"）。
 
-【神圣地基】handle_client 中的双保险物理绑定
-    upstream_sock.bind((nic['ip'], 0))
-    upstream_sock.setsockopt(socket.IPPROTO_IP, IP_UNICAST_IF, struct.pack("!I", nic['index']))
-以及前置异步 DNS 解析逻辑，均一字不差地继承自 Phase 2，不得改动。
+【物理绑定】所有实际出站 socket 经 utils.socket_binding 统一执行：
+    IP_UNICAST_IF（网络字节序）→ getsockopt 回读 → bind(source IP)
+任一环节失败即关闭 socket，绝不降级为依赖 Windows 默认路由。
 """
 
 import asyncio
@@ -36,6 +34,10 @@ from PySide6.QtCore import QThread, Signal
 
 from utils.network_utils import get_adapter_if_indices
 from utils.blocked_domain_tracker import get_tracker
+from utils.socket_binding import (
+    configure_bound_ipv4_socket,
+    log_connected_ipv4_socket,
+)
 
 
 def _is_winerror6_overlapped_cancel(context: dict) -> bool:
@@ -79,8 +81,6 @@ def _shutdown_event_loop(loop: asyncio.AbstractEventLoop):
     loop.close()
 
 
-# IPv4 下的 IP_UNICAST_IF：强制指定物理网卡出口，绕过 Windows 默认路由判定。
-IP_UNICAST_IF = 31
 AF_INET = 2
 TCP_TABLE_OWNER_PID_ALL = 5
 ERROR_INSUFFICIENT_BUFFER = 122
@@ -351,6 +351,7 @@ async def _connect_with_one_failover(
             await asyncio.wait_for(
                 loop.sock_connect(sock, (dst_addr, dst_port)), timeout=timeout
             )
+            log_connected_ipv4_socket(sock, nic, (dst_addr, dst_port), "proxy-tcp")
             balancer.on_connect_success(nic["name"])
             return sock, nic
         except asyncio.CancelledError:
@@ -471,31 +472,15 @@ class ProxyWorker(QThread):
     def _create_bound_upstream_socket(nic) -> socket.socket:
         """创建出站 TCP socket 并用 IP_UNICAST_IF 把它死锁在目标网卡上。
 
-        关键修复（WinError 10049）：先注入 IP_UNICAST_IF（IPPROTO_IP 级别，常量 31），
-        把出口物理网卡锁死在 nic['if_index'] 上，再执行 bind()。这样即便两张网卡
-        同处一个网段，内核也按接口索引而非默认路由选路，不会再 bind 命中错网卡。
-
-        IPv4 下 IP_UNICAST_IF 的接口索引必须为【网络字节序（大端）】，
-        故用 struct.pack('!I', if_index) 转换。
+        由统一工具执行 IP_UNICAST_IF（网络字节序）设置、回读校验和源
+        地址 bind；IfIndex 缺失、回读不一致或 bind 失败均不得降级。
         """
-        if_index = int(nic.get("if_index", nic.get("index", 0)) or 0)
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
             sock.setblocking(False)
-            # 1) 先注入接口索引强绑定（必须在 bind() 之前）
-            sock.setsockopt(
-                socket.IPPROTO_IP,
-                IP_UNICAST_IF,
-                struct.pack("!I", if_index),  # 大端 / 网络字节序
-            )
-            # 2) 再尝试 bind 到本地出口 IP（仅用于固定源地址）。即便失败，
-            #    上面的 IP_UNICAST_IF 已保证出口网卡正确，故 bind 失败可降级忽略。
-            local_ip = nic.get("ip")
-            if local_ip:
-                try:
-                    sock.bind((local_ip, 0))
-                except OSError:
-                    pass
+            # 拒绝 if_index=0、setsockopt 回读不一致或 source bind 失败；
+            # 这些情况不能降级为依赖 Windows 默认路由的 socket。
+            configure_bound_ipv4_socket(sock, nic, "proxy-tcp")
         except Exception:
             sock.close()
             raise
@@ -1554,17 +1539,10 @@ class MultiPortProxyWorker(QThread):
     @staticmethod
     def _create_bound_udp_socket(nic) -> socket.socket:
         """创建出站 UDP socket，并用物理接口索引锁定出口。"""
-        if_index = int(nic.get("if_index", nic.get("index", 0)) or 0)
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         try:
             sock.setblocking(False)
-            sock.setsockopt(socket.IPPROTO_IP, IP_UNICAST_IF, struct.pack("!I", if_index))
-            local_ip = nic.get("ip")
-            if local_ip:
-                try:
-                    sock.bind((local_ip, 0))
-                except OSError:
-                    pass
+            configure_bound_ipv4_socket(sock, nic, "proxy-udp")
         except Exception:
             sock.close()
             raise
@@ -1683,6 +1661,7 @@ class MultiPortProxyWorker(QThread):
             sock = self._create_bound_udp_socket(nic)
             self._upstream_sockets.add(sock)
             await loop.sock_sendto(sock, packet, (dns_server, 53))
+            log_connected_ipv4_socket(sock, nic, (dns_server, 53), "dns-udp")
             data, _remote = await asyncio.wait_for(
                 loop.sock_recvfrom(sock, 1232),
                 timeout=self.DNS53_TIMEOUT,
@@ -1714,6 +1693,7 @@ class MultiPortProxyWorker(QThread):
             sock = self._create_bound_upstream_socket(nic)
             self._upstream_sockets.add(sock)
             await asyncio.wait_for(loop.sock_connect(sock, (dns_server, 53)), timeout=self.DNS53_TIMEOUT)
+            log_connected_ipv4_socket(sock, nic, (dns_server, 53), "dns-tcp")
             await asyncio.wait_for(
                 loop.sock_sendall(sock, struct.pack("!H", len(packet)) + packet),
                 timeout=self.DNS53_TIMEOUT,
@@ -1747,6 +1727,7 @@ class MultiPortProxyWorker(QThread):
             sock = self._create_bound_upstream_socket(nic)
             sock.settimeout(connect_timeout)
             sock.connect((endpoint_ip, 443))
+            log_connected_ipv4_socket(sock, nic, (endpoint_ip, 443), "dns-doh")
             context = ssl.create_default_context()
             ssl_sock = context.wrap_socket(sock, server_hostname=host)
             ssl_sock.settimeout(io_timeout)

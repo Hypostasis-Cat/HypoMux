@@ -48,6 +48,11 @@ VersionInfoCompany={#MyAppPublisher}
 VersionInfoDescription={#MyAppName} Setup
 VersionInfoCopyright=Copyright (C) 2026 {#MyAppPublisher}
 ArchitecturesInstallIn64BitMode=x64compatible
+; 普通关闭请求会被 HypoMux 的“关闭到托盘”偏好拦截，导致 Restart
+; Manager 误判文件仍被占用。优先正常关闭；若未退出则由安装器强制关闭，
+; 避免覆盖安装需要用户手动点“重试”。应用内更新仍会先优雅退出。
+CloseApplications=force
+RestartApplications=no
 
 [Languages]
 ; 简体中文语言文件随仓库携带，避免 GitHub Actions runner 缺失语言包导致打包失败

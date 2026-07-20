@@ -181,12 +181,17 @@ class AboutPage(QWidget):
         self._check_update_btn = PrimaryPushButton(
             resolve_icon("SYNC", "UPDATE"), tr("about_check_update"), info_card
         )
+        # 按两种状态中较宽的文案锁定按钮宽度。否则右侧按钮以右边缘对齐时，
+        # 在“检查更新”与“正在检查…”之间切换会导致左边缘来回跳动。
+        self._lock_update_button_width()
         self._check_update_btn.clicked.connect(self._check_for_updates)
         version_row.addWidget(self._check_update_btn)
         info_layout.addLayout(version_row)
 
         self._update_status = BodyLabel("", info_card)
-        self._update_status.setVisible(False)
+        # 更新状态出现/消失时不能增减布局行，否则卡片里的版本、介绍等文字会
+        # 整体上下跳动。始终预留一行，只在需要时填入状态文案。
+        self._update_status.setFixedHeight(self._update_status.fontMetrics().height())
         info_layout.addWidget(self._update_status)
 
         self._intro_label = BodyLabel(tr("about_intro"), info_card)
@@ -289,13 +294,22 @@ class AboutPage(QWidget):
         app = QApplication.instance()
         return (app.applicationVersion() if app is not None else "") or "0.0.0"
 
+    def _lock_update_button_width(self):
+        """Keep the update action stationary while its status text changes."""
+        original_text = self._check_update_btn.text()
+        widths = []
+        for text in (tr("about_check_update"), tr("about_checking_update")):
+            self._check_update_btn.setText(text)
+            widths.append(self._check_update_btn.sizeHint().width())
+        self._check_update_btn.setText(original_text)
+        self._check_update_btn.setFixedWidth(max(widths))
+
     def _set_update_state(self, text: str = "", *, checking: bool = False):
         self._check_update_btn.setEnabled(not checking)
         self._check_update_btn.setText(
             tr("about_checking_update") if checking else tr("about_check_update")
         )
         self._update_status.setText(text)
-        self._update_status.setVisible(bool(text))
 
     def _check_for_updates(self):
         if self._check_worker is not None:
@@ -382,6 +396,7 @@ class AboutPage(QWidget):
         )
         if self._check_worker is None and self._download_worker is None:
             self._check_update_btn.setText(tr("about_check_update"))
+        self._lock_update_button_width()
         self._github_btn.setText(tr("about_open_github"))
         self._intro_label.setText(tr("about_intro"))
         self._notice_title.setText(tr("about_notice_title"))

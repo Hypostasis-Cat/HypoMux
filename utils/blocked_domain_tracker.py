@@ -21,9 +21,10 @@ import time
 from pathlib import Path
 from typing import Dict, Optional, Set, List
 
+from utils.socket_binding import configure_bound_ipv4_socket, log_connected_ipv4_socket
+
 logger = logging.getLogger(__name__)
 
-IP_UNICAST_IF = 31
 _VERIFY_RETRIES = 5
 _VERIFY_MIN_SUCCESS = 4
 _VERIFY_TIMEOUT = 5.0
@@ -288,25 +289,15 @@ class BlockedDomainTracker:
                 self._emit_log(f"[被墙检测] [{nic_name}] DNS解析失败: {dns_error}")
                 return False
 
-            if_index = int(nic.get("if_index", nic.get("index", 0)) or 0)
-            if not if_index:
-                self._emit_log(f"[被墙检测] [{nic_name}] 无有效 IfIndex")
-                return False
-
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.setblocking(False)
-            sock.setsockopt(socket.IPPROTO_IP, IP_UNICAST_IF, struct.pack("!I", if_index))
-            local_ip = nic.get("ip")
-            if local_ip:
-                try:
-                    sock.bind((local_ip, 0))
-                except OSError:
-                    pass
+            configure_bound_ipv4_socket(sock, nic, "blocked-domain-tcp")
 
             await asyncio.wait_for(
                 loop.sock_connect(sock, (dst_addr, test_port)),
                 timeout=_VERIFY_TIMEOUT,
             )
+            log_connected_ipv4_socket(sock, nic, (dst_addr, test_port), "blocked-domain-tcp")
             return True
         except asyncio.TimeoutError:
             self._emit_log(f"[被墙检测] [{nic_name}] TCP连接 {domain}:{test_port} 超时({_VERIFY_TIMEOUT}s)")
@@ -338,19 +329,13 @@ class BlockedDomainTracker:
         question = b"".join(bytes([len(label)]) + label for label in labels) + b"\x00"
         packet = struct.pack("!HHHHHH", query_id, 0x0100, 1, 0, 0, 0) + question + struct.pack("!HH", 1, 1)
 
-        if_index = int(nic.get("if_index", nic.get("index", 0)) or 0)
         sock = None
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             sock.setblocking(False)
-            sock.setsockopt(socket.IPPROTO_IP, IP_UNICAST_IF, struct.pack("!I", if_index))
-            local_ip = nic.get("ip")
-            if local_ip:
-                try:
-                    sock.bind((local_ip, 0))
-                except OSError:
-                    pass
+            configure_bound_ipv4_socket(sock, nic, "blocked-domain-dns")
             await loop.sock_sendto(sock, packet, ("223.5.5.5", 53))
+            log_connected_ipv4_socket(sock, nic, ("223.5.5.5", 53), "blocked-domain-dns")
             data, _remote = await asyncio.wait_for(loop.sock_recvfrom(sock, 512), timeout=3.0)
 
             if len(data) < 12:
