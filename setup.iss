@@ -16,6 +16,7 @@
 #define MyAppURL "https://github.com/Hypostasis-Cat/HypoMux"
 #define MyAppExeName "HypoMux.exe"
 #define MyAppRunValueName "HypoMux"
+#define MyAppUserModelID "hypostasiscat.hypomux.accelerator.v2"
 
 [Setup]
 AppId={{7637d353-b9c0-4145-bc81-7a474e534d07}
@@ -80,8 +81,14 @@ Source: "bin\libcronet.dll"; DestDir: "{app}\bin"; Flags: ignoreversion
 Source: "assets\icon.ico"; DestDir: "{app}\assets"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
-Name: "{commondesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; AppUserModelID: "{#MyAppUserModelID}"
+Name: "{commondesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; AppUserModelID: "{#MyAppUserModelID}"; Tasks: desktopicon
+
+[Registry]
+; QSystemTrayIcon 的 Windows 通知会以进程 AppUserModelID 为来源。没有该映射
+; 时通知中心会把内部 ID 直接显示为标题，而不是应用名称。
+Root: HKLM; Subkey: "Software\Classes\AppUserModelId\{#MyAppUserModelID}"; ValueType: string; ValueName: "DisplayName"; ValueData: "{#MyAppName}"; Flags: uninsdeletekeyifempty
+Root: HKLM; Subkey: "Software\Classes\AppUserModelId\{#MyAppUserModelID}"; ValueType: string; ValueName: "IconUri"; ValueData: "{app}\assets\icon.ico"; Flags: uninsdeletekeyifempty
 
 [Run]
 ; ---------- 计划任务自启机制 ----------
