@@ -8,11 +8,20 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      sign_with_test_certificate:
+        description: 'Submit the generated installer to SignPath test-signing'
+        required: true
+        type: boolean
+        default: false
 
 jobs:
   build:
     name: Build HypoMux (Python ${{ matrix.python-version }})
     runs-on: windows-2025
+    permissions:
+      actions: read
+      contents: read
     strategy:
       matrix:
         python-version: ['3.13'] 
@@ -94,6 +103,66 @@ jobs:
             throw "Expected dist\main.dist\HypoMux.exe was not found."
           }
 
+      # diagnostic.exe 由仓库内的 Rust 源码构建；不能复用仓库中已有的旧二进制。
+      - name: Build diagnostic core
+        shell: pwsh
+        run: |
+          cargo build --manifest-path hypomux-diagnostic\Cargo.toml --release
+          Copy-Item -Path "hypomux-diagnostic\target\release\diagnostic.exe" -Destination "diagnostic.exe" -Force
+
+      # SignPath 的默认 PE 构件配置一次只签一个 PE 文件。先签我们自己构建的程序，
+      # 再将签名后的文件封装进 Inno Setup 安装包，避免安装后主程序仍是未签名状态。
+      - name: Upload HypoMux executable for SignPath test signing
+        if: github.event_name == 'workflow_dispatch' && inputs.sign_with_test_certificate
+        id: upload-hypomux-executable
+        uses: actions/upload-artifact@v7
+        with:
+          path: dist/main.dist/HypoMux.exe
+          archive: false
+          if-no-files-found: error
+
+      - name: Sign HypoMux executable with SignPath test certificate
+        if: github.event_name == 'workflow_dispatch' && inputs.sign_with_test_certificate
+        uses: signpath/github-action-submit-signing-request@v2
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: 4463263d-e740-4262-ae16-7eac788453ea
+          project-slug: HypoMux
+          signing-policy-slug: test-signing
+          github-artifact-id: ${{ steps.upload-hypomux-executable.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: signed-hypomux
+          skip-decompress: true
+
+      - name: Upload diagnostic executable for SignPath test signing
+        if: github.event_name == 'workflow_dispatch' && inputs.sign_with_test_certificate
+        id: upload-diagnostic-executable
+        uses: actions/upload-artifact@v7
+        with:
+          path: diagnostic.exe
+          archive: false
+          if-no-files-found: error
+
+      - name: Sign diagnostic executable with SignPath test certificate
+        if: github.event_name == 'workflow_dispatch' && inputs.sign_with_test_certificate
+        uses: signpath/github-action-submit-signing-request@v2
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: 4463263d-e740-4262-ae16-7eac788453ea
+          project-slug: HypoMux
+          signing-policy-slug: test-signing
+          github-artifact-id: ${{ steps.upload-diagnostic-executable.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: signed-diagnostic
+          skip-decompress: true
+
+      - name: Use test-signed application executables
+        if: github.event_name == 'workflow_dispatch' && inputs.sign_with_test_certificate
+        shell: pwsh
+        run: |
+          Copy-Item -Path "signed-hypomux\HypoMux.exe" -Destination "dist\main.dist\HypoMux.exe" -Force
+          Copy-Item -Path "signed-diagnostic\diagnostic.exe" -Destination "diagnostic.exe" -Force
+
       # 呼叫 Windows 虚拟机自带的 Inno Setup 编译器打包安装包
       # 通过 /D 注入版本号：DISPLAY_VERSION 作显示/文件名，INNO_VERSION 作纯数字文件版本
       - name: Compile Installer with Inno Setup
@@ -107,6 +176,39 @@ jobs:
         with:
           name: HypoMux-Installer-${{ steps.version.outputs.VERSION }}
           path: Output/*.exe 
+          if-no-files-found: error
+
+      # 最后签外层安装包。测试签名只能从手动触发的工作流提交，防止测试证书产物进入正式 Release。
+      # archive: false 让 SignPath 的 PE 构件配置直接接收安装包，而不是 GitHub 包装的 ZIP。
+      - name: Upload installer for SignPath test signing
+        if: github.event_name == 'workflow_dispatch' && inputs.sign_with_test_certificate
+        id: upload-unsigned-installer
+        uses: actions/upload-artifact@v7
+        with:
+          path: Output/HypoMux_Setup_${{ steps.version.outputs.DISPLAY_VERSION }}.exe
+          archive: false
+          if-no-files-found: error
+
+      - name: Sign installer with SignPath test certificate
+        if: github.event_name == 'workflow_dispatch' && inputs.sign_with_test_certificate
+        id: signpath-test
+        uses: signpath/github-action-submit-signing-request@v2
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: 4463263d-e740-4262-ae16-7eac788453ea
+          project-slug: HypoMux
+          signing-policy-slug: test-signing
+          github-artifact-id: ${{ steps.upload-unsigned-installer.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: signed-installer
+          skip-decompress: true
+
+      - name: Upload SignPath test-signed installer
+        if: github.event_name == 'workflow_dispatch' && inputs.sign_with_test_certificate
+        uses: actions/upload-artifact@v7
+        with:
+          name: HypoMux-Test-Signed-${{ steps.version.outputs.VERSION }}
+          path: signed-installer/*.exe
           if-no-files-found: error
 
   release:
