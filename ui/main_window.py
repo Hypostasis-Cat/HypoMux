@@ -920,6 +920,9 @@ def create_main_window():
             self.settings_page.success_message.connect(self.show_success)
             self.settings_page.warning_message.connect(self.show_warning)
             self.settings_page.dns_changed.connect(self._on_dns_changed)
+            self.settings_page.force_tun_connectivity_bypass_changed.connect(
+                self._on_force_tun_connectivity_bypass_changed
+            )
             self.settings_page.mica_effect_changed.connect(self._set_mica_effect_enabled)
             self.settings_page.blocked_domain_settings_changed.connect(self._on_blocked_domain_settings_changed)
             self.settings_page.blocked_domains_requested.connect(self._open_blocked_domains_dialog)
@@ -1041,6 +1044,14 @@ def create_main_window():
             if self._tun_active:
                 self._regenerate_singbox_config()
 
+        def _on_force_tun_connectivity_bypass_changed(self, enabled: bool):
+            self._app_config["force_tun_connectivity_bypass"] = bool(enabled)
+            self._persist_config()
+
+        def _force_tun_connectivity_bypass_enabled(self) -> bool:
+            """Whether this run bypasses only external TUN connectivity probes."""
+            return bool(self._app_config.get("force_tun_connectivity_bypass", False))
+
         def _on_blocked_domain_settings_changed(self):
             self._persist_config()
             if self.blocked_page is not None:
@@ -1101,6 +1112,7 @@ def create_main_window():
                 "routing_rules": self._routing_rules,
                 "dns_server": self._app_config.get("dns_server", "223.5.5.5"),
                 "doh_provider": self._app_config.get("doh_provider", "auto"),
+                "force_tun_connectivity_bypass": self._force_tun_connectivity_bypass_enabled(),
                 "blocked_domain_bypass": get_tracker().enabled,
                 "blocked_domain_expiry": get_tracker().use_expiry,
                 "weighted_scheduler": self.home_page.is_weighted_scheduler(),
@@ -1644,6 +1656,13 @@ def create_main_window():
             if isinstance(sender, TunManager) and sender is not self._tun_manager:
                 return
             self._tun_kernel_ready = True
+            if self._force_tun_connectivity_bypass_enabled():
+                self.append_log(
+                    "[TUN][强制模式] 已跳过外部联网验证与运行期自动停机",
+                    force=True,
+                )
+                self._complete_tun_startup("强制模式：未执行外部联网验证")
+                return
             self.home_page.set_engine_startup_status(tr("tun_validating"))
             self.append_log(f"[TUN] {tr('tun_validating')}: {info}")
             if time.monotonic() - self._tun_last_connectivity_at < 30.0:
@@ -1677,15 +1696,25 @@ def create_main_window():
                 worker.cancel()
             self._tun_starting = False
             self._tun_health_failures = 0
-            self.append_log(f"[TUN][联网验证] 通过: {detail}", force=True)
+            if self._force_tun_connectivity_bypass_enabled():
+                self.append_log(f"[TUN][强制模式] 已启动: {detail}", force=True)
+            else:
+                self.append_log(f"[TUN][联网验证] 通过: {detail}", force=True)
             self._enter_boosting_ui()
             self.home_page.set_engine_state(True)
             self._finish_engine_transition()
-            self._tun_health_timer.start()
-            self.show_success(tr("tun_started"))
+            if not self._force_tun_connectivity_bypass_enabled():
+                self._tun_health_timer.start()
+                self.show_success(tr("tun_started"))
+            else:
+                self.show_warning(tr("tun_force_started"))
 
         def _start_tun_health_check(self, startup: bool = False):
             if not self._tun_active or self._tun_manager is None:
+                return
+            if self._force_tun_connectivity_bypass_enabled():
+                if startup:
+                    self._complete_tun_startup("强制模式：未执行外部联网验证")
                 return
             if self._tun_health_worker is not None:
                 if self._tun_health_worker.isRunning():
@@ -1736,6 +1765,9 @@ def create_main_window():
         def _on_tun_health_startup_timeout(self):
             if not self._tun_starting or not self._tun_active:
                 return
+            if self._force_tun_connectivity_bypass_enabled():
+                self._complete_tun_startup("强制模式：忽略启动联网验证超时")
+                return
             if time.monotonic() - self._tun_last_connectivity_at < 30.0:
                 self._complete_tun_startup("启动期间已收到真实上游数据")
                 return
@@ -1744,7 +1776,11 @@ def create_main_window():
             self._stop_tun_mode()
 
         def _run_periodic_tun_health_check(self):
-            if self._tun_active and not self._tun_starting:
+            if (
+                self._tun_active
+                and not self._tun_starting
+                and not self._force_tun_connectivity_bypass_enabled()
+            ):
                 self._start_tun_health_check(startup=False)
 
         @Slot(bool, bool, str)

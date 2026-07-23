@@ -79,6 +79,8 @@ def default_config() -> Dict[str, Any]:
         "routing_rules": [],
         "dns_server": DEFAULT_DNS_SERVER,
         "doh_provider": DEFAULT_DOH_PROVIDER,
+        # 特殊网络环境下允许 TUN 跳过外部联网探测；默认保持安全回滚。
+        "force_tun_connectivity_bypass": False,
         "blocked_domain_bypass": False,  # 自动规避单网卡被墙域名（默认关闭，仅特殊网络环境建议开启）
         "blocked_domain_expiry": True,  # 被墙黑名单自动过期
         "weighted_scheduler": False,    # 权重调度器
@@ -146,6 +148,12 @@ def _coerce_config(raw: Any) -> Dict[str, Any]:
 
     raw_doh = str(raw.get("doh_provider", DEFAULT_DOH_PROVIDER)).strip().lower()
     cfg["doh_provider"] = raw_doh if raw_doh in VALID_DOH_PROVIDERS else DEFAULT_DOH_PROVIDER
+
+    # 仅跳过 TUN 外部联网探测的自动停机，不跳过网卡预检、出站池启动或
+    # sing-box 异常回滚。
+    cfg["force_tun_connectivity_bypass"] = _coerce_bool(
+        raw.get("force_tun_connectivity_bypass"), False
+    )
 
     # blocked_domain_bypass：自动规避单网卡被墙域名
     cfg["blocked_domain_bypass"] = _coerce_bool(raw.get("blocked_domain_bypass"), False)

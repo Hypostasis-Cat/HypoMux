@@ -62,6 +62,7 @@ class SettingsPage(QWidget):
     mica_effect_changed = Signal(bool)
     blocked_domain_settings_changed = Signal()
     blocked_domains_requested = Signal()
+    force_tun_connectivity_bypass_changed = Signal(bool)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -220,6 +221,20 @@ class SettingsPage(QWidget):
 
         # ===== 分组3：高级网络 / 特殊网络环境 =====
         self.advanced_network_group = SettingCardGroup(tr("settings_advanced_network"), container)
+        self.force_tun_card = SwitchSettingCard(
+            resolve_icon("WARNING", "INFO", "ERROR"),
+            tr("settings_force_tun"),
+            tr("settings_force_tun_hint"),
+            parent=self.advanced_network_group,
+        )
+        self.force_tun_card.setChecked(
+            bool(app_config.get("force_tun_connectivity_bypass", False))
+        )
+        self.force_tun_card.checkedChanged.connect(
+            self._on_force_tun_connectivity_bypass_changed
+        )
+        self.advanced_network_group.addSettingCard(self.force_tun_card)
+
         tracker = get_tracker()
         self.blocked_enable_card = SwitchSettingCard(
             resolve_icon("BLOCK", "CANCEL", "CLOSE"),
@@ -375,6 +390,10 @@ class SettingsPage(QWidget):
         tracker.save()
         self.blocked_domain_settings_changed.emit()
 
+    def _on_force_tun_connectivity_bypass_changed(self, checked: bool):
+        """Persist through MainWindow so the active TUN lifecycle has one config source."""
+        self.force_tun_connectivity_bypass_changed.emit(bool(checked))
+
     def _on_blocked_expiry_changed(self, checked: bool):
         tracker = get_tracker()
         tracker.use_expiry = checked
@@ -409,6 +428,7 @@ class SettingsPage(QWidget):
         """运行中锁定会影响底层网络栈的设置项。"""
         self.dns_edit.setEnabled(enabled)
         self.doh_combo.setEnabled(enabled)
+        self.force_tun_card.setEnabled(enabled)
         self.blocked_enable_card.setEnabled(enabled)
         self.blocked_expiry_card.setEnabled(enabled)
         self.blocked_manage_card.setEnabled(enabled)
@@ -444,6 +464,8 @@ class SettingsPage(QWidget):
         self.doh_combo.setItemText(2, tr("settings_doh_dnspod"))
         self.doh_combo.setItemText(3, tr("settings_doh_google"))
         self.advanced_network_group.titleLabel.setText(tr("settings_advanced_network"))
+        self.force_tun_card.titleLabel.setText(tr("settings_force_tun"))
+        self.force_tun_card.contentLabel.setText(tr("settings_force_tun_hint"))
         self.blocked_enable_card.titleLabel.setText(tr("blocked_enable"))
         self.blocked_enable_card.contentLabel.setText(tr("blocked_enable_hint"))
         self.blocked_expiry_card.titleLabel.setText(tr("blocked_expiry_toggle"))
