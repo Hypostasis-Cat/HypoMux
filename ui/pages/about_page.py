@@ -16,11 +16,12 @@ from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QFrame,
 )
 from qfluentwidgets import (
-    CardWidget, ElevatedCardWidget, TitleLabel, SubtitleLabel, StrongBodyLabel, BodyLabel,
+    CardWidget, TitleLabel, SubtitleLabel, StrongBodyLabel, BodyLabel,
     IconWidget, ImageLabel, SingleDirectionScrollArea, PrimaryPushButton, PushButton, MessageBox,
     themeColor,
 )
 
+from ui.components import SurfaceCardWidget
 from ui.i18n import tr
 from ui.pages import resolve_icon
 from ui.popup_material import apply_mica_popup
@@ -76,7 +77,7 @@ def _project_root() -> str:
     return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
-class PaymentCard(ElevatedCardWidget):
+class PaymentCard(SurfaceCardWidget):
     """单个收款码卡片：标题 + 高画质缩放二维码。"""
 
     def __init__(self, title: str, rel_path: str, parent=None):

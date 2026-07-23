@@ -17,17 +17,19 @@ HypoMux 系统设置页 (SettingsPage) - 第三阶段 Fluent 换装
 import os
 
 from PySide6.QtCore import Qt, Signal, QSettings
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QFrame, QButtonGroup,
 )
 from qfluentwidgets import (
-    SettingCard, SettingCardGroup, SwitchSettingCard, ComboBox, SpinBox,
-    PushSettingCard, CaptionLabel, TitleLabel,
+    SettingCard, SettingCardGroup, ComboBox, SpinBox,
+    PushSettingCard, PushButton, CaptionLabel, TitleLabel,
     LineEdit,
-    RadioButton, SingleDirectionScrollArea, setTheme, Theme,
+    RadioButton, SingleDirectionScrollArea, setTheme, setThemeColor, Theme,
 )
 
 from ui.i18n import tr
+from ui.components import LocalizedColorPickerButton, LocalizedSwitchSettingCard
 from ui.pages import resolve_icon
 from utils.autostart import set_autostart, is_autostart_enabled
 from utils.config_manager import (
@@ -37,6 +39,7 @@ from utils.blocked_domain_tracker import get_tracker
 
 DEFAULT_SOCKS_PORT = 10800
 DEFAULT_HTTP_PORT = 10801
+DEFAULT_THEME_COLOR = "#0078d4"
 
 _THEME_MAP = {0: Theme.AUTO, 1: Theme.LIGHT, 2: Theme.DARK}
 _THEME_INDEX = {"auto": 0, "light": 1, "dark": 2}
@@ -58,6 +61,7 @@ class SettingsPage(QWidget):
     info_message = Signal(str)
     success_message = Signal(str)
     warning_message = Signal(str)
+    theme_color_changed = Signal()
     dns_changed = Signal(str, str)
     mica_effect_changed = Signal(bool)
     blocked_domain_settings_changed = Signal()
@@ -123,8 +127,63 @@ class SettingsPage(QWidget):
         self.theme_card.hBoxLayout.addSpacing(16)
         self.global_group.addSettingCard(self.theme_card)
 
+        # 主题色可在默认 Fluent 蓝与自定义强调色间切换。自定义颜色会保留，
+        # 因此切回自定义时无需重新选择。
+        saved_color = QColor(settings.value("theme_color", DEFAULT_THEME_COLOR, type=str))
+        if not saved_color.isValid():
+            saved_color = QColor(DEFAULT_THEME_COLOR)
+        saved_color_mode = settings.value("theme_color_mode", "", type=str)
+        if saved_color_mode not in {"default", "custom"}:
+            # 兼容第一个版本的主题色设置：非默认值视为用户已选的自定义色。
+            saved_color_mode = (
+                "custom" if saved_color.name().lower() != DEFAULT_THEME_COLOR else "default"
+            )
+        self._theme_color_mode = saved_color_mode
+        self.theme_color_card = SettingCard(
+            resolve_icon("PALETTE", "BRUSH", "CONSTRACT"),
+            tr("settings_theme_color"),
+            tr("settings_theme_color_hint"),
+            self.global_group,
+        )
+        self.theme_color_mode_combo = ComboBox(self.theme_color_card)
+        self.theme_color_mode_combo.addItem(
+            tr("settings_theme_color_default"), userData="default"
+        )
+        self.theme_color_mode_combo.addItem(
+            tr("settings_theme_color_custom"), userData="custom"
+        )
+        self.theme_color_mode_combo.setCurrentIndex(
+            self.theme_color_mode_combo.findData(saved_color_mode)
+        )
+        self.theme_color_picker = LocalizedColorPickerButton(
+            saved_color, tr("settings_theme_color"), self.theme_color_card
+        )
+        # 颜色按钮只用于复用 QFluentWidgets 的原生对话框；界面使用文字按钮，
+        # 避免在默认模式仍显示容易误导的自定义色块。
+        self.theme_color_picker.hide()
+        self.theme_color_picker.colorChanged.connect(self._on_theme_color_changed)
+        self.theme_color_choose_button = PushButton(
+            tr("settings_theme_color_choose"), self.theme_color_card
+        )
+        self.theme_color_choose_button.setEnabled(saved_color_mode == "custom")
+        self.theme_color_choose_button.clicked.connect(
+            self.theme_color_picker.open_color_dialog
+        )
+        self.theme_color_mode_combo.currentIndexChanged.connect(
+            self._on_theme_color_mode_changed
+        )
+        self.theme_color_card.hBoxLayout.addWidget(
+            self.theme_color_choose_button, 0, Qt.AlignRight
+        )
+        self.theme_color_card.hBoxLayout.addSpacing(8)
+        self.theme_color_card.hBoxLayout.addWidget(
+            self.theme_color_mode_combo, 0, Qt.AlignRight
+        )
+        self.theme_color_card.hBoxLayout.addSpacing(16)
+        self.global_group.addSettingCard(self.theme_color_card)
+
         # Windows 11 云母材质：默认开启；不支持的系统由主窗口安全降级。
-        self.mica_card = SwitchSettingCard(
+        self.mica_card = LocalizedSwitchSettingCard(
             resolve_icon("BRUSH", "PALETTE", "CONSTRACT"),
             tr("settings_mica_effect"),
             tr("settings_mica_effect_hint"),
@@ -221,7 +280,7 @@ class SettingsPage(QWidget):
 
         # ===== 分组3：高级网络 / 特殊网络环境 =====
         self.advanced_network_group = SettingCardGroup(tr("settings_advanced_network"), container)
-        self.force_tun_card = SwitchSettingCard(
+        self.force_tun_card = LocalizedSwitchSettingCard(
             resolve_icon("WARNING", "INFO", "ERROR"),
             tr("settings_force_tun"),
             tr("settings_force_tun_hint"),
@@ -236,7 +295,7 @@ class SettingsPage(QWidget):
         self.advanced_network_group.addSettingCard(self.force_tun_card)
 
         tracker = get_tracker()
-        self.blocked_enable_card = SwitchSettingCard(
+        self.blocked_enable_card = LocalizedSwitchSettingCard(
             resolve_icon("BLOCK", "CANCEL", "CLOSE"),
             tr("blocked_enable"),
             tr("blocked_enable_hint"),
@@ -246,7 +305,7 @@ class SettingsPage(QWidget):
         self.blocked_enable_card.checkedChanged.connect(self._on_blocked_enable_changed)
         self.advanced_network_group.addSettingCard(self.blocked_enable_card)
 
-        self.blocked_expiry_card = SwitchSettingCard(
+        self.blocked_expiry_card = LocalizedSwitchSettingCard(
             resolve_icon("HISTORY", "SYNC", "UPDATE"),
             tr("blocked_expiry_toggle"),
             tr("blocked_expiry_hint"),
@@ -271,7 +330,7 @@ class SettingsPage(QWidget):
         self.startup_group = SettingCardGroup(tr("settings_config_group"), container)
 
         # 开机自启（SwitchSettingCard）
-        self.autostart_card = SwitchSettingCard(
+        self.autostart_card = LocalizedSwitchSettingCard(
             resolve_icon("POWER_BUTTON", "EMBED", "APPLICATION"),
             tr("settings_autostart"), tr("settings_autostart_hint"),
             parent=self.startup_group
@@ -324,6 +383,37 @@ class SettingsPage(QWidget):
         settings.setValue("theme", theme_code)
         settings.sync()
         setTheme(_THEME_MAP.get(index, Theme.AUTO))
+
+    def _on_theme_color_changed(self, color):
+        """立即应用并持久化用户选定的 Fluent 主题色。"""
+        color = QColor(color)
+        if not color.isValid():
+            return
+        settings = QSettings("Hypostasis-Cat", "HypoMux")
+        settings.setValue("theme_color", color.name())
+        settings.sync()
+        if self._theme_color_mode != "custom":
+            return
+        setThemeColor(color)
+        self.theme_color_changed.emit()
+
+    def _on_theme_color_mode_changed(self, index):
+        """在默认 Fluent 蓝与保留的自定义主题色间即时切换。"""
+        color_mode = self.theme_color_mode_combo.itemData(index)
+        if color_mode not in {"default", "custom"}:
+            return
+
+        self._theme_color_mode = color_mode
+        self.theme_color_choose_button.setEnabled(color_mode == "custom")
+        settings = QSettings("Hypostasis-Cat", "HypoMux")
+        settings.setValue("theme_color_mode", color_mode)
+        settings.sync()
+        setThemeColor(
+            self.theme_color_picker.color
+            if color_mode == "custom"
+            else DEFAULT_THEME_COLOR
+        )
+        self.theme_color_changed.emit()
 
     def _on_mica_effect_changed(self, enabled: bool):
         settings = QSettings("Hypostasis-Cat", "HypoMux")
@@ -445,6 +535,20 @@ class SettingsPage(QWidget):
         self.theme_combo.setItemText(0, tr("settings_theme_auto"))
         self.theme_combo.setItemText(1, tr("settings_theme_light"))
         self.theme_combo.setItemText(2, tr("settings_theme_dark"))
+        self.theme_color_card.titleLabel.setText(tr("settings_theme_color"))
+        self.theme_color_card.contentLabel.setText(tr("settings_theme_color_hint"))
+        self.theme_color_mode_combo.setItemText(0, tr("settings_theme_color_default"))
+        self.theme_color_mode_combo.setItemText(1, tr("settings_theme_color_custom"))
+        self.theme_color_picker.title = tr("settings_theme_color")
+        self.theme_color_choose_button.setText(tr("settings_theme_color_choose"))
+        for card in (
+            self.mica_card,
+            self.force_tun_card,
+            self.blocked_enable_card,
+            self.blocked_expiry_card,
+            self.autostart_card,
+        ):
+            card.refresh_switch_text()
         self.mica_card.titleLabel.setText(tr("settings_mica_effect"))
         self.mica_card.contentLabel.setText(tr("settings_mica_effect_hint"))
         self.close_card.titleLabel.setText(tr("settings_close_behavior"))

@@ -18,9 +18,10 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QHeaderView
 from qfluentwidgets import (
     TableWidget, TitleLabel, BodyLabel, PushButton, TransparentPushButton,
     LineEdit, ComboBox, FluentIcon, MessageBoxBase, SearchLineEdit, ListWidget,
-    SubtitleLabel, CaptionLabel, ElevatedCardWidget, PrimaryPushButton,
+    SubtitleLabel, CaptionLabel, PrimaryPushButton,
 )
 
+from ui.components import SurfaceCardWidget
 from ui.i18n import tr
 from ui.popup_material import apply_mica_popup
 from qfluentwidgets.common.color import FluentSystemColor
@@ -233,7 +234,7 @@ class RoutingPage(QWidget):
         root.addWidget(self._hint)
 
         # 将操作收纳进卡片，避免少量按钮散落在整行两端。
-        self._toolbar_card = ElevatedCardWidget(self)
+        self._toolbar_card = SurfaceCardWidget(self)
         self._toolbar = QHBoxLayout(self._toolbar_card)
         self._toolbar.setContentsMargins(14, 10, 14, 10)
         self._toolbar.setSpacing(10)

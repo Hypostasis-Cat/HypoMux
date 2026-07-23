@@ -10,13 +10,14 @@ from typing import Dict, List
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QFrame, QSizePolicy
 from qfluentwidgets import (
-    ElevatedCardWidget, SwitchButton, StrongBodyLabel, SpinBox,
+    SwitchButton, StrongBodyLabel, SpinBox,
     BodyLabel, CaptionLabel, SubtitleLabel, DisplayLabel, CheckBox,
     PushButton, TransparentToolButton, InfoBadge, InfoLevel, IconWidget,
     SingleDirectionScrollArea, SmoothScrollArea, FluentIcon, themeColor, SegmentedWidget,
     HorizontalSeparator, ToolTipFilter, IndeterminateProgressRing,
 )
 
+from ui.components import SurfaceCardWidget
 from ui.i18n import tr
 
 
@@ -160,7 +161,7 @@ class AdapterRow(QWidget):
         self.update_health(self._last_status or "")
 
 
-class MetricCard(ElevatedCardWidget):
+class MetricCard(SurfaceCardWidget):
     """四宫格遥测小卡。"""
 
     def __init__(self, title_key: str, value: str, parent=None):
@@ -253,7 +254,7 @@ class HomePage(QWidget):
         page_layout.addWidget(scroll)
 
     def _build_engine_card(self) -> QWidget:
-        card = ElevatedCardWidget(self)
+        card = SurfaceCardWidget(self)
         card.setFixedHeight(236)
         layout = QHBoxLayout(card)
         layout.setContentsMargins(36, 24, 36, 24)
@@ -370,7 +371,7 @@ class HomePage(QWidget):
         return card
 
     def _build_adapters_card(self) -> QWidget:
-        card = ElevatedCardWidget(self)
+        card = SurfaceCardWidget(self)
         layout = QVBoxLayout(card)
         layout.setContentsMargins(20, 18, 20, 18)
         layout.setSpacing(12)

@@ -156,11 +156,21 @@ def create_main_window():
         FluentWindow, FluentWidget, InfoBar, InfoBarPosition,
         setThemeColor, setTheme, Theme, FluentIcon, qconfig, MessageBox,
     )
-    setThemeColor("#0078d4")
 
     # 启动即应用持久化主题（浅色/深色/跟随系统）
     _theme_settings = QSettings("Hypostasis-Cat", "HypoMux")
     _theme_map = {"auto": Theme.AUTO, "light": Theme.LIGHT, "dark": Theme.DARK}
+    _saved_theme_color = QColor(_theme_settings.value("theme_color", "#0078d4", type=str))
+    _saved_theme_color_mode = _theme_settings.value("theme_color_mode", "", type=str)
+    if _saved_theme_color_mode not in {"default", "custom"}:
+        _saved_theme_color_mode = (
+            "custom" if _saved_theme_color.name().lower() != "#0078d4" else "default"
+        )
+    setThemeColor(
+        _saved_theme_color
+        if _saved_theme_color_mode == "custom" and _saved_theme_color.isValid()
+        else "#0078d4"
+    )
     setTheme(_theme_map.get(_theme_settings.value("theme", "auto"), Theme.AUTO))
 
     from ui.i18n import tr
@@ -915,6 +925,7 @@ def create_main_window():
             self.routing_page.import_requested.connect(self.on_import_routing_rules)
             # 设置页
             self.settings_page.language_changed.connect(self._on_language_changed)
+            self.settings_page.theme_color_changed.connect(self._refresh_theme_sensitive_pages)
             self.settings_page.ports_changed.connect(self._on_settings_ports_changed)
             self.settings_page.info_message.connect(self.show_info)
             self.settings_page.success_message.connect(self.show_success)

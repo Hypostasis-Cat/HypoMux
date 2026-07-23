@@ -8,7 +8,7 @@ HypoMux 网络体检页 (ToolsPage)
 
 无缝接入第二阶段的 Rust 异步诊断内核 diagnostic.exe：
 - PrimaryPushButton 触发体检，IndeterminateProgressRing 指示运行态
-- 每张网卡一张 ElevatedCardWidget 结果卡：三色 InfoBadge + 丢包/延迟/抖动
+- 每张网卡一张静态 Fluent 结果卡：三色 InfoBadge + 丢包/延迟/抖动
 
 纯视图层：用户意图经 Qt 信号上抛，数据经公开方法回填。
 """
@@ -21,11 +21,12 @@ from PySide6.QtWidgets import (
 )
 from qfluentwidgets import (
     PrimaryPushButton, PushButton, TitleLabel, SubtitleLabel, BodyLabel,
-    CaptionLabel, StrongBodyLabel, ElevatedCardWidget, InfoBadge, InfoLevel,
+    CaptionLabel, StrongBodyLabel, InfoBadge, InfoLevel,
     IndeterminateProgressRing, IconWidget, FlowLayout,
     SingleDirectionScrollArea, TransparentToolButton, CheckBox, FluentIcon,
 )
 
+from ui.components import SurfaceCardWidget
 from ui.i18n import tr
 
 
@@ -36,7 +37,7 @@ _HEALTH_LEVEL = {
 }
 
 
-class SelectableNicCard(ElevatedCardWidget):
+class SelectableNicCard(SurfaceCardWidget):
     """体检页用的网卡选择卡片（轻量版，仅勾选 + 名称 + IP）。
 
     勾选变化通过 toggled 信号上抛，由 MainWindow 做跨屏双向同步。
@@ -94,7 +95,7 @@ class SelectableNicCard(ElevatedCardWidget):
         return self._alias
 
 
-class DiagResultCard(ElevatedCardWidget):
+class DiagResultCard(SurfaceCardWidget):
     """单张网卡体检结果卡片。"""
 
     def __init__(self, result: Dict, parent=None):
