@@ -27,6 +27,30 @@ In simpler terms, as long as your computer is connected to multiple networks at 
 
 ---
 
+## Sponsors
+
+<p align="center">
+  <a href="https://signpath.io/"><img src="support/SignPath/SignPath.png" alt="SignPath" height="38" /></a>&nbsp;&nbsp;
+  Free code signing provided by <a href="https://signpath.io/">SignPath.io</a>, certificate by <a href="https://signpath.org/">SignPath Foundation</a>.
+</p>
+
+### Code Signing Policy
+
+HypoMux is sincerely grateful to SignPath and the SignPath Foundation for supporting open-source software and helping us deliver a safer Windows download experience.
+
+The official Windows releases of HypoMux are built from this repository through GitHub Actions and submitted to SignPath for code signing. Users should download installers only from the [official GitHub Releases page](https://github.com/Hypostasis-Cat/HypoMux/releases/latest) and verify that signed releases show **SignPath Foundation** as the publisher.
+
+### Team roles
+
+* **Committer and reviewer:** [Hypostasis-Cat](https://github.com/Hypostasis-Cat), the project maintainer. Pull requests from non-committers must be reviewed by a project maintainer before merging.
+* **Approver:** [Hypostasis-Cat](https://github.com/Hypostasis-Cat). Each production signing request is manually approved in the SignPath UI before the signed artifact is retrieved.
+
+### Privacy policy
+
+HypoMux does not collect, sell, or upload personal data or telemetry. The program contacts other networked systems only to perform functionality requested by the user or the person operating it: forwarding the user's selected network traffic, checking or downloading an update from the official GitHub repository, and validating connectivity after Virtual NIC mode has been enabled.
+
+---
+
 ## ⬇️ Download
 
 > **Windows installer:** [Download the latest release](https://github.com/Hypostasis-Cat/HypoMux/releases/latest)
@@ -152,7 +176,7 @@ HypoMux's core distribution mechanism combines **Layer-4 application-level sched
 ```powershell
 venv\Scripts\activate
 pip install nuitka zstandard PySide6-Fluent-Widgets
-nuitka --standalone --onefile --enable-plugin=pyside6 --windows-console-mode=disable --windows-uac-admin --windows-icon-from-ico=assets/icon.ico --include-package-data=qfluentwidgets --include-data-dir=assets=assets --python-flag=-O --lto=yes main.py
+nuitka --standalone --onefile --enable-plugin=pyside6 --windows-console-mode=disable --windows-uac-admin --windows-icon-from-ico=assets/icon.ico --include-package-data=qfluentwidgets --include-data-dir=support=support --python-flag=-O --lto=yes main.py
 ```
 
 ---
@@ -207,7 +231,7 @@ HypoMux is an open-source project driven purely by technical passion, independen
 * **Regarding Feature Direction**: This project has a clear technical roadmap and architectural boundaries. All sponsorships are voluntary donations, and **sponsorship does not equate to commercial customization, nor can it directly determine or influence the direction of future feature development**.
 * **Regarding Disclaimer**: This project is open-sourced under the **AGPL-3.0** license. The software is provided "as is", and the author assumes no liability for any direct or indirect damages resulting from the use of this tool.
 
-###  Sponsors
+### Individual Supporters
 
 Thanks to all supporters who have injected energy into HypoMux:
 

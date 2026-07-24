@@ -1,7 +1,7 @@
 """
 HypoMux 关于页 (AboutPage) - 第四阶段任务3
 
-承载从设置页迁出的版本信息、项目介绍，以及大厂级赞助模块：
+承载从设置页迁出的版本信息、项目介绍、SignPath 代码签名致谢，以及赞助模块：
 两张并排 CardWidget 分别渲染微信(support/wei.png) 与 支付宝(support/zhi.jpg) 收款码。
 
 纯视图层，无任何后端依赖。全程使用 qfluentwidgets 原生组件，
@@ -31,6 +31,8 @@ from utils.update_checker import (
 
 REPO_URL = "https://github.com/Hypostasis-Cat/HypoMux"
 QR_MAX_WIDTH = 180
+SIGNPATH_LOGO_PATH = "support/SignPath/SignPath.png"
+SIGNPATH_LOGO_HEIGHT = 38
 
 
 class ReleaseCheckWorker(QThread):
@@ -218,6 +220,32 @@ class AboutPage(QWidget):
         self._notice_card = notice_card
         root.addLayout(self._top_grid)
 
+        # ===== SignPath 代码签名致谢 =====
+        signpath_card = CardWidget(container)
+        signpath_layout = QHBoxLayout(signpath_card)
+        signpath_layout.setContentsMargins(24, 18, 24, 18)
+        signpath_layout.setSpacing(18)
+
+        self._signpath_logo = ImageLabel(signpath_card)
+        self._signpath_logo.setAlignment(Qt.AlignCenter)
+        logo_path = os.path.join(_project_root(), SIGNPATH_LOGO_PATH)
+        logo = QPixmap(logo_path)
+        if not logo.isNull():
+            logo = logo.scaledToHeight(SIGNPATH_LOGO_HEIGHT, Qt.SmoothTransformation)
+            self._signpath_logo.setPixmap(logo)
+            self._signpath_logo.setFixedSize(logo.size())
+            signpath_layout.addWidget(self._signpath_logo, 0, Qt.AlignVCenter)
+
+        signpath_copy = QVBoxLayout()
+        signpath_copy.setSpacing(4)
+        self._signpath_title = SubtitleLabel(tr("about_signpath_title"), signpath_card)
+        signpath_copy.addWidget(self._signpath_title)
+        self._signpath_text = BodyLabel(tr("about_signpath_text"), signpath_card)
+        self._signpath_text.setWordWrap(True)
+        signpath_copy.addWidget(self._signpath_text)
+        signpath_layout.addLayout(signpath_copy, 1)
+        root.addWidget(signpath_card)
+
         # ===== 赞助模块 =====
         sponsor_card = CardWidget(container)
         sponsor_layout = QVBoxLayout(sponsor_card)
@@ -246,7 +274,7 @@ class AboutPage(QWidget):
         page_layout.setContentsMargins(0, 0, 0, 0)
         page_layout.addWidget(scroll)
 
-        # 任务4：用 themeColor 给赞助标题着色（主题切换安全）
+        # 任务4：用 themeColor 给高亮标题着色（主题切换安全）
         self.refresh_theme()
         QTimer.singleShot(0, self._update_responsive_layout)
 
@@ -289,6 +317,7 @@ class AboutPage(QWidget):
         """任务4：主题切换时用最新 themeColor 重绘高亮标题。"""
         accent = themeColor().name()
         self._sponsor_title.setTextColor(accent, accent)
+        self._signpath_title.setTextColor(accent, accent)
 
     @staticmethod
     def _current_version() -> str:
@@ -402,6 +431,8 @@ class AboutPage(QWidget):
         self._intro_label.setText(tr("about_intro"))
         self._notice_title.setText(tr("about_notice_title"))
         self._notice_text.setText(tr("about_notice_text"))
+        self._signpath_title.setText(tr("about_signpath_title"))
+        self._signpath_text.setText(tr("about_signpath_text"))
         self._sponsor_title.setText(tr("about_sponsorship_title"))
         self._sponsor_text.setText(tr("settings_sponsorship_text"))
         self._wechat_card.retranslate_ui(tr("about_wechat"))

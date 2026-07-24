@@ -68,10 +68,9 @@ Name: "autostart"; Description: "{cm:AutoStartTask}"; Flags: unchecked
 ; 1. 全量打包 Nuitka standalone 模式输出的纯 C 二进制依赖矩阵文件夹
 Source: "dist\main.dist\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
-; 2. 核心修复：全量把 support 文件夹装箱打包，确保安装后 C:\Program Files\HypoMux\support 物理存在！
-Source: "support\*"; DestDir: "{app}\support"; Flags: ignoreversion recursesubdirs createallsubdirs
+  ; 2. support 运行时资源已由 Nuitka 复制进 dist\main.dist（包含二维码与 SignPath 致谢图标）。
 
-; 3. 释放同级诊断内核与 bin 目录下网络接管三大运行时资产
+  ; 3. 释放同级诊断内核与 bin 目录下网络接管三大运行时资产
 Source: "diagnostic.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "bin\sing-box.exe"; DestDir: "{app}\bin"; Flags: ignoreversion
 Source: "bin\wintun.dll"; DestDir: "{app}\bin"; Flags: ignoreversion
