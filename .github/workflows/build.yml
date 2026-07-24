@@ -3,8 +3,6 @@ name: Build Installer
 on:
   push:
     branches: [main]
-    tags:
-      - 'v*'
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -16,6 +14,11 @@ on:
         default: false
       sign_with_production_certificate:
         description: 'Test production signing from main without publishing a GitHub Release'
+        required: true
+        type: boolean
+        default: false
+      publish_release:
+        description: 'Production-sign the selected v* tag and publish or update its GitHub Release'
         required: true
         type: boolean
         default: false
@@ -41,12 +44,18 @@ jobs:
         run: |
           $useTestCertificate = "${{ inputs.sign_with_test_certificate }}" -eq "true"
           $useProductionCertificate = "${{ inputs.sign_with_production_certificate }}" -eq "true"
+          $publishRelease = "${{ inputs.publish_release }}" -eq "true"
 
-          if ($useTestCertificate -and $useProductionCertificate) {
-            throw "Choose either test signing or production-signing test, not both."
+          if (($useTestCertificate -and $useProductionCertificate) -or
+              ($useTestCertificate -and $publishRelease) -or
+              ($useProductionCertificate -and $publishRelease)) {
+            throw "Choose only one signing mode: test signing, production-signing test, or publish release."
           }
           if ($useProductionCertificate -and "${{ github.ref }}" -ne "refs/heads/main") {
             throw "Production-signing tests must be started from the main branch."
+          }
+          if ($publishRelease -and "${{ github.ref }}" -notlike "refs/tags/v*") {
+            throw "Release publishing must be started from a v* tag."
           }
           if ($useTestCertificate -and "${{ github.ref }}" -like "refs/tags/*") {
             throw "Test signing must not be started from a release tag."
@@ -134,10 +143,10 @@ jobs:
           cargo build --manifest-path hypomux-diagnostic\Cargo.toml --release
           Copy-Item -Path "hypomux-diagnostic\target\release\diagnostic.exe" -Destination "diagnostic.exe" -Force
 
-      # 正式 Release 由 tag push 触发；也可从 main 手动测试生产签名。
+      # 从 main 手动测试生产签名，或从 v* tag 手动发布正式版本。
       # 两种情况均使用 SignPath 生产策略，并须在 UI 人工批准每个请求。
       - name: Upload HypoMux executable for SignPath production signing
-        if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && inputs.sign_with_production_certificate && github.ref == 'refs/heads/main')
+        if: github.event_name == 'workflow_dispatch' && ((inputs.sign_with_production_certificate && github.ref == 'refs/heads/main') || (inputs.publish_release && startsWith(github.ref, 'refs/tags/v')))
         id: upload-hypomux-production-executable
         uses: actions/upload-artifact@v7
         with:
@@ -146,7 +155,7 @@ jobs:
           if-no-files-found: error
 
       - name: Sign HypoMux executable with SignPath production certificate
-        if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && inputs.sign_with_production_certificate && github.ref == 'refs/heads/main')
+        if: github.event_name == 'workflow_dispatch' && ((inputs.sign_with_production_certificate && github.ref == 'refs/heads/main') || (inputs.publish_release && startsWith(github.ref, 'refs/tags/v')))
         uses: signpath/github-action-submit-signing-request@v2
         with:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
@@ -162,7 +171,7 @@ jobs:
       # diagnostic.exe is built from hypomux-diagnostic/src in this repository;
       # it is a HypoMux-owned artifact, unlike bundled upstream binaries.
       - name: Upload diagnostic executable for SignPath production signing
-        if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && inputs.sign_with_production_certificate && github.ref == 'refs/heads/main')
+        if: github.event_name == 'workflow_dispatch' && ((inputs.sign_with_production_certificate && github.ref == 'refs/heads/main') || (inputs.publish_release && startsWith(github.ref, 'refs/tags/v')))
         id: upload-diagnostic-production-executable
         uses: actions/upload-artifact@v7
         with:
@@ -171,7 +180,7 @@ jobs:
           if-no-files-found: error
 
       - name: Sign diagnostic executable with SignPath production certificate
-        if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && inputs.sign_with_production_certificate && github.ref == 'refs/heads/main')
+        if: github.event_name == 'workflow_dispatch' && ((inputs.sign_with_production_certificate && github.ref == 'refs/heads/main') || (inputs.publish_release && startsWith(github.ref, 'refs/tags/v')))
         uses: signpath/github-action-submit-signing-request@v2
         with:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
@@ -185,7 +194,7 @@ jobs:
           skip-decompress: true
 
       - name: Use production-signed HypoMux executables
-        if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && inputs.sign_with_production_certificate && github.ref == 'refs/heads/main')
+        if: github.event_name == 'workflow_dispatch' && ((inputs.sign_with_production_certificate && github.ref == 'refs/heads/main') || (inputs.publish_release && startsWith(github.ref, 'refs/tags/v')))
         shell: pwsh
         run: |
           Copy-Item -Path "signed-hypomux-production\HypoMux.exe" -Destination "dist\main.dist\HypoMux.exe" -Force
@@ -194,7 +203,7 @@ jobs:
       # SignPath 的默认 PE 构件配置一次只签一个 PE 文件。先签我们自己构建的程序，
       # 再将签名后的文件封装进 Inno Setup 安装包，避免安装后主程序仍是未签名状态。
       - name: Upload HypoMux executable for SignPath test signing
-        if: github.event_name == 'workflow_dispatch' && inputs.sign_with_test_certificate && !inputs.sign_with_production_certificate && !startsWith(github.ref, 'refs/tags/v')
+        if: github.event_name == 'workflow_dispatch' && inputs.sign_with_test_certificate && !inputs.sign_with_production_certificate && !inputs.publish_release && !startsWith(github.ref, 'refs/tags/v')
         id: upload-hypomux-executable
         uses: actions/upload-artifact@v7
         with:
@@ -203,7 +212,7 @@ jobs:
           if-no-files-found: error
 
       - name: Sign HypoMux executable with SignPath test certificate
-        if: github.event_name == 'workflow_dispatch' && inputs.sign_with_test_certificate && !inputs.sign_with_production_certificate && !startsWith(github.ref, 'refs/tags/v')
+        if: github.event_name == 'workflow_dispatch' && inputs.sign_with_test_certificate && !inputs.sign_with_production_certificate && !inputs.publish_release && !startsWith(github.ref, 'refs/tags/v')
         uses: signpath/github-action-submit-signing-request@v2
         with:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
@@ -216,7 +225,7 @@ jobs:
           skip-decompress: true
 
       - name: Upload diagnostic executable for SignPath test signing
-        if: github.event_name == 'workflow_dispatch' && inputs.sign_with_test_certificate && !inputs.sign_with_production_certificate && !startsWith(github.ref, 'refs/tags/v')
+        if: github.event_name == 'workflow_dispatch' && inputs.sign_with_test_certificate && !inputs.sign_with_production_certificate && !inputs.publish_release && !startsWith(github.ref, 'refs/tags/v')
         id: upload-diagnostic-executable
         uses: actions/upload-artifact@v7
         with:
@@ -225,7 +234,7 @@ jobs:
           if-no-files-found: error
 
       - name: Sign diagnostic executable with SignPath test certificate
-        if: github.event_name == 'workflow_dispatch' && inputs.sign_with_test_certificate && !inputs.sign_with_production_certificate && !startsWith(github.ref, 'refs/tags/v')
+        if: github.event_name == 'workflow_dispatch' && inputs.sign_with_test_certificate && !inputs.sign_with_production_certificate && !inputs.publish_release && !startsWith(github.ref, 'refs/tags/v')
         uses: signpath/github-action-submit-signing-request@v2
         with:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
@@ -238,7 +247,7 @@ jobs:
           skip-decompress: true
 
       - name: Use test-signed HypoMux executables
-        if: github.event_name == 'workflow_dispatch' && inputs.sign_with_test_certificate && !inputs.sign_with_production_certificate && !startsWith(github.ref, 'refs/tags/v')
+        if: github.event_name == 'workflow_dispatch' && inputs.sign_with_test_certificate && !inputs.sign_with_production_certificate && !inputs.publish_release && !startsWith(github.ref, 'refs/tags/v')
         shell: pwsh
         run: |
           Copy-Item -Path "signed-hypomux\HypoMux.exe" -Destination "dist\main.dist\HypoMux.exe" -Force
@@ -252,7 +261,7 @@ jobs:
           iscc /DMyAppVersion="${{ steps.version.outputs.DISPLAY_VERSION }}" /DMyAppVersionInfo="${{ steps.version.outputs.INNO_VERSION }}" setup.iss
 
       - name: Upload installer for SignPath production signing
-        if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && inputs.sign_with_production_certificate && github.ref == 'refs/heads/main')
+        if: github.event_name == 'workflow_dispatch' && ((inputs.sign_with_production_certificate && github.ref == 'refs/heads/main') || (inputs.publish_release && startsWith(github.ref, 'refs/tags/v')))
         id: upload-production-installer
         uses: actions/upload-artifact@v7
         with:
@@ -261,7 +270,7 @@ jobs:
           if-no-files-found: error
 
       - name: Sign installer with SignPath production certificate
-        if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && inputs.sign_with_production_certificate && github.ref == 'refs/heads/main')
+        if: github.event_name == 'workflow_dispatch' && ((inputs.sign_with_production_certificate && github.ref == 'refs/heads/main') || (inputs.publish_release && startsWith(github.ref, 'refs/tags/v')))
         uses: signpath/github-action-submit-signing-request@v2
         with:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
@@ -275,7 +284,7 @@ jobs:
           skip-decompress: true
 
       - name: Use production-signed installer
-        if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && inputs.sign_with_production_certificate && github.ref == 'refs/heads/main')
+        if: github.event_name == 'workflow_dispatch' && ((inputs.sign_with_production_certificate && github.ref == 'refs/heads/main') || (inputs.publish_release && startsWith(github.ref, 'refs/tags/v')))
         shell: pwsh
         run: |
           Copy-Item -Path "signed-installer-production\HypoMux_Setup_${{ steps.version.outputs.DISPLAY_VERSION }}.exe" -Destination "Output\HypoMux_Setup_${{ steps.version.outputs.DISPLAY_VERSION }}.exe" -Force
@@ -291,7 +300,7 @@ jobs:
       # 最后签外层安装包。测试签名只能从手动触发的工作流提交，防止测试证书产物进入正式 Release。
       # archive: false 让 SignPath 的 PE 构件配置直接接收安装包，而不是 GitHub 包装的 ZIP。
       - name: Upload installer for SignPath test signing
-        if: github.event_name == 'workflow_dispatch' && inputs.sign_with_test_certificate && !inputs.sign_with_production_certificate && !startsWith(github.ref, 'refs/tags/v')
+        if: github.event_name == 'workflow_dispatch' && inputs.sign_with_test_certificate && !inputs.sign_with_production_certificate && !inputs.publish_release && !startsWith(github.ref, 'refs/tags/v')
         id: upload-unsigned-installer
         uses: actions/upload-artifact@v7
         with:
@@ -300,7 +309,7 @@ jobs:
           if-no-files-found: error
 
       - name: Sign installer with SignPath test certificate
-        if: github.event_name == 'workflow_dispatch' && inputs.sign_with_test_certificate && !inputs.sign_with_production_certificate && !startsWith(github.ref, 'refs/tags/v')
+        if: github.event_name == 'workflow_dispatch' && inputs.sign_with_test_certificate && !inputs.sign_with_production_certificate && !inputs.publish_release && !startsWith(github.ref, 'refs/tags/v')
         id: signpath-test
         uses: signpath/github-action-submit-signing-request@v2
         with:
@@ -314,7 +323,7 @@ jobs:
           skip-decompress: true
 
       - name: Upload SignPath test-signed installer
-        if: github.event_name == 'workflow_dispatch' && inputs.sign_with_test_certificate && !inputs.sign_with_production_certificate && !startsWith(github.ref, 'refs/tags/v')
+        if: github.event_name == 'workflow_dispatch' && inputs.sign_with_test_certificate && !inputs.sign_with_production_certificate && !inputs.publish_release && !startsWith(github.ref, 'refs/tags/v')
         uses: actions/upload-artifact@v7
         with:
           name: HypoMux-Test-Signed-${{ steps.version.outputs.VERSION }}
@@ -324,7 +333,7 @@ jobs:
   release:
     name: Upload Installer to Release
     needs: build
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_release && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -339,7 +348,7 @@ jobs:
       # 若用户已在网页手动发布同标签 Release，action 只补充安装包，
       # 不传 name/body/generate_release_notes，以保留用户填写的标题和更新日志。
       - name: Upload installer to GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: ./output_dir/*.exe
           fail_on_unmatched_files: true
