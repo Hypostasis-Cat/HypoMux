@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from datetime import datetime
+import json
 from pathlib import Path
 from threading import RLock
-from typing import Iterable, Optional
+from typing import Any, Iterable, Mapping, Optional
+from uuid import uuid4
 
 
 SESSION_MARKER = "=== HypoMux Acceleration Session |"
@@ -27,8 +29,18 @@ class AccelerationLogStore:
     def active(self) -> bool:
         return self._active
 
-    def start(self, mode: str, adapters: Iterable[str] = ()):
-        """开启新的加速会话，并裁剪历史到最近 ``max_sessions`` 次。"""
+    def start(
+        self,
+        mode: str,
+        adapters: Iterable[str] = (),
+        context: Optional[Mapping[str, Any]] = None,
+    ):
+        """开启新的加速会话，并裁剪历史到最近 ``max_sessions`` 次。
+
+        ``context`` 只应包含适合用户提交给开发者排障的非敏感快照，例如
+        程序版本、运行模式、端口、选中网卡的接口索引/网关/DNS 与规则统计。
+        它会以单行 JSON 写入，既便于人工阅读，也方便之后按字段检索。
+        """
         with self._lock:
             if self._active:
                 return
@@ -37,10 +49,16 @@ class AccelerationLogStore:
             history = history[-(self.max_sessions - 1):] if self.max_sessions > 1 else []
             self._rewrite_sessions(history)
             names = ", ".join(str(name).strip() for name in adapters if str(name).strip())
+            session_id = uuid4().hex[:12]
             self._append(
-                f"{SESSION_MARKER} started={self._timestamp()} | mode={mode} ===\n"
+                f"{SESSION_MARKER} id={session_id} | started={self._timestamp()} | mode={mode} ===\n"
                 f"selected_adapters={names or 'none'}"
             )
+            if context:
+                self._append(
+                    "session_context="
+                    + json.dumps(context, ensure_ascii=False, sort_keys=True, default=str)
+                )
             self._active = True
             self._remove_legacy_rotations()
 
@@ -63,6 +81,18 @@ class AccelerationLogStore:
                 f"=== HypoMux Acceleration Session End | ended={self._timestamp()} | reason={reason} ==="
             )
             self._active = False
+
+    def record_event(self, category: str, event: str, **fields: Any):
+        """写入一个稳定、易检索的生命周期或诊断事件。"""
+        payload = {
+            "category": str(category).strip() or "general",
+            "event": str(event).strip() or "unknown",
+            **{key: value for key, value in fields.items() if value is not None},
+        }
+        self.record(
+            "event=" + json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str),
+            force=True,
+        )
 
     def _read_sessions(self) -> list[str]:
         try:

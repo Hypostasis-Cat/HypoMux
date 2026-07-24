@@ -19,6 +19,7 @@ import asyncio
 import ctypes
 import json
 import os
+import platform
 import subprocess
 import sys
 import time
@@ -1248,6 +1249,61 @@ def create_main_window():
             self.routing_page.set_available_adapters(self._adapters)
 
         # ========== 引擎开关（首页 SwitchButton）==========
+        def _build_acceleration_log_context(self, selected_adapters: List[Dict]) -> Dict[str, Any]:
+            """构造一次加速会话的可脱敏诊断快照。
+
+            不记录流量目标、进程路径或用户目录；这些内容对定位启动、绑定、
+            路由问题帮助有限，且不适合用户直接提交。网卡的接口索引、网关、
+            DNS 和跃点数则是复现多链路问题的关键上下文。
+            """
+            rules_by_action: Dict[str, int] = {}
+            for rule in self._routing_rules:
+                action = str(rule.get("action") or rule.get("outbound") or "unknown")
+                rules_by_action[action] = rules_by_action.get(action, 0) + 1
+
+            adapters = []
+            for adapter in selected_adapters:
+                dns_servers = adapter.get("dns_servers") or []
+                if not isinstance(dns_servers, list):
+                    dns_servers = [dns_servers]
+                adapters.append({
+                    "name": str(adapter.get("name") or adapter.get("alias") or "unknown"),
+                    "alias": str(adapter.get("alias") or ""),
+                    "ipv4": str(adapter.get("ip") or _first_valid_ipv4(adapter.get("ipv4", ""))),
+                    "if_index": adapter.get("if_index", adapter.get("index", "")),
+                    "gateway": str(adapter.get("gateway") or ""),
+                    "dns_servers": [str(item) for item in dns_servers if str(item).strip()],
+                    "metric": adapter.get("metric", ""),
+                    "metric_mode": "auto" if adapter.get("is_auto", True) else "fixed",
+                    "is_ppp": bool(adapter.get("is_ppp", False)),
+                })
+
+            return {
+                "app_version": QApplication.applicationVersion() or "unknown",
+                "pid": os.getpid(),
+                "admin": self._is_admin(),
+                "runtime": {
+                    "windows": f"{platform.release()} ({platform.version()})",
+                    "python": platform.python_version(),
+                    "packaged": bool(getattr(sys, "frozen", False) or ("__compiled__" in globals())),
+                },
+                "mode": self._run_mode,
+                "scheduler": "weighted" if self.home_page.is_weighted_scheduler() else "round_robin",
+                "ports": {
+                    "socks": int(self._app_config.get("socks_port", DEFAULT_SOCKS_PORT)),
+                    "http": int(self._app_config.get("http_port", DEFAULT_HTTP_PORT)),
+                },
+                "dns": {
+                    "server": str(self._app_config.get("dns_server", "223.5.5.5")),
+                    "doh_provider": str(self._app_config.get("doh_provider", "auto")),
+                },
+                "tun": {
+                    "force_connectivity_bypass": self._force_tun_connectivity_bypass_enabled(),
+                    "routing_rules": {"total": len(self._routing_rules), "by_action": rules_by_action},
+                },
+                "selected_adapters": adapters,
+            }
+
         def on_engine_toggled(self, checked: bool):
             if self._engine_transitioning:
                 self._sync_engine_ports()
@@ -1259,9 +1315,11 @@ def create_main_window():
             if checked == already_running:
                 return
             if checked:
+                selected_adapters = self.get_selected_adapters()
                 self._acceleration_log.start(
                     tr("mode_tun") if self._run_mode == "tun" else tr("mode_proxy"),
-                    (adapter["name"] for adapter in self.get_selected_adapters()),
+                    (adapter["name"] for adapter in selected_adapters),
+                    context=self._build_acceleration_log_context(selected_adapters),
                 )
             self._engine_transitioning = True
             self.home_page.set_adapter_controls_enabled(False)
@@ -1436,13 +1494,23 @@ def create_main_window():
                         "wifi_port": int(ports["nic_wifi"]),
                         "aggregation_port": int(ports["aggregation"]),
                     }
-                return singbox_config.generate_config_file(
+                generated = singbox_config.generate_config_file(
                     self._routing_rules,
                     self._singbox_config_path(),
                     app_process_path=self._app_process_paths(),
                     **port_kwargs,
                 )
+                self._acceleration_log.record_event(
+                    "singbox_config", "generated" if generated else "generation_failed",
+                    routing_rule_count=len(self._routing_rules),
+                    outbound_pool_ports=port_kwargs or None,
+                )
+                return generated
             except Exception as e:
+                self._acceleration_log.record_event(
+                    "singbox_config", "generation_exception",
+                    error_type=type(e).__name__, error=str(e),
+                )
                 self.append_log(mw_tr("log_tun_config_failed", error=e))
                 return False
 
@@ -1508,6 +1576,10 @@ def create_main_window():
                 worker.start()
                 self._tun_preflight_poll_timer.start(50)
             except Exception as e:
+                self._acceleration_log.record_event(
+                    "tun_preflight", "worker_start_failed",
+                    error_type=type(e).__name__, error=str(e),
+                )
                 self._tun_preflight_worker = None
                 worker.deleteLater()
                 self._tun_starting = False
@@ -1536,6 +1608,12 @@ def create_main_window():
                 or self._shutdown_started
             ):
                 return
+            self._acceleration_log.record_event(
+                "tun_preflight", "completed",
+                generation=generation,
+                foreign_default_route=foreign_tun or None,
+                selected_adapter_count=len(selected_nics),
+            )
             if foreign_tun:
                 self.show_warning(tr("warn_foreign_tun_route", name=foreign_tun))
                 self._tun_starting = False
@@ -1594,6 +1672,9 @@ def create_main_window():
                 return
             self._tun_pool_start_timer.stop()
             self.append_log(mw_tr("log_tun_pool_ready", info=info))
+            self._acceleration_log.record_event(
+                "tun_outbound_pool", "started", endpoints=info,
+            )
             self.home_page.set_engine_startup_status(tr("tun_starting"))
 
             # 2) 生成 sing-box 配置
@@ -1620,6 +1701,10 @@ def create_main_window():
             try:
                 self._tun_manager.start()
             except Exception as e:
+                self._acceleration_log.record_event(
+                    "tun_kernel", "thread_start_failed",
+                    error_type=type(e).__name__, error=str(e),
+                )
                 self.append_log(
                     f"[TUN] 无法启动内核线程: {type(e).__name__}: {e}"
                 )
@@ -1637,6 +1722,9 @@ def create_main_window():
                 return
             self._tun_pool_start_timer.stop()
             message = localize_runtime_message(message)
+            self._acceleration_log.record_event(
+                "tun_outbound_pool", "error", message=message,
+            )
             self.append_log(mw_tr("log_tun_pool_failed", message=message))
             self.show_error(message)
             if self._tun_active:
@@ -1654,6 +1742,7 @@ def create_main_window():
         def _on_tun_pool_start_timeout(self):
             if not self._tun_starting or self._tun_active:
                 return
+            self._acceleration_log.record_event("tun_outbound_pool", "startup_timeout")
             self.append_log(mw_tr("log_tun_pool_timeout"))
             self.show_error(tr("tun_pool_start_timeout"))
             self._tun_starting = False
@@ -1667,6 +1756,7 @@ def create_main_window():
             if isinstance(sender, TunManager) and sender is not self._tun_manager:
                 return
             self._tun_kernel_ready = True
+            self._acceleration_log.record_event("tun_kernel", "stable", details=info)
             if self._force_tun_connectivity_bypass_enabled():
                 self.append_log(
                     "[TUN][强制模式] 已跳过外部联网验证与运行期自动停机",
@@ -1707,6 +1797,11 @@ def create_main_window():
                 worker.cancel()
             self._tun_starting = False
             self._tun_health_failures = 0
+            self._acceleration_log.record_event(
+                "tun_connectivity", "startup_validated",
+                details=detail,
+                forced=self._force_tun_connectivity_bypass_enabled(),
+            )
             if self._force_tun_connectivity_bypass_enabled():
                 self.append_log(f"[TUN][强制模式] 已启动: {detail}", force=True)
             else:
@@ -1861,6 +1956,7 @@ def create_main_window():
             if self._tun_manager is None and not self._tun_active:
                 return
             message = localize_runtime_message(message)
+            self._acceleration_log.record_event("tun_kernel", "error", message=message)
             self.append_log(f"[TUN] {message}")
             self.show_error(message)
             self._stop_tun_mode()
@@ -2008,9 +2104,20 @@ def create_main_window():
                     "log_starting", socks=self._pending_socks_addr,
                     http=self._pending_http_addr, nics=nic_names,
                 ))
+                self._acceleration_log.record_event(
+                    "proxy", "launch_requested",
+                    socks_endpoint=self._pending_socks_addr,
+                    http_endpoint=self._pending_http_addr,
+                    scheduler="weighted" if use_weighted else "round_robin",
+                    selected_adapter_count=len(selected),
+                )
                 self.home_page.set_engine_state(True, socks_port, http_port)
                 self.proxy_worker.start()
             except Exception as e:
+                self._acceleration_log.record_event(
+                    "proxy", "launch_failed",
+                    error_type=type(e).__name__, error=str(e),
+                )
                 try:
                     set_system_proxy(False)
                 except Exception as ce:
@@ -2088,7 +2195,16 @@ def create_main_window():
                     "log_proxy_enabled", http=self._pending_http_addr,
                     socks=self._pending_socks_addr,
                 ))
+                self._acceleration_log.record_event(
+                    "system_proxy", "enabled",
+                    socks_endpoint=self._pending_socks_addr,
+                    http_endpoint=self._pending_http_addr,
+                )
             except Exception as e:
+                self._acceleration_log.record_event(
+                    "system_proxy", "enable_failed",
+                    error_type=type(e).__name__, error=str(e),
+                )
                 self.append_log(mw_tr("log_proxy_enable_failed", error=e))
                 self.show_error(tr("error_proxy_write", error=e))
                 if self.proxy_worker is not None:
@@ -2106,6 +2222,7 @@ def create_main_window():
         @Slot(str)
         def on_proxy_error(self, message: str):
             message = localize_runtime_message(message)
+            self._acceleration_log.record_event("proxy", "error", message=message)
             self.append_log(mw_tr("log_error", message=message))
             try:
                 set_system_proxy(False)
@@ -2172,7 +2289,9 @@ def create_main_window():
             self._diagnostic_log_session = False
             if not self._acceleration_log.active:
                 self._acceleration_log.start(
-                    "adapter-diagnostic", (adapter["name"] for adapter in selected)
+                    "adapter-diagnostic",
+                    (adapter["name"] for adapter in selected),
+                    context=self._build_acceleration_log_context(selected),
                 )
                 self._diagnostic_log_session = True
             self.tools_page.begin_running()
@@ -2209,6 +2328,25 @@ def create_main_window():
                 f"[health-tcp] adapter={name} result={result.get('bound_tcp_detail', '')}",
                 force=True,
             )
+            self._acceleration_log.record_event(
+                "adapter_diagnostic", "result",
+                adapter=name,
+                status=status,
+                source_ip=result.get("src_ip", ""),
+                target_ip=result.get("target_ip", ""),
+                packets={
+                    "sent": result.get("sent", 0),
+                    "received": result.get("received", 0),
+                    "loss_rate": result.get("loss_rate", 0),
+                },
+                latency_ms={
+                    "average": result.get("avg_latency_ms", 0),
+                    "jitter": result.get("jitter_ms", 0),
+                },
+                bound_tcp=result.get("bound_tcp_detail", ""),
+                configuration_checks=result.get("configuration_checks", []),
+                note=result.get("note", ""),
+            )
 
         @Slot()
         def on_diag_finished(self):
@@ -2224,7 +2362,11 @@ def create_main_window():
         @Slot(str)
         def on_diag_error(self, message: str):
             self.tools_page.end_running()
-            self.show_error(localize_runtime_message(message))
+            localized = localize_runtime_message(message)
+            self._acceleration_log.record_event(
+                "adapter_diagnostic", "error", message=localized,
+            )
+            self.show_error(localized)
             self.diag_worker = None
             if self._diagnostic_log_session:
                 self._acceleration_log.finish("diagnostic_error")
