@@ -90,12 +90,12 @@ jobs:
         run: |
           # 让运行中的应用版本与 Git tag 一致，供 GitHub Release 更新检查比较。
           Set-Content -Path "hypomux-version.txt" -Value "${{ steps.version.outputs.DISPLAY_VERSION }}" -NoNewline -Encoding ascii
-          # 仅打包运行时资源（包含 support\SignPath\SignPath.png），避免把 README 截图等 assets 素材带入安装包。
+          # 仅打包运行时资源（含程序图标与 SignPath 图标），避免把 README 截图等 assets 素材带入安装包。
           python -m nuitka `
             --standalone `
             --enable-plugin=pyside6 `
             --windows-console-mode=disable `
-            --windows-icon-from-ico=assets\icon.ico `
+            --windows-icon-from-ico=support\icon.ico `
             --windows-uac-admin `
             --company-name=Hypostasis-Cat `
             --product-name=HypoMux `

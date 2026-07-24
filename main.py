@@ -162,7 +162,7 @@ if __name__ == "__main__":
     from PySide6.QtWidgets import QApplication, QMessageBox
 
     qt_plugin_path = os.path.join(RUNTIME_DIR, "PySide6", "qt-plugins")
-    icon_path = os.path.join(RUNTIME_DIR, "assets", "icon.ico")
+    icon_path = os.path.join(RUNTIME_DIR, "support", "icon.ico")
 
     if os.path.exists(qt_plugin_path):
         QCoreApplication.addLibraryPath(qt_plugin_path)

@@ -39,7 +39,7 @@ Compression=lzma2
 SolidCompression=yes
 OutputDir=Output
 OutputBaseFilename=HypoMux_Setup_{#MyAppVersion}
-SetupIconFile=assets\icon.ico
+SetupIconFile=support\icon.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 VersionInfoVersion={#MyAppVersionInfo}
 ; ---------- 安装包 EXE 版本资源（右键属性→详细信息） ----------
@@ -76,8 +76,7 @@ Source: "bin\sing-box.exe"; DestDir: "{app}\bin"; Flags: ignoreversion
 Source: "bin\wintun.dll"; DestDir: "{app}\bin"; Flags: ignoreversion
 Source: "bin\libcronet.dll"; DestDir: "{app}\bin"; Flags: ignoreversion
 
-; 4. 图标资源：运行时窗口图标与系统托盘图标从 {app}\assets\icon.ico 读取
-Source: "assets\icon.ico"; DestDir: "{app}\assets"; Flags: ignoreversion
+; 4. 程序图标也在 support 中，由 Nuitka 一并复制到 {app}\support。
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; AppUserModelID: "{#MyAppUserModelID}"
@@ -87,7 +86,7 @@ Name: "{commondesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Working
 ; QSystemTrayIcon 的 Windows 通知会以进程 AppUserModelID 为来源。没有该映射
 ; 时通知中心会把内部 ID 直接显示为标题，而不是应用名称。
 Root: HKLM; Subkey: "Software\Classes\AppUserModelId\{#MyAppUserModelID}"; ValueType: string; ValueName: "DisplayName"; ValueData: "{#MyAppName}"; Flags: uninsdeletekeyifempty
-Root: HKLM; Subkey: "Software\Classes\AppUserModelId\{#MyAppUserModelID}"; ValueType: string; ValueName: "IconUri"; ValueData: "{app}\assets\icon.ico"; Flags: uninsdeletekeyifempty
+Root: HKLM; Subkey: "Software\Classes\AppUserModelId\{#MyAppUserModelID}"; ValueType: string; ValueName: "IconUri"; ValueData: "{app}\support\icon.ico"; Flags: uninsdeletekeyifempty
 
 [Run]
 ; ---------- 计划任务自启机制 ----------

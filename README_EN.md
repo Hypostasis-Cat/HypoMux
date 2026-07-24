@@ -1,7 +1,7 @@
 # HypoMux
 
 <p align="center">
-  <img src="assets/icon.ico" alt="HypoMux Icon" width="128" height="128"><br><br>
+  <img src="support/icon.ico" alt="HypoMux Icon" width="128" height="128"><br><br>
   <a href="README.md">简体中文</a> | <a href="README_EN.md">English</a>
 </p>
 
@@ -176,7 +176,7 @@ HypoMux's core distribution mechanism combines **Layer-4 application-level sched
 ```powershell
 venv\Scripts\activate
 pip install nuitka zstandard PySide6-Fluent-Widgets
-nuitka --standalone --onefile --enable-plugin=pyside6 --windows-console-mode=disable --windows-uac-admin --windows-icon-from-ico=assets/icon.ico --include-package-data=qfluentwidgets --include-data-dir=support=support --python-flag=-O --lto=yes main.py
+nuitka --standalone --onefile --enable-plugin=pyside6 --windows-console-mode=disable --windows-uac-admin --windows-icon-from-ico=support/icon.ico --include-package-data=qfluentwidgets --include-data-dir=support=support --python-flag=-O --lto=yes main.py
 ```
 
 ---
