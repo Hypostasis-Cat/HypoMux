@@ -1703,6 +1703,7 @@ def create_main_window():
                     selected_nics=selected,
                     use_weighted=use_weighted,
                     bandwidth_limits=bw_limits,
+                    allow_degraded_start=self._force_tun_connectivity_bypass_enabled(),
                     parent=self,
                 )
                 self._pool_worker.set_dns_servers([self._app_config.get("dns_server", "223.5.5.5")])

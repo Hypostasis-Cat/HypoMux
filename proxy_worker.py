@@ -1346,6 +1346,7 @@ class MultiPortProxyWorker(QThread):
         aggregation_port: int = PORT_AGGREGATION,
         use_weighted: bool = False,
         bandwidth_limits: Optional[Dict[str, int]] = None,
+        allow_degraded_start: bool = False,
         parent=None,
     ):
         super().__init__(parent)
@@ -1385,6 +1386,11 @@ class MultiPortProxyWorker(QThread):
         self._dns_cache: Dict[Tuple[int, str], Tuple[float, str]] = {}
         self._dns_inflight: Dict[Tuple[int, str], asyncio.Task] = {}
         self._last_connectivity_emit = 0.0
+        # "强制启动" is a test/recovery mode.  It must bypass the all-NIC
+        # DNS preflight gate as well as the later TUN connectivity probe;
+        # otherwise a deliberately unavailable test NIC prevents TUN from
+        # starting before it can be tested at all.
+        self._allow_degraded_start = bool(allow_degraded_start)
 
     def listen_ports(self) -> Dict[str, int]:
         """返回三个通道当前实际监听端口的快照。"""
@@ -1498,19 +1504,25 @@ class MultiPortProxyWorker(QThread):
             self.error_signal.emit(f"多端口出站池监听失败: {e}")
             return
 
-        dns_ready, dns_details = await self._preflight_selected_nics_dns()
-        for detail in dns_details:
-            self.log_signal.emit(f"[出站池][DNS预检] {detail}")
-        if self._stop_requested:
-            await self._teardown()
-            return
-        if not dns_ready:
-            await self._teardown()
-            self.error_signal.emit(
-                "多端口出站池 DNS 预检失败：至少一张已选网卡无法完成域名解析，"
-                "已取消 TUN 接管"
+        if self._allow_degraded_start:
+            self.log_signal.emit(
+                "[出站池][强制模式] 已跳过全部网卡 DNS/DoH 预检；"
+                "保留所有已选网卡并直接启动，供故障复现与测试"
             )
-            return
+        else:
+            dns_ready, dns_details = await self._preflight_selected_nics_dns()
+            for detail in dns_details:
+                self.log_signal.emit(f"[出站池][DNS预检] {detail}")
+            if self._stop_requested:
+                await self._teardown()
+                return
+            if not dns_ready:
+                await self._teardown()
+                self.error_signal.emit(
+                    "多端口出站池 DNS 预检失败：至少一张已选网卡无法完成域名解析，"
+                    "已取消 TUN 接管"
+                )
+                return
 
         self.log_signal.emit(
             f"[出站池] 三通道已就绪 | 有线 {self._listen_host}:{self._ports['nic_ethernet']} "

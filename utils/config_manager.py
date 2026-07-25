@@ -149,8 +149,8 @@ def _coerce_config(raw: Any) -> Dict[str, Any]:
     raw_doh = str(raw.get("doh_provider", DEFAULT_DOH_PROVIDER)).strip().lower()
     cfg["doh_provider"] = raw_doh if raw_doh in VALID_DOH_PROVIDERS else DEFAULT_DOH_PROVIDER
 
-    # 仅跳过 TUN 外部联网探测的自动停机，不跳过网卡预检、出站池启动或
-    # sing-box 异常回滚。
+    # 强制模式跳过全部网卡 DNS/DoH 预检，以及 TUN 外部联网探测的自动
+    # 停机；仍不跳过出站池/sing-box 的实际启动异常。
     cfg["force_tun_connectivity_bypass"] = _coerce_bool(
         raw.get("force_tun_connectivity_bypass"), False
     )
