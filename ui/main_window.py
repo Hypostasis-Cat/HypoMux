@@ -678,6 +678,8 @@ def create_main_window():
             self._diagnostic_log_session = False
             self._adapter_snapshot = ()
             self._no_adapter_warning_shown = False
+            # 自动扫描不应改变刷新按钮的视觉状态；仅手动刷新才短暂锁住按钮。
+            self._manual_adapter_scan_pending = False
 
             self._stop_fallback_timer = QTimer(self)
             self._stop_fallback_timer.setSingleShot(True)
@@ -1254,14 +1256,25 @@ def create_main_window():
                 return
             if self.scan_worker.isRunning():
                 return
-            self.home_page.refresh_btn.setEnabled(False)
-            self.tools_page.refresh_btn.setEnabled(False)
+            self._manual_adapter_scan_pending = manual
+            if manual:
+                self.home_page.refresh_btn.setEnabled(False)
+                self.tools_page.refresh_btn.setEnabled(False)
             self.scan_worker.start()
 
         @Slot(bool, list, str)
         def on_scan_finished(self, success: bool, adapters: list, error_msg: str):
-            self.home_page.refresh_btn.setEnabled(True)
-            self.tools_page.refresh_btn.setEnabled(True)
+            if self._manual_adapter_scan_pending:
+                self._manual_adapter_scan_pending = False
+                # 扫描期间若刚好开始了加速，保持加速生命周期对控件的锁定。
+                controls_enabled = not (
+                    self._is_boosting
+                    or self._tun_active
+                    or self._tun_starting
+                    or self._engine_transitioning
+                )
+                self.home_page.refresh_btn.setEnabled(controls_enabled)
+                self.tools_page.refresh_btn.setEnabled(controls_enabled)
             if not success:
                 # 周期扫描失败不打断用户；手动刷新仍可在下一轮恢复。
                 if not self._adapters:
@@ -2036,8 +2049,6 @@ def create_main_window():
                 self._pool_worker = None
                 try:
                     worker.stop()
-                    if worker.isRunning():
-                        worker.wait(3000)
                 except Exception:
                     pass
                 self._retire_tun_thread(worker, self._retired_pool_workers)
@@ -2092,12 +2103,6 @@ def create_main_window():
                 self._tun_manager = None
                 try:
                     manager.stop()
-                    if manager.isRunning():
-                        manager.wait(6000)
-                    # 兜底强杀，杜绝残留导致断网
-                    manager.force_kill()
-                    if manager.isRunning():
-                        manager.wait(2000)
                 except Exception:
                     pass
                 self._retire_tun_thread(manager, self._retired_tun_managers)
@@ -2228,6 +2233,13 @@ def create_main_window():
 
         @Slot(dict)
         def on_proxy_traffic(self, payload: dict):
+            # 停止时，工作线程最后一次遥测信号可能已经排进主线程事件队列。
+            # 只接受当前仍处于加速生命周期内的工作线程数据，防止旧速度覆盖 0。
+            source = self.sender()
+            if source is not None and source is not self.proxy_worker and source is not self._pool_worker:
+                return
+            if not (self._is_boosting or self._tun_active or self._tun_starting):
+                return
             total = payload.get("_total", {})
             down = total.get("down_mbps", 0.0)
             up = total.get("up_mbps", 0.0)
@@ -2283,6 +2295,20 @@ def create_main_window():
             self._acceleration_log.finish("proxy_error")
             self._finish_engine_transition()
 
+        def _retire_proxy_worker(self, worker):
+            """异步保留已停止的代理线程，绝不在 UI 线程中等待它退出。"""
+            if worker is None:
+                return
+            if not worker.isRunning():
+                worker.deleteLater()
+                return
+            if worker in self._retired_proxy_workers:
+                return
+            self._retired_proxy_workers.append(worker)
+            worker.finished.connect(
+                lambda w=worker: self._cleanup_retired_proxy_worker(w)
+            )
+
         @Slot(str)
         def on_proxy_stopped(self, message: str):
             message = localize_runtime_message(message)
@@ -2295,10 +2321,9 @@ def create_main_window():
             self._is_boosting = False
             self._exit_boosting_ui()
             self._finish_engine_transition()
-            if self.proxy_worker is not None:
-                if self.proxy_worker.isRunning():
-                    self.proxy_worker.wait(3000)
-                self.proxy_worker = None
+            worker = self.proxy_worker
+            self.proxy_worker = None
+            self._retire_proxy_worker(worker)
             self._acceleration_log.finish("stopped")
 
         def _force_finish_stop_ui(self):
@@ -2318,8 +2343,7 @@ def create_main_window():
                 worker.stopped.disconnect(self.on_proxy_stopped)
             except Exception:
                 pass
-            self._retired_proxy_workers.append(worker)
-            worker.finished.connect(lambda w=worker: self._cleanup_retired_proxy_worker(w))
+            self._retire_proxy_worker(worker)
             self._acceleration_log.finish("stop_timeout")
 
         def _cleanup_retired_proxy_worker(self, worker):
@@ -2327,6 +2351,7 @@ def create_main_window():
                 self._retired_proxy_workers.remove(worker)
             except ValueError:
                 pass
+            worker.deleteLater()
 
         # ========== 网卡体检（第二阶段诊断）==========
         def on_diagnose_clicked(self):

@@ -1149,12 +1149,37 @@ class ProxyWorker(QThread):
                 sent[nic["name"]] = c.bytes_sent if c else 0
             return recv, sent
 
-        last_recv, last_sent = snapshot()
+        # Windows 的计数器是累计值。用短时间窗口计算平均速率，而不是把每次
+        # asyncio sleep 都当作精确的一秒：线程调度稍有延迟时，后者会让数值
+        # 无意义地忽高忽低。
+        sample_window_seconds = 3.0
+        initial_recv, initial_sent = snapshot()
+        samples = [(time.monotonic(), initial_recv, initial_sent)]
 
         try:
             while True:
                 await asyncio.sleep(1.0)
+                if self._stop_requested:
+                    break
                 now_recv, now_sent = snapshot()
+                sampled_at = time.monotonic()
+                _, previous_recv, previous_sent = samples[-1]
+                if any(
+                    now_recv[nic["name"]] < previous_recv[nic["name"]]
+                    or now_sent[nic["name"]] < previous_sent[nic["name"]]
+                    for nic in self._selected_nics
+                ):
+                    # 计数器重置后从新基线重新开始，不能继续引用重置前样本。
+                    samples = [(sampled_at, now_recv, now_sent)]
+                else:
+                    samples.append((sampled_at, now_recv, now_sent))
+
+                # 保留窗口左侧的一个样本，以便在窗口边界处使用真实的经过时间。
+                cutoff = sampled_at - sample_window_seconds
+                while len(samples) > 1 and samples[1][0] <= cutoff:
+                    samples.pop(0)
+                base_at, base_recv, base_sent = samples[0]
+                elapsed = max(sampled_at - base_at, 0.001)
                 active = self.balancer.active_connections()
 
                 payload: Dict[str, Dict] = {}
@@ -1162,8 +1187,10 @@ class ProxyWorker(QThread):
                 total_conn = 0
                 for nic in self._selected_nics:
                     name = nic["name"]
-                    down = (now_recv[name] - last_recv[name]) / 1024 / 1024
-                    up = (now_sent[name] - last_sent[name]) / 1024 / 1024
+                    # 网卡重连或驱动重置时计数器可能回退；此时显示 0，避免
+                    # 产生负速率或把旧样本带入新的统计周期。
+                    down = max(now_recv[name] - base_recv[name], 0) / 1024 / 1024 / elapsed
+                    up = max(now_sent[name] - base_sent[name], 0) / 1024 / 1024 / elapsed
                     conn = active.get(name, 0)
                     payload[name] = {
                         "index": nic["index"],
@@ -1182,7 +1209,6 @@ class ProxyWorker(QThread):
                 }
                 self.traffic_signal.emit(payload)
 
-                last_recv, last_sent = now_recv, now_sent
         except asyncio.CancelledError:
             pass
 

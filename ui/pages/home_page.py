@@ -5,6 +5,7 @@ HypoMux 首页数据看板 (HomePage)
 主界面文本框，由 MainWindow 写入用户目录日志文件。
 """
 
+import time
 from typing import Dict, List
 
 from PySide6.QtCore import Qt, Signal
@@ -225,6 +226,7 @@ class HomePage(QWidget):
         self._last_down_mbps = 0.0
         self._last_up_mbps = 0.0
         self._last_connections = 0
+        self._last_telemetry_at = None
         self._current_mode = "tun"
         self._last_socks_port = 10800
         self._last_http_port = 10801
@@ -476,15 +478,20 @@ class HomePage(QWidget):
             row.refresh_theme()
 
     def update_total(self, down_mbps: float, up_mbps: float, connections: int):
-        self._speed_value.setText(f"{down_mbps:.2f}")
-        self._up_conn.setText(tr("home_up_conn", up=up_mbps, conn=connections))
-        self.conn_metric.set_value(tr("home_metric_connections_value", value=connections))
         self._last_down_mbps = max(0.0, float(down_mbps or 0.0))
         self._last_up_mbps = max(0.0, float(up_mbps or 0.0))
         self._last_connections = int(connections or 0)
+        self._speed_value.setText(f"{self._last_down_mbps:.2f}")
+        self._up_conn.setText(tr("home_up_conn", up=self._last_up_mbps, conn=self._last_connections))
+        self.conn_metric.set_value(tr("home_metric_connections_value", value=self._last_connections))
         if self._engine_running:
-            self._accelerated_bytes += self._last_down_mbps * 1024 * 1024
+            now = time.monotonic()
+            elapsed = 1.0 if self._last_telemetry_at is None else now - self._last_telemetry_at
+            # 不让窗口切后台、恢复后的一次延迟刷新把总流量夸大。
+            elapsed = max(0.0, min(elapsed, 5.0))
+            self._accelerated_bytes += self._last_down_mbps * 1024 * 1024 * elapsed
             self.traffic_metric.set_value(self._format_bytes(self._accelerated_bytes))
+            self._last_telemetry_at = now
 
     def update_telemetry(self, payload: Dict):
         for alias, row in self._cards.items():
@@ -498,8 +505,10 @@ class HomePage(QWidget):
         self._speed_value.setText("0.00")
         self._up_conn.setText(tr("home_up_conn", up=0.0, conn=0))
         self.conn_metric.set_value(tr("home_metric_connections_value", value=0))
+        self._last_down_mbps = 0.0
         self._last_up_mbps = 0.0
         self._last_connections = 0
+        self._last_telemetry_at = None
         for row in self._cards.values():
             row.reset_telemetry()
 
@@ -514,6 +523,9 @@ class HomePage(QWidget):
         if running and not was_running:
             self._accelerated_bytes = 0.0
             self.traffic_metric.set_value("0.00 MB")
+            self._last_telemetry_at = None
+        elif not running:
+            self._last_telemetry_at = None
         self.engine_switch.blockSignals(True)
         self.engine_switch.setChecked(running)
         self.engine_switch.blockSignals(False)
