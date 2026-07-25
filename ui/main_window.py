@@ -151,7 +151,7 @@ def _first_valid_ipv4(raw) -> str:
 def create_main_window():
     """工厂函数：创建 MainWindow 实例（此时 QApplication 已存在）"""
     from PySide6.QtCore import Qt, QThread, Signal, Slot, QTimer, QSettings, QRect, QRectF, QPoint, QEvent
-    from PySide6.QtGui import QIcon, QAction, QFont, QPainter, QColor, QCursor
+    from PySide6.QtGui import QIcon, QAction, QFont, QPainter, QColor, QCursor, QPixmap
     from PySide6.QtWidgets import QApplication, QSystemTrayIcon, QMenu, QWidget, QVBoxLayout, QFileDialog
     from qfluentwidgets import (
         FluentWindow, FluentWidget, InfoBar, InfoBarPosition,
@@ -623,6 +623,10 @@ def create_main_window():
 
         def __init__(self):
             set_system_proxy(False)
+            # FluentWindow 的基类构造会回调 _normalBackgroundColor()；先建立
+            # 背景字段，避免构造阶段访问尚未初始化的个性化状态。
+            self._background_pixmap = None
+            self._background_overlay_color = QColor(0, 0, 0, 36)
             super().__init__()
 
             # ===== 配置与运行状态 =====
@@ -706,10 +710,17 @@ def create_main_window():
             self.setWindowTitle("HypoMux")
             self.apply_standard_geometry()
 
+            self._background_pixmap = QPixmap()
+
             # Windows 11 原生 Mica/云母材质默认开启；不支持的系统安全降级。
             self._set_mica_effect_enabled(
                 QSettings("Hypostasis-Cat", "HypoMux").value(
                     "mica_enabled", True, type=bool
+                )
+            )
+            self._set_background_image(
+                QSettings("Hypostasis-Cat", "HypoMux").value(
+                    "background_image", "", type=str
                 )
             )
 
@@ -802,7 +813,10 @@ def create_main_window():
         def _apply_mica_visual_state(self):
             """按当前主题更新云母/纯色背景的视觉状态。"""
             try:
-                if getattr(self, "_mica_effect_enabled", True):
+                background_pixmap = getattr(self, "_background_pixmap", None)
+                if background_pixmap is not None and not background_pixmap.isNull():
+                    self.setBackgroundColor(QColor(0, 0, 0, 0))
+                elif getattr(self, "_mica_effect_enabled", True):
                     self.setBackgroundColor(QColor(0, 0, 0, 0))
                 else:
                     self.setBackgroundColor(self._normalBackgroundColor())
@@ -810,8 +824,43 @@ def create_main_window():
             except Exception:
                 pass
 
+        def _set_background_image(self, image_path: str):
+            """Load a persisted wallpaper and redraw without rebuilding the window."""
+            pixmap = QPixmap(str(image_path)) if image_path else QPixmap()
+            self._background_pixmap = pixmap if not pixmap.isNull() else QPixmap()
+            self._apply_mica_visual_state()
+
+        def paintEvent(self, event):
+            """Paint the user wallpaper below all transparent Fluent pages."""
+            super().paintEvent(event)
+            background_pixmap = getattr(self, "_background_pixmap", None)
+            if background_pixmap is None or background_pixmap.isNull():
+                return
+
+            target = self.rect()
+            if target.width() <= 0 or target.height() <= 0:
+                return
+            source = background_pixmap.rect()
+            scale = max(target.width() / source.width(), target.height() / source.height())
+            crop_width = target.width() / scale
+            crop_height = target.height() / scale
+            crop = QRectF(
+                (source.width() - crop_width) / 2,
+                (source.height() - crop_height) / 2,
+                crop_width,
+                crop_height,
+            )
+
+            painter = QPainter(self)
+            painter.setRenderHint(QPainter.SmoothPixmapTransform)
+            painter.drawPixmap(QRectF(target), background_pixmap, crop)
+            painter.fillRect(target, self._background_overlay_color)
+
         def _normalBackgroundColor(self):
             """交互动画重绘时也必须尊重用户的云母开关。"""
+            background_pixmap = getattr(self, "_background_pixmap", None)
+            if background_pixmap is not None and not background_pixmap.isNull():
+                return QColor(0, 0, 0, 0)
             if getattr(self, "_mica_effect_enabled", True):
                 return super()._normalBackgroundColor()
 
@@ -927,6 +976,7 @@ def create_main_window():
             # 设置页
             self.settings_page.language_changed.connect(self._on_language_changed)
             self.settings_page.theme_color_changed.connect(self._refresh_theme_sensitive_pages)
+            self.settings_page.background_image_changed.connect(self._set_background_image)
             self.settings_page.ports_changed.connect(self._on_settings_ports_changed)
             self.settings_page.info_message.connect(self.show_info)
             self.settings_page.success_message.connect(self.show_success)
