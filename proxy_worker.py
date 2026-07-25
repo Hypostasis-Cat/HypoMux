@@ -1423,11 +1423,28 @@ class MultiPortProxyWorker(QThread):
                 pass
 
     # 复用 ProxyWorker 的静态/实例方法，避免重复实现
-    _create_bound_upstream_socket = staticmethod(ProxyWorker._create_bound_upstream_socket)
     _relay_to_sock = staticmethod(ProxyWorker._relay_to_sock)
     _relay_from_sock = staticmethod(ProxyWorker._relay_from_sock)
     _abort_writer = staticmethod(ProxyWorker._abort_writer)
     _close_socket = staticmethod(ProxyWorker._close_socket)
+
+    def _create_bound_upstream_socket(self, nic) -> socket.socket:
+        """Create a TCP socket pinned to one selected physical adapter.
+
+        Unlike the legacy proxy worker, the TUN pool persists the binding
+        evidence in the session log.  This is needed to distinguish a real
+        adapter failure from a TUN/WFP interception failure.
+        """
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            sock.setblocking(False)
+            configure_bound_ipv4_socket(
+                sock, nic, "proxy-tcp", trace=self.log_signal.emit
+            )
+        except Exception:
+            sock.close()
+            raise
+        return sock
 
     def set_dns_servers(self, servers: List[str]):
         """设置传统 53 端口 DNS 兜底服务器。"""
@@ -1562,13 +1579,14 @@ class MultiPortProxyWorker(QThread):
             await self._handle_socks(reader, writer, balancer, channel)
         return handler
 
-    @staticmethod
-    def _create_bound_udp_socket(nic) -> socket.socket:
+    def _create_bound_udp_socket(self, nic) -> socket.socket:
         """创建出站 UDP socket，并用物理接口索引锁定出口。"""
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         try:
             sock.setblocking(False)
-            configure_bound_ipv4_socket(sock, nic, "proxy-udp")
+            configure_bound_ipv4_socket(
+                sock, nic, "proxy-udp", trace=self.log_signal.emit
+            )
         except Exception:
             sock.close()
             raise
@@ -1687,7 +1705,9 @@ class MultiPortProxyWorker(QThread):
             sock = self._create_bound_udp_socket(nic)
             self._upstream_sockets.add(sock)
             await loop.sock_sendto(sock, packet, (dns_server, 53))
-            log_connected_ipv4_socket(sock, nic, (dns_server, 53), "dns-udp")
+            log_connected_ipv4_socket(
+                sock, nic, (dns_server, 53), "dns-udp", trace=self.log_signal.emit
+            )
             data, _remote = await asyncio.wait_for(
                 loop.sock_recvfrom(sock, 1232),
                 timeout=self.DNS53_TIMEOUT,
@@ -1719,7 +1739,9 @@ class MultiPortProxyWorker(QThread):
             sock = self._create_bound_upstream_socket(nic)
             self._upstream_sockets.add(sock)
             await asyncio.wait_for(loop.sock_connect(sock, (dns_server, 53)), timeout=self.DNS53_TIMEOUT)
-            log_connected_ipv4_socket(sock, nic, (dns_server, 53), "dns-tcp")
+            log_connected_ipv4_socket(
+                sock, nic, (dns_server, 53), "dns-tcp", trace=self.log_signal.emit
+            )
             await asyncio.wait_for(
                 loop.sock_sendall(sock, struct.pack("!H", len(packet)) + packet),
                 timeout=self.DNS53_TIMEOUT,
@@ -1753,7 +1775,9 @@ class MultiPortProxyWorker(QThread):
             sock = self._create_bound_upstream_socket(nic)
             sock.settimeout(connect_timeout)
             sock.connect((endpoint_ip, 443))
-            log_connected_ipv4_socket(sock, nic, (endpoint_ip, 443), "dns-doh")
+            log_connected_ipv4_socket(
+                sock, nic, (endpoint_ip, 443), "dns-doh", trace=self.log_signal.emit
+            )
             context = ssl.create_default_context()
             ssl_sock = context.wrap_socket(sock, server_hostname=host)
             ssl_sock.settimeout(io_timeout)
@@ -1862,19 +1886,10 @@ class MultiPortProxyWorker(QThread):
                 except Exception as e:
                     errors.append(f"{method}/{dns_server} {type(e).__name__}: {e!r}")
 
-        try:
-            infos = await asyncio.wait_for(
-                loop.getaddrinfo(domain, None, family=socket.AF_INET, type=socket.SOCK_STREAM),
-                timeout=2.0,
-            )
-            for info in infos:
-                ip = info[4][0]
-                if self._is_usable_ipv4(ip):
-                    return ip
-            errors.append("system resolver returned no usable A record")
-        except Exception as e:
-            errors.append(f"system {type(e).__name__}: {e!r}")
-
+        # Do not fall back to Windows' system resolver here.  It is not bound
+        # to this NIC and, once TUN is active, can re-enter the TUN DNS path or
+        # leak through the wrong adapter.  A resolver failure must remain a
+        # failure of this selected NIC so the scheduler can make a real choice.
         raise RuntimeError("; ".join(errors[-8:]) or "dns resolve failed")
 
     async def _resolve_domain_via_nic(self, domain: str, nic: Dict, loop) -> str:

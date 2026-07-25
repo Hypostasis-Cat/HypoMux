@@ -5,7 +5,7 @@ HypoMux sing-box 配置生成器 - 第三阶段下半场 · 任务2
 sing-box 兼容 config.json。
 
 架构映射：
-- inbounds : 单一 tun 入站（interface_name=HypoMux-Tun，auto_route + strict_route），
+- inbounds : 单一 tun 入站（interface_name=HypoMux-Tun，auto_route），
   全局吸入系统 TCP/UDP 流量。
 - outbounds: 三个 socks 出站，分别对接 Python 本地多端口出站池。
   默认端口为 2001/2002/2003；端口受 HNS/Hyper-V 限制时使用运行时回退端口。
@@ -287,7 +287,15 @@ def build_config(
                 "address": ["172.19.0.1/30"],
                 "mtu": 1492,
                 "auto_route": True,
-                "strict_route": True,
+                # On Windows strict_route installs a WFP filter that blocks
+                # port-53 traffic sent through any non-TUN interface.  The
+                # local multi-NIC pool *deliberately* sends its DNS sockets
+                # through the selected physical adapters, so that filter
+                # converts legitimate bound DNS into WSAEACCES/timeouts.
+                # DNS interception is still provided by the explicit
+                # hijack-dns rules above; do not re-enable strict_route unless
+                # the pool is no longer responsible for physical DNS egress.
+                "strict_route": False,
                 "stack": "system",
             }
         ],
