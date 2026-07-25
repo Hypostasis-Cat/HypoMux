@@ -1,6 +1,6 @@
 """
 HypoMux - Windows 多网卡跃点数并发调度工具
-主应用入口 (v2.1.1)
+主应用入口 (v2.1.0)
 
 启动生命周期：
 1. 在任何 UI 导入前纠偏工作目录
@@ -35,7 +35,7 @@ def normalize_working_directory() -> str:
 
 
 RUNTIME_DIR = normalize_working_directory()
-DEFAULT_APP_VERSION = "2.1.1"
+DEFAULT_APP_VERSION = "2.1.0"
 
 
 def get_application_version() -> str:

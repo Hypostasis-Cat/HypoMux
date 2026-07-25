@@ -17,7 +17,8 @@ from PySide6.QtWidgets import (
 )
 from qfluentwidgets import (
     CardWidget, TitleLabel, SubtitleLabel, StrongBodyLabel, BodyLabel,
-    IconWidget, ImageLabel, SingleDirectionScrollArea, PrimaryPushButton, PushButton, MessageBox,
+    IconWidget, ImageLabel, SingleDirectionScrollArea, PrimaryPushButton, PushButton, MessageBoxBase,
+    TextBrowser,
     themeColor,
 )
 
@@ -72,6 +73,45 @@ class ReleaseDownloadWorker(QThread):
             self.failed.emit(str(exc))
         except Exception:
             self.failed.emit(tr("about_update_unknown_error"))
+
+
+class UpdateAvailableDialog(MessageBoxBase):
+    """Update prompt with a bounded, scrollable release-notes area."""
+
+    def __init__(self, current: str, release: ReleaseInfo, notes: str, parent=None):
+        super().__init__(parent)
+        apply_mica_popup(self)
+
+        self.widget.setFixedWidth(680)
+        title = SubtitleLabel(tr("about_update_available_title"), self.widget)
+        summary = BodyLabel(
+            tr(
+                "about_update_available_summary",
+                current=current,
+                latest=release.tag_name.lstrip("vV"),
+            ),
+            self.widget,
+        )
+        notes_title = StrongBodyLabel(tr("about_update_notes_label"), self.widget)
+        self.notes_browser = TextBrowser(self.widget)
+        self.notes_browser.setObjectName("updateReleaseNotes")
+        self.notes_browser.setReadOnly(True)
+        self.notes_browser.setOpenExternalLinks(True)
+        self.notes_browser.setMarkdown(notes or tr("about_update_notes_empty"))
+        self.notes_browser.setMinimumHeight(250)
+        self.notes_browser.setMaximumHeight(340)
+
+        hint = BodyLabel(tr("about_update_download_hint"), self.widget)
+        hint.setWordWrap(True)
+
+        self.viewLayout.addWidget(title)
+        self.viewLayout.addWidget(summary)
+        self.viewLayout.addWidget(notes_title)
+        self.viewLayout.addWidget(self.notes_browser)
+        self.viewLayout.addWidget(hint)
+
+        self.yesButton.setText(tr("about_update_now"))
+        self.cancelButton.setText(tr("about_update_later"))
 
 
 def _project_root() -> str:
@@ -368,18 +408,7 @@ class AboutPage(QWidget):
             return
 
         notes = release.notes.strip()
-        if len(notes) > 900:
-            notes = f"{notes[:900].rstrip()}…"
-        content = tr(
-            "about_update_available_content",
-            current=current,
-            latest=release.tag_name.lstrip("vV"),
-            notes=notes or tr("about_update_notes_empty"),
-        )
-        dialog = MessageBox(tr("about_update_available_title"), content, self)
-        dialog.yesButton.setText(tr("about_update_now"))
-        dialog.cancelButton.setText(tr("about_update_later"))
-        apply_mica_popup(dialog)
+        dialog = UpdateAvailableDialog(current, release, notes, self)
         if dialog.exec():
             self._download_release(release)
 

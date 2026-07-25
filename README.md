@@ -27,14 +27,14 @@ HypoMux v2.0 是一款专为 Windows 平台打造的**多网卡带宽并发聚�
 
 ---
 
-## Sponsors
+## 赞助方
 
 <p align="center">
   <a href="https://signpath.io/"><img src="support/SignPath/SignPath.png" alt="SignPath" height="38" /></a>&nbsp;&nbsp;
-  Free code signing provided by <a href="https://signpath.io/">SignPath.io</a>, certificate by <a href="https://signpath.org/">SignPath Foundation</a>.
+  Windows 代码签名服务由 <a href="https://signpath.io/">SignPath.io</a> 免费提供，证书由 <a href="https://signpath.org/">SignPath Foundation</a> 颁发。
 </p>
 
-### Code Signing Policy / Windows 代码签名政策
+### Windows 代码签名政策（Code Signing Policy）
 
 HypoMux 衷心感谢 SignPath 与 SignPath Foundation 对开源软件的支持，帮助我们为 Windows 用户提供更安全、可信的下载体验。
 
