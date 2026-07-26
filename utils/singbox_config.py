@@ -254,16 +254,20 @@ def build_config(
     dns_server_config: Dict[str, Any] = {
         "type": "local",
         "tag": DNS_LOCAL_TAG,
-        # Do not let hijacked TUN DNS follow the Windows default NIC.  The
-        # aggregation SOCKS outbound reaches the Python pool, whose resolver
-        # sockets are pinned with IP_UNICAST_IF per selected adapter.
-        "detour": OUTBOUND_AGGREGATION,
+        # Keep the resolver on sing-box's native DNS path.  Sending it back
+        # through the aggregation SOCKS pool changes the FakeIP reverse-map
+        # path and can recurse into the TUN on Windows.  More importantly, it
+        # regressed applications that require a timely real-IP lookup (such as
+        # Hermes/WeChat) compared with v2.1.1.
     }
     fakeip_server_config: Dict[str, Any] = {
         "type": "fakeip",
         "tag": DNS_FAKEIP_TAG,
         "inet4_range": "198.18.0.0/15",
     }
+    # Preserve the v2.1.1 FakeIP policy.  The regression was introduced by
+    # routing the *native* resolver through the aggregation pool, not by this
+    # catch-all mapping itself.
     dns_rules: List[Dict[str, Any]] = [{
         "query_type": ["A", "AAAA"],
         "server": DNS_FAKEIP_TAG,
@@ -287,15 +291,7 @@ def build_config(
                 "address": ["172.19.0.1/30"],
                 "mtu": 1492,
                 "auto_route": True,
-                # On Windows strict_route installs a WFP filter that blocks
-                # port-53 traffic sent through any non-TUN interface.  The
-                # local multi-NIC pool *deliberately* sends its DNS sockets
-                # through the selected physical adapters, so that filter
-                # converts legitimate bound DNS into WSAEACCES/timeouts.
-                # DNS interception is still provided by the explicit
-                # hijack-dns rules above; do not re-enable strict_route unless
-                # the pool is no longer responsible for physical DNS egress.
-                "strict_route": False,
+                "strict_route": True,
                 "stack": "system",
             }
         ],

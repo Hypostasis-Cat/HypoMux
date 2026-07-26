@@ -42,21 +42,6 @@ class _MIB_IPFORWARDROW(ctypes.Structure):
     ]
 
 
-def _winerror(message: str, code: int = 10022) -> OSError:
-    error = OSError(code, message)
-    error.winerror = code
-    return error
-
-
-def _as_ipv4(value: Any, field: str) -> str:
-    text = str(value or "").strip()
-    try:
-        socket.inet_aton(text)
-    except OSError as exc:
-        raise _winerror(f"invalid {field}: {text!r}") from exc
-    return text
-
-
 def adapter_luid(if_index: int) -> Optional[int]:
     """Return a best-effort Windows Interface LUID for diagnostics."""
     if if_index <= 0 or not hasattr(ctypes, "windll"):
@@ -115,31 +100,20 @@ def configure_bound_ipv4_socket(
     purpose: str,
     trace: Optional[TraceCallback] = None,
 ) -> Dict[str, Any]:
-    """Require and verify an IPv4 interface+source binding before connect/send.
+    """Apply the v2.1.1-compatible interface binding sequence.
 
-    Raises on every binding failure.  In particular, interface index zero is
-    rejected because IP_UNICAST_IF=0 deliberately means "unspecified".
+    ``IP_UNICAST_IF`` remains the primary egress selector.  Windows may reject
+    a best-effort source-address bind while an adapter renews or reconnects;
+    v2.1.1 continued with the interface pin in that case.  Do the same here
+    instead of making that diagnostic condition fatal to every TUN flow.
     """
-    try:
-        if_index = int(nic.get("if_index", nic.get("index", 0)) or 0)
-    except (TypeError, ValueError) as exc:
-        raise _winerror("invalid interface index") from exc
-    if if_index <= 0:
-        raise _winerror("refusing unpinned socket: missing IPv4 IfIndex")
-
-    source_ip = _as_ipv4(nic.get("ip"), "source IPv4")
+    if_index = int(nic.get("if_index", nic.get("index", 0)) or 0)
+    source_ip = str(nic.get("ip") or "").strip()
     name = str(nic.get("name") or source_ip)
     luid = adapter_luid(if_index)
     payload = struct.pack("!I", if_index)
     try:
         sock.setsockopt(socket.IPPROTO_IP, IP_UNICAST_IF, payload)
-        # Winsock returns this option in host byte order when queried.
-        actual = struct.unpack("=I", sock.getsockopt(socket.IPPROTO_IP, IP_UNICAST_IF, 4))[0]
-        if actual != if_index:
-            raise _winerror(
-                f"IP_UNICAST_IF verification mismatch: requested={if_index}, actual={actual}"
-            )
-        sock.bind((source_ip, 0))
     except OSError as exc:
         message = (
             "[socket-bind] failed purpose=%s adapter=%s source=%s if_index=%s "
@@ -155,6 +129,26 @@ def configure_bound_ipv4_socket(
         _notify_trace(trace, message)
         raise
 
+    source_bind_error = ""
+    if source_ip:
+        try:
+            sock.bind((source_ip, 0))
+        except OSError as exc:
+            source_bind_error = (
+                f"winerror={getattr(exc, 'winerror', None)} "
+                f"errno={getattr(exc, 'errno', None)} error={exc}"
+            )
+            message = (
+                "[socket-bind] source-bind fallback purpose=%s adapter=%s source=%s if_index=%s "
+                "luid=%s gateway=%s ip_unicast_if=set bind=failed; continuing (%s)"
+            ) % (
+                purpose, name, source_ip, if_index,
+                f"0x{luid:016X}" if luid is not None else "unknown",
+                nic.get("gateway", ""), source_bind_error,
+            )
+            logger.warning(message)
+            _notify_trace(trace, message)
+
     info = {
         "adapter": name,
         "source_ip": source_ip,
@@ -162,13 +156,15 @@ def configure_bound_ipv4_socket(
         "luid": luid,
         "gateway": str(nic.get("gateway") or ""),
         "purpose": purpose,
+        "source_bind_error": source_bind_error,
     }
     message = (
         "[socket-bind] ready purpose=%s adapter=%s source=%s if_index=%s luid=%s "
-        "gateway=%s ip_unicast_if=set+verified(%s) bind=ok"
+        "gateway=%s ip_unicast_if=set bind=%s"
     ) % (
         purpose, name, source_ip, if_index,
-        f"0x{luid:016X}" if luid is not None else "unknown", info["gateway"], actual,
+        f"0x{luid:016X}" if luid is not None else "unknown", info["gateway"],
+        "fallback" if source_bind_error else "ok",
     )
     logger.info(message)
     _notify_trace(trace, message)
