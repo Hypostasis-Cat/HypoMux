@@ -47,6 +47,45 @@ class ProxyTransportRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(default_config()["doh_provider"], "auto")
         self.assertEqual(_coerce_config({"doh_provider": "off"})["doh_provider"], "off")
 
+    async def test_doh_strict_never_falls_back_to_port_53(self):
+        worker = MultiPortProxyWorker([NIC], allow_degraded_start=True)
+        worker._dns_mode = worker.DNS_MODE_DOH_STRICT
+        calls = []
+
+        async def fail_doh(*_args, **_kwargs):
+            raise OSError("DoH unavailable")
+
+        async def legacy_dns(*_args, **_kwargs):
+            calls.append(True)
+            return "192.0.2.53"
+
+        worker._query_dns_doh = fail_doh
+        worker._query_dns_udp = legacy_dns
+        worker._query_dns_tcp = legacy_dns
+
+        with self.assertRaises(RuntimeError):
+            await worker._resolve_domain_uncached(
+                "strict.example", NIC, asyncio.get_running_loop(),
+            )
+        self.assertEqual(calls, [])
+
+    async def test_mixed_doh_results_choose_global_legacy_compatibility(self):
+        second_nic = {"name": "backup", "ip": "192.0.2.11", "if_index": 8}
+        worker = MultiPortProxyWorker([NIC, second_nic])
+
+        async def fake_preflight(nic, _loop):
+            if nic["name"] == "test-nic":
+                return True, True, "test-nic: DoH=ok; legacy=ok"
+            return False, True, "backup: DoH=failed; legacy=ok"
+
+        worker._preflight_dns_for_nic = fake_preflight
+        ready, details = await worker._preflight_selected_nics_dns()
+
+        self.assertTrue(ready)
+        self.assertEqual(worker.dns_mode(), worker.DNS_MODE_LEGACY_COMPAT)
+        self.assertTrue(worker._legacy_dns_verified)
+        self.assertIn("legacy compatibility", details[-1])
+
     async def test_dns_failure_does_not_decrement_an_existing_connection(self):
         worker = MultiPortProxyWorker([NIC], allow_degraded_start=True)
         balancer = RoundRobinBalancer([NIC])
@@ -69,7 +108,8 @@ class ProxyTransportRegressionTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_udp_domain_resolution_uses_selected_nic_and_can_return_aaaa(self):
         worker = MultiPortProxyWorker([NIC], allow_degraded_start=True)
-        worker._doh_endpoints = ()
+        worker.set_doh_provider("off")
+        worker._dns_mode = worker.DNS_MODE_LEGACY_COMPAT
         worker._dns_servers_for_nic = lambda _nic: ("192.0.2.53",)
         requested_types = []
 

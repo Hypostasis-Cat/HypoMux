@@ -657,6 +657,9 @@ def create_main_window():
             self._routing_rules = self._app_config.get("routing_rules", [])
             self._pool_worker = None      # MultiPortProxyWorker（TUN 模式下的出站池）
             self._tun_wfp_dns_exemption = None
+            self._tun_dns_mode = MultiPortProxyWorker.DNS_MODE_DOH_STRICT
+            self._tun_dns_mode_override = ""
+            self._tun_dns_fallback_attempted = False
             self._tun_manager = None      # sing-box 内核侧车
             self._retired_pool_workers = []
             self._retired_tun_managers = []
@@ -1612,12 +1615,17 @@ def create_main_window():
                     self._routing_rules,
                     self._singbox_config_path(),
                     app_process_path=self._app_process_paths(),
+                    strict_route=(
+                        self._tun_dns_mode
+                        == MultiPortProxyWorker.DNS_MODE_DOH_STRICT
+                    ),
                     **port_kwargs,
                 )
                 self._acceleration_log.record_event(
                     "singbox_config", "generated" if generated else "generation_failed",
                     routing_rule_count=len(self._routing_rules),
                     outbound_pool_ports=port_kwargs or None,
+                    dns_mode=self._tun_dns_mode,
                 )
                 return generated
             except Exception as e:
@@ -1666,6 +1674,8 @@ def create_main_window():
                 self.home_page.set_engine_state(False)
                 self._finish_engine_transition()
                 return
+            if not self._tun_dns_mode_override:
+                self._tun_dns_fallback_attempted = False
             self._tun_health_generation += 1
             self._tun_health_failures = 0
             self._tun_last_connectivity_at = 0.0
@@ -1759,10 +1769,17 @@ def create_main_window():
                 )
                 self._pool_worker.set_dns_servers([self._app_config.get("dns_server", "223.5.5.5")])
                 self._pool_worker.set_doh_provider(self._app_config.get("doh_provider", "auto"))
+                self._pool_worker.set_dns_mode_override(self._tun_dns_mode_override)
+                # The override is copied into this worker.  Clearing the UI
+                # side here means a later manual start evaluates DoH afresh.
+                self._tun_dns_mode_override = ""
                 self._pool_worker.log_signal.connect(self.on_proxy_log)
                 self._pool_worker.traffic_signal.connect(self.on_proxy_traffic)
                 self._pool_worker.connectivity_signal.connect(
                     self._on_tun_pool_connectivity
+                )
+                self._pool_worker.dns_compatibility_required.connect(
+                    self._on_tun_dns_compatibility_required
                 )
                 self._pool_worker.started_ok.connect(self._on_tun_pool_started)
                 self._pool_worker.error_signal.connect(self._on_tun_pool_error)
@@ -1832,24 +1849,32 @@ def create_main_window():
             if not self._tun_starting or self._pool_worker is None:
                 return
             self._tun_pool_start_timer.stop()
+            self._tun_dns_mode = self._pool_worker.dns_mode()
             self.append_log(mw_tr("log_tun_pool_ready", info=info))
             self._acceleration_log.record_event(
                 "tun_outbound_pool", "started", endpoints=info,
+                dns_mode=self._tun_dns_mode,
             )
+            if self._tun_dns_mode == MultiPortProxyWorker.DNS_MODE_LEGACY_COMPAT:
+                self.append_log(
+                    "[TUN][DNS] 传统 DNS 兼容模式：已关闭 strict_route，"
+                    "传统 UDP/TCP 53 仍严格绑定到所选物理网卡。",
+                    force=True,
+                )
+            else:
+                self.append_log(
+                    "[TUN][DNS] DoH 严格模式：已开启 strict_route，DNS 不会回退到 UDP/TCP 53。",
+                    force=True,
+                )
             self.home_page.set_engine_startup_status(tr("tun_starting"))
-            if not self._install_tun_wfp_dns_exemption(
-                self._pool_worker.selected_nics_snapshot()
-            ):
-                self._teardown_pool()
-                self._tun_starting = False
-                self._exit_boosting_ui()
-                self.home_page.set_engine_state(False)
-                self._finish_engine_transition()
-                return
+            # strict_route's own WFP block has a final block action; an
+            # external Permit filter cannot reliably override it.  DoH strict
+            # mode needs no port-53 exception, while compatibility mode turns
+            # strict_route off before any legacy DNS packet is sent.
+            self._teardown_tun_wfp_dns_exemption(log_cleanup=False)
 
             # 2) 生成 sing-box 配置
             if not self._regenerate_singbox_config():
-                self._teardown_tun_wfp_dns_exemption()
                 self._teardown_pool()
                 self._tun_starting = False
                 self._exit_boosting_ui()
@@ -1881,6 +1906,36 @@ def create_main_window():
                 )
                 self.show_error(tr("error_start_failed", error=e))
                 self._stop_tun_mode()
+
+        @Slot(str)
+        def _on_tun_dns_compatibility_required(self, reason: str):
+            """Retry exactly once without strict_route after persistent DoH loss."""
+            sender = self.sender()
+            if (
+                isinstance(sender, MultiPortProxyWorker)
+                and sender is not self._pool_worker
+            ):
+                return
+            if (
+                not self._tun_active
+                or self._tun_dns_mode != MultiPortProxyWorker.DNS_MODE_DOH_STRICT
+                or self._tun_dns_fallback_attempted
+            ):
+                return
+            self._tun_dns_fallback_attempted = True
+            self._tun_dns_mode_override = MultiPortProxyWorker.DNS_MODE_LEGACY_COMPAT
+            self.append_log(f"[TUN][DNS] {reason}；正在受控重启为传统 DNS 兼容模式。", force=True)
+            self._acceleration_log.record_event(
+                "tun_dns", "runtime_compatibility_fallback", reason=reason,
+            )
+            self.show_warning("DoH 连续解析失败，正在切换到兼容 DNS 模式")
+            QTimer.singleShot(0, self._restart_tun_in_dns_compatibility_mode)
+
+        def _restart_tun_in_dns_compatibility_mode(self):
+            if not self._tun_active or self._shutdown_started:
+                return
+            self._stop_tun_mode()
+            QTimer.singleShot(350, self._start_tun_mode)
 
         def _on_tun_pool_error(self, message: str):
             sender = self.sender()

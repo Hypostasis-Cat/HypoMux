@@ -1368,6 +1368,7 @@ class MultiPortProxyWorker(QThread):
     log_signal = Signal(str)
     traffic_signal = Signal(dict)
     connectivity_signal = Signal(str)
+    dns_compatibility_required = Signal(str)
     started_ok = Signal(str)
     stopped = Signal(str)
     error_signal = Signal(str)
@@ -1398,6 +1399,8 @@ class MultiPortProxyWorker(QThread):
     DNS_CACHE_TTL = 180.0
     DNS_PREFLIGHT_DOMAIN = "www.msftconnecttest.com"
     DNS_PREFLIGHT_DOH_LIMIT = 2
+    DNS_MODE_DOH_STRICT = "doh_strict"
+    DNS_MODE_LEGACY_COMPAT = "legacy_compat"
 
     def __init__(
         self,
@@ -1445,6 +1448,12 @@ class MultiPortProxyWorker(QThread):
         self._stop_requested = False
         self._configured_dns_servers: Tuple[str, ...] = self.DNS_SERVERS
         self._doh_endpoints: Tuple[Tuple[str, str, str], ...] = self.DEFAULT_DOH_ENDPOINTS
+        self._doh_provider = "auto"
+        self._dns_mode = self.DNS_MODE_DOH_STRICT
+        self._dns_mode_override = ""
+        self._legacy_dns_verified = False
+        self._doh_failure_count = 0
+        self._doh_compatibility_signal_emitted = False
         self._dns_cache: Dict[Tuple[int, str], Tuple[float, str]] = {}
         self._dns_inflight: Dict[Tuple[int, str], asyncio.Task] = {}
         self._last_connectivity_emit = 0.0
@@ -1461,6 +1470,17 @@ class MultiPortProxyWorker(QThread):
     def selected_nics_snapshot(self) -> List[Dict]:
         """返回已解析权威接口索引的网卡快照，供 TUN 健康探测复用。"""
         return [dict(nic) for nic in self._selected_nics]
+
+    def dns_mode(self) -> str:
+        """Return the mode selected by DNS preflight for this TUN run."""
+        return self._dns_mode
+
+    def set_dns_mode_override(self, mode: str):
+        """Request one controlled restart in legacy compatibility mode."""
+        self._dns_mode_override = (
+            self.DNS_MODE_LEGACY_COMPAT
+            if str(mode) == self.DNS_MODE_LEGACY_COMPAT else ""
+        )
 
     def _emit_connectivity(self, detail: str):
         """节流上报真实上游响应，作为 TUN 双向数据链路已打通的证据。"""
@@ -1532,6 +1552,7 @@ class MultiPortProxyWorker(QThread):
         key = str(provider or "auto").strip().lower()
         # ``off`` is an explicit policy, not an unknown provider fallback:
         # resolution stays on the selected NIC's bound UDP/TCP 53 path.
+        self._doh_provider = key
         self._doh_endpoints = () if key == "off" else self.DOH_PRESETS.get(
             key, self.DEFAULT_DOH_ENDPOINTS,
         )
@@ -1573,6 +1594,11 @@ class MultiPortProxyWorker(QThread):
             return
 
         if self._allow_degraded_start:
+            self._dns_mode = (
+                self.DNS_MODE_LEGACY_COMPAT
+                if self._doh_provider == "off" or self._dns_mode_override
+                else self.DNS_MODE_DOH_STRICT
+            )
             self.log_signal.emit(
                 "[出站池][强制模式] 已跳过全部网卡 DNS/DoH 预检；"
                 "保留所有已选网卡并直接启动，供故障复现与测试"
@@ -1602,10 +1628,16 @@ class MultiPortProxyWorker(QThread):
             for nic in self._selected_nics
         )
         doh_plan = ",".join(f"{host}@{ip}" for ip, host, _path in self._doh_endpoints)
-        if doh_plan:
-            self.log_signal.emit(f"[出站池][DNS] DoH优先 {doh_plan} | 53兜底 {dns_plan}")
+        if self._dns_mode == self.DNS_MODE_DOH_STRICT:
+            self.log_signal.emit(
+                f"[出站池][DNS] DoH 严格模式 {doh_plan} | 禁止回退 UDP/TCP 53"
+            )
         else:
-            self.log_signal.emit(f"[出站池][DNS] DoH已关闭 | 仅使用已绑定网卡的 53 DNS {dns_plan}")
+            reason = "用户关闭 DoH" if self._doh_provider == "off" else "DoH 不可用或运行期降级"
+            self.log_signal.emit(
+                f"[出站池][DNS] 传统 DNS 兼容模式（{reason}）| "
+                f"仅使用已绑定网卡的 UDP/TCP 53 {dns_plan}"
+            )
         self.started_ok.emit(
             f"ethernet={self._ports['nic_ethernet']};wifi={self._ports['nic_wifi']};"
             f"aggregation={self._ports['aggregation']}"
@@ -1979,20 +2011,37 @@ class MultiPortProxyWorker(QThread):
         # scheduling behaviour, then transparently use IPv6 for AAAA-only
         # services.  Both query types use the NIC-bound DNS transport.
         for record_type, label in ((DNS_TYPE_A, "A"), (DNS_TYPE_AAAA, "AAAA")):
-            for endpoint_ip, host, path in self._doh_endpoints:
-                try:
-                    return await self._query_dns_doh(
-                        domain, nic, loop, endpoint_ip, host, path, record_type,
-                    )
-                except Exception as e:
-                    errors.append(f"doh-{label}/{host}@{endpoint_ip} {type(e).__name__}: {e!r}")
-
-            for dns_server in self._dns_servers_for_nic(nic):
-                for method, resolver in (("udp", self._query_dns_udp), ("tcp", self._query_dns_tcp)):
+            if self._dns_mode == self.DNS_MODE_DOH_STRICT:
+                for endpoint_ip, host, path in self._doh_endpoints:
                     try:
-                        return await resolver(domain, nic, loop, dns_server, record_type)
+                        value = await self._query_dns_doh(
+                            domain, nic, loop, endpoint_ip, host, path, record_type,
+                        )
+                        self._doh_failure_count = 0
+                        return value
                     except Exception as e:
-                        errors.append(f"{method}-{label}/{dns_server} {type(e).__name__}: {e!r}")
+                        errors.append(
+                            f"doh-{label}/{host}@{endpoint_ip} {type(e).__name__}: {e!r}"
+                        )
+            else:
+                for dns_server in self._dns_servers_for_nic(nic):
+                    for method, resolver in (("udp", self._query_dns_udp), ("tcp", self._query_dns_tcp)):
+                        try:
+                            return await resolver(domain, nic, loop, dns_server, record_type)
+                        except Exception as e:
+                            errors.append(f"{method}-{label}/{dns_server} {type(e).__name__}: {e!r}")
+
+        if self._dns_mode == self.DNS_MODE_DOH_STRICT:
+            self._doh_failure_count += 1
+            if (
+                self._legacy_dns_verified
+                and self._doh_failure_count >= 3
+                and not self._doh_compatibility_signal_emitted
+            ):
+                self._doh_compatibility_signal_emitted = True
+                self.dns_compatibility_required.emit(
+                    "连续 3 次 DoH 解析失败，已请求受控切换到传统 DNS 兼容模式"
+                )
 
         # Do not fall back to Windows' system resolver here.  It is not bound
         # to this NIC and, once TUN is active, can re-enter the TUN DNS path or
@@ -2020,13 +2069,15 @@ class MultiPortProxyWorker(QThread):
             if self._dns_inflight.get(cache_key) is task and task.done():
                 self._dns_inflight.pop(cache_key, None)
 
-    async def _preflight_dns_for_nic(self, nic: Dict, loop) -> Tuple[bool, str]:
-        """在 TUN 接管前快速验证指定物理网卡的 DNS 可用性。"""
+    async def _preflight_dns_for_nic(self, nic: Dict, loop) -> Tuple[bool, bool, str]:
+        """Verify both DNS transports so all selected NICs share one safe mode."""
         name = str(nic.get("name") or nic.get("ip") or "unknown")
         errors: List[str] = []
+        doh_ok = False
+        doh_detail = "disabled"
         for endpoint_ip, host, path in self._doh_endpoints[:self.DNS_PREFLIGHT_DOH_LIMIT]:
             if self._stop_requested:
-                return False, f"{name}: cancelled"
+                return False, False, f"{name}: cancelled"
             try:
                 ip = await asyncio.wait_for(
                     loop.run_in_executor(
@@ -2042,32 +2093,56 @@ class MultiPortProxyWorker(QThread):
                     ),
                     timeout=4.0,
                 )
-                return True, f"{name}: DoH {host} -> {ip}"
+                doh_ok = True
+                doh_detail = f"{host} -> {ip}"
+                break
             except Exception as e:
                 errors.append(f"DoH {host}: {type(e).__name__}")
 
-        # DoH 暂不可用时仅用传统 DNS 判断该网卡是否仍具备基本解析能力；
-        # 正式连接阶段依旧保持 DoH 优先和多节点回退。
+        legacy_ok = False
+        legacy_detail = "unavailable"
         for dns_server in self._dns_servers_for_nic(nic)[:2]:
             if self._stop_requested:
-                return False, f"{name}: cancelled"
+                return False, False, f"{name}: cancelled"
             try:
                 ip = await self._query_dns_udp(
                     self.DNS_PREFLIGHT_DOMAIN, nic, loop, dns_server
                 )
-                return True, f"{name}: DNS {dns_server} -> {ip} (DoH preflight unavailable)"
+                legacy_ok = True
+                legacy_detail = f"{dns_server} -> {ip}"
+                break
             except Exception as e:
                 errors.append(f"DNS {dns_server}: {type(e).__name__}")
-        return False, f"{name}: " + "; ".join(errors[-4:])
+        detail = f"{name}: DoH={'ok ' + doh_detail if doh_ok else 'failed'}; legacy DNS={'ok ' + legacy_detail if legacy_ok else 'failed'}"
+        if not doh_ok and not legacy_ok and errors:
+            detail += " | " + "; ".join(errors[-4:])
+        return doh_ok, legacy_ok, detail
 
     async def _preflight_selected_nics_dns(self) -> Tuple[bool, List[str]]:
-        """并行预热全部选中网卡；任一卡完全无法解析时拒绝 TUN 接管。"""
+        """Select one DNS policy that works for every selected physical NIC."""
         loop = asyncio.get_running_loop()
         results = await asyncio.gather(*(
             self._preflight_dns_for_nic(nic, loop) for nic in self._selected_nics
         ))
-        details = [detail for _ok, detail in results]
-        return all(ok for ok, _detail in results), details
+        details = [detail for _doh_ok, _legacy_ok, detail in results]
+        all_doh = bool(self._doh_endpoints) and all(doh_ok for doh_ok, _legacy_ok, _detail in results)
+        all_legacy = all(legacy_ok for _doh_ok, legacy_ok, _detail in results)
+        self._legacy_dns_verified = all_legacy
+
+        if self._dns_mode_override == self.DNS_MODE_LEGACY_COMPAT or self._doh_provider == "off":
+            self._dns_mode = self.DNS_MODE_LEGACY_COMPAT
+            details.append("selected mode: legacy compatibility (strict_route off)")
+            return all_legacy, details
+        if all_doh:
+            self._dns_mode = self.DNS_MODE_DOH_STRICT
+            details.append("selected mode: DoH strict (strict_route on, no port 53 fallback)")
+            return True, details
+        if all_legacy:
+            self._dns_mode = self.DNS_MODE_LEGACY_COMPAT
+            details.append("selected mode: legacy compatibility (DoH unavailable, strict_route off)")
+            return True, details
+        details.append("selected mode: none (not all selected NICs support the same safe DNS transport)")
+        return False, details
 
     async def _start_udp_associate(
         self, reader, writer, balancer, channel, requested_client_port: int = 0,

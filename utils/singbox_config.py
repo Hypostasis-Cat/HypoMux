@@ -163,6 +163,7 @@ def build_config(
     dns_bind_ip: str = "",
     dns_bind_interface: str = "",
     app_process_path: str | List[str] = "",
+    strict_route: bool = True,
 ) -> Dict[str, Any]:
     """根据用户规则动态构建 sing-box 配置字典。
 
@@ -294,7 +295,11 @@ def build_config(
                 "address": ["172.19.0.1/30", "fdfe:dcba:9876::1/126"],
                 "mtu": 1492,
                 "auto_route": True,
-                "strict_route": True,
+                # Windows strict_route installs WFP DNS blocks for every
+                # non-TUN interface.  It is safe only while the outbound pool
+                # resolves exclusively over DoH; legacy UDP/TCP DNS needs the
+                # adaptive compatibility mode to turn it off for this run.
+                "strict_route": bool(strict_route),
                 "stack": "system",
             }
         ],
