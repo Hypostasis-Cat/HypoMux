@@ -35,6 +35,7 @@ from utils.socket_binding import probe_bound_tcp
 from proxy_worker import ProxyWorker, MultiPortProxyWorker
 from utils.blocked_domain_tracker import get_tracker
 from utils.tun_manager import TunManager
+from utils.wfp_dns_exemption import WfpDnsExemption, WfpPolicyError
 from utils import singbox_config
 from utils.acceleration_log import AccelerationLogStore
 from utils.update_checker import UpdateError, launch_installer_after_exit
@@ -188,6 +189,7 @@ def create_main_window():
     from ui.pages.about_page import AboutPage
     from ui.pages.blocked_domains_page import BlockedDomainsPage
     from ui.popup_material import apply_mica_popup
+    from ui.components import refresh_content_card_material, set_content_card_opacity
 
     class BlockedDomainsWindow(FluentWidget):
         """单网卡被墙域名的独立云母窗口。"""
@@ -654,6 +656,7 @@ def create_main_window():
             self._run_mode = self._app_config.get("run_mode", "tun")
             self._routing_rules = self._app_config.get("routing_rules", [])
             self._pool_worker = None      # MultiPortProxyWorker（TUN 模式下的出站池）
+            self._tun_wfp_dns_exemption = None
             self._tun_manager = None      # sing-box 内核侧车
             self._retired_pool_workers = []
             self._retired_tun_managers = []
@@ -758,7 +761,9 @@ def create_main_window():
         def _on_theme_changed(self, *args):
             """主题切换回调：延迟重绘高亮控件，避免取到旧主题色。"""
             self._refresh_theme_sensitive_pages()
+            self._refresh_content_card_material()
             QTimer.singleShot(80, self._refresh_theme_sensitive_pages)
+            QTimer.singleShot(80, self._refresh_content_card_material)
             QTimer.singleShot(100, self._apply_mica_visual_state)
 
         def eventFilter(self, watched, event):
@@ -830,7 +835,36 @@ def create_main_window():
             """Load a persisted wallpaper and redraw without rebuilding the window."""
             pixmap = QPixmap(str(image_path)) if image_path else QPixmap()
             self._background_pixmap = pixmap if not pixmap.isNull() else QPixmap()
+            self._set_content_card_opacity(
+                QSettings("Hypostasis-Cat", "HypoMux").value(
+                    "content_card_opacity", 88, type=int
+                )
+            )
             self._apply_mica_visual_state()
+
+        def _set_content_card_opacity(self, opacity: int):
+            """Refresh card surfaces while leaving text and icons fully opaque."""
+            self._content_card_opacity = max(0, min(int(opacity), 100))
+            background_pixmap = getattr(self, "_background_pixmap", None)
+            wallpaper_active = bool(
+                background_pixmap is not None and not background_pixmap.isNull()
+            )
+            set_content_card_opacity(self._content_card_opacity, wallpaper_active)
+            self._refresh_content_card_material()
+
+        def _refresh_content_card_material(self):
+            """Repaint cached Fluent surfaces after wallpaper material changes."""
+            for page in (
+                getattr(self, "home_page", None),
+                getattr(self, "routing_page", None),
+                getattr(self, "tools_page", None),
+                getattr(self, "settings_page", None),
+                getattr(self, "about_page", None),
+                getattr(self, "blocked_page", None),
+            ):
+                if page is not None:
+                    refresh_content_card_material(page)
+            self.update()
 
         def paintEvent(self, event):
             """Paint the user wallpaper below all transparent Fluent pages."""
@@ -900,6 +934,7 @@ def create_main_window():
             self.blocked_page = None
             self._blocked_domains_dialog = None
             self._blocked_domains_controls_enabled = True
+            self._refresh_content_card_material()
 
         def _init_navigation(self):
             # 图标方案（用户确认）：HOME / GLOBAL(回退 GLOBE/IOT) / SPEED_HIGH / SETTING
@@ -979,6 +1014,9 @@ def create_main_window():
             self.settings_page.language_changed.connect(self._on_language_changed)
             self.settings_page.theme_color_changed.connect(self._refresh_theme_sensitive_pages)
             self.settings_page.background_image_changed.connect(self._set_background_image)
+            self.settings_page.content_card_opacity_changed.connect(
+                self._set_content_card_opacity
+            )
             self.settings_page.ports_changed.connect(self._on_settings_ports_changed)
             self.settings_page.info_message.connect(self.show_info)
             self.settings_page.success_message.connect(self.show_success)
@@ -986,6 +1024,9 @@ def create_main_window():
             self.settings_page.dns_changed.connect(self._on_dns_changed)
             self.settings_page.force_tun_connectivity_bypass_changed.connect(
                 self._on_force_tun_connectivity_bypass_changed
+            )
+            self.settings_page.wfp_dns_egress_exemption_changed.connect(
+                self._on_wfp_dns_egress_exemption_changed
             )
             self.settings_page.mica_effect_changed.connect(self._set_mica_effect_enabled)
             self.settings_page.blocked_domain_settings_changed.connect(self._on_blocked_domain_settings_changed)
@@ -1112,9 +1153,17 @@ def create_main_window():
             self._app_config["force_tun_connectivity_bypass"] = bool(enabled)
             self._persist_config()
 
+        def _on_wfp_dns_egress_exemption_changed(self, enabled: bool):
+            self._app_config["wfp_dns_egress_exemption"] = bool(enabled)
+            self._persist_config()
+
         def _force_tun_connectivity_bypass_enabled(self) -> bool:
             """Whether this run bypasses only external TUN connectivity probes."""
             return bool(self._app_config.get("force_tun_connectivity_bypass", False))
+
+        def _wfp_dns_egress_exemption_enabled(self) -> bool:
+            """Whether strict-route DNS gets the narrow HypoMux-only WFP permit."""
+            return bool(self._app_config.get("wfp_dns_egress_exemption", True))
 
         def _on_blocked_domain_settings_changed(self):
             self._persist_config()
@@ -1149,6 +1198,7 @@ def create_main_window():
                 self.blocked_page.set_controls_enabled(self._blocked_domains_controls_enabled)
                 layout.addWidget(self.blocked_page)
                 self._blocked_domains_dialog = dialog
+                self._refresh_content_card_material()
             self.blocked_page._load_data()
             self._blocked_domains_dialog.show()
             self._blocked_domains_dialog.raise_()
@@ -1176,6 +1226,7 @@ def create_main_window():
                 "routing_rules": self._routing_rules,
                 "dns_server": self._app_config.get("dns_server", "223.5.5.5"),
                 "doh_provider": self._app_config.get("doh_provider", "auto"),
+                "wfp_dns_egress_exemption": self._wfp_dns_egress_exemption_enabled(),
                 "force_tun_connectivity_bypass": self._force_tun_connectivity_bypass_enabled(),
                 "blocked_domain_bypass": get_tracker().enabled,
                 "blocked_domain_expiry": get_tracker().use_expiry,
@@ -1715,6 +1766,7 @@ def create_main_window():
                 )
                 self._pool_worker.started_ok.connect(self._on_tun_pool_started)
                 self._pool_worker.error_signal.connect(self._on_tun_pool_error)
+                self._pool_worker.stopped.connect(self._on_tun_pool_stopped)
                 # 包含全部选中网卡的 DoH/DNS 预检，弱网环境留出足够时间。
                 self._tun_pool_start_timer.start(15000)
                 self._pool_worker.start()
@@ -1724,6 +1776,51 @@ def create_main_window():
                 self._teardown_pool()
                 self._exit_boosting_ui()
                 self._finish_engine_transition()
+
+        def _install_tun_wfp_dns_exemption(self, selected_nics: list) -> bool:
+            """Install the app+IP+IfIndex+53 permit before strict_route starts."""
+            self._teardown_tun_wfp_dns_exemption(log_cleanup=False)
+            if not self._wfp_dns_egress_exemption_enabled():
+                self.append_log("[TUN][WFP] 精确 DNS 出站豁免已由设置关闭")
+                return True
+            controller = WfpDnsExemption(selected_nics)
+            try:
+                filter_ids = controller.install()
+            except WfpPolicyError as exc:
+                controller.close()
+                message = f"[TUN][WFP] 无法安装严格路由 DNS 精确豁免: {exc}"
+                self.append_log(message, force=True)
+                self._acceleration_log.record_event("tun_wfp_dns", "install_failed", error=str(exc))
+                if self._force_tun_connectivity_bypass_enabled():
+                    self.append_log("[TUN][强制模式] 忽略 WFP 豁免安装失败，继续用于复现测试", force=True)
+                    return True
+                self.show_error("无法建立 TUN 的 DNS 出站隔离策略，请以管理员身份启动后重试。")
+                return False
+            self._tun_wfp_dns_exemption = controller
+            rules = ", ".join(
+                f"{rule.adapter_name}/{rule.source_ip}/if{rule.interface_index}/{rule.protocol.upper()}53"
+                for rule in controller.rules
+            )
+            self.append_log(
+                f"[TUN][WFP] 已安装 {len(filter_ids)} 条临时精确豁免 | {rules}",
+                force=True,
+            )
+            self._acceleration_log.record_event(
+                "tun_wfp_dns", "installed", filter_count=len(filter_ids), rules=rules,
+            )
+            return True
+
+        def _teardown_tun_wfp_dns_exemption(self, *, log_cleanup: bool = True):
+            controller = self._tun_wfp_dns_exemption
+            self._tun_wfp_dns_exemption = None
+            if controller is None:
+                return
+            try:
+                controller.close()
+                if log_cleanup:
+                    self.append_log("[TUN][WFP] 临时 DNS 精确豁免已清理")
+            except Exception as exc:
+                self.append_log(f"[TUN][WFP] 清理临时 DNS 豁免失败: {exc}", force=True)
 
         def _on_tun_pool_started(self, info: str):
             sender = self.sender()
@@ -1740,9 +1837,19 @@ def create_main_window():
                 "tun_outbound_pool", "started", endpoints=info,
             )
             self.home_page.set_engine_startup_status(tr("tun_starting"))
+            if not self._install_tun_wfp_dns_exemption(
+                self._pool_worker.selected_nics_snapshot()
+            ):
+                self._teardown_pool()
+                self._tun_starting = False
+                self._exit_boosting_ui()
+                self.home_page.set_engine_state(False)
+                self._finish_engine_transition()
+                return
 
             # 2) 生成 sing-box 配置
             if not self._regenerate_singbox_config():
+                self._teardown_tun_wfp_dns_exemption()
                 self._teardown_pool()
                 self._tun_starting = False
                 self._exit_boosting_ui()
@@ -1878,6 +1985,25 @@ def create_main_window():
                 self.show_success(tr("tun_started"))
             else:
                 self.show_warning(tr("tun_force_started"))
+
+        @Slot(str)
+        def _on_tun_pool_stopped(self, message: str):
+            """Rollback TUN when its sole Python egress pool vanishes silently."""
+            sender = self.sender()
+            if (
+                isinstance(sender, MultiPortProxyWorker)
+                and sender is not self._pool_worker
+            ):
+                return
+            if not self._tun_starting and not self._tun_active:
+                return
+            localized = localize_runtime_message(message)
+            self.append_log(f"[TUN] {localized}")
+            self._acceleration_log.record_event(
+                "tun_outbound_pool", "stopped_unexpectedly", message=localized,
+            )
+            self.show_error("TUN 出站池意外停止，正在安全回滚虚拟网卡")
+            self._stop_tun_mode()
 
         def _start_tun_health_check(self, startup: bool = False):
             if not self._tun_active or self._tun_manager is None:
@@ -2107,6 +2233,7 @@ def create_main_window():
                 except Exception:
                     pass
                 self._retire_tun_thread(manager, self._retired_tun_managers)
+            self._teardown_tun_wfp_dns_exemption()
             # 2) 关 Python 出站池
             self._teardown_pool()
             self._tun_active = False

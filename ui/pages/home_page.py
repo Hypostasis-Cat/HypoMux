@@ -18,7 +18,7 @@ from qfluentwidgets import (
     HorizontalSeparator, ToolTipFilter, IndeterminateProgressRing,
 )
 
-from ui.components import SurfaceCardWidget
+from ui.components import SurfaceCardWidget, register_content_card_control
 from ui.i18n import tr
 
 
@@ -72,6 +72,7 @@ class AdapterRow(QWidget):
         # 调度权重输入
         self._bw_unit = CaptionLabel(tr("home_bw_column"), self)
         self._bw_spin = SpinBox(self)
+        register_content_card_control(self._bw_spin)
         self._bw_spin.setRange(1, 100)
         self._bw_spin.setValue(max(1, min(int(schedule_weight or 1), 100)))
         # Fluent SpinBox 内置独立的上下按钮，需要保留足够宽度给数字编辑区。

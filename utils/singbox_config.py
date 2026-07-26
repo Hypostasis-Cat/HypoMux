@@ -264,6 +264,7 @@ def build_config(
         "type": "fakeip",
         "tag": DNS_FAKEIP_TAG,
         "inet4_range": "198.18.0.0/15",
+        "inet6_range": "fc00::/18",
     }
     # Preserve the v2.1.1 FakeIP policy.  The regression was introduced by
     # routing the *native* resolver through the aggregation pool, not by this
@@ -288,7 +289,9 @@ def build_config(
                 "type": "tun",
                 "tag": "tun-in",
                 "interface_name": tun_name,
-                "address": ["172.19.0.1/30"],
+                # IPv6 needs an address on the TUN itself; without it Windows
+                # cannot install a usable IPv6 default route into this inbound.
+                "address": ["172.19.0.1/30", "fdfe:dcba:9876::1/126"],
                 "mtu": 1492,
                 "auto_route": True,
                 "strict_route": True,

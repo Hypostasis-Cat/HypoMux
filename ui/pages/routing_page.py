@@ -21,7 +21,7 @@ from qfluentwidgets import (
     SubtitleLabel, CaptionLabel, PrimaryPushButton,
 )
 
-from ui.components import SurfaceCardWidget
+from ui.components import SurfaceCardWidget, register_content_card_control
 from ui.i18n import tr
 from ui.popup_material import apply_mica_popup
 from qfluentwidgets.common.color import FluentSystemColor
@@ -369,6 +369,7 @@ class RoutingPage(QWidget):
         self.tableWidget.setRowHeight(row, self.ROW_HEIGHT)
 
         edit = LineEdit(self.tableWidget)
+        register_content_card_control(edit)
         edit.setPlaceholderText(tr("routing_placeholder_process"))
         edit.setText(process_name)
         edit.textChanged.connect(self._on_process_text_changed)
@@ -379,6 +380,7 @@ class RoutingPage(QWidget):
         self.tableWidget.setCellWidget(row, self.COL_PROCESS, edit)
 
         combo = self._make_outbound_combo(outbound)
+        register_content_card_control(combo)
         self.tableWidget.setCellWidget(row, self.COL_OUTBOUND, combo)
         self._update_duplicate_state()
         self._update_rule_count()

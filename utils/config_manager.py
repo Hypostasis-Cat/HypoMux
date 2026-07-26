@@ -42,7 +42,7 @@ DEFAULT_SOCKS_PORT = 10800
 DEFAULT_HTTP_PORT = 10801
 DEFAULT_DNS_SERVER = "223.5.5.5"
 DEFAULT_DOH_PROVIDER = "auto"
-VALID_DOH_PROVIDERS = {"auto", "alidns", "dnspod", "google"}
+VALID_DOH_PROVIDERS = {"auto", "off", "alidns", "dnspod", "google"}
 
 # 配置目录 / 文件名
 CONFIG_DIR_NAME = ".hypomux"
@@ -79,6 +79,7 @@ def default_config() -> Dict[str, Any]:
         "routing_rules": [],
         "dns_server": DEFAULT_DNS_SERVER,
         "doh_provider": DEFAULT_DOH_PROVIDER,
+        "wfp_dns_egress_exemption": True,
         # 特殊网络环境下允许 TUN 跳过外部联网探测；默认保持安全回滚。
         "force_tun_connectivity_bypass": False,
         "blocked_domain_bypass": False,  # 自动规避单网卡被墙域名（默认关闭，仅特殊网络环境建议开启）
@@ -148,6 +149,10 @@ def _coerce_config(raw: Any) -> Dict[str, Any]:
 
     raw_doh = str(raw.get("doh_provider", DEFAULT_DOH_PROVIDER)).strip().lower()
     cfg["doh_provider"] = raw_doh if raw_doh in VALID_DOH_PROVIDERS else DEFAULT_DOH_PROVIDER
+
+    cfg["wfp_dns_egress_exemption"] = _coerce_bool(
+        raw.get("wfp_dns_egress_exemption"), True
+    )
 
     # 强制模式跳过全部网卡 DNS/DoH 预检，以及 TUN 外部联网探测的自动
     # 停机；仍不跳过出站池/sing-box 的实际启动异常。

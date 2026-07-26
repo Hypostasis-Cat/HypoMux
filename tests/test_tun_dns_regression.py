@@ -25,6 +25,14 @@ class TunDnsRegressionTests(unittest.TestCase):
             "server": DNS_FAKEIP_TAG,
         }])
 
+    def test_strict_route_remains_enabled_with_scoped_wfp_dns_fix(self):
+        config = build_config()
+        tun = config["inbounds"][0]
+        self.assertTrue(tun["strict_route"])
+        self.assertIn("fdfe:dcba:9876::1/126", tun["address"])
+        fakeip = next(server for server in config["dns"]["servers"] if server["tag"] == DNS_FAKEIP_TAG)
+        self.assertEqual(fakeip["inet6_range"], "fc00::/18")
+
     def test_source_bind_failure_keeps_v211_interface_pin_behavior(self):
         class SourceBindFailingSocket:
             def setsockopt(self, *_args):
