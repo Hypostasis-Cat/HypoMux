@@ -1,5 +1,6 @@
 """Unit tests for the scoped WFP DNS policy planner (no WFP privileges needed)."""
 
+import os
 import unittest
 
 from utils.wfp_dns_exemption import (
@@ -12,6 +13,7 @@ from utils.wfp_dns_exemption import (
     FWP_BYTE_BLOB,
     WfpDnsExemption,
     build_dns_rule_specs,
+    current_application_path,
     ipv4_to_wfp_uint32,
 )
 import ctypes
@@ -19,6 +21,9 @@ from utils.config_manager import _coerce_config, default_config
 
 
 class WfpDnsExemptionTests(unittest.TestCase):
+    def test_current_application_path_is_an_existing_executable(self):
+        self.assertTrue(os.path.isfile(current_application_path()))
+
     def test_product_default_enables_the_scoped_fix_but_respects_opt_out(self):
         self.assertTrue(default_config()["wfp_dns_egress_exemption"])
         self.assertTrue(_coerce_config({})["wfp_dns_egress_exemption"])

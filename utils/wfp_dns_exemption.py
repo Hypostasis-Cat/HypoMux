@@ -48,8 +48,39 @@ class WfpDnsRuleSpec:
 
 
 def current_application_path() -> str:
-    """Return the canonical executable identity used by WFP ALE_APP_ID."""
-    return str(Path(sys.executable).resolve())
+    """Return the real process image path used by WFP ALE_APP_ID.
+
+    Nuitka standalone builds may expose a helper ``python.exe`` through
+    ``sys.executable`` even though the running process is ``HypoMux.exe``.
+    WFP resolves an ALE application identity from an on-disk executable, so
+    use the Windows process image first and fall back to the interpreter only
+    for normal source/venv execution.
+    """
+    candidates: List[Path] = []
+    if os.name == "nt":
+        try:
+            # A long-path-sized buffer also covers installations below a path
+            # containing non-ASCII characters without relying on ANSI APIs.
+            buffer = ctypes.create_unicode_buffer(32768)
+            length = ctypes.windll.kernel32.GetModuleFileNameW(
+                None, buffer, len(buffer)
+            )
+            if length:
+                candidates.append(Path(buffer.value))
+        except Exception:
+            # Source execution still has the interpreter path below.
+            pass
+    if sys.executable:
+        candidates.append(Path(sys.executable))
+
+    for candidate in candidates:
+        try:
+            resolved = candidate.resolve(strict=True)
+        except OSError:
+            continue
+        if resolved.is_file():
+            return str(resolved)
+    raise WfpPolicyError("unable to locate the running HypoMux executable for WFP")
 
 
 def ipv4_to_wfp_uint32(address: str) -> int:
