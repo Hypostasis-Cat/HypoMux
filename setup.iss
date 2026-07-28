@@ -48,6 +48,7 @@ VersionInfoProductVersion={#MyAppVersionInfo}
 VersionInfoCompany={#MyAppPublisher}
 VersionInfoDescription={#MyAppName} Setup
 VersionInfoCopyright=Copyright (C) 2026 {#MyAppPublisher}
+ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 ; 普通关闭请求会被 HypoMux 的“关闭到托盘”偏好拦截，导致 Restart
 ; Manager 误判文件仍被占用。优先正常关闭；若未退出则由安装器强制关闭，
