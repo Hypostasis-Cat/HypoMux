@@ -1,7 +1,7 @@
 """
 HypoMux sing-box 配置生成器 - 第三阶段下半场 · 任务2
 
-把【路由规则页】TableWidget 中的进程级分流规则，动态序列化为标准的
+把【路由规则页】TableWidget 中的进程/域名/IP 分流规则，动态序列化为标准的
 sing-box 兼容 config.json。
 
 架构映射：
@@ -11,8 +11,8 @@ sing-box 兼容 config.json。
   默认端口为 2001/2002/2003；端口受 HNS/Hyper-V 限制时使用运行时回退端口。
   另含 direct（保底直连）。
 - route.rules: 顶部按固定顺序强插后端自流量防环、DNS 劫持、ICMP 网络
-  直连防御矩阵，并让 QUIC 快速回退到 TCP（规避 FakeIP/QUIC 会话不稳定），
-  再按用户表格逐条生成 {process_name:[...], outbound:...}；
+  直连防御矩阵，并在交给本地 SOCKS 前解析 FakeIP 对应的真实目标，
+  再按用户规则生成 process_name / domain / ip_cidr 路由项；
   未命中规则的默认兜底 final 一律指向 aggregation，实现 TCP/UDP 全局聚合叠加。
 
 纯逻辑模块，零 Qt 依赖，防御式编程，绝不抛出未捕获异常。
@@ -24,6 +24,8 @@ import json
 import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+from utils.routing_rules import normalize_routing_rules, to_singbox_route_rule
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +49,9 @@ PORT_WIFI = 2002
 PORT_AGGREGATION = 2003
 
 TUN_INTERFACE_NAME = "HypoMux-Tun"
-DNS_LOCAL_TAG = "dns-local"
+DNS_UPSTREAM_TAG = "dns-upstream"
+# Backwards-compatible import name used by existing regression tests.
+DNS_LOCAL_TAG = DNS_UPSTREAM_TAG
 DNS_FAKEIP_TAG = "dns-fakeip"
 
 # 常见游戏加速器的核心进程。它们负责隧道、分流驱动或本地转发；让这些
@@ -133,6 +137,56 @@ def _socks_outbound(tag: str, port: int) -> Dict[str, Any]:
     }
 
 
+def _dns_upstream_server(
+    dns_plan: Optional[Dict[str, Any]],
+    *,
+    bind_ip: str = "",
+    bind_interface: str = "",
+) -> Dict[str, Any]:
+    """Build a sing-box-owned DNS upstream.
+
+    Windows strict_route hard-permits the sing-box process before installing
+    the port-53 block.  Keeping both encrypted and traditional DNS inside
+    sing-box therefore preserves DNS leak protection without requiring a
+    separate WFP exception for the Python outbound pool.
+    """
+    plan = dict(dns_plan or {})
+    mode = str(plan.get("mode") or "doh").strip().lower()
+    server = str(plan.get("server") or "223.5.5.5").strip()
+    interface = str(plan.get("bind_interface") or bind_interface).strip()
+    source_ip = str(plan.get("bind_ip") or bind_ip).strip()
+
+    if mode == "legacy":
+        upstream: Dict[str, Any] = {
+            "type": "udp",
+            "tag": DNS_UPSTREAM_TAG,
+            "server": server,
+            "server_port": int(plan.get("server_port") or 53),
+        }
+    else:
+        tls_name = str(
+            plan.get("tls_server_name") or plan.get("host") or "dns.alidns.com"
+        ).strip()
+        upstream = {
+            "type": "https",
+            "tag": DNS_UPSTREAM_TAG,
+            "server": server,
+            "server_port": int(plan.get("server_port") or 443),
+            "path": str(plan.get("path") or "/dns-query"),
+            "tls": {
+                "enabled": True,
+                "server_name": tls_name,
+            },
+        }
+
+    if interface:
+        upstream["bind_interface"] = interface
+    if source_ip:
+        upstream["inet4_bind_address"] = source_ip
+    upstream["connect_timeout"] = "5s"
+    return upstream
+
+
 def _is_valid_outbound_tag(tag: str) -> bool:
     """校验出站标签；允许固定标签与 nic_真实网卡别名动态标签。"""
     if tag in VALID_OUTBOUNDS:
@@ -162,22 +216,23 @@ def build_config(
     default_outbound: str = OUTBOUND_AGGREGATION,
     dns_bind_ip: str = "",
     dns_bind_interface: str = "",
+    dns_plan: Optional[Dict[str, Any]] = None,
     app_process_path: str | List[str] = "",
     strict_route: bool = True,
 ) -> Dict[str, Any]:
     """根据用户规则动态构建 sing-box 配置字典。
 
     Args:
-        rules: 规则列表，每项 {"process_name": [...], "outbound": "<tag>"}。
-               兼容单字符串 process_name；非法/空规则会被安全跳过。
+        rules: 进程、域名或目标 IP/CIDR 分流规则列表。
+               兼容旧版单字符串/列表 process_name；非法规则会被安全跳过。
         default_outbound: 兜底出站标签（默认 aggregation 聚合叠加）。
 
     Returns:
         dict: 可直接 json.dump 的 sing-box 配置。
     """
     user_route_rules: List[Dict[str, Any]] = []
-    for raw in (rules or []):
-        rule = _normalize_rule(raw)
+    for raw in normalize_routing_rules(rules or []):
+        rule = to_singbox_route_rule(raw)
         if rule is not None:
             user_route_rules.append(rule)
 
@@ -222,12 +277,16 @@ def build_config(
         },
         {"port": [53], "action": "hijack-dns"},
         {"protocol": ["dns"], "action": "hijack-dns"},
-        # 当前 Python SOCKS UDP relay 尚不能为 QUIC 保持稳定的五元组，
-        # FakeIP 下直接放行还会尝试访问 198.18.0.0/15。仅拒绝 sniff 已
-        # 识别的 QUIC，令浏览器立即回退 TCP/HTTPS，同时避免误伤其他恰好
-        # 使用 UDP/443 的应用；其余 UDP 暂维持物理出口直连。
-        {"protocol": ["quic"], "action": "reject"},
-        {"network": ["udp"], "action": "route", "outbound": "direct"},
+        # FakeIP reverse mapping restores the original domain here.  Resolve
+        # it inside sing-box before selecting a local SOCKS outbound so the
+        # Python data plane never needs to emit DNS traffic of its own.  This
+        # also runs before SOCKS UDP routing, whose persistent flow mapping
+        # preserves the physical socket/five-tuple required by QUIC.
+        {
+            "action": "resolve",
+            "server": DNS_UPSTREAM_TAG,
+            "strategy": "prefer_ipv4",
+        },
     ])
     route_rules = defensive_route_rules + user_route_rules
 
@@ -252,24 +311,20 @@ def build_config(
             _dynamic_nic_port(tag, ethernet_port, wifi_port),
         ))
 
-    dns_server_config: Dict[str, Any] = {
-        "type": "local",
-        "tag": DNS_LOCAL_TAG,
-        # Keep the resolver on sing-box's native DNS path.  Sending it back
-        # through the aggregation SOCKS pool changes the FakeIP reverse-map
-        # path and can recurse into the TUN on Windows.  More importantly, it
-        # regressed applications that require a timely real-IP lookup (such as
-        # Hermes/WeChat) compared with v2.1.1.
-    }
+    dns_server_config = _dns_upstream_server(
+        dns_plan,
+        bind_ip=dns_bind_ip,
+        bind_interface=dns_bind_interface,
+    )
     fakeip_server_config: Dict[str, Any] = {
         "type": "fakeip",
         "tag": DNS_FAKEIP_TAG,
         "inet4_range": "198.18.0.0/15",
         "inet6_range": "fc00::/18",
     }
-    # Preserve the v2.1.1 FakeIP policy.  The regression was introduced by
-    # routing the *native* resolver through the aggregation pool, not by this
-    # catch-all mapping itself.
+    # Preserve the v2.1.1 FakeIP policy.  Real address lookup is performed by
+    # the non-final route.resolve action immediately before local SOCKS
+    # outbound selection.
     dns_rules: List[Dict[str, Any]] = [{
         "query_type": ["A", "AAAA"],
         "server": DNS_FAKEIP_TAG,
@@ -295,10 +350,10 @@ def build_config(
                 "address": ["172.19.0.1/30", "fdfe:dcba:9876::1/126"],
                 "mtu": 1492,
                 "auto_route": True,
-                # Windows strict_route installs WFP DNS blocks for every
-                # non-TUN interface.  It is safe only while the outbound pool
-                # resolves exclusively over DoH; legacy UDP/TCP DNS needs the
-                # adaptive compatibility mode to turn it off for this run.
+                # DNS is emitted by the hard-permitted sing-box process, so
+                # traditional port 53 can coexist with strict_route.  This is
+                # disabled only when WFP itself is unavailable or the user
+                # explicitly requests compatibility mode.
                 "strict_route": bool(strict_route),
                 "stack": "system",
             }
@@ -316,23 +371,7 @@ def build_config(
 
 def _normalize_rule(raw: Any) -> Optional[Dict[str, Any]]:
     """把任意来源的单条规则规整为合法的 sing-box route 规则；非法返回 None。"""
-    if not isinstance(raw, dict):
-        return None
-
-    outbound = str(raw.get("outbound", "")).strip()
-    if not _is_valid_outbound_tag(outbound):
-        return None
-
-    raw_proc = raw.get("process_name")
-    procs: List[str] = []
-    if isinstance(raw_proc, str):
-        procs = [raw_proc.strip()] if raw_proc.strip() else []
-    elif isinstance(raw_proc, list):
-        procs = [str(p).strip() for p in raw_proc if str(p).strip()]
-    if not procs:
-        return None
-
-    return {"process_name": procs, "outbound": outbound}
+    return to_singbox_route_rule(raw)
 
 
 def write_config(

@@ -28,14 +28,18 @@ from pathlib import Path
 from typing import Any, List, Dict
 import winreg
 
-from utils.network_utils import scan_network_adapters
+from utils.network_utils import scan_network_adapters, find_shared_ipv4_gateway_risks
 from utils.config_manager import load_config, save_config
 from utils.diagnostic_runner import build_configuration_checks, run_diagnostic, DEFAULT_TARGET_IP
 from utils.socket_binding import probe_bound_tcp
 from proxy_worker import ProxyWorker, MultiPortProxyWorker
 from utils.blocked_domain_tracker import get_tracker
 from utils.tun_manager import TunManager
-from utils.wfp_dns_exemption import WfpDnsExemption, WfpPolicyError
+from utils.wfp_dns_exemption import (
+    get_wfp_environment_fingerprint,
+    probe_wfp_engine,
+    try_repair_wfp_services,
+)
 from utils import singbox_config
 from utils.acceleration_log import AccelerationLogStore
 from utils.update_checker import UpdateError, launch_installer_after_exit
@@ -43,6 +47,26 @@ from utils.update_checker import UpdateError, launch_installer_after_exit
 
 DEFAULT_SOCKS_PORT = 10800
 DEFAULT_HTTP_PORT = 10801
+
+
+def _should_finish_acceleration_log(
+    *,
+    active: bool,
+    tun_active: bool,
+    tun_starting: bool,
+    proxy_active: bool,
+    proxy_worker_present: bool,
+    tun_restart_pending: bool,
+) -> bool:
+    """Return whether the current diagnostic session has genuinely ended."""
+    return (
+        active
+        and not tun_active
+        and not tun_starting
+        and not proxy_active
+        and not proxy_worker_present
+        and not tun_restart_pending
+    )
 
 
 def detect_foreign_tun_default_route() -> str:
@@ -656,10 +680,17 @@ def create_main_window():
             self._run_mode = self._app_config.get("run_mode", "tun")
             self._routing_rules = self._app_config.get("routing_rules", [])
             self._pool_worker = None      # MultiPortProxyWorker（TUN 模式下的出站池）
-            self._tun_wfp_dns_exemption = None
             self._tun_dns_mode = MultiPortProxyWorker.DNS_MODE_DOH_STRICT
             self._tun_dns_mode_override = ""
             self._tun_dns_fallback_attempted = False
+            self._tun_strict_route_fallback_attempted = False
+            self._tun_strict_route_active = False
+            self._wfp_startup_preflight_done = False
+            self._tun_restart_pending = False
+            self._tun_restart_reason = ""
+            self._tun_restart_uses_compatibility = False
+            self._tun_restart_waiting_workers = []
+            self._tun_restart_deadline = 0.0
             self._tun_manager = None      # sing-box 内核侧车
             self._retired_pool_workers = []
             self._retired_tun_managers = []
@@ -703,6 +734,14 @@ def create_main_window():
             self._tun_health_deadline_timer.setSingleShot(True)
             self._tun_health_deadline_timer.timeout.connect(
                 self._on_tun_health_startup_timeout
+            )
+            self._tun_restart_timer = QTimer(self)
+            self._tun_restart_timer.setSingleShot(True)
+            self._tun_restart_timer.timeout.connect(self._on_tun_restart_timeout)
+            self._tun_restart_resume_timer = QTimer(self)
+            self._tun_restart_resume_timer.setSingleShot(True)
+            self._tun_restart_resume_timer.timeout.connect(
+                self._resume_scheduled_tun_restart
             )
             # Windows 没有可靠的跨版本网卡变更 Qt 信号；用轻量后台扫描兜底。
             # 扫描只在列表实际改变时重建控件，不影响用户正在进行的操作。
@@ -760,6 +799,9 @@ def create_main_window():
             self.load_adapters()
             self._adapter_watch_timer.start()
             self._sync_engine_ports()
+            # Only open/close the WFP engine here; never start sing-box or
+            # create a virtual adapter merely to check compatibility.
+            QTimer.singleShot(600, self._run_wfp_startup_preflight)
 
         def _on_theme_changed(self, *args):
             """主题切换回调：延迟重绘高亮控件，避免取到旧主题色。"""
@@ -1028,9 +1070,10 @@ def create_main_window():
             self.settings_page.force_tun_connectivity_bypass_changed.connect(
                 self._on_force_tun_connectivity_bypass_changed
             )
-            self.settings_page.wfp_dns_egress_exemption_changed.connect(
-                self._on_wfp_dns_egress_exemption_changed
+            self.settings_page.wfp_strict_route_changed.connect(
+                self._on_wfp_strict_route_changed
             )
+            self.settings_page.wfp_repair_requested.connect(self._on_wfp_repair_requested)
             self.settings_page.mica_effect_changed.connect(self._set_mica_effect_enabled)
             self.settings_page.blocked_domain_settings_changed.connect(self._on_blocked_domain_settings_changed)
             self.settings_page.blocked_domains_requested.connect(self._open_blocked_domains_dialog)
@@ -1156,17 +1199,137 @@ def create_main_window():
             self._app_config["force_tun_connectivity_bypass"] = bool(enabled)
             self._persist_config()
 
-        def _on_wfp_dns_egress_exemption_changed(self, enabled: bool):
-            self._app_config["wfp_dns_egress_exemption"] = bool(enabled)
+        def _on_wfp_strict_route_changed(self, enabled: bool):
+            self._app_config["wfp_strict_route"] = bool(enabled)
+            if enabled:
+                # An explicit user retry clears the device-local suppression.
+                self._app_config["wfp_compatibility_state"] = {}
             self._persist_config()
+            self._refresh_wfp_compatibility_status()
 
         def _force_tun_connectivity_bypass_enabled(self) -> bool:
             """Whether this run bypasses only external TUN connectivity probes."""
             return bool(self._app_config.get("force_tun_connectivity_bypass", False))
 
-        def _wfp_dns_egress_exemption_enabled(self) -> bool:
-            """Whether strict-route DNS gets the narrow HypoMux-only WFP permit."""
-            return bool(self._app_config.get("wfp_dns_egress_exemption", True))
+        def _wfp_strict_route_enabled(self) -> bool:
+            """Whether this device should attempt sing-box strict_route now."""
+            if not bool(self._app_config.get("wfp_strict_route", True)):
+                return False
+            state = self._app_config.get("wfp_compatibility_state", {})
+            if not isinstance(state, dict) or state.get("status") != "failed":
+                return True
+            return state.get("fingerprint") != get_wfp_environment_fingerprint()
+
+        def _remember_wfp_compatibility_failure(self, detail: str):
+            """Persist only a device-local compatibility fallback, not preference."""
+            self._app_config["wfp_compatibility_state"] = {
+                "status": "failed",
+                "fingerprint": get_wfp_environment_fingerprint(),
+                "detail": str(detail)[:1024],
+            }
+            self._persist_config()
+            self._refresh_wfp_compatibility_status()
+
+        def _clear_wfp_compatibility_failure(self):
+            self._app_config["wfp_compatibility_state"] = {
+                "status": "healthy",
+                "fingerprint": get_wfp_environment_fingerprint(),
+                "detail": "",
+            }
+            self._persist_config()
+            self._refresh_wfp_compatibility_status()
+
+        def _refresh_wfp_compatibility_status(self):
+            if not hasattr(self, "settings_page"):
+                return
+            if not bool(self._app_config.get("wfp_strict_route", True)):
+                self.settings_page.set_wfp_compatibility_status(
+                    "严格路由已由用户关闭；TUN 将使用兼容模式。"
+                )
+                return
+            state = self._app_config.get("wfp_compatibility_state", {})
+            if isinstance(state, dict) and state.get("status") == "failed":
+                self.settings_page.set_wfp_compatibility_status(
+                    "此设备的 WFP 不可用，已自动使用兼容 TUN；可随时重新检测并修复。"
+                )
+            elif isinstance(state, dict) and state.get("status") == "healthy":
+                self.settings_page.set_wfp_compatibility_status(
+                    "严格路由可用。HypoMux 启动时未创建虚拟网卡。"
+                )
+            else:
+                self.settings_page.set_wfp_compatibility_status(
+                    "尚未检测。不会在 HypoMux 启动时创建虚拟网卡。"
+                )
+
+        def _run_wfp_startup_preflight(self):
+            """Perform a side-effect-free WFP preflight after the UI is ready."""
+            if self._shutdown_started or self._wfp_startup_preflight_done:
+                return
+            self._wfp_startup_preflight_done = True
+            if not bool(self._app_config.get("wfp_strict_route", True)):
+                self._refresh_wfp_compatibility_status()
+                return
+            if not self._is_admin():
+                self.settings_page.set_wfp_compatibility_status(
+                    "需以管理员身份运行后才能检测 WFP/TUN；未创建虚拟网卡。"
+                )
+                return
+            state = self._app_config.get("wfp_compatibility_state", {})
+            if (
+                isinstance(state, dict)
+                and state.get("status") == "failed"
+                and state.get("fingerprint") == get_wfp_environment_fingerprint()
+            ):
+                self.append_log("[TUN][WFP] 此设备已有失败记录，本次默认兼容模式；未重复弹出修复窗口。")
+                self._refresh_wfp_compatibility_status()
+                return
+            ready, detail = probe_wfp_engine()
+            if ready:
+                self._clear_wfp_compatibility_failure()
+                self.append_log("[TUN][WFP] 启动预检通过（未启动 sing-box，未创建虚拟网卡）。")
+                return
+            self._remember_wfp_compatibility_failure(detail)
+            self.append_log(f"[TUN][WFP] 启动预检失败：{detail}；已为本机准备兼容 TUN。", force=True)
+            self._show_wfp_repair_prompt(detail)
+
+        def _show_wfp_repair_prompt(self, detail: str):
+            """Offer one explicit, non-destructive BFE repair attempt."""
+            if self._shutdown_started:
+                return
+            box = MessageBox(
+                "检测到 Windows 网络组件异常",
+                "严格路由需要 Windows Filtering Platform (WFP)，当前预检失败。\n\n"
+                "可尝试启动 Base Filtering Engine 服务；不会重置防火墙规则，也不会开放入站端口。\n\n"
+                f"诊断：{detail}\n\n"
+                "若跳过或修复失败，HypoMux 将在本设备自动使用兼容 TUN 模式。",
+                self,
+            )
+            box.yesButton.setText("尝试修复")
+            box.cancelButton.setText("使用兼容模式")
+            self._apply_popup_material(box)
+            if box.exec():
+                self._attempt_wfp_repair(interactive=True)
+
+        def _on_wfp_repair_requested(self):
+            self._attempt_wfp_repair(interactive=True)
+
+        def _attempt_wfp_repair(self, interactive: bool = False):
+            if not self._is_admin():
+                self.show_warning("网络组件修复需要以管理员身份运行 HypoMux。")
+                return False
+            self.append_log("[TUN][WFP] 正在尝试启动 Base Filtering Engine 并重新检测…", force=True)
+            ready, detail = try_repair_wfp_services()
+            if ready:
+                self._clear_wfp_compatibility_failure()
+                self.append_log("[TUN][WFP] 网络组件修复/检测通过，下一次 TUN 将尝试严格路由。", force=True)
+                if interactive:
+                    self.show_success("网络组件检测通过，已恢复严格路由。")
+                return True
+            self._remember_wfp_compatibility_failure(detail)
+            self.append_log(f"[TUN][WFP] 修复未成功：{detail}；本机继续使用兼容 TUN。", force=True)
+            if interactive:
+                self.show_warning("网络组件仍不可用，已为本机自动切换到兼容 TUN 模式。")
+            return False
 
         def _on_blocked_domain_settings_changed(self):
             self._persist_config()
@@ -1229,7 +1392,8 @@ def create_main_window():
                 "routing_rules": self._routing_rules,
                 "dns_server": self._app_config.get("dns_server", "223.5.5.5"),
                 "doh_provider": self._app_config.get("doh_provider", "auto"),
-                "wfp_dns_egress_exemption": self._wfp_dns_egress_exemption_enabled(),
+                "wfp_strict_route": bool(self._app_config.get("wfp_strict_route", True)),
+                "wfp_compatibility_state": self._app_config.get("wfp_compatibility_state", {}),
                 "force_tun_connectivity_bypass": self._force_tun_connectivity_bypass_enabled(),
                 "blocked_domain_bypass": get_tracker().enabled,
                 "blocked_domain_expiry": get_tracker().use_expiry,
@@ -1291,6 +1455,7 @@ def create_main_window():
                     "is_ppp": bool(a.get("is_ppp", False)),
                     "metric": a.get("metric", -1),
                     "is_auto": bool(a.get("is_auto", True)),
+                    "prefix_length": a.get("prefix_length", 24),
                     "gateway": a.get("gateway", ""),
                     "connection_state": a.get("connection_state", ""),
                 })
@@ -1466,12 +1631,13 @@ def create_main_window():
         def _finish_engine_transition(self):
             self._engine_transitioning = False
             self.home_page.set_engine_busy(False)
-            if (
-                self._acceleration_log.active
-                and not self._tun_active
-                and not self._tun_starting
-                and not self._is_boosting
-                and self.proxy_worker is None
+            if _should_finish_acceleration_log(
+                active=self._acceleration_log.active,
+                tun_active=self._tun_active,
+                tun_starting=self._tun_starting,
+                proxy_active=self._is_boosting,
+                proxy_worker_present=self.proxy_worker is not None,
+                tun_restart_pending=self._tun_restart_pending,
             ):
                 self._acceleration_log.finish("start_failed_or_stopped")
 
@@ -1604,6 +1770,7 @@ def create_main_window():
             """据当前路由规则重新序列化 sing-box config.json。"""
             try:
                 port_kwargs = {}
+                dns_plan = {}
                 if self._pool_worker is not None:
                     ports = self._pool_worker.listen_ports()
                     port_kwargs = {
@@ -1611,14 +1778,14 @@ def create_main_window():
                         "wifi_port": int(ports["nic_wifi"]),
                         "aggregation_port": int(ports["aggregation"]),
                     }
+                    dns_plan = self._pool_worker.singbox_dns_plan()
+                self._tun_strict_route_active = self._wfp_strict_route_enabled()
                 generated = singbox_config.generate_config_file(
                     self._routing_rules,
                     self._singbox_config_path(),
                     app_process_path=self._app_process_paths(),
-                    strict_route=(
-                        self._tun_dns_mode
-                        == MultiPortProxyWorker.DNS_MODE_DOH_STRICT
-                    ),
+                    strict_route=self._tun_strict_route_active,
+                    dns_plan=dns_plan,
                     **port_kwargs,
                 )
                 self._acceleration_log.record_event(
@@ -1626,6 +1793,8 @@ def create_main_window():
                     routing_rule_count=len(self._routing_rules),
                     outbound_pool_ports=port_kwargs or None,
                     dns_mode=self._tun_dns_mode,
+                    dns_owner="sing-box",
+                    strict_route=self._tun_strict_route_active,
                 )
                 return generated
             except Exception as e:
@@ -1674,8 +1843,42 @@ def create_main_window():
                 self.home_page.set_engine_state(False)
                 self._finish_engine_transition()
                 return
+            # A manual start gets a fresh DNS decision.  A scheduled fallback
+            # retains its override so it cannot return to the failed mode.
+            if not self._tun_restart_uses_compatibility:
+                self._tun_dns_mode_override = ""
             if not self._tun_dns_mode_override:
                 self._tun_dns_fallback_attempted = False
+                self._tun_strict_route_fallback_attempted = False
+                if not self._wfp_strict_route_enabled():
+                    self._tun_strict_route_fallback_attempted = True
+                    self.append_log(
+                        "[TUN][WFP] 此设备已选择/记忆为兼容模式；"
+                        "本次关闭 strict_route 后启动；DNS 仍由 sing-box 独立管理。",
+                        force=True,
+                    )
+                # strict_route on Windows relies on the WFP engine.  Probe it
+                # without creating filters so incompatible machines safely
+                # enter legacy DNS compatibility mode before route takeover.
+                if (
+                    self._wfp_strict_route_enabled()
+                ):
+                    wfp_ready, wfp_detail = probe_wfp_engine()
+                    if not wfp_ready:
+                        self._tun_strict_route_fallback_attempted = True
+                        self._remember_wfp_compatibility_failure(wfp_detail)
+                        self.append_log(
+                            "[TUN][WFP] Windows Filtering Platform 预检不可用："
+                            f"{wfp_detail}。本次将关闭 strict_route 并尝试兼容启动。",
+                            force=True,
+                        )
+                        self._acceleration_log.record_event(
+                            "tun_wfp", "preflight_compatibility_fallback",
+                            details=wfp_detail,
+                        )
+                        self.show_warning(
+                            "Windows 过滤平台不可用，正在使用兼容虚拟网卡模式启动"
+                        )
             self._tun_health_generation += 1
             self._tun_health_failures = 0
             self._tun_last_connectivity_at = 0.0
@@ -1746,6 +1949,21 @@ def create_main_window():
                 self._finish_engine_transition()
                 return
 
+            same_lan_risks = find_shared_ipv4_gateway_risks(selected_nics)
+            if same_lan_risks:
+                detail = "; ".join(same_lan_risks)
+                self.append_log(
+                    "[TUN][路由风险] 检测到同 IPv4 子网且共用默认网关的多网卡："
+                    f"{detail}。Windows 可能按默认路由选择出口，无法保证聚合效果；仍允许继续启动。",
+                    force=True,
+                )
+                self._acceleration_log.record_event(
+                    "tun_preflight", "shared_lan_gateway_warning", details=detail,
+                )
+                self.show_warning(
+                    "所选网卡共用同一 IPv4 子网和网关，无法保证聚合效果；已继续启动。"
+                )
+
             self.append_log(mw_tr(
                 "log_tun_dns_plan",
                 paths=", ".join(self._app_process_paths()),
@@ -1765,6 +1983,7 @@ def create_main_window():
                     use_weighted=use_weighted,
                     bandwidth_limits=bw_limits,
                     allow_degraded_start=self._force_tun_connectivity_bypass_enabled(),
+                    resolve_socks_domains=False,
                     parent=self,
                 )
                 self._pool_worker.set_dns_servers([self._app_config.get("dns_server", "223.5.5.5")])
@@ -1794,51 +2013,6 @@ def create_main_window():
                 self._exit_boosting_ui()
                 self._finish_engine_transition()
 
-        def _install_tun_wfp_dns_exemption(self, selected_nics: list) -> bool:
-            """Install the app+IP+IfIndex+53 permit before strict_route starts."""
-            self._teardown_tun_wfp_dns_exemption(log_cleanup=False)
-            if not self._wfp_dns_egress_exemption_enabled():
-                self.append_log("[TUN][WFP] 精确 DNS 出站豁免已由设置关闭")
-                return True
-            controller = WfpDnsExemption(selected_nics)
-            try:
-                filter_ids = controller.install()
-            except WfpPolicyError as exc:
-                controller.close()
-                message = f"[TUN][WFP] 无法安装严格路由 DNS 精确豁免: {exc}"
-                self.append_log(message, force=True)
-                self._acceleration_log.record_event("tun_wfp_dns", "install_failed", error=str(exc))
-                if self._force_tun_connectivity_bypass_enabled():
-                    self.append_log("[TUN][强制模式] 忽略 WFP 豁免安装失败，继续用于复现测试", force=True)
-                    return True
-                self.show_error("无法建立 TUN 的 DNS 出站隔离策略，请以管理员身份启动后重试。")
-                return False
-            self._tun_wfp_dns_exemption = controller
-            rules = ", ".join(
-                f"{rule.adapter_name}/{rule.source_ip}/if{rule.interface_index}/{rule.protocol.upper()}53"
-                for rule in controller.rules
-            )
-            self.append_log(
-                f"[TUN][WFP] 已安装 {len(filter_ids)} 条临时精确豁免 | {rules}",
-                force=True,
-            )
-            self._acceleration_log.record_event(
-                "tun_wfp_dns", "installed", filter_count=len(filter_ids), rules=rules,
-            )
-            return True
-
-        def _teardown_tun_wfp_dns_exemption(self, *, log_cleanup: bool = True):
-            controller = self._tun_wfp_dns_exemption
-            self._tun_wfp_dns_exemption = None
-            if controller is None:
-                return
-            try:
-                controller.close()
-                if log_cleanup:
-                    self.append_log("[TUN][WFP] 临时 DNS 精确豁免已清理")
-            except Exception as exc:
-                self.append_log(f"[TUN][WFP] 清理临时 DNS 豁免失败: {exc}", force=True)
-
         def _on_tun_pool_started(self, info: str):
             sender = self.sender()
             if (
@@ -1857,22 +2031,20 @@ def create_main_window():
             )
             if self._tun_dns_mode == MultiPortProxyWorker.DNS_MODE_LEGACY_COMPAT:
                 self.append_log(
-                    "[TUN][DNS] 传统 DNS 兼容模式：已关闭 strict_route，"
-                    "传统 UDP/TCP 53 仍严格绑定到所选物理网卡。",
+                    "[TUN][DNS] 传统 DNS 已移入 sing-box；"
+                    f"strict_route={'开启' if self._wfp_strict_route_enabled() else '关闭'}，"
+                    "Python 出站池不再发送 DNS。",
                     force=True,
                 )
             else:
                 self.append_log(
-                    "[TUN][DNS] DoH 严格模式：已开启 strict_route，DNS 不会回退到 UDP/TCP 53。",
+                    "[TUN][DNS] DoH 已移入 sing-box；Python 出站池仅接收解析后的 IP。",
                     force=True,
                 )
             self.home_page.set_engine_startup_status(tr("tun_starting"))
-            # strict_route's own WFP block has a final block action; an
-            # external Permit filter cannot reliably override it.  DoH strict
-            # mode needs no port-53 exception, while compatibility mode turns
-            # strict_route off before any legacy DNS packet is sent.
-            self._teardown_tun_wfp_dns_exemption(log_cleanup=False)
-
+            # DNS now runs inside the sing-box process, which sing-tun
+            # hard-permits before its port-53 block.  The old external Python
+            # WFP exception is intentionally not installed.
             # 2) 生成 sing-box 配置
             if not self._regenerate_singbox_config():
                 self._teardown_pool()
@@ -1923,19 +2095,138 @@ def create_main_window():
             ):
                 return
             self._tun_dns_fallback_attempted = True
-            self._tun_dns_mode_override = MultiPortProxyWorker.DNS_MODE_LEGACY_COMPAT
-            self.append_log(f"[TUN][DNS] {reason}；正在受控重启为传统 DNS 兼容模式。", force=True)
+            self.append_log(
+                f"[TUN][DNS] {reason}；正在受控重启并切换到传统 DNS 上游。",
+                force=True,
+            )
             self._acceleration_log.record_event(
                 "tun_dns", "runtime_compatibility_fallback", reason=reason,
             )
-            self.show_warning("DoH 连续解析失败，正在切换到兼容 DNS 模式")
-            QTimer.singleShot(0, self._restart_tun_in_dns_compatibility_mode)
+            self.show_warning("DoH 连续解析失败，正在切换到传统 DNS 上游")
+            self._schedule_tun_compatibility_restart(
+                "DoH 运行期降级", force_legacy_dns=True
+            )
 
-        def _restart_tun_in_dns_compatibility_mode(self):
-            if not self._tun_active or self._shutdown_started:
+        def _schedule_tun_compatibility_restart(
+            self, reason: str, *, force_legacy_dns: bool = False
+        ):
+            """Restart only after the previous TUN session has actually ended."""
+            if self._tun_restart_pending or self._shutdown_started:
                 return
-            self._stop_tun_mode()
-            QTimer.singleShot(350, self._start_tun_mode)
+            self._tun_restart_pending = True
+            self._tun_restart_reason = str(reason)
+            self._tun_restart_uses_compatibility = True
+            self._tun_restart_deadline = time.monotonic() + 8.0
+            self._tun_restart_resume_timer.stop()
+            if force_legacy_dns:
+                self._tun_dns_mode_override = MultiPortProxyWorker.DNS_MODE_LEGACY_COMPAT
+            self._tun_restart_waiting_workers = [
+                worker for worker in (self._tun_manager, self._pool_worker)
+                if worker is not None and worker.isRunning()
+            ]
+            for worker in tuple(self._tun_restart_waiting_workers):
+                # Connect to a QObject-bound slot so AutoConnection delivers
+                # the callback on the main-window thread.  A bare lambda can
+                # inherit the worker thread and cannot safely start UI timers.
+                worker.finished.connect(self._on_tun_restart_worker_finished)
+            self.append_log(
+                f"[TUN][兼容重启] 已排队：{reason}；正在停止当前 TUN。",
+                force=True,
+            )
+            self._stop_tun_mode(preserve_scheduled_restart=True)
+            if not self._tun_restart_waiting_workers:
+                self._queue_scheduled_tun_restart()
+                return
+            # Polling also covers the race where a worker exits between
+            # isRunning() and connecting its finished signal.
+            self._tun_restart_timer.start(250)
+
+        @Slot()
+        def _on_tun_restart_worker_finished(self):
+            if not self._tun_restart_pending:
+                return
+            worker = self.sender()
+            try:
+                self._tun_restart_waiting_workers.remove(worker)
+            except ValueError:
+                return
+            if self._tun_restart_waiting_workers:
+                return
+            self.append_log("[TUN][兼容重启] 上一轮 TUN 和出站池已完全退出。", force=True)
+            self._queue_scheduled_tun_restart()
+
+        def _queue_scheduled_tun_restart(self):
+            """Queue restart on a window-owned timer after old callbacks drain."""
+            if not self._tun_restart_pending:
+                return
+            self._tun_restart_timer.stop()
+            self._tun_restart_resume_timer.start(0)
+
+        def _on_tun_restart_timeout(self):
+            if not self._tun_restart_pending:
+                return
+            still_running = []
+            for worker in self._tun_restart_waiting_workers:
+                try:
+                    if worker.isRunning():
+                        still_running.append(worker)
+                except RuntimeError:
+                    # The QObject was already deleted after emitting finished.
+                    continue
+            self._tun_restart_waiting_workers = still_running
+            if not still_running:
+                self.append_log(
+                    "[TUN][兼容重启] 上一轮 TUN 和出站池已完全退出。",
+                    force=True,
+                )
+                self._queue_scheduled_tun_restart()
+                return
+            if time.monotonic() < self._tun_restart_deadline:
+                self._tun_restart_timer.start(250)
+                return
+
+            reason = self._tun_restart_reason
+            pending = len(still_running)
+            self._tun_restart_pending = False
+            self._tun_restart_reason = ""
+            self._tun_restart_uses_compatibility = False
+            self._tun_restart_waiting_workers.clear()
+            self._tun_restart_deadline = 0.0
+            self._tun_dns_mode_override = ""
+            self.append_log(
+                f"[TUN][兼容重启] 等待旧会话退出超时（剩余 {pending} 个线程）；"
+                "为避免两个 TUN 实例重叠，已取消自动重启。",
+                force=True,
+            )
+            self._acceleration_log.record_event(
+                "tun_restart", "old_session_exit_timeout",
+                reason=reason, pending_workers=pending,
+            )
+            self.show_error("旧 TUN 会话未能完全退出，已取消自动重启以避免网络状态冲突。")
+            self._finish_engine_transition()
+
+        def _resume_scheduled_tun_restart(self):
+            if not self._tun_restart_pending:
+                return
+            reason = self._tun_restart_reason
+            self._tun_restart_pending = False
+            self._tun_restart_reason = ""
+            self._tun_restart_waiting_workers.clear()
+            self._tun_restart_deadline = 0.0
+            if self._shutdown_started or self._tun_active or self._tun_starting:
+                self._tun_restart_uses_compatibility = False
+                self._tun_dns_mode_override = ""
+                self.append_log(
+                    f"[TUN][兼容重启] 已取消：{reason}（当前状态不允许重新启动）",
+                    force=True,
+                )
+                self._finish_engine_transition()
+                return
+            self.append_log(f"[TUN][兼容重启] 正在重新启动：{reason}", force=True)
+            try:
+                self._start_tun_mode()
+            finally:
+                self._tun_restart_uses_compatibility = False
 
         def _on_tun_pool_error(self, message: str):
             sender = self.sender()
@@ -2201,6 +2492,28 @@ def create_main_window():
             if self._tun_manager is None and not self._tun_active:
                 return
             message = localize_runtime_message(message)
+            if (
+                "FwpmEngineOpen0" in message
+                and self._tun_strict_route_active
+                and not self._tun_strict_route_fallback_attempted
+            ):
+                self._tun_strict_route_fallback_attempted = True
+                self._remember_wfp_compatibility_failure(message)
+                self.append_log(
+                    "[TUN][WFP] strict_route 初始化失败，已捕获 FwpmEngineOpen0；"
+                    "将自动以 strict_route=false 重试。",
+                    force=True,
+                )
+                self._acceleration_log.record_event(
+                    "tun_wfp", "runtime_compatibility_fallback", error=message,
+                )
+                self.show_warning(
+                    "Windows 过滤平台无法启用严格路由，正在改用兼容模式重试"
+                )
+                self._schedule_tun_compatibility_restart(
+                    "WFP 严格路由初始化失败", force_legacy_dns=False
+                )
+                return
             self._acceleration_log.record_event("tun_kernel", "error", message=message)
             self.append_log(f"[TUN] {message}")
             self.show_error(message)
@@ -2258,7 +2571,15 @@ def create_main_window():
                 pass
             worker.deleteLater()
 
-        def _stop_tun_mode(self):
+        def _stop_tun_mode(self, *, preserve_scheduled_restart: bool = False):
+            if not preserve_scheduled_restart:
+                self._tun_restart_pending = False
+                self._tun_restart_reason = ""
+                self._tun_restart_uses_compatibility = False
+                self._tun_restart_waiting_workers.clear()
+                self._tun_restart_deadline = 0.0
+                self._tun_restart_timer.stop()
+                self._tun_restart_resume_timer.stop()
             self._tun_health_timer.stop()
             self._tun_health_deadline_timer.stop()
             self._tun_preflight_poll_timer.stop()
@@ -2288,7 +2609,6 @@ def create_main_window():
                 except Exception:
                     pass
                 self._retire_tun_thread(manager, self._retired_tun_managers)
-            self._teardown_tun_wfp_dns_exemption()
             # 2) 关 Python 出站池
             self._teardown_pool()
             self._tun_active = False
@@ -2390,7 +2710,7 @@ def create_main_window():
 
         def _enter_boosting_ui(self):
             self.home_page.set_controls_enabled(False)
-            # 仅 TUN 能根据进程名匹配流量；加速运行中允许继续维护规则，
+            # 仅 TUN 能按进程/域名/IP 完整匹配流量；加速运行中允许继续维护规则，
             # 变更会保存并在用户下次重启加速时加载。
             self.routing_page.set_controls_enabled(self._run_mode == "tun")
             self.settings_page.set_controls_enabled(False)

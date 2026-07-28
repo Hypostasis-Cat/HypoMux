@@ -69,7 +69,8 @@ class SettingsPage(QWidget):
     blocked_domain_settings_changed = Signal()
     blocked_domains_requested = Signal()
     force_tun_connectivity_bypass_changed = Signal(bool)
-    wfp_dns_egress_exemption_changed = Signal(bool)
+    wfp_strict_route_changed = Signal(bool)
+    wfp_repair_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -238,19 +239,29 @@ class SettingsPage(QWidget):
         )
         self.advanced_network_group.addSettingCard(self.force_tun_card)
 
-        self.wfp_dns_exemption_card = LocalizedSwitchSettingCard(
+        self.wfp_strict_route_card = LocalizedSwitchSettingCard(
             resolve_icon("SHIELD", "INFO", "WARNING"),
-            tr("settings_wfp_dns_exemption"),
-            tr("settings_wfp_dns_exemption_hint"),
+            tr("settings_wfp_strict_route"),
+            tr("settings_wfp_strict_route_hint"),
             parent=self.advanced_network_group,
         )
-        self.wfp_dns_exemption_card.setChecked(
-            bool(app_config.get("wfp_dns_egress_exemption", True))
+        self.wfp_strict_route_card.setChecked(
+            bool(app_config.get("wfp_strict_route", True))
         )
-        self.wfp_dns_exemption_card.checkedChanged.connect(
-            self._on_wfp_dns_egress_exemption_changed
+        self.wfp_strict_route_card.checkedChanged.connect(
+            self._on_wfp_strict_route_changed
         )
-        self.advanced_network_group.addSettingCard(self.wfp_dns_exemption_card)
+        self.advanced_network_group.addSettingCard(self.wfp_strict_route_card)
+
+        self.wfp_repair_card = TranslucentPushSettingCard(
+            tr("settings_wfp_repair_button"),
+            resolve_icon("SYNC", "UPDATE", "REPAIR"),
+            tr("settings_wfp_repair"),
+            tr("settings_wfp_repair_unknown"),
+            self.advanced_network_group,
+        )
+        self.wfp_repair_card.clicked.connect(self.wfp_repair_requested.emit)
+        self.advanced_network_group.addSettingCard(self.wfp_repair_card)
 
         tracker = get_tracker()
         self.blocked_enable_card = LocalizedSwitchSettingCard(
@@ -398,8 +409,12 @@ class SettingsPage(QWidget):
         """Persist through MainWindow so the active TUN lifecycle has one config source."""
         self.force_tun_connectivity_bypass_changed.emit(bool(checked))
 
-    def _on_wfp_dns_egress_exemption_changed(self, checked: bool):
-        self.wfp_dns_egress_exemption_changed.emit(bool(checked))
+    def _on_wfp_strict_route_changed(self, checked: bool):
+        self.wfp_strict_route_changed.emit(bool(checked))
+
+    def set_wfp_compatibility_status(self, text: str):
+        """Update the device-local WFP/TUN status without changing preference."""
+        self.wfp_repair_card.contentLabel.setText(str(text))
 
     def _on_blocked_expiry_changed(self, checked: bool):
         tracker = get_tracker()
@@ -436,7 +451,8 @@ class SettingsPage(QWidget):
         self.dns_edit.setEnabled(enabled)
         self.doh_combo.setEnabled(enabled)
         self.force_tun_card.setEnabled(enabled)
-        self.wfp_dns_exemption_card.setEnabled(enabled)
+        self.wfp_strict_route_card.setEnabled(enabled)
+        self.wfp_repair_card.setEnabled(enabled)
         self.blocked_enable_card.setEnabled(enabled)
         self.blocked_expiry_card.setEnabled(enabled)
         self.blocked_manage_card.setEnabled(enabled)
@@ -450,6 +466,7 @@ class SettingsPage(QWidget):
         self.lang_combo.setItemText(1, tr("settings_language_en"))
         for card in (
             self.force_tun_card,
+            self.wfp_strict_route_card,
             self.blocked_enable_card,
             self.blocked_expiry_card,
             self.autostart_card,
@@ -475,8 +492,10 @@ class SettingsPage(QWidget):
         self.advanced_network_group.titleLabel.setText(tr("settings_advanced_network"))
         self.force_tun_card.titleLabel.setText(tr("settings_force_tun"))
         self.force_tun_card.contentLabel.setText(tr("settings_force_tun_hint"))
-        self.wfp_dns_exemption_card.titleLabel.setText(tr("settings_wfp_dns_exemption"))
-        self.wfp_dns_exemption_card.contentLabel.setText(tr("settings_wfp_dns_exemption_hint"))
+        self.wfp_strict_route_card.titleLabel.setText(tr("settings_wfp_strict_route"))
+        self.wfp_strict_route_card.contentLabel.setText(tr("settings_wfp_strict_route_hint"))
+        self.wfp_repair_card.titleLabel.setText(tr("settings_wfp_repair"))
+        self.wfp_repair_card.button.setText(tr("settings_wfp_repair_button"))
         self.blocked_enable_card.titleLabel.setText(tr("blocked_enable"))
         self.blocked_enable_card.contentLabel.setText(tr("blocked_enable_hint"))
         self.blocked_expiry_card.titleLabel.setText(tr("blocked_expiry_toggle"))

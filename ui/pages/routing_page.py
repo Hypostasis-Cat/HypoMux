@@ -1,7 +1,7 @@
 """
-HypoMux 路由规则页 (RoutingPage) - 进程级分流规则编辑器
+HypoMux 路由规则页 (RoutingPage) - 进程/域名/IP 分流规则编辑器
 
-用户在表格中维护「进程名 -> 出口通道」规则，MainWindow 读取后动态
+用户在表格中维护「匹配条件 -> 出口通道」规则，MainWindow 读取后动态
 序列化为 sing-box route.rules。页面只负责视图、进程选择和规则数据回吐，
 不直接触碰代理内核线程，避免破坏既有单端口、多端口、聚合引擎信号链。
 """
@@ -14,22 +14,36 @@ from io import StringIO
 from typing import Any, Iterable, List, Optional
 
 from PySide6.QtCore import Qt, QEvent, Signal, QThread, Slot
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QHeaderView
+from PySide6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QHeaderView, QStackedWidget,
+)
 from qfluentwidgets import (
     TableWidget, TitleLabel, BodyLabel, PushButton, TransparentPushButton,
     LineEdit, ComboBox, FluentIcon, MessageBoxBase, SearchLineEdit, ListWidget,
-    SubtitleLabel, CaptionLabel, PrimaryPushButton,
+    SubtitleLabel, CaptionLabel, PrimaryPushButton, SegmentedWidget,
 )
 
 from ui.components import SurfaceCardWidget, register_content_card_control
 from ui.i18n import tr
 from ui.popup_material import apply_mica_popup
+from utils.routing_rules import (
+    MATCH_DOMAIN,
+    MATCH_IP,
+    MATCH_PROCESS,
+    VALID_MATCH_TYPES,
+    expand_routing_rule,
+    normalize_match_value,
+    normalize_routing_rules,
+    routing_rule_identity,
+    routing_rule_sort_key,
+    routing_rule_value,
+)
 from qfluentwidgets.common.color import FluentSystemColor
 
 
 _CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
 ROUTING_BACKUP_FORMAT = "hypomux-routing-rules"
-ROUTING_BACKUP_VERSION = 1
+ROUTING_BACKUP_VERSION = 2
 
 
 def parse_routing_rules_backup(payload: Any) -> list:
@@ -45,7 +59,7 @@ def parse_routing_rules_backup(payload: Any) -> list:
                 version = int(payload.get("version", 0))
             except (TypeError, ValueError):
                 version = 0
-            if version != ROUTING_BACKUP_VERSION:
+            if version not in (1, ROUTING_BACKUP_VERSION):
                 raise ValueError("unsupported backup version")
         raw_rules = payload.get("rules", payload.get("routing_rules"))
     else:
@@ -59,33 +73,18 @@ def parse_routing_rules_backup(payload: Any) -> list:
     for index, item in enumerate(raw_rules, start=1):
         if not isinstance(item, dict):
             raise ValueError(f"invalid rule at index {index}")
-        names = item.get("process_name", [])
-        if isinstance(names, str):
-            names = [names]
-        if not isinstance(names, list) or not names:
-            raise ValueError(f"missing process name at index {index}")
-
-        outbound = str(item.get("outbound", "aggregation") or "").strip()
-        if (
-            outbound not in ("aggregation", "direct")
-            and (not outbound.startswith("nic_") or len(outbound) == 4)
-        ):
-            raise ValueError(f"invalid outbound at index {index}")
-
-        has_valid_name = False
-        for raw_name in names:
-            name = str(raw_name or "").strip()
-            if not name or len(name) > 260 or any(ch in name for ch in ("/", "\\", ":", "\0")):
-                raise ValueError(f"invalid process name at index {index}")
-            has_valid_name = True
-            normalized = name.casefold()
-            if normalized in seen:
+        expanded = expand_routing_rule(item)
+        if not expanded:
+            raise ValueError(f"invalid routing rule at index {index}")
+        for rule in expanded:
+            identity = routing_rule_identity(
+                rule["match_type"], routing_rule_value(rule)
+            )
+            if identity in seen:
                 continue
-            seen.add(normalized)
-            rules.append({"process_name": [name], "outbound": outbound})
-        if not has_valid_name:
-            raise ValueError(f"missing process name at index {index}")
-    return rules
+            seen.add(identity)
+            rules.append(rule)
+    return sorted(rules, key=routing_rule_sort_key)
 
 
 def _decode_process_output(raw: bytes) -> str:
@@ -201,14 +200,14 @@ class ProcessSelectDialog(MessageBoxBase):
 
 
 class RoutingPage(QWidget):
-    """进程级分流规则管理页。"""
+    """进程、目标 IP/CIDR 与域名分流规则管理页。"""
 
     rules_changed = Signal()
     duplicate_detected = Signal(str)
     export_requested = Signal()
     import_requested = Signal()
 
-    COL_PROCESS = 0
+    COL_VALUE = 0
     COL_OUTBOUND = 1
     ROW_HEIGHT = 38
 
@@ -219,6 +218,8 @@ class RoutingPage(QWidget):
         self._controls_enabled = True
         self._shutting_down = False
         self._sorting_rules = False
+        self._current_match_type = MATCH_PROCESS
+        self._tables = {}
         self._process_worker: Optional[ProcessListWorker] = None
         self._init_ui()
 
@@ -270,28 +271,22 @@ class RoutingPage(QWidget):
         table_bar.addWidget(self._list_title)
         table_bar.addWidget(self._rule_count)
         table_bar.addStretch()
+        self.rule_segment = SegmentedWidget(self)
+        self.rule_segment.addItem(MATCH_PROCESS, tr("routing_tab_process"))
+        self.rule_segment.addItem(MATCH_DOMAIN, tr("routing_tab_domain"))
+        self.rule_segment.addItem(MATCH_IP, tr("routing_tab_ip"))
+        self.rule_segment.setCurrentItem(MATCH_PROCESS)
+        self.rule_segment.currentItemChanged.connect(self._on_rule_tab_changed)
+        table_bar.addWidget(self.rule_segment)
         root.addLayout(table_bar)
 
-        self.tableWidget = TableWidget(self)
+        self._table_stack = QStackedWidget(self)
+        for match_type in VALID_MATCH_TYPES:
+            table = self._create_rule_table(match_type)
+            self._tables[match_type] = table
+            self._table_stack.addWidget(table)
+        self.tableWidget = self._tables[MATCH_PROCESS]
         self.table = self.tableWidget
-        self.tableWidget.setBorderVisible(True)
-        self.tableWidget.setBorderRadius(8)
-        self.tableWidget.setWordWrap(False)
-        self.tableWidget.setColumnCount(2)
-        self.tableWidget.setRowCount(0)
-        self.tableWidget.setMinimumHeight(260)
-        self.tableWidget.verticalHeader().hide()
-        self.tableWidget.verticalHeader().setDefaultSectionSize(self.ROW_HEIGHT)
-        self.tableWidget.setSelectionBehavior(TableWidget.SelectRows)
-        # Fluent TableWidget 默认启用整行悬停追踪。规则单元格内嵌输入框时，
-        # 这种高亮很像“鼠标经过即选中”，会干扰用户判断当前编辑行。
-        self.tableWidget.setMouseTracking(False)
-        self.tableWidget.viewport().setMouseTracking(False)
-        self._apply_headers()
-
-        header = self.tableWidget.horizontalHeader()
-        header.setSectionResizeMode(self.COL_PROCESS, QHeaderView.Stretch)
-        header.setSectionResizeMode(self.COL_OUTBOUND, QHeaderView.Stretch)
 
         self._duplicate_hint = BodyLabel("", self)
         self._duplicate_hint.setWordWrap(True)
@@ -299,14 +294,51 @@ class RoutingPage(QWidget):
         self._duplicate_hint.hide()
         root.addWidget(self._duplicate_hint)
         # 规则表填满页面剩余空间；规则较多时由表格自身滚动，而非把下半页留白。
-        root.addWidget(self.tableWidget, 1)
+        root.addWidget(self._table_stack, 1)
+        self._on_rule_tab_changed(MATCH_PROCESS)
         self._update_rule_count()
 
-    def _apply_headers(self):
-        self.tableWidget.setHorizontalHeaderLabels([
-            tr("routing_col_process"),
+    def _create_rule_table(self, match_type: str) -> TableWidget:
+        table = TableWidget(self)
+        table.setBorderVisible(True)
+        table.setBorderRadius(8)
+        table.setWordWrap(False)
+        table.setColumnCount(2)
+        table.setRowCount(0)
+        table.setMinimumHeight(260)
+        table.verticalHeader().hide()
+        table.verticalHeader().setDefaultSectionSize(self.ROW_HEIGHT)
+        table.setSelectionBehavior(TableWidget.SelectRows)
+        # 内嵌输入框时关闭整行悬停追踪，避免悬停看起来像选择。
+        table.setMouseTracking(False)
+        table.viewport().setMouseTracking(False)
+        self._apply_headers(table, match_type)
+        header = table.horizontalHeader()
+        header.setSectionResizeMode(self.COL_VALUE, QHeaderView.Stretch)
+        header.setSectionResizeMode(self.COL_OUTBOUND, QHeaderView.Stretch)
+        return table
+
+    def _apply_headers(self, table: TableWidget, match_type: str):
+        value_key = {
+            MATCH_PROCESS: "routing_col_process",
+            MATCH_DOMAIN: "routing_col_domain",
+            MATCH_IP: "routing_col_ip",
+        }[match_type]
+        table.setHorizontalHeaderLabels([
+            tr(value_key),
             tr("routing_col_nic"),
         ])
+
+    def _on_rule_tab_changed(self, match_type: str):
+        if match_type not in self._tables:
+            return
+        self._current_match_type = match_type
+        table = self._tables[match_type]
+        self._table_stack.setCurrentWidget(table)
+        self.tableWidget = table
+        self.table = table
+        self.select_process_btn.setVisible(match_type == MATCH_PROCESS)
+        self._update_rule_count()
 
     def _apply_theme_colors(self):
         """使用 qfluentwidgets 的语义色，避免深色主题下错误提示变暗。"""
@@ -333,8 +365,10 @@ class RoutingPage(QWidget):
         self._available_aliases = aliases
         self._refresh_outbound_combos()
 
-    def _make_outbound_combo(self, current: str = "aggregation") -> ComboBox:
-        combo = ComboBox(self.tableWidget)
+    def _make_outbound_combo(
+        self, table: TableWidget, current: str = "aggregation"
+    ) -> ComboBox:
+        combo = ComboBox(table)
         self._fill_outbound_combo(combo, current)
         combo.currentIndexChanged.connect(lambda _i: self.rules_changed.emit())
         combo.installEventFilter(self)
@@ -355,34 +389,49 @@ class RoutingPage(QWidget):
         combo.blockSignals(False)
 
     def _refresh_outbound_combos(self):
-        for row in range(self.tableWidget.rowCount()):
-            combo = self.tableWidget.cellWidget(row, self.COL_OUTBOUND)
-            if combo is not None:
-                current = combo.currentData() or "aggregation"
-                self._fill_outbound_combo(combo, current)
-                combo.setEnabled(self._controls_enabled)
+        for _match_type, _table, _row, _edit, combo in self._rule_rows():
+            current = combo.currentData() or "aggregation"
+            self._fill_outbound_combo(combo, current)
+            combo.setEnabled(self._controls_enabled)
+
+    @staticmethod
+    def _placeholder_key(match_type: str) -> str:
+        return {
+            MATCH_DOMAIN: "routing_placeholder_domain",
+            MATCH_IP: "routing_placeholder_ip",
+        }.get(match_type, "routing_placeholder_process")
 
     # ---------- 行构建 ----------
-    def _insert_row(self, process_name: str = "", outbound: str = "aggregation"):
-        row = self.tableWidget.rowCount()
-        self.tableWidget.insertRow(row)
-        self.tableWidget.setRowHeight(row, self.ROW_HEIGHT)
+    def _insert_row(
+        self,
+        match_type: str = MATCH_PROCESS,
+        value: str = "",
+        outbound: str = "aggregation",
+    ):
+        if match_type not in self._tables:
+            match_type = MATCH_PROCESS
+        table = self._tables[match_type]
+        row = table.rowCount()
+        table.insertRow(row)
+        table.setRowHeight(row, self.ROW_HEIGHT)
 
-        edit = LineEdit(self.tableWidget)
+        edit = LineEdit(table)
         register_content_card_control(edit)
-        edit.setPlaceholderText(tr("routing_placeholder_process"))
-        edit.setText(process_name)
-        edit.textChanged.connect(self._on_process_text_changed)
+        edit.setPlaceholderText(tr(self._placeholder_key(match_type)))
+        edit.setText(value)
+        edit.textChanged.connect(self._on_rule_value_changed)
         # 输入完成后再排序，避免用户每敲一个字符就跳动行位置。
-        edit.editingFinished.connect(self._sort_rules)
+        edit.editingFinished.connect(
+            lambda kind=match_type: self._sort_rules(kind)
+        )
         edit.installEventFilter(self)
         edit.setEnabled(self._controls_enabled)
-        self.tableWidget.setCellWidget(row, self.COL_PROCESS, edit)
+        table.setCellWidget(row, self.COL_VALUE, edit)
 
-        combo = self._make_outbound_combo(outbound)
+        combo = self._make_outbound_combo(table, outbound)
         register_content_card_control(combo)
-        self.tableWidget.setCellWidget(row, self.COL_OUTBOUND, combo)
-        self._update_duplicate_state()
+        table.setCellWidget(row, self.COL_OUTBOUND, combo)
+        self._update_rule_state()
         self._update_rule_count()
 
     def _update_rule_count(self):
@@ -395,135 +444,160 @@ class RoutingPage(QWidget):
         if self._shutting_down:
             return super().eventFilter(watched, event)
         if event.type() == QEvent.MouseButtonPress:
-            for row in range(self.tableWidget.rowCount()):
-                if watched in (
-                    self.tableWidget.cellWidget(row, self.COL_PROCESS),
-                    self.tableWidget.cellWidget(row, self.COL_OUTBOUND),
-                ):
-                    self.tableWidget.selectRow(row)
+            for _kind, table, row, edit, outbound in self._rule_rows():
+                if watched in (edit, outbound):
+                    table.selectRow(row)
                     break
         return super().eventFilter(watched, event)
 
-    @staticmethod
-    def _normalize_process_name(name: str) -> str:
-        """Windows 进程名不区分大小写；首尾空格也不应形成不同规则。"""
-        return str(name or "").strip().casefold()
+    def _rule_rows(self, match_type: Optional[str] = None):
+        match_types = (
+            (match_type,) if match_type in self._tables else VALID_MATCH_TYPES
+        )
+        for kind in match_types:
+            table = self._tables[kind]
+            for row in range(table.rowCount()):
+                edit = table.cellWidget(row, self.COL_VALUE)
+                outbound = table.cellWidget(row, self.COL_OUTBOUND)
+                if edit is not None and outbound is not None:
+                    yield kind, table, row, edit, outbound
 
-    def _process_edits(self):
-        for row in range(self.tableWidget.rowCount()):
-            edit = self.tableWidget.cellWidget(row, self.COL_PROCESS)
-            if edit is not None:
-                yield row, edit
-
-    def _duplicate_process_names(self) -> set:
+    def _update_rule_state(self) -> set:
         counts = {}
-        for _row, edit in self._process_edits():
-            normalized = self._normalize_process_name(edit.text())
-            if normalized:
-                counts[normalized] = counts.get(normalized, 0) + 1
-        return {name for name, count in counts.items() if count > 1}
+        rows = []
+        invalid_values = []
+        for match_type, _table, row, edit, _outbound in self._rule_rows():
+            raw_value = edit.text().strip()
+            normalized = normalize_match_value(match_type, raw_value)
+            identity = (
+                routing_rule_identity(match_type, normalized)
+                if normalized is not None else None
+            )
+            if identity is not None:
+                counts[identity] = counts.get(identity, 0) + 1
+            elif raw_value:
+                invalid_values.append(raw_value)
+            rows.append((match_type, row, edit, raw_value, identity))
 
-    def _update_duplicate_state(self) -> set:
-        duplicates = self._duplicate_process_names()
-        display_names = []
+        duplicates = {identity for identity, count in counts.items() if count > 1}
+        duplicate_values = []
         seen = set()
-        for _row, edit in self._process_edits():
-            normalized = self._normalize_process_name(edit.text())
-            edit.setError(bool(normalized and normalized in duplicates))
-            if normalized in duplicates and normalized not in seen:
-                seen.add(normalized)
-                display_names.append(edit.text().strip())
+        for _match_type, _row, edit, raw_value, identity in rows:
+            invalid = bool(raw_value and identity is None)
+            duplicated = identity in duplicates if identity is not None else False
+            edit.setError(invalid or duplicated)
+            if duplicated and identity not in seen:
+                seen.add(identity)
+                duplicate_values.append(raw_value)
 
-        if display_names:
-            self._duplicate_hint.setText(tr(
-                "routing_duplicate_hint", names=", ".join(display_names)
+        messages = []
+        if duplicate_values:
+            messages.append(tr(
+                "routing_duplicate_hint", names=", ".join(duplicate_values)
             ))
+        if invalid_values:
+            messages.append(tr(
+                "routing_invalid_hint", values=", ".join(invalid_values[:5])
+            ))
+        if messages:
+            self._duplicate_hint.setText("\n".join(messages))
             self._duplicate_hint.show()
         else:
             self._duplicate_hint.clear()
             self._duplicate_hint.hide()
         return duplicates
 
-    def _on_process_text_changed(self, _text: str):
+    def _on_rule_value_changed(self, _text: str):
         if self._shutting_down:
             return
-        self._update_duplicate_state()
+        self._update_rule_state()
         self.rules_changed.emit()
 
-    def _sort_rules(self):
-        """按进程名排序，同时保留当前编辑/选中的规则。"""
-        if self._shutting_down or self._sorting_rules or self.tableWidget.rowCount() < 2:
+    def _sort_rules(self, match_type: Optional[str] = None):
+        """排序当前类型的规则，同时保留当前编辑/选中的规则。"""
+        match_type = (
+            match_type if match_type in self._tables else self._current_match_type
+        )
+        table = self._tables[match_type]
+        if self._shutting_down or self._sorting_rules or table.rowCount() < 2:
             return
 
         rows = []
-        selected_names = set()
-        focused_name = ""
-        selected_rows = {index.row() for index in self.tableWidget.selectedIndexes()}
-        for row, edit in self._process_edits():
-            combo = self.tableWidget.cellWidget(row, self.COL_OUTBOUND)
-            if combo is None:
-                continue
-            name = edit.text().strip()
-            normalized = self._normalize_process_name(name)
+        selected_identities = set()
+        focused_identity = None
+        selected_rows = {index.row() for index in table.selectedIndexes()}
+        for _kind, _table, row, edit, combo in self._rule_rows(match_type):
+            value = edit.text().strip()
+            identity = routing_rule_identity(match_type, value)
             if row in selected_rows:
-                selected_names.add(normalized)
+                selected_identities.add(identity)
             if edit.hasFocus():
-                focused_name = normalized
-            rows.append((row, name, combo.currentData() or "aggregation"))
+                focused_identity = identity
+            rows.append((row, value, combo.currentData() or "aggregation"))
 
-        # 空白的新规则始终排在末尾；同名规则维持原先相对顺序，方便用户修复重复项。
+        def row_sort_key(item):
+            old_row, value, outbound = item
+            expanded = expand_routing_rule({
+                "match_type": match_type,
+                "value": value,
+                "outbound": outbound,
+            })
+            if not expanded:
+                return (1, value.casefold(), old_row)
+            return (0, *routing_rule_sort_key(expanded[0]), old_row)
+
+        # 空白/非法的新规则始终排在末尾；有效规则按明确优先级排序。
         sorted_rows = sorted(
             rows,
-            key=lambda item: (
-                not self._normalize_process_name(item[1]),
-                self._normalize_process_name(item[1]),
-                item[0],
-            ),
+            key=row_sort_key,
         )
         if rows == sorted_rows:
             return
 
         self._sorting_rules = True
-        self.tableWidget.setUpdatesEnabled(False)
+        table.setUpdatesEnabled(False)
         try:
-            self.tableWidget.setRowCount(0)
-            for _old_row, name, outbound in sorted_rows:
-                self._insert_row(name, outbound)
+            table.setRowCount(0)
+            for _old_row, value, outbound in sorted_rows:
+                self._insert_row(match_type, value, outbound)
         finally:
-            self.tableWidget.setUpdatesEnabled(True)
+            table.setUpdatesEnabled(True)
             self._sorting_rules = False
 
-        for row, edit in self._process_edits():
-            normalized = self._normalize_process_name(edit.text())
-            if normalized == focused_name and focused_name:
-                self._focus_process_row(row)
+        for _kind, _table, row, edit, _outbound in self._rule_rows(match_type):
+            identity = routing_rule_identity(match_type, edit.text())
+            if identity == focused_identity and focused_identity is not None:
+                self._focus_rule_row(match_type, row)
                 break
-            if normalized in selected_names:
-                self.tableWidget.selectRow(row)
-        self._update_duplicate_state()
+            if identity in selected_identities:
+                table.selectRow(row)
+        self._update_rule_state()
         self._update_rule_count()
 
     def _find_process_row(self, process_name: str) -> int:
-        target = self._normalize_process_name(process_name)
+        target = routing_rule_identity(MATCH_PROCESS, process_name)
         if not target:
             return -1
-        for row, edit in self._process_edits():
-            if self._normalize_process_name(edit.text()) == target:
+        for _kind, _table, row, edit, _outbound in self._rule_rows(MATCH_PROCESS):
+            if routing_rule_identity(MATCH_PROCESS, edit.text()) == target:
                 return row
         return -1
 
-    def _focus_process_row(self, row: int):
+    def _focus_rule_row(self, match_type: str, row: int):
         if row < 0:
             return
-        self.tableWidget.selectRow(row)
-        edit = self.tableWidget.cellWidget(row, self.COL_PROCESS)
+        self.rule_segment.setCurrentItem(match_type)
+        self._on_rule_tab_changed(match_type)
+        table = self._tables[match_type]
+        table.selectRow(row)
+        edit = table.cellWidget(row, self.COL_VALUE)
         if edit is not None:
             edit.setFocus()
             edit.setCursorPosition(len(edit.text()))
 
     # ---------- 交互 ----------
     def _on_add_rule(self):
-        self._insert_row("", "aggregation")
+        self._insert_row(self._current_match_type, "", "aggregation")
         self.rules_changed.emit()
 
     def _on_remove_selected(self):
@@ -533,7 +607,7 @@ class RoutingPage(QWidget):
         for row in rows:
             self.tableWidget.removeRow(row)
         if rows:
-            self._update_duplicate_state()
+            self._update_rule_state()
             self._update_rule_count()
             self.rules_changed.emit()
 
@@ -557,13 +631,13 @@ class RoutingPage(QWidget):
             if process:
                 existing_row = self._find_process_row(process)
                 if existing_row >= 0:
-                    self._focus_process_row(existing_row)
+                    self._focus_rule_row(MATCH_PROCESS, existing_row)
                     self.duplicate_detected.emit(tr(
                         "routing_duplicate_process", name=process
                     ))
                     return
-                self._insert_row(process, "aggregation")
-                self._sort_rules()
+                self._insert_row(MATCH_PROCESS, process, "aggregation")
+                self._sort_rules(MATCH_PROCESS)
                 self.rules_changed.emit()
 
     @Slot(str)
@@ -595,12 +669,11 @@ class RoutingPage(QWidget):
         self.remove_btn.setEnabled(enabled)
         self.export_btn.setEnabled(enabled)
         self.import_btn.setEnabled(enabled)
-        self.tableWidget.setEnabled(enabled)
-        for row in range(self.tableWidget.rowCount()):
-            for col in (self.COL_PROCESS, self.COL_OUTBOUND):
-                widget = self.tableWidget.cellWidget(row, col)
-                if widget is not None:
-                    widget.setEnabled(enabled)
+        for table in self._tables.values():
+            table.setEnabled(enabled)
+        for _kind, _table, _row, edit, outbound in self._rule_rows():
+            edit.setEnabled(enabled)
+            outbound.setEnabled(enabled)
 
     def prepare_for_shutdown(self):
         """停止编辑回调和进程扫描，避免 Qt 销毁阶段访问已释放的表格控件。"""
@@ -608,11 +681,8 @@ class RoutingPage(QWidget):
             return
         self._shutting_down = True
 
-        for row in range(self.tableWidget.rowCount()):
-            for col in (self.COL_PROCESS, self.COL_OUTBOUND):
-                widget = self.tableWidget.cellWidget(row, col)
-                if widget is None:
-                    continue
+        for _kind, _table, _row, edit, outbound in self._rule_rows():
+            for widget in (edit, outbound):
                 widget.blockSignals(True)
                 widget.removeEventFilter(self)
 
@@ -636,50 +706,36 @@ class RoutingPage(QWidget):
 
     # ---------- 数据 API ----------
     def get_rules(self) -> list:
-        """读取表格，返回 [{"process_name": [name], "outbound": tag}, ...]。"""
+        """读取表格并返回规范化的进程、域名和 IP/CIDR 规则。"""
         rules = []
         seen = set()
-        for row in range(self.tableWidget.rowCount()):
-            edit = self.tableWidget.cellWidget(row, self.COL_PROCESS)
-            combo = self.tableWidget.cellWidget(row, self.COL_OUTBOUND)
-            if edit is None or combo is None:
+        for match_type, _table, _row, edit, combo in self._rule_rows():
+            expanded = expand_routing_rule({
+                "match_type": match_type,
+                "value": edit.text().strip(),
+                "outbound": combo.currentData() or "aggregation",
+            })
+            if not expanded:
                 continue
-            name = edit.text().strip()
-            if not name:
+            rule = expanded[0]
+            identity = routing_rule_identity(match_type, routing_rule_value(rule))
+            if identity in seen:
                 continue
-            normalized = self._normalize_process_name(name)
-            if normalized in seen:
-                # 防御性去重：存在未修正的重复项时，以第一条规则为准，
-                # 避免向 sing-box 生成含义冲突的重复规则。
-                continue
-            seen.add(normalized)
-            tag = combo.currentData() or "aggregation"
-            rules.append({"process_name": [name], "outbound": tag})
-        return sorted(
-            rules,
-            key=lambda rule: self._normalize_process_name(rule["process_name"][0]),
-        )
+            seen.add(identity)
+            rules.append(rule)
+        return sorted(rules, key=routing_rule_sort_key)
 
     def load_rules(self, rules: list):
         """从持久化配置恢复规则到表格。"""
-        self.tableWidget.setRowCount(0)
-        normalized_rules = []
-        for rule in (rules or []):
-            if not isinstance(rule, dict):
-                continue
-            procs = rule.get("process_name", [])
-            name = procs[0] if isinstance(procs, list) and procs else (
-                procs if isinstance(procs, str) else ""
+        for table in self._tables.values():
+            table.setRowCount(0)
+        for rule in normalize_routing_rules(rules or []):
+            self._insert_row(
+                rule["match_type"],
+                routing_rule_value(rule),
+                str(rule.get("outbound", "aggregation")),
             )
-            outbound = rule.get("outbound", "aggregation")
-            if name:
-                normalized_rules.append((str(name), str(outbound)))
-        for name, outbound in sorted(
-            normalized_rules,
-            key=lambda item: self._normalize_process_name(item[0]),
-        ):
-            self._insert_row(name, outbound)
-        self._update_duplicate_state()
+        self._update_rule_state()
         self._update_rule_count()
 
     def retranslate_ui(self):
@@ -692,15 +748,15 @@ class RoutingPage(QWidget):
         self.export_btn.setText(tr("routing_export"))
         self.import_btn.setText(tr("routing_import"))
         self._list_title.setText(tr("routing_list_title"))
+        self.rule_segment.setItemText(MATCH_PROCESS, tr("routing_tab_process"))
+        self.rule_segment.setItemText(MATCH_DOMAIN, tr("routing_tab_domain"))
+        self.rule_segment.setItemText(MATCH_IP, tr("routing_tab_ip"))
         self._update_rule_count()
-        self._update_duplicate_state()
-        self._apply_headers()
-        for row in range(self.tableWidget.rowCount()):
-            edit = self.tableWidget.cellWidget(row, self.COL_PROCESS)
-            combo = self.tableWidget.cellWidget(row, self.COL_OUTBOUND)
-            if edit is not None:
-                edit.setPlaceholderText(tr("routing_placeholder_process"))
-            if combo is not None:
-                current = combo.currentData() or "aggregation"
-                self._fill_outbound_combo(combo, current)
-                combo.setEnabled(self._controls_enabled)
+        self._update_rule_state()
+        for match_type, table in self._tables.items():
+            self._apply_headers(table, match_type)
+        for match_type, _table, _row, edit, combo in self._rule_rows():
+            edit.setPlaceholderText(tr(self._placeholder_key(match_type)))
+            current = combo.currentData() or "aggregation"
+            self._fill_outbound_combo(combo, current)
+            combo.setEnabled(self._controls_enabled)

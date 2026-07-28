@@ -23,9 +23,12 @@ from __future__ import annotations
 
 import ctypes
 import os
+import platform
 import socket
 import struct
+import subprocess
 import sys
+import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -34,6 +37,94 @@ from typing import Dict, Iterable, List, Optional, Sequence
 
 class WfpPolicyError(RuntimeError):
     """Raised when Windows rejects a WFP policy operation."""
+
+
+def get_wfp_environment_fingerprint() -> str:
+    """Return a stable fingerprint for the local TUN/WFP environment.
+
+    A remembered failure must not suppress a retry forever.  Windows build and
+    the executable timestamp invalidate the compatibility fallback after an
+    OS or HypoMux update, without starting sing-box or creating a TUN adapter.
+    """
+    # Prefer the actual process image: packaged Nuitka builds may expose a
+    # helper interpreter through sys.executable while HypoMux.exe is updated.
+    executable = current_application_path()
+    try:
+        stat = os.stat(executable)
+        executable_identity = f"{os.path.abspath(executable)}:{stat.st_size}:{stat.st_mtime_ns}"
+    except OSError:
+        executable_identity = os.path.abspath(executable)
+    return "|".join((platform.platform(), platform.version(), executable_identity))
+
+
+def probe_wfp_engine() -> tuple[bool, str]:
+    """Open and immediately close the local WFP engine without adding rules.
+
+    sing-box needs this same Windows Filtering Platform entry point when
+    ``tun.strict_route`` is enabled.  Running the probe before TUN takeover
+    turns an opaque late ``code=1`` into a safe compatibility-mode start.
+    """
+    if os.name != "nt":
+        return False, "Windows Filtering Platform is only available on Windows"
+    engine = ctypes.c_void_p()
+    try:
+        api = _WfpApi()
+        status = api.FwpmEngineOpen0(
+            None, RPC_C_AUTHN_DEFAULT, None, None, ctypes.byref(engine)
+        )
+        if status:
+            try:
+                detail = ctypes.WinError(int(status)).strerror
+            except Exception:
+                detail = "unknown WFP error"
+            return False, f"FwpmEngineOpen0 failed (0x{int(status):08X}): {detail}"
+        return True, "FwpmEngineOpen0 succeeded"
+    except Exception as exc:
+        return False, f"WFP engine probe failed: {type(exc).__name__}: {exc}"
+    finally:
+        if engine:
+            try:
+                api.FwpmEngineClose0(engine)
+            except Exception:
+                pass
+
+
+def try_repair_wfp_services() -> tuple[bool, str]:
+    """Try the least invasive repair: start the Base Filtering Engine service.
+
+    This intentionally does not reset firewall rules, alter security policy,
+    or create an inbound firewall exception.  BFE is the service exposing WFP.
+    The caller must already have administrator rights.
+    """
+    if os.name != "nt":
+        return False, "WFP is only available on Windows"
+    try:
+        result = subprocess.run(
+            ["sc.exe", "start", "BFE"],
+            capture_output=True,
+            text=True,
+            timeout=8,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        output = " ".join(
+            part.strip() for part in (result.stdout, result.stderr) if part.strip()
+        )
+    except Exception as exc:
+        return False, f"unable to start BFE: {type(exc).__name__}: {exc}"
+
+    # `sc start` may report success while BFE is still START_PENDING.  Probe
+    # repeatedly instead of persisting a false incompatibility immediately.
+    deadline = time.monotonic() + 8.0
+    detail = "WFP probe did not run"
+    while True:
+        ready, detail = probe_wfp_engine()
+        if ready:
+            return True, "Base Filtering Engine is available"
+        if time.monotonic() >= deadline:
+            break
+        time.sleep(0.25)
+    suffix = f"; service output: {output}" if output else ""
+    return False, f"BFE/WFP is still unavailable: {detail}{suffix}"
 
 
 @dataclass(frozen=True)

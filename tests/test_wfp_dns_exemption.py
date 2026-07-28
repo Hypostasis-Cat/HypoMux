@@ -2,6 +2,7 @@
 
 import os
 import unittest
+from unittest import mock
 
 from utils.wfp_dns_exemption import (
     FWP_ACTION_PERMIT,
@@ -14,7 +15,10 @@ from utils.wfp_dns_exemption import (
     WfpDnsExemption,
     build_dns_rule_specs,
     current_application_path,
+    get_wfp_environment_fingerprint,
     ipv4_to_wfp_uint32,
+    probe_wfp_engine,
+    try_repair_wfp_services,
 )
 import ctypes
 from utils.config_manager import _coerce_config, default_config
@@ -24,10 +28,17 @@ class WfpDnsExemptionTests(unittest.TestCase):
     def test_current_application_path_is_an_existing_executable(self):
         self.assertTrue(os.path.isfile(current_application_path()))
 
-    def test_product_default_enables_the_scoped_fix_but_respects_opt_out(self):
-        self.assertTrue(default_config()["wfp_dns_egress_exemption"])
-        self.assertTrue(_coerce_config({})["wfp_dns_egress_exemption"])
-        self.assertFalse(_coerce_config({"wfp_dns_egress_exemption": False})["wfp_dns_egress_exemption"])
+    def test_strict_route_preference_and_device_fallback_are_separate(self):
+        self.assertTrue(default_config()["wfp_strict_route"])
+        cfg = _coerce_config({
+            "wfp_strict_route": True,
+            "wfp_compatibility_state": {
+                "status": "failed", "fingerprint": "test", "detail": "BFE unavailable",
+            },
+        })
+        self.assertTrue(cfg["wfp_strict_route"])
+        self.assertEqual(cfg["wfp_compatibility_state"]["status"], "failed")
+        self.assertEqual(cfg["wfp_compatibility_state"]["fingerprint"], "test")
 
     def test_ipv4_value_keeps_network_byte_layout(self):
         value = ipv4_to_wfp_uint32("192.0.2.10")
@@ -74,6 +85,40 @@ class WfpDnsExemptionTests(unittest.TestCase):
             [condition.conditionValue.type for condition in conditions],
             [FWP_BYTE_BLOB_TYPE, FWP_UINT32, FWP_UINT32, FWP_UINT8, FWP_UINT16],
         )
+
+    def test_wfp_probe_reports_open_failure_without_creating_filters(self):
+        with mock.patch("utils.wfp_dns_exemption._WfpApi") as api_class:
+            api_class.return_value.FwpmEngineOpen0.return_value = 87
+            ready, detail = probe_wfp_engine()
+
+        self.assertFalse(ready)
+        self.assertIn("FwpmEngineOpen0 failed", detail)
+
+    def test_fingerprint_is_available_without_starting_singbox(self):
+        self.assertTrue(get_wfp_environment_fingerprint())
+
+    def test_repair_only_starts_bfe_then_reprobes(self):
+        with mock.patch("utils.wfp_dns_exemption.subprocess.run") as run, \
+                mock.patch("utils.wfp_dns_exemption.probe_wfp_engine", return_value=(True, "ok")):
+            run.return_value.stdout = ""
+            run.return_value.stderr = ""
+            ready, detail = try_repair_wfp_services()
+        self.assertTrue(ready)
+        self.assertIn("Base Filtering Engine", detail)
+        self.assertEqual(run.call_args.args[0], ["sc.exe", "start", "BFE"])
+
+    def test_repair_retries_wfp_probe_while_bfe_is_starting(self):
+        with mock.patch("utils.wfp_dns_exemption.subprocess.run") as run, \
+                mock.patch(
+                    "utils.wfp_dns_exemption.probe_wfp_engine",
+                    side_effect=[(False, "pending"), (True, "ok")],
+                ) as probe, \
+                mock.patch("utils.wfp_dns_exemption.time.sleep"):
+            run.return_value.stdout = ""
+            run.return_value.stderr = ""
+            ready, _detail = try_repair_wfp_services()
+        self.assertTrue(ready)
+        self.assertEqual(probe.call_count, 2)
 
 
 if __name__ == "__main__":

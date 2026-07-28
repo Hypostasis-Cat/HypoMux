@@ -72,14 +72,17 @@ def default_config() -> Dict[str, Any]:
         "selected_adapters": [],
         "socks_port": DEFAULT_SOCKS_PORT,
         "http_port": DEFAULT_HTTP_PORT,
-        # 第三阶段下半场：运行模式与进程级分流规则
+        # 第三阶段下半场：运行模式与进程/域名/IP 分流规则
         # 新安装默认采用 TUN，避免用户在不知情时只启用覆盖面有限的系统代理。
         # 已保存的 proxy 选择会在下方迁移逻辑中原样保留。
         "run_mode": "tun",            # proxy | tun
         "routing_rules": [],
         "dns_server": DEFAULT_DNS_SERVER,
         "doh_provider": DEFAULT_DOH_PROVIDER,
-        "wfp_dns_egress_exemption": True,
+        # User preference and a device-local fallback are separate: one WFP
+        # failure must not permanently change the user's security preference.
+        "wfp_strict_route": True,
+        "wfp_compatibility_state": {},
         # 特殊网络环境下允许 TUN 跳过外部联网探测；默认保持安全回滚。
         "force_tun_connectivity_bypass": False,
         "blocked_domain_bypass": False,  # 自动规避单网卡被墙域名（默认关闭，仅特殊网络环境建议开启）
@@ -138,7 +141,7 @@ def _coerce_config(raw: Any) -> Dict[str, Any]:
     raw_mode = str(raw.get("run_mode", "tun")).strip().lower()
     cfg["run_mode"] = raw_mode if raw_mode in ("proxy", "tun") else "tun"
 
-    # routing_rules：进程级分流规则列表，轻量结构校验，具体合法性由 singbox_config 规整
+    # routing_rules：分流规则列表，轻量结构校验，具体合法性由 routing_rules/singbox_config 规整
     raw_rules = raw.get("routing_rules")
     if isinstance(raw_rules, list):
         cfg["routing_rules"] = [item for item in raw_rules if isinstance(item, dict)]
@@ -150,9 +153,16 @@ def _coerce_config(raw: Any) -> Dict[str, Any]:
     raw_doh = str(raw.get("doh_provider", DEFAULT_DOH_PROVIDER)).strip().lower()
     cfg["doh_provider"] = raw_doh if raw_doh in VALID_DOH_PROVIDERS else DEFAULT_DOH_PROVIDER
 
-    cfg["wfp_dns_egress_exemption"] = _coerce_bool(
-        raw.get("wfp_dns_egress_exemption"), True
-    )
+    cfg["wfp_strict_route"] = _coerce_bool(raw.get("wfp_strict_route"), True)
+    raw_wfp_state = raw.get("wfp_compatibility_state")
+    if isinstance(raw_wfp_state, dict):
+        status = str(raw_wfp_state.get("status", "")).strip().lower()
+        if status in {"failed", "healthy"}:
+            cfg["wfp_compatibility_state"] = {
+                "status": status,
+                "fingerprint": str(raw_wfp_state.get("fingerprint", ""))[:512],
+                "detail": str(raw_wfp_state.get("detail", ""))[:1024],
+            }
 
     # 强制模式跳过全部网卡 DNS/DoH 预检，以及 TUN 外部联网探测的自动
     # 停机；仍不跳过出站池/sing-box 的实际启动异常。
