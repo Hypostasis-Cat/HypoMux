@@ -1,8 +1,9 @@
-"""Windows IPv4 outbound-interface binding and diagnostics.
+"""Windows outbound-interface binding and diagnostics.
 
 Every HypoMux path that promises a selected physical NIC must use this module.
 ``bind(local_ip)`` alone only selects a source address on multihomed Windows
-hosts; it is not accepted here as a replacement for IP_UNICAST_IF.
+hosts; it is not accepted here as a replacement for the corresponding
+``*_UNICAST_IF`` socket option.
 """
 
 from __future__ import annotations
@@ -20,6 +21,10 @@ logger = logging.getLogger(__name__)
 TraceCallback = Callable[[str], None]
 
 IP_UNICAST_IF = 31
+# Windows documents IPV6_UNICAST_IF as a host-byte-order IF_INDEX.  Python's
+# socket module exposes the same value on current Windows builds, while the
+# fallback keeps packaged builds compatible with older Python runtimes.
+IPV6_UNICAST_IF = getattr(socket, "IPV6_UNICAST_IF", 31)
 NO_ERROR = 0
 
 
@@ -40,21 +45,6 @@ class _MIB_IPFORWARDROW(ctypes.Structure):
         ("dwForwardMetric4", wintypes.DWORD),
         ("dwForwardMetric5", wintypes.DWORD),
     ]
-
-
-def _winerror(message: str, code: int = 10022) -> OSError:
-    error = OSError(code, message)
-    error.winerror = code
-    return error
-
-
-def _as_ipv4(value: Any, field: str) -> str:
-    text = str(value or "").strip()
-    try:
-        socket.inet_aton(text)
-    except OSError as exc:
-        raise _winerror(f"invalid {field}: {text!r}") from exc
-    return text
 
 
 def adapter_luid(if_index: int) -> Optional[int]:
@@ -115,31 +105,22 @@ def configure_bound_ipv4_socket(
     purpose: str,
     trace: Optional[TraceCallback] = None,
 ) -> Dict[str, Any]:
-    """Require and verify an IPv4 interface+source binding before connect/send.
+    """Apply the v2.1.1-compatible interface binding sequence.
 
-    Raises on every binding failure.  In particular, interface index zero is
-    rejected because IP_UNICAST_IF=0 deliberately means "unspecified".
+    ``IP_UNICAST_IF`` remains the primary egress selector.  Windows may reject
+    a best-effort source-address bind while an adapter renews or reconnects;
+    v2.1.1 continued with the interface pin in that case.  Do the same here
+    instead of making that diagnostic condition fatal to every TUN flow.
     """
-    try:
-        if_index = int(nic.get("if_index", nic.get("index", 0)) or 0)
-    except (TypeError, ValueError) as exc:
-        raise _winerror("invalid interface index") from exc
-    if if_index <= 0:
-        raise _winerror("refusing unpinned socket: missing IPv4 IfIndex")
-
-    source_ip = _as_ipv4(nic.get("ip"), "source IPv4")
+    if_index = int(nic.get("if_index", nic.get("index", 0)) or 0)
+    source_ip = str(nic.get("ip") or "").strip()
     name = str(nic.get("name") or source_ip)
+    if if_index <= 0:
+        raise ValueError(f"invalid IPv4 interface index for {name}: {if_index}")
     luid = adapter_luid(if_index)
     payload = struct.pack("!I", if_index)
     try:
         sock.setsockopt(socket.IPPROTO_IP, IP_UNICAST_IF, payload)
-        # Winsock returns this option in host byte order when queried.
-        actual = struct.unpack("=I", sock.getsockopt(socket.IPPROTO_IP, IP_UNICAST_IF, 4))[0]
-        if actual != if_index:
-            raise _winerror(
-                f"IP_UNICAST_IF verification mismatch: requested={if_index}, actual={actual}"
-            )
-        sock.bind((source_ip, 0))
     except OSError as exc:
         message = (
             "[socket-bind] failed purpose=%s adapter=%s source=%s if_index=%s "
@@ -155,6 +136,26 @@ def configure_bound_ipv4_socket(
         _notify_trace(trace, message)
         raise
 
+    source_bind_error = ""
+    if source_ip:
+        try:
+            sock.bind((source_ip, 0))
+        except OSError as exc:
+            source_bind_error = (
+                f"winerror={getattr(exc, 'winerror', None)} "
+                f"errno={getattr(exc, 'errno', None)} error={exc}"
+            )
+            message = (
+                "[socket-bind] source-bind fallback purpose=%s adapter=%s source=%s if_index=%s "
+                "luid=%s gateway=%s ip_unicast_if=set bind=failed; continuing (%s)"
+            ) % (
+                purpose, name, source_ip, if_index,
+                f"0x{luid:016X}" if luid is not None else "unknown",
+                nic.get("gateway", ""), source_bind_error,
+            )
+            logger.warning(message)
+            _notify_trace(trace, message)
+
     info = {
         "adapter": name,
         "source_ip": source_ip,
@@ -162,17 +163,116 @@ def configure_bound_ipv4_socket(
         "luid": luid,
         "gateway": str(nic.get("gateway") or ""),
         "purpose": purpose,
+        "source_bind_error": source_bind_error,
     }
     message = (
         "[socket-bind] ready purpose=%s adapter=%s source=%s if_index=%s luid=%s "
-        "gateway=%s ip_unicast_if=set+verified(%s) bind=ok"
+        "gateway=%s ip_unicast_if=set bind=%s"
     ) % (
         purpose, name, source_ip, if_index,
-        f"0x{luid:016X}" if luid is not None else "unknown", info["gateway"], actual,
+        f"0x{luid:016X}" if luid is not None else "unknown", info["gateway"],
+        "fallback" if source_bind_error else "ok",
     )
     logger.info(message)
     _notify_trace(trace, message)
     return info
+
+
+def configure_bound_ipv6_socket(
+    sock: socket.socket,
+    nic: Dict[str, Any],
+    purpose: str,
+    trace: Optional[TraceCallback] = None,
+) -> Dict[str, Any]:
+    """Pin an IPv6 socket to a selected physical adapter.
+
+    Unlike ``IP_UNICAST_IF``, Windows expects ``IPV6_UNICAST_IF`` as an
+    IF_INDEX in host byte order.  A source IPv6 address is optional because a
+    selected adapter can legitimately have a temporary/privacy address; the
+    interface pin is the authoritative routing constraint.
+    """
+    if_index = int(nic.get("if_index", nic.get("index", 0)) or 0)
+    source_ip = str(nic.get("ipv6") or "").strip()
+    name = str(nic.get("name") or source_ip)
+    if if_index <= 0:
+        raise ValueError(f"invalid IPv6 interface index for {name}: {if_index}")
+    luid = adapter_luid(if_index)
+    try:
+        sock.setsockopt(socket.IPPROTO_IPV6, IPV6_UNICAST_IF, if_index)
+        configured = sock.getsockopt(socket.IPPROTO_IPV6, IPV6_UNICAST_IF)
+        if int(configured) != if_index:
+            raise OSError(
+                f"IPV6_UNICAST_IF readback mismatch: expected {if_index}, got {configured}"
+            )
+    except OSError as exc:
+        message = (
+            "[socket-bind] failed purpose=%s adapter=%s source=%s if_index=%s "
+            "luid=%s ipv6_unicast_if=failed bind=failed winerror=%s errno=%s error=%s"
+        ) % (
+            purpose, name, source_ip, if_index,
+            f"0x{luid:016X}" if luid is not None else "unknown",
+            getattr(exc, "winerror", None), getattr(exc, "errno", None), exc,
+        )
+        logger.warning(message)
+        _notify_trace(trace, message)
+        raise
+
+    source_bind_error = ""
+    if source_ip:
+        try:
+            # A scope ID is required only for link-local addresses.  Passing it
+            # for global addresses is harmless but obscures diagnostics.
+            scope_id = if_index if source_ip.lower().startswith("fe80:") else 0
+            sock.bind((source_ip, 0, 0, scope_id))
+        except OSError as exc:
+            source_bind_error = (
+                f"winerror={getattr(exc, 'winerror', None)} "
+                f"errno={getattr(exc, 'errno', None)} error={exc}"
+            )
+            message = (
+                "[socket-bind] source-bind fallback purpose=%s adapter=%s source=%s if_index=%s "
+                "luid=%s ipv6_unicast_if=set bind=failed; continuing (%s)"
+            ) % (
+                purpose, name, source_ip, if_index,
+                f"0x{luid:016X}" if luid is not None else "unknown", source_bind_error,
+            )
+            logger.warning(message)
+            _notify_trace(trace, message)
+
+    info = {
+        "adapter": name,
+        "source_ip": source_ip,
+        "if_index": if_index,
+        "luid": luid,
+        "purpose": purpose,
+        "source_bind_error": source_bind_error,
+    }
+    message = (
+        "[socket-bind] ready purpose=%s adapter=%s source=%s if_index=%s luid=%s "
+        "ipv6_unicast_if=set bind=%s"
+    ) % (
+        purpose, name, source_ip, if_index,
+        f"0x{luid:016X}" if luid is not None else "unknown",
+        "fallback" if source_bind_error else "ok",
+    )
+    logger.info(message)
+    _notify_trace(trace, message)
+    return info
+
+
+def configure_bound_socket(
+    sock: socket.socket,
+    nic: Dict[str, Any],
+    purpose: str,
+    family: int,
+    trace: Optional[TraceCallback] = None,
+) -> Dict[str, Any]:
+    """Dispatch selected-interface binding by an already-resolved address family."""
+    if family == socket.AF_INET:
+        return configure_bound_ipv4_socket(sock, nic, purpose, trace)
+    if family == socket.AF_INET6:
+        return configure_bound_ipv6_socket(sock, nic, purpose, trace)
+    raise ValueError(f"unsupported socket family for interface binding: {family}")
 
 
 def log_connected_ipv4_socket(
@@ -199,6 +299,50 @@ def log_connected_ipv4_socket(
     )
     logger.info(message)
     _notify_trace(trace, message)
+
+
+def log_connected_ipv6_socket(
+    sock: socket.socket,
+    nic: Dict[str, Any],
+    destination: Tuple[str, int],
+    purpose: str,
+    trace: Optional[TraceCallback] = None,
+) -> None:
+    """Log IPv6 interface-pin evidence after a send/connect.
+
+    The legacy GetBestRoute API is IPv4-only; the interface option readback and
+    actual local endpoint are therefore the useful, non-misleading evidence.
+    """
+    try:
+        local = sock.getsockname()
+    except OSError as exc:
+        local = f"getsockname failed: {exc}"
+    message = (
+        "[socket-route] purpose=%s adapter=%s destination=[%s]:%s local=%s "
+        "expected_if=%s ipv6_unicast_if=set"
+    ) % (
+        purpose, nic.get("name", nic.get("ipv6", "")), destination[0], destination[1], local,
+        nic.get("if_index", nic.get("index")),
+    )
+    logger.info(message)
+    _notify_trace(trace, message)
+
+
+def log_connected_socket(
+    sock: socket.socket,
+    nic: Dict[str, Any],
+    destination: Tuple[str, int],
+    purpose: str,
+    family: int,
+    trace: Optional[TraceCallback] = None,
+) -> None:
+    if family == socket.AF_INET:
+        log_connected_ipv4_socket(sock, nic, destination, purpose, trace)
+        return
+    if family == socket.AF_INET6:
+        log_connected_ipv6_socket(sock, nic, destination, purpose, trace)
+        return
+    raise ValueError(f"unsupported socket family for route log: {family}")
 
 
 def probe_bound_tcp(

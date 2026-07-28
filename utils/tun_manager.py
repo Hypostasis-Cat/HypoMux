@@ -134,6 +134,9 @@ class TunManager(QThread):
         self._stop_event: Optional[asyncio.Event] = None
         self._reader_tasks: list[asyncio.Task] = []
         self._stop_requested = False
+        self._last_stderr_line = ""
+        self._saw_wfp_engine_error = False
+        self._wfp_engine_error_detail = ""
 
     # ---------- QThread 入口 ----------
     def run(self):
@@ -223,7 +226,18 @@ class TunManager(QThread):
             await self._drain_log_tasks(stdout_task, stderr_task)
             rc = exit_task.result()
             if rc != 0:
-                self.error_signal.emit(f"sing-box 内核意外退出 (code={rc})")
+                detail = self._last_stderr_line
+                if self._saw_wfp_engine_error:
+                    detail = self._wfp_engine_error_detail or detail
+                    self.error_signal.emit(
+                        "TUN 严格路由无法初始化 Windows Filtering Platform: "
+                        f"{detail}"
+                    )
+                else:
+                    suffix = f" | {detail}" if detail else ""
+                    self.error_signal.emit(
+                        f"sing-box 内核意外退出 (code={rc}){suffix}"
+                    )
 
         # 收尾：强杀进程 + 清理路由
         await self._terminate_process()
@@ -288,6 +302,11 @@ class TunManager(QThread):
                     break
                 text = line.decode("utf-8", errors="replace").rstrip()
                 if text:
+                    if name == "stderr":
+                        self._last_stderr_line = text
+                        if "FwpmEngineOpen0" in text:
+                            self._saw_wfp_engine_error = True
+                            self._wfp_engine_error_detail = text
                     self.log_signal.emit(f"[sing-box:{name}] {text}")
         except asyncio.CancelledError:
             pass

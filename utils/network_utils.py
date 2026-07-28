@@ -16,6 +16,7 @@ HypoMux 网络工具模块 - Step 2
 
 import ctypes
 from ctypes import wintypes
+import ipaddress
 import sys
 import socket
 import subprocess
@@ -30,6 +31,37 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
+
+
+def find_shared_ipv4_gateway_risks(adapters: List[Dict]) -> List[str]:
+    """Return ambiguous same-LAN/default-gateway adapter pairs.
+
+    This is intentionally advisory: two interfaces on one LAN may still be
+    useful for failover, but Windows cannot promise independent egress or
+    bandwidth aggregation for that topology.
+    """
+    risks: List[str] = []
+    for left_index, left in enumerate(adapters or []):
+        for right in adapters[left_index + 1:]:
+            try:
+                left_ip = ipaddress.IPv4Address(str(left.get("ip") or ""))
+                right_ip = ipaddress.IPv4Address(str(right.get("ip") or ""))
+                left_prefix = int(left.get("prefix_length", 24) or 24)
+                right_prefix = int(right.get("prefix_length", 24) or 24)
+                if not (1 <= left_prefix <= 32 and 1 <= right_prefix <= 32):
+                    continue
+                left_net = ipaddress.IPv4Network(f"{left_ip}/{left_prefix}", strict=False)
+                right_net = ipaddress.IPv4Network(f"{right_ip}/{right_prefix}", strict=False)
+            except (ipaddress.AddressValueError, ValueError):
+                continue
+            left_gateway = str(left.get("gateway") or "").split(",", 1)[0].strip()
+            right_gateway = str(right.get("gateway") or "").split(",", 1)[0].strip()
+            if left_net == right_net and left_gateway and left_gateway == right_gateway:
+                risks.append(
+                    f"{left.get('name', left_ip)} 与 {right.get('name', right_ip)} "
+                    f"同属 {left_net}，且共用网关 {left_gateway}"
+                )
+    return risks
 
 
 def _get_windows_startupinfo():
@@ -361,6 +393,7 @@ def get_adapter_full_info() -> List[Dict]:
             # 排除回环 / 隧道；仅保留 UP 且 IfIndex 有效的网卡
             if oper_up and adapter.IfIndex != 0 and iftype not in _EXCLUDED_IF_TYPES:
                 ipv4_list: List[str] = []
+                ipv4_prefix_lengths: Dict[str, int] = {}
                 dns_servers = _adapter_dns_servers_ipv4(adapter)
                 gateways = _adapter_gateways_ipv4(adapter)
                 unicast_ptr = adapter.FirstUnicastAddress
@@ -369,6 +402,9 @@ def get_adapter_full_info() -> List[Dict]:
                     ipv4 = _sockaddr_to_ipv4(unicast.Address)
                     if ipv4 and _is_routable_ipv4(ipv4):
                         ipv4_list.append(ipv4)
+                        prefix_length = int(unicast.OnLinkPrefixLength)
+                        if 1 <= prefix_length <= 32:
+                            ipv4_prefix_lengths[ipv4] = prefix_length
                     unicast_ptr = unicast.Next
 
                 if ipv4_list:
@@ -379,6 +415,9 @@ def get_adapter_full_info() -> List[Dict]:
                         "is_ppp": iftype == _IF_TYPE_PPP,
                         "friendly": friendly,
                         "ipv4_list": ipv4_list,
+                        # The fallback scanner later selects ipv4_list[0], so
+                        # preserve that address's actual on-link prefix.
+                        "prefix_length": ipv4_prefix_lengths.get(ipv4_list[0], 24),
                         "dns_servers": dns_servers,
                         "gateways": gateways,
                         "metric": int(adapter.Ipv4Metric),
@@ -508,6 +547,7 @@ def _parse_adapter_from_json(adapter_json: Dict) -> Optional[Dict]:
             "index": int(adapter_json.get("InterfaceIndex", -1)),
             "alias": alias,
             "ipv4": adapter_json.get("IPv4Address", "N/A"),
+            "prefix_length": int(adapter_json.get("IPv4PrefixLength") or 24),
             "dns_servers": _normalize_dns_servers(adapter_json.get("DNSServers")),
             "is_auto": adapter_json.get("AutomaticMetric", True),
             "metric": int(adapter_json.get("InterfaceMetric") or -1),
@@ -578,7 +618,10 @@ def scan_network_adapters() -> Tuple[bool, List[Dict], str]:
             Select-Object -ExpandProperty NextHop -ErrorAction SilentlyContinue
         ) -join ', '
 
-        $ipv4Addr = (Get-NetIPAddress -InterfaceIndex $ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue).IPAddress
+        $ipv4Info = Get-NetIPAddress -InterfaceIndex $ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+        $ipv4Addr = $ipv4Info.IPAddress
+        $ipv4PrefixLength = $ipv4Info.PrefixLength
         $dnsServers = @(
             Get-DnsClientServerAddress -InterfaceIndex $ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue |
             Select-Object -ExpandProperty ServerAddresses -ErrorAction SilentlyContinue |
@@ -598,6 +641,7 @@ def scan_network_adapters() -> Tuple[bool, List[Dict], str]:
                 InterfaceIndex = $ifIndex
                 InterfaceAlias = $ifAlias
                 IPv4Address = $ipv4Addr
+                IPv4PrefixLength = $ipv4PrefixLength
                 DNSServers = $dnsServers
                 AutomaticMetric = $autoMetric
                 InterfaceMetric = $ifMetric
@@ -654,6 +698,7 @@ def scan_network_adapters() -> Tuple[bool, List[Dict], str]:
                     "index": n["index"],
                     "alias": alias,
                     "ipv4": ", ".join(n["ipv4_list"]),
+                    "prefix_length": int(n.get("prefix_length", 24) or 24),
                     "dns_servers": n.get("dns_servers", []),
                     "is_auto": True,
                     "metric": n.get("metric", -1),

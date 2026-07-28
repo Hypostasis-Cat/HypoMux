@@ -19,6 +19,8 @@ HypoMux 代理后端模块 - v2.0（SOCKS5 + HTTP 双协议无感接管）
 
 import asyncio
 import ctypes
+import ipaddress
+import logging
 import ssl
 import random
 import socket
@@ -35,9 +37,41 @@ from PySide6.QtCore import QThread, Signal
 from utils.network_utils import get_adapter_if_indices
 from utils.blocked_domain_tracker import get_tracker
 from utils.socket_binding import (
+    configure_bound_socket,
     configure_bound_ipv4_socket,
+    log_connected_socket,
     log_connected_ipv4_socket,
 )
+
+
+logger = logging.getLogger(__name__)
+
+TCP_RELAY_CHUNK_SIZE = 128 * 1024
+TCP_RELAY_DRAIN_THRESHOLD = 512 * 1024
+TCP_SOCKET_BUFFER_SIZE = 1024 * 1024
+
+
+def _tune_tcp_socket(sock: socket.socket):
+    """Best-effort tuning for the local SOCKS high-throughput data path."""
+    for level, option, value in (
+        (socket.SOL_SOCKET, socket.SO_RCVBUF, TCP_SOCKET_BUFFER_SIZE),
+        (socket.SOL_SOCKET, socket.SO_SNDBUF, TCP_SOCKET_BUFFER_SIZE),
+        (socket.IPPROTO_TCP, socket.TCP_NODELAY, 1),
+    ):
+        try:
+            sock.setsockopt(level, option, value)
+        except OSError:
+            # Interface binding remains the safety boundary.  A platform that
+            # caps buffer sizes should still be allowed to use its defaults.
+            pass
+
+
+async def _write_with_bounded_backpressure(writer, data: bytes):
+    writer.write(data)
+    transport = getattr(writer, "transport", None)
+    get_size = getattr(transport, "get_write_buffer_size", None)
+    if not callable(get_size) or get_size() >= TCP_RELAY_DRAIN_THRESHOLD:
+        await writer.drain()
 
 
 def _is_winerror6_overlapped_cancel(context: dict) -> bool:
@@ -90,6 +124,20 @@ NO_ERROR = 0
 # 仅对它们执行短时熔断，避免单个 CDN 或远端服务故障被误判为整张网卡故障。
 _LOCAL_LINK_FAILURE_CODES = {10049, 10050, 10051, 10065, 1231, 1232}
 _LINK_FAILURE_COOLDOWN_SECONDS = 15.0
+DNS_TYPE_A = 1
+DNS_TYPE_AAAA = 28
+
+
+def _address_family(address: str) -> int:
+    """Return the socket family for an already-resolved literal address."""
+    return socket.AF_INET6 if ipaddress.ip_address(address).version == 6 else socket.AF_INET
+
+
+def _socket_endpoint(address: str, port: int):
+    """Build the sockaddr shape required by the resolved address family."""
+    if _address_family(address) == socket.AF_INET6:
+        return address, port, 0, 0
+    return address, port
 
 
 def _is_local_link_failure(error: Exception) -> bool:
@@ -317,7 +365,7 @@ async def _connect_with_one_failover(
     schedule_target: str,
     dst_addr: str,
     dst_port: int,
-    create_socket: Callable[[Dict], socket.socket],
+    create_socket: Callable[[Dict, int], socket.socket],
     upstream_sockets: set,
     timeout: float,
     on_failure: Callable[[Dict, Exception, str], None],
@@ -333,6 +381,8 @@ async def _connect_with_one_failover(
     excluded: set[str] = set()
     max_attempts = min(2, max(1, len(getattr(balancer, "nics", ()))))
     last_error: Optional[Exception] = None
+    family = _address_family(dst_addr)
+    endpoint = _socket_endpoint(dst_addr, dst_port)
 
     for attempt in range(max_attempts):
         nic = first_nic if attempt == 0 and first_nic is not None else (
@@ -345,13 +395,13 @@ async def _connect_with_one_failover(
         balancer.on_connect(nic["name"])
         failure_stage = "bind"
         try:
-            sock = create_socket(nic)
+            sock = create_socket(nic, family)
             upstream_sockets.add(sock)
             failure_stage = "connect"
             await asyncio.wait_for(
-                loop.sock_connect(sock, (dst_addr, dst_port)), timeout=timeout
+                loop.sock_connect(sock, endpoint), timeout=timeout
             )
-            log_connected_ipv4_socket(sock, nic, (dst_addr, dst_port), "proxy-tcp")
+            log_connected_socket(sock, nic, (dst_addr, dst_port), "proxy-tcp", family)
             balancer.on_connect_success(nic["name"])
             return sock, nic
         except asyncio.CancelledError:
@@ -378,12 +428,12 @@ async def _connect_with_one_failover(
             try:
                 on_failure(nic, error, failure_stage)
             except Exception:
-                pass
+                logger.debug("proxy connection failure callback failed", exc_info=True)
             if attempt + 1 < max_attempts:
                 try:
                     on_retry(nic, error)
                 except Exception:
-                    pass
+                    logger.debug("proxy connection retry callback failed", exc_info=True)
 
     raise ConnectionError("all selected adapters failed to connect") from last_error
 
@@ -469,18 +519,17 @@ class ProxyWorker(QThread):
             nic["if_index"] = int(resolved or fallback)
 
     @staticmethod
-    def _create_bound_upstream_socket(nic) -> socket.socket:
-        """创建出站 TCP socket 并用 IP_UNICAST_IF 把它死锁在目标网卡上。
+    def _create_bound_upstream_socket(nic, family: int = socket.AF_INET) -> socket.socket:
+        """创建出站 TCP socket 并把它死锁在目标网卡上。
 
         由统一工具执行 IP_UNICAST_IF（网络字节序）设置、回读校验和源
         地址 bind；IfIndex 缺失、回读不一致或 bind 失败均不得降级。
         """
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock = socket.socket(family, socket.SOCK_STREAM)
         try:
             sock.setblocking(False)
-            # 拒绝 if_index=0、setsockopt 回读不一致或 source bind 失败；
-            # 这些情况不能降级为依赖 Windows 默认路由的 socket。
-            configure_bound_ipv4_socket(sock, nic, "proxy-tcp")
+            _tune_tcp_socket(sock)
+            configure_bound_socket(sock, nic, "proxy-tcp", family)
         except Exception:
             sock.close()
             raise
@@ -758,20 +807,24 @@ class ProxyWorker(QThread):
 
             if atyp == 1:  # IPv4
                 dst_addr = socket.inet_ntoa(await reader.readexactly(4))
+            elif atyp == 4:  # IPv6
+                dst_addr = socket.inet_ntop(socket.AF_INET6, await reader.readexactly(16))
             elif atyp == 3:  # 域名
                 domain_len = ord(await reader.readexactly(1))
                 dst_domain = (await reader.readexactly(domain_len)).decode()
                 try:
-                    # 【关键修复】前置异步解析 DNS，绕过单网卡解析死锁
-                    addr_info = await loop.getaddrinfo(dst_domain, None, family=socket.AF_INET, type=socket.SOCK_STREAM)
+                    # Preserve IPv4 preference for dual-stack names, while
+                    # accepting IPv6-only targets instead of rejecting them.
+                    addr_info = await loop.getaddrinfo(
+                        dst_domain, None, family=socket.AF_UNSPEC,
+                        type=socket.SOCK_STREAM,
+                    )
+                    addr_info.sort(key=lambda item: 0 if item[0] == socket.AF_INET else 1)
                     dst_addr = addr_info[0][4][0]
                 except Exception as e:
                     self.log_signal.emit(f"[DNS失败] 无法解析域名 {dst_domain}: {e}")
                     writer.close()
                     return
-            elif atyp == 4:  # IPv6 暂不支持
-                writer.close()
-                return
             else:
                 writer.close()
                 return
@@ -783,11 +836,12 @@ class ProxyWorker(QThread):
                 if not self._allow_passthrough_client(writer):
                     writer.close()
                     return
-                upstream_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                family = _address_family(dst_addr)
+                upstream_sock = socket.socket(family, socket.SOCK_STREAM)
                 upstream_sock.setblocking(False)
                 self._upstream_sockets.add(upstream_sock)
                 await asyncio.wait_for(
-                    loop.sock_connect(upstream_sock, (dst_addr, dst_port)),
+                    loop.sock_connect(upstream_sock, _socket_endpoint(dst_addr, dst_port)),
                     timeout=self.TCP_CONNECT_TIMEOUT,
                 )
             else:
@@ -998,20 +1052,22 @@ class ProxyWorker(QThread):
         loop = asyncio.get_running_loop()
         try:
             addr_info = await loop.getaddrinfo(
-                dst_host, dst_port, family=socket.AF_INET, type=socket.SOCK_STREAM
+                dst_host, dst_port, family=socket.AF_UNSPEC, type=socket.SOCK_STREAM
             )
+            addr_info.sort(key=lambda item: 0 if item[0] == socket.AF_INET else 1)
             dst_addr = addr_info[0][4][0]
         except Exception as e:
             raise RuntimeError(f"DNS 解析失败: {e}") from e
 
         if self._passthrough_mode:
             nic = None
-            upstream_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            family = _address_family(dst_addr)
+            upstream_sock = socket.socket(family, socket.SOCK_STREAM)
             upstream_sock.setblocking(False)
             self._upstream_sockets.add(upstream_sock)
             try:
                 await asyncio.wait_for(
-                    loop.sock_connect(upstream_sock, (dst_addr, dst_port)),
+                    loop.sock_connect(upstream_sock, _socket_endpoint(dst_addr, dst_port)),
                     timeout=self.TCP_CONNECT_TIMEOUT,
                 )
             except Exception:
@@ -1085,7 +1141,19 @@ class ProxyWorker(QThread):
         if not host:
             return "", 0
         if host.startswith("["):
-            return "", 0
+            closing = host.find("]")
+            if closing <= 1:
+                return "", 0
+            hostname = host[1:closing]
+            suffix = host[closing + 1:]
+            if not suffix:
+                return hostname, default_port
+            if not suffix.startswith(":"):
+                return "", 0
+            try:
+                return hostname, int(suffix[1:])
+            except ValueError:
+                return "", 0
         if ":" in host:
             host_part, port_part = host.rsplit(":", 1)
             try:
@@ -1098,12 +1166,14 @@ class ProxyWorker(QThread):
     async def _relay_to_sock(reader, sock, loop):
         try:
             while True:
-                data = await reader.read(65536)
+                data = await reader.read(TCP_RELAY_CHUNK_SIZE)
                 if not data:
                     break
                 await loop.sock_sendall(sock, data)
-        except Exception:
+        except (asyncio.CancelledError, ConnectionResetError, BrokenPipeError):
             pass
+        except Exception:
+            logger.debug("client-to-upstream relay failed", exc_info=True)
         finally:
             try:
                 sock.close()
@@ -1114,13 +1184,15 @@ class ProxyWorker(QThread):
     async def _relay_from_sock(sock, writer, loop):
         try:
             while True:
-                data = await loop.sock_recv(sock, 65536)
+                data = await loop.sock_recv(sock, TCP_RELAY_CHUNK_SIZE)
                 if not data:
                     break
-                writer.write(data)
-                await writer.drain()
-        except Exception:
+                await _write_with_bounded_backpressure(writer, data)
+            await writer.drain()
+        except (asyncio.CancelledError, ConnectionResetError, BrokenPipeError):
             pass
+        except Exception:
+            logger.debug("upstream-to-client relay failed", exc_info=True)
         finally:
             try:
                 sock.close()
@@ -1219,7 +1291,7 @@ class ProxyWorker(QThread):
 # 在同一个子线程的 asyncio loop 内同时开启三个隔离的本地 SOCKS5 监听。
 # 默认优先使用 2001/2002/2003；若被 Hyper-V/HNS 排除或被其他程序占用，
 # 自动回退到 Windows 分配的可用端口，并把实际端口同步给 sing-box。
-# 供 sing-box TUN 的三个 socks 出站对接，实现进程级分流 + 物理多卡叠加。
+# 供 sing-box TUN 的三个 socks 出站对接，实现进程/域名/IP 分流 + 物理多卡叠加。
 PORT_ETHERNET = 2001
 PORT_WIFI = 2002
 PORT_AGGREGATION = 2003
@@ -1270,28 +1342,155 @@ class _MergedBalancerView:
 
 
 class _SocksUdpRelayProtocol(asyncio.DatagramProtocol):
-    """SOCKS5 UDP ASSOCIATE 本地 relay。"""
+    """SOCKS5 UDP ASSOCIATE relay with persistent per-destination flows."""
 
-    def __init__(self, owner: "MultiPortProxyWorker", balancer: RoundRobinBalancer, channel: str):
+    def __init__(
+        self,
+        owner: "MultiPortProxyWorker",
+        balancer: RoundRobinBalancer,
+        channel: str,
+        allowed_client_host: str,
+        allowed_client_port: int = 0,
+    ):
         self.owner = owner
         self.balancer = balancer
         self.channel = channel
+        self.allowed_client_host = allowed_client_host
+        self.allowed_client_port = int(allowed_client_port or 0)
         self.transport = None
+        self.flows: Dict[Tuple[tuple, str, int], "_PersistentUdpFlow"] = {}
+        self.flow_lock = asyncio.Lock()
 
     def connection_made(self, transport):
         self.transport = transport
         self.owner._udp_transports.add(transport)
 
     def datagram_received(self, data: bytes, addr):
+        # UDP ASSOCIATE is scoped to the TCP control connection.  The relay is
+        # loopback-only, but without this check any local process could inject
+        # packets into another application's association.
+        if (
+            not isinstance(addr, tuple)
+            or addr[0] != self.allowed_client_host
+            or (self.allowed_client_port and int(addr[1]) != self.allowed_client_port)
+        ):
+            return
         task = asyncio.create_task(
-            self.owner._handle_udp_packet(data, addr, self.balancer, self.channel, self.transport)
+            self.owner._handle_udp_packet(data, addr, self.balancer, self.channel, self)
         )
         self.owner._client_tasks.add(task)
         task.add_done_callback(lambda t: self.owner._client_tasks.discard(t))
 
     def connection_lost(self, exc):
+        self.close_flows()
         if self.transport is not None:
             self.owner._udp_transports.discard(self.transport)
+
+    def close_flows(self):
+        for flow in list(self.flows.values()):
+            flow.close()
+        self.flows.clear()
+
+    def discard_flow(self, key, flow):
+        if self.flows.get(key) is flow:
+            self.flows.pop(key, None)
+
+
+class _PersistentUdpFlow:
+    """One stable physical UDP socket for a SOCKS client/destination tuple."""
+
+    def __init__(
+        self,
+        owner: "MultiPortProxyWorker",
+        protocol: _SocksUdpRelayProtocol,
+        key: Tuple[tuple, str, int],
+        client_addr: tuple,
+        remote_host: str,
+        remote_port: int,
+        balancer,
+        nic: Dict,
+        sock: socket.socket,
+    ):
+        self.owner = owner
+        self.protocol = protocol
+        self.key = key
+        self.client_addr = client_addr
+        self.remote_host = remote_host
+        self.remote_port = int(remote_port)
+        self.balancer = balancer
+        self.nic = nic
+        self.sock = sock
+        self.last_activity = time.monotonic()
+        self.closed = False
+        self.send_lock = asyncio.Lock()
+        self.receive_task = asyncio.create_task(self._receive_loop())
+        owner._client_tasks.add(self.receive_task)
+        self.receive_task.add_done_callback(owner._client_tasks.discard)
+
+    async def send(self, payload: bytes):
+        if self.closed:
+            raise ConnectionError("UDP flow is closed")
+        async with self.send_lock:
+            if self.closed:
+                raise ConnectionError("UDP flow is closed")
+            self.last_activity = time.monotonic()
+            await asyncio.get_running_loop().sock_sendall(self.sock, payload)
+
+    async def _receive_loop(self):
+        loop = asyncio.get_running_loop()
+        try:
+            while not self.closed:
+                try:
+                    response = await asyncio.wait_for(
+                        loop.sock_recv(self.sock, 65535),
+                        timeout=self.owner.UDP_FLOW_SWEEP_INTERVAL,
+                    )
+                except asyncio.TimeoutError:
+                    if (
+                        time.monotonic() - self.last_activity
+                        >= self.owner.UDP_FLOW_IDLE_TIMEOUT
+                    ):
+                        break
+                    continue
+                if not response:
+                    break
+                self.last_activity = time.monotonic()
+                transport = self.protocol.transport
+                if transport is None:
+                    break
+                packet = self.owner._pack_socks5_udp_header(
+                    self.remote_host,
+                    self.remote_port,
+                    response,
+                )
+                transport.sendto(packet, self.client_addr)
+                self.owner._emit_connectivity(
+                    f"{self.nic['name']} -> {self.remote_host}:{self.remote_port}/udp"
+                )
+        except asyncio.CancelledError:
+            pass
+        except Exception as exc:
+            self.owner.log_signal.emit(
+                f"[出站池-{self.protocol.channel}][UDP接收异常] "
+                f"{type(exc).__name__}: {exc}"
+            )
+        finally:
+            self.close()
+
+    def close(self):
+        if self.closed:
+            return
+        self.closed = True
+        self.protocol.discard_flow(self.key, self)
+        self.owner._upstream_sockets.discard(self.sock)
+        self.owner._close_socket(self.sock)
+        self.balancer.on_disconnect(self.nic["name"])
+        current = asyncio.current_task()
+        if (
+            self.receive_task is not current
+            and not self.receive_task.done()
+        ):
+            self.receive_task.cancel()
 
 
 class MultiPortProxyWorker(QThread):
@@ -1306,6 +1505,7 @@ class MultiPortProxyWorker(QThread):
     log_signal = Signal(str)
     traffic_signal = Signal(dict)
     connectivity_signal = Signal(str)
+    dns_compatibility_required = Signal(str)
     started_ok = Signal(str)
     stopped = Signal(str)
     error_signal = Signal(str)
@@ -1315,6 +1515,10 @@ class MultiPortProxyWorker(QThread):
     DNS_SERVERS = ("223.5.5.5", "119.29.29.29")
     DNS53_TIMEOUT = 0.8
     TCP_CONNECT_TIMEOUT = 6.0
+    UDP_FLOW_IDLE_TIMEOUT = 120.0
+    UDP_FLOW_SWEEP_INTERVAL = 5.0
+    DNS_HEALTH_INTERVAL = 20.0
+    DNS_HEALTH_FAILURE_LIMIT = 3
     DOH_PRESETS = {
         "alidns": (("223.5.5.5", "dns.alidns.com", "/dns-query"),),
         "dnspod": (
@@ -1336,6 +1540,8 @@ class MultiPortProxyWorker(QThread):
     DNS_CACHE_TTL = 180.0
     DNS_PREFLIGHT_DOMAIN = "www.msftconnecttest.com"
     DNS_PREFLIGHT_DOH_LIMIT = 2
+    DNS_MODE_DOH_STRICT = "doh_strict"
+    DNS_MODE_LEGACY_COMPAT = "legacy_compat"
 
     def __init__(
         self,
@@ -1347,6 +1553,7 @@ class MultiPortProxyWorker(QThread):
         use_weighted: bool = False,
         bandwidth_limits: Optional[Dict[str, int]] = None,
         allow_degraded_start: bool = False,
+        resolve_socks_domains: bool = True,
         parent=None,
     ):
         super().__init__(parent)
@@ -1380,9 +1587,18 @@ class MultiPortProxyWorker(QThread):
         self._upstream_sockets = set()
         self._udp_transports = set()
         self._monitor_task: Optional[asyncio.Task] = None
+        self._dns_health_task: Optional[asyncio.Task] = None
         self._stop_requested = False
         self._configured_dns_servers: Tuple[str, ...] = self.DNS_SERVERS
         self._doh_endpoints: Tuple[Tuple[str, str, str], ...] = self.DEFAULT_DOH_ENDPOINTS
+        self._doh_provider = "auto"
+        self._dns_mode = self.DNS_MODE_DOH_STRICT
+        self._dns_mode_override = ""
+        self._legacy_dns_verified = False
+        self._doh_failure_count = 0
+        self._doh_compatibility_signal_emitted = False
+        self._resolve_socks_domains = bool(resolve_socks_domains)
+        self._dns_egress_plan: Dict[str, object] = {}
         self._dns_cache: Dict[Tuple[int, str], Tuple[float, str]] = {}
         self._dns_inflight: Dict[Tuple[int, str], asyncio.Task] = {}
         self._last_connectivity_emit = 0.0
@@ -1400,6 +1616,48 @@ class MultiPortProxyWorker(QThread):
         """返回已解析权威接口索引的网卡快照，供 TUN 健康探测复用。"""
         return [dict(nic) for nic in self._selected_nics]
 
+    def dns_mode(self) -> str:
+        """Return the mode selected by DNS preflight for this TUN run."""
+        return self._dns_mode
+
+    def singbox_dns_plan(self) -> Dict[str, object]:
+        """Return the verified DNS upstream that sing-box should own."""
+        if self._dns_egress_plan:
+            return dict(self._dns_egress_plan)
+
+        nic = self._selected_nics[0] if self._selected_nics else {}
+        base = {
+            "bind_interface": str(nic.get("name") or ""),
+            "bind_ip": str(nic.get("ip") or ""),
+        }
+        if self._dns_mode == self.DNS_MODE_LEGACY_COMPAT:
+            servers = self._dns_servers_for_nic(nic)
+            return {
+                **base,
+                "mode": "legacy",
+                "server": servers[0] if servers else self.DNS_SERVERS[0],
+                "server_port": 53,
+            }
+        endpoint_ip, host, path = (
+            self._doh_endpoints[0]
+            if self._doh_endpoints else self.DEFAULT_DOH_ENDPOINTS[0]
+        )
+        return {
+            **base,
+            "mode": "doh",
+            "server": endpoint_ip,
+            "server_port": 443,
+            "tls_server_name": host,
+            "path": path,
+        }
+
+    def set_dns_mode_override(self, mode: str):
+        """Request one controlled restart in legacy compatibility mode."""
+        self._dns_mode_override = (
+            self.DNS_MODE_LEGACY_COMPAT
+            if str(mode) == self.DNS_MODE_LEGACY_COMPAT else ""
+        )
+
     def _emit_connectivity(self, detail: str):
         """节流上报真实上游响应，作为 TUN 双向数据链路已打通的证据。"""
         now = time.monotonic()
@@ -1412,16 +1670,18 @@ class MultiPortProxyWorker(QThread):
         first_response = True
         try:
             while True:
-                data = await loop.sock_recv(sock, 65536)
+                data = await loop.sock_recv(sock, TCP_RELAY_CHUNK_SIZE)
                 if not data:
                     break
                 if first_response:
                     first_response = False
                     self._emit_connectivity(detail)
-                writer.write(data)
-                await writer.drain()
-        except Exception:
+                await _write_with_bounded_backpressure(writer, data)
+            await writer.drain()
+        except (asyncio.CancelledError, ConnectionResetError, BrokenPipeError):
             pass
+        except Exception:
+            logger.debug("TUN upstream relay failed: %s", detail, exc_info=True)
         finally:
             try:
                 sock.close()
@@ -1434,18 +1694,19 @@ class MultiPortProxyWorker(QThread):
     _abort_writer = staticmethod(ProxyWorker._abort_writer)
     _close_socket = staticmethod(ProxyWorker._close_socket)
 
-    def _create_bound_upstream_socket(self, nic) -> socket.socket:
+    def _create_bound_upstream_socket(self, nic, family: int = socket.AF_INET) -> socket.socket:
         """Create a TCP socket pinned to one selected physical adapter.
 
         Unlike the legacy proxy worker, the TUN pool persists the binding
         evidence in the session log.  This is needed to distinguish a real
         adapter failure from a TUN/WFP interception failure.
         """
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock = socket.socket(family, socket.SOCK_STREAM)
         try:
             sock.setblocking(False)
-            configure_bound_ipv4_socket(
-                sock, nic, "proxy-tcp", trace=self.log_signal.emit
+            _tune_tcp_socket(sock)
+            configure_bound_socket(
+                sock, nic, "proxy-tcp", family, trace=self.log_signal.emit
             )
         except Exception:
             sock.close()
@@ -1466,7 +1727,12 @@ class MultiPortProxyWorker(QThread):
 
     def set_doh_provider(self, provider: str):
         key = str(provider or "auto").strip().lower()
-        self._doh_endpoints = self.DOH_PRESETS.get(key, self.DEFAULT_DOH_ENDPOINTS)
+        # ``off`` is an explicit policy, not an unknown provider fallback:
+        # resolution stays on the selected NIC's bound UDP/TCP 53 path.
+        self._doh_provider = key
+        self._doh_endpoints = () if key == "off" else self.DOH_PRESETS.get(
+            key, self.DEFAULT_DOH_ENDPOINTS,
+        )
 
     def run(self):
         self._loop = asyncio.new_event_loop()
@@ -1505,6 +1771,12 @@ class MultiPortProxyWorker(QThread):
             return
 
         if self._allow_degraded_start:
+            self._dns_mode = (
+                self.DNS_MODE_LEGACY_COMPAT
+                if self._doh_provider == "off" or self._dns_mode_override
+                else self.DNS_MODE_DOH_STRICT
+            )
+            self._dns_egress_plan = self.singbox_dns_plan()
             self.log_signal.emit(
                 "[出站池][强制模式] 已跳过全部网卡 DNS/DoH 预检；"
                 "保留所有已选网卡并直接启动，供故障复现与测试"
@@ -1519,7 +1791,7 @@ class MultiPortProxyWorker(QThread):
             if not dns_ready:
                 await self._teardown()
                 self.error_signal.emit(
-                    "多端口出站池 DNS 预检失败：至少一张已选网卡无法完成域名解析，"
+                    "多端口出站池 DNS 预检失败：所选网卡均无法提供可用 DNS 上游，"
                     "已取消 TUN 接管"
                 )
                 return
@@ -1534,13 +1806,29 @@ class MultiPortProxyWorker(QThread):
             for nic in self._selected_nics
         )
         doh_plan = ",".join(f"{host}@{ip}" for ip, host, _path in self._doh_endpoints)
-        self.log_signal.emit(f"[出站池][DNS] DoH优先 {doh_plan} | 53兜底 {dns_plan}")
+        dns_owner = self.singbox_dns_plan()
+        if self._dns_mode == self.DNS_MODE_DOH_STRICT:
+            self.log_signal.emit(
+                f"[出站池][DNS] sing-box 接管 DoH {doh_plan} | "
+                f"绑定 {dns_owner.get('bind_interface') or dns_owner.get('bind_ip') or 'default'} | "
+                "Python SOCKS 仅接受已解析 IP"
+            )
+        else:
+            reason = "用户关闭 DoH" if self._doh_provider == "off" else "DoH 不可用或运行期降级"
+            self.log_signal.emit(
+                f"[出站池][DNS] sing-box 接管传统 DNS（{reason}）| "
+                f"仅使用已绑定网卡的 UDP 53 {dns_plan} | Python SOCKS 仅接受已解析 IP"
+            )
         self.started_ok.emit(
             f"ethernet={self._ports['nic_ethernet']};wifi={self._ports['nic_wifi']};"
             f"aggregation={self._ports['aggregation']}"
         )
 
         self._monitor_task = asyncio.create_task(self._traffic_monitor())
+        if self._dns_mode == self.DNS_MODE_DOH_STRICT:
+            self._dns_health_task = asyncio.create_task(
+                self._monitor_singbox_doh_upstream()
+            )
         try:
             await self._stop_event.wait()
         finally:
@@ -1591,13 +1879,13 @@ class MultiPortProxyWorker(QThread):
             await self._handle_socks(reader, writer, balancer, channel)
         return handler
 
-    def _create_bound_udp_socket(self, nic) -> socket.socket:
+    def _create_bound_udp_socket(self, nic, family: int = socket.AF_INET) -> socket.socket:
         """创建出站 UDP socket，并用物理接口索引锁定出口。"""
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock = socket.socket(family, socket.SOCK_DGRAM)
         try:
             sock.setblocking(False)
-            configure_bound_ipv4_socket(
-                sock, nic, "proxy-udp", trace=self.log_signal.emit
+            configure_bound_socket(
+                sock, nic, "proxy-udp", family, trace=self.log_signal.emit
             )
         except Exception:
             sock.close()
@@ -1639,17 +1927,22 @@ class MultiPortProxyWorker(QThread):
             addr = socket.inet_aton(host)
             return b"\x00\x00\x00\x01" + addr + struct.pack("!H", port) + payload
         except OSError:
+            try:
+                addr6 = socket.inet_pton(socket.AF_INET6, host)
+                return b"\x00\x00\x00\x04" + addr6 + struct.pack("!H", port) + payload
+            except OSError:
+                pass
             encoded = host.encode("idna")[:255]
             return b"\x00\x00\x00\x03" + bytes([len(encoded)]) + encoded + struct.pack("!H", port) + payload
 
     @staticmethod
-    def _build_dns_query(domain: str, query_id: int) -> bytes:
+    def _build_dns_query(domain: str, query_id: int, record_type: int = DNS_TYPE_A) -> bytes:
         labels = domain.rstrip(".").encode("idna").split(b".")
         question = b"".join(bytes([len(label)]) + label for label in labels) + b"\x00"
         return (
             struct.pack("!HHHHHH", query_id, 0x0100, 1, 0, 0, 0)
             + question
-            + struct.pack("!HH", 1, 1)
+            + struct.pack("!HH", record_type, 1)
         )
 
     @staticmethod
@@ -1678,7 +1971,7 @@ class MultiPortProxyWorker(QThread):
         raise ValueError("bad dns name")
 
     @classmethod
-    def _parse_dns_a_response(cls, packet: bytes, query_id: int) -> str:
+    def _parse_dns_response(cls, packet: bytes, query_id: int, record_type: int) -> str:
         if len(packet) < 12:
             raise ValueError("short dns response")
         resp_id, flags, qdcount, ancount, _nscount, _arcount = struct.unpack("!HHHHHH", packet[:12])
@@ -1703,15 +1996,21 @@ class MultiPortProxyWorker(QThread):
                 raise ValueError("truncated dns rdata")
             rdata = packet[offset:offset + rdlength]
             offset += rdlength
-            if rtype == 1 and rclass == 1 and rdlength == 4:
+            if rtype == DNS_TYPE_A and record_type == DNS_TYPE_A and rclass == 1 and rdlength == 4:
                 ip = socket.inet_ntoa(rdata)
                 if not ip.startswith("198.18.") and not ip.startswith("198.19."):
                     return ip
-        raise ValueError("no A record")
+            if rtype == DNS_TYPE_AAAA and record_type == DNS_TYPE_AAAA and rclass == 1 and rdlength == 16:
+                return socket.inet_ntop(socket.AF_INET6, rdata)
+        label = "AAAA" if record_type == DNS_TYPE_AAAA else "A"
+        raise ValueError(f"no {label} record")
 
-    async def _query_dns_udp(self, domain: str, nic: Dict, loop, dns_server: str) -> str:
+    async def _query_dns_udp(
+        self, domain: str, nic: Dict, loop, dns_server: str,
+        record_type: int = DNS_TYPE_A,
+    ) -> str:
         query_id = random.randint(0, 0xFFFF)
-        packet = self._build_dns_query(domain, query_id)
+        packet = self._build_dns_query(domain, query_id, record_type)
         sock = None
         try:
             sock = self._create_bound_udp_socket(nic)
@@ -1724,7 +2023,7 @@ class MultiPortProxyWorker(QThread):
                 loop.sock_recvfrom(sock, 1232),
                 timeout=self.DNS53_TIMEOUT,
             )
-            return self._parse_dns_a_response(data, query_id)
+            return self._parse_dns_response(data, query_id, record_type)
         finally:
             if sock is not None:
                 self._close_socket(sock)
@@ -1743,9 +2042,12 @@ class MultiPortProxyWorker(QThread):
             remaining -= len(chunk)
         return b"".join(chunks)
 
-    async def _query_dns_tcp(self, domain: str, nic: Dict, loop, dns_server: str) -> str:
+    async def _query_dns_tcp(
+        self, domain: str, nic: Dict, loop, dns_server: str,
+        record_type: int = DNS_TYPE_A,
+    ) -> str:
         query_id = random.randint(0, 0xFFFF)
-        packet = self._build_dns_query(domain, query_id)
+        packet = self._build_dns_query(domain, query_id, record_type)
         sock = None
         try:
             sock = self._create_bound_upstream_socket(nic)
@@ -1763,7 +2065,7 @@ class MultiPortProxyWorker(QThread):
             if response_len <= 0 or response_len > 4096:
                 raise ValueError(f"bad dns tcp length={response_len}")
             data = await self._sock_recv_exact(sock, loop, response_len, self.DNS53_TIMEOUT)
-            return self._parse_dns_a_response(data, query_id)
+            return self._parse_dns_response(data, query_id, record_type)
         finally:
             if sock is not None:
                 self._close_socket(sock)
@@ -1778,9 +2080,10 @@ class MultiPortProxyWorker(QThread):
         path: str,
         connect_timeout: float = 4.0,
         io_timeout: float = 8.0,
+        record_type: int = DNS_TYPE_A,
     ) -> str:
         query_id = random.randint(0, 0xFFFF)
-        packet = self._build_dns_query(domain, query_id)
+        packet = self._build_dns_query(domain, query_id, record_type)
         sock = None
         ssl_sock = None
         try:
@@ -1839,7 +2142,7 @@ class MultiPortProxyWorker(QThread):
                 raise ValueError(status_line)
             if "Transfer-Encoding: chunked" in header_text:
                 body = self._decode_http_chunked(body)
-            return self._parse_dns_a_response(body, query_id)
+            return self._parse_dns_response(body, query_id, record_type)
         finally:
             if ssl_sock is not None:
                 self._close_socket(ssl_sock)
@@ -1854,6 +2157,7 @@ class MultiPortProxyWorker(QThread):
         endpoint_ip: str,
         host: str,
         path: str,
+        record_type: int = DNS_TYPE_A,
     ) -> str:
         return await loop.run_in_executor(
             None,
@@ -1863,6 +2167,9 @@ class MultiPortProxyWorker(QThread):
             endpoint_ip,
             host,
             path,
+            4.0,
+            8.0,
+            record_type,
         )
 
     @staticmethod
@@ -1885,18 +2192,41 @@ class MultiPortProxyWorker(QThread):
 
     async def _resolve_domain_uncached(self, domain: str, nic: Dict, loop) -> str:
         errors: List[str] = []
-        for endpoint_ip, host, path in self._doh_endpoints:
-            try:
-                return await self._query_dns_doh(domain, nic, loop, endpoint_ip, host, path)
-            except Exception as e:
-                errors.append(f"doh/{host}@{endpoint_ip} {type(e).__name__}: {e!r}")
+        # Keep IPv4 preference for dual-stack domains to preserve existing
+        # scheduling behaviour, then transparently use IPv6 for AAAA-only
+        # services.  Both query types use the NIC-bound DNS transport.
+        for record_type, label in ((DNS_TYPE_A, "A"), (DNS_TYPE_AAAA, "AAAA")):
+            if self._dns_mode == self.DNS_MODE_DOH_STRICT:
+                for endpoint_ip, host, path in self._doh_endpoints:
+                    try:
+                        value = await self._query_dns_doh(
+                            domain, nic, loop, endpoint_ip, host, path, record_type,
+                        )
+                        self._doh_failure_count = 0
+                        return value
+                    except Exception as e:
+                        errors.append(
+                            f"doh-{label}/{host}@{endpoint_ip} {type(e).__name__}: {e!r}"
+                        )
+            else:
+                for dns_server in self._dns_servers_for_nic(nic):
+                    for method, resolver in (("udp", self._query_dns_udp), ("tcp", self._query_dns_tcp)):
+                        try:
+                            return await resolver(domain, nic, loop, dns_server, record_type)
+                        except Exception as e:
+                            errors.append(f"{method}-{label}/{dns_server} {type(e).__name__}: {e!r}")
 
-        for dns_server in self._dns_servers_for_nic(nic):
-            for method, resolver in (("udp", self._query_dns_udp), ("tcp", self._query_dns_tcp)):
-                try:
-                    return await resolver(domain, nic, loop, dns_server)
-                except Exception as e:
-                    errors.append(f"{method}/{dns_server} {type(e).__name__}: {e!r}")
+        if self._dns_mode == self.DNS_MODE_DOH_STRICT:
+            self._doh_failure_count += 1
+            if (
+                self._legacy_dns_verified
+                and self._doh_failure_count >= 3
+                and not self._doh_compatibility_signal_emitted
+            ):
+                self._doh_compatibility_signal_emitted = True
+                self.dns_compatibility_required.emit(
+                    "连续 3 次 DoH 解析失败，已请求受控切换到传统 DNS 上游"
+                )
 
         # Do not fall back to Windows' system resolver here.  It is not bound
         # to this NIC and, once TUN is active, can re-enter the TUN DNS path or
@@ -1924,13 +2254,16 @@ class MultiPortProxyWorker(QThread):
             if self._dns_inflight.get(cache_key) is task and task.done():
                 self._dns_inflight.pop(cache_key, None)
 
-    async def _preflight_dns_for_nic(self, nic: Dict, loop) -> Tuple[bool, str]:
-        """在 TUN 接管前快速验证指定物理网卡的 DNS 可用性。"""
+    async def _preflight_dns_for_nic(self, nic: Dict, loop):
+        """Verify DNS transports and return exact sing-box upstream choices."""
         name = str(nic.get("name") or nic.get("ip") or "unknown")
         errors: List[str] = []
+        doh_ok = False
+        doh_detail = "disabled"
+        choices: Dict[str, Dict[str, object]] = {}
         for endpoint_ip, host, path in self._doh_endpoints[:self.DNS_PREFLIGHT_DOH_LIMIT]:
             if self._stop_requested:
-                return False, f"{name}: cancelled"
+                return False, False, f"{name}: cancelled"
             try:
                 ip = await asyncio.wait_for(
                     loop.run_in_executor(
@@ -1946,38 +2279,195 @@ class MultiPortProxyWorker(QThread):
                     ),
                     timeout=4.0,
                 )
-                return True, f"{name}: DoH {host} -> {ip}"
+                doh_ok = True
+                doh_detail = f"{host} -> {ip}"
+                choices["doh"] = {
+                    "mode": "doh",
+                    "server": endpoint_ip,
+                    "server_port": 443,
+                    "tls_server_name": host,
+                    "path": path,
+                    "bind_interface": str(nic.get("name") or ""),
+                    "bind_ip": str(nic.get("ip") or ""),
+                }
+                break
             except Exception as e:
                 errors.append(f"DoH {host}: {type(e).__name__}")
 
-        # DoH 暂不可用时仅用传统 DNS 判断该网卡是否仍具备基本解析能力；
-        # 正式连接阶段依旧保持 DoH 优先和多节点回退。
+        legacy_ok = False
+        legacy_detail = "unavailable"
         for dns_server in self._dns_servers_for_nic(nic)[:2]:
             if self._stop_requested:
-                return False, f"{name}: cancelled"
+                return False, False, f"{name}: cancelled"
             try:
                 ip = await self._query_dns_udp(
                     self.DNS_PREFLIGHT_DOMAIN, nic, loop, dns_server
                 )
-                return True, f"{name}: DNS {dns_server} -> {ip} (DoH preflight unavailable)"
+                legacy_ok = True
+                legacy_detail = f"{dns_server} -> {ip}"
+                choices["legacy"] = {
+                    "mode": "legacy",
+                    "server": dns_server,
+                    "server_port": 53,
+                    "bind_interface": str(nic.get("name") or ""),
+                    "bind_ip": str(nic.get("ip") or ""),
+                }
+                break
             except Exception as e:
                 errors.append(f"DNS {dns_server}: {type(e).__name__}")
-        return False, f"{name}: " + "; ".join(errors[-4:])
+        detail = f"{name}: DoH={'ok ' + doh_detail if doh_ok else 'failed'}; legacy DNS={'ok ' + legacy_detail if legacy_ok else 'failed'}"
+        if not doh_ok and not legacy_ok and errors:
+            detail += " | " + "; ".join(errors[-4:])
+        return doh_ok, legacy_ok, detail, choices
 
     async def _preflight_selected_nics_dns(self) -> Tuple[bool, List[str]]:
-        """并行预热全部选中网卡；任一卡完全无法解析时拒绝 TUN 接管。"""
+        """Select one verified, selected-interface DNS egress for sing-box."""
         loop = asyncio.get_running_loop()
-        results = await asyncio.gather(*(
+        raw_results = await asyncio.gather(*(
             self._preflight_dns_for_nic(nic, loop) for nic in self._selected_nics
         ))
-        details = [detail for _ok, detail in results]
-        return all(ok for ok, _detail in results), details
+        results = []
+        for result in raw_results:
+            if len(result) >= 4:
+                doh_ok, legacy_ok, detail, choices = result[:4]
+            else:
+                # Keep test doubles and third-party integrations using the
+                # former three-field preflight result compatible.
+                doh_ok, legacy_ok, detail = result
+                choices = {}
+            results.append((bool(doh_ok), bool(legacy_ok), str(detail), dict(choices)))
 
-    async def _start_udp_associate(self, reader, writer, balancer, channel):
-        """为一个 SOCKS5 UDP ASSOCIATE TCP 控制连接启动本地 UDP relay。"""
+        details = [detail for _doh_ok, _legacy_ok, detail, _choices in results]
+        any_doh = bool(self._doh_endpoints) and any(
+            doh_ok for doh_ok, _legacy_ok, _detail, _choices in results
+        )
+        any_legacy = any(
+            legacy_ok for _doh_ok, legacy_ok, _detail, _choices in results
+        )
+        self._legacy_dns_verified = any_legacy
+
+        def select_plan(kind: str) -> Dict[str, object]:
+            for nic, (_doh_ok, _legacy_ok, _detail, choices) in zip(
+                self._selected_nics, results
+            ):
+                plan = choices.get(kind)
+                if plan:
+                    return dict(plan)
+                supported = _doh_ok if kind == "doh" else _legacy_ok
+                if supported:
+                    previous_mode = self._dns_mode
+                    self._dns_mode = (
+                        self.DNS_MODE_DOH_STRICT
+                        if kind == "doh" else self.DNS_MODE_LEGACY_COMPAT
+                    )
+                    try:
+                        fallback = self.singbox_dns_plan()
+                    finally:
+                        self._dns_mode = previous_mode
+                    fallback["bind_interface"] = str(nic.get("name") or "")
+                    fallback["bind_ip"] = str(nic.get("ip") or "")
+                    return fallback
+            return {}
+
+        if self._dns_mode_override == self.DNS_MODE_LEGACY_COMPAT or self._doh_provider == "off":
+            self._dns_mode = self.DNS_MODE_LEGACY_COMPAT
+            self._dns_egress_plan = select_plan("legacy")
+            details.append("selected mode: sing-box traditional DNS (strict_route independent)")
+            return any_legacy, details
+        if any_doh:
+            self._dns_mode = self.DNS_MODE_DOH_STRICT
+            self._dns_egress_plan = select_plan("doh")
+            details.append("selected mode: sing-box DoH (Python SOCKS receives IP only)")
+            return True, details
+        if any_legacy:
+            self._dns_mode = self.DNS_MODE_LEGACY_COMPAT
+            self._dns_egress_plan = select_plan("legacy")
+            details.append(
+                "selected mode: sing-box traditional DNS "
+                "(DoH unavailable; strict_route remains independent)"
+            )
+            return True, details
+        self._dns_egress_plan = {}
+        details.append("selected mode: none (no selected NIC has a verified DNS transport)")
+        return False, details
+
+    async def _monitor_singbox_doh_upstream(self):
+        """Monitor only the selected DoH egress; application DNS stays in sing-box."""
+        plan = self.singbox_dns_plan()
+        if plan.get("mode") != "doh":
+            return
+        nic = next(
+            (
+                item for item in self._selected_nics
+                if (
+                    str(item.get("name") or "") == str(plan.get("bind_interface") or "")
+                    or str(item.get("ip") or "") == str(plan.get("bind_ip") or "")
+                )
+            ),
+            self._selected_nics[0] if self._selected_nics else None,
+        )
+        if nic is None:
+            return
+
         loop = asyncio.get_running_loop()
-        transport, _protocol = await loop.create_datagram_endpoint(
-            lambda: _SocksUdpRelayProtocol(self, balancer, channel),
+        while not self._stop_requested:
+            await asyncio.sleep(self.DNS_HEALTH_INTERVAL)
+            if self._stop_requested:
+                return
+            try:
+                await asyncio.wait_for(
+                    loop.run_in_executor(
+                        None,
+                        self._query_dns_doh_sync,
+                        self.DNS_PREFLIGHT_DOMAIN,
+                        nic,
+                        str(plan.get("server") or ""),
+                        str(plan.get("tls_server_name") or ""),
+                        str(plan.get("path") or "/dns-query"),
+                        2.0,
+                        3.0,
+                    ),
+                    timeout=4.0,
+                )
+                if self._doh_failure_count:
+                    self.log_signal.emit(
+                        "[出站池][DNS健康] sing-box 所用 DoH 出口已恢复"
+                    )
+                self._doh_failure_count = 0
+            except asyncio.CancelledError:
+                return
+            except Exception as exc:
+                self._doh_failure_count += 1
+                self.log_signal.emit(
+                    f"[出站池][DNS健康] DoH 探测失败 "
+                    f"{self._doh_failure_count}/{self.DNS_HEALTH_FAILURE_LIMIT}: "
+                    f"{type(exc).__name__}"
+                )
+                if (
+                    self._doh_failure_count >= self.DNS_HEALTH_FAILURE_LIMIT
+                    and not self._doh_compatibility_signal_emitted
+                ):
+                    self._doh_compatibility_signal_emitted = True
+                    self.dns_compatibility_required.emit(
+                        "sing-box 所用 DoH 出口连续 3 次探测失败，"
+                        "已请求切换到传统 DNS"
+                    )
+                    return
+
+    async def _start_udp_associate(
+        self, reader, writer, balancer, channel, requested_client_port: int = 0,
+    ):
+        """为一个 SOCKS5 UDP ASSOCIATE TCP 控制连接启动本地 UDP relay。"""
+        peer = writer.get_extra_info("peername")
+        if not isinstance(peer, tuple) or not peer or not peer[0]:
+            raise ConnectionError("SOCKS UDP ASSOCIATE missing TCP peer address")
+        allowed_client_host = str(peer[0])
+        loop = asyncio.get_running_loop()
+        transport, protocol = await loop.create_datagram_endpoint(
+            lambda: _SocksUdpRelayProtocol(
+                self, balancer, channel, allowed_client_host,
+                requested_client_port,
+            ),
             local_addr=(self._listen_host, 0),
         )
         host, port = transport.get_extra_info("sockname")[:2]
@@ -1986,26 +2476,42 @@ class MultiPortProxyWorker(QThread):
         try:
             while await reader.read(1024):
                 pass
-        except Exception:
+        except (asyncio.CancelledError, ConnectionResetError, BrokenPipeError):
             pass
+        except Exception:
+            logger.debug("SOCKS UDP control connection ended unexpectedly", exc_info=True)
         finally:
+            protocol.close_flows()
             transport.close()
 
-    async def _handle_udp_packet(self, data: bytes, client_addr, balancer, channel, transport):
+    async def _handle_udp_packet(self, data: bytes, client_addr, balancer, channel, protocol):
         if len(data) < 10 or data[2] != 0:
             return
         atyp = data[3]
         pos = 4
         try:
             if atyp == 1:
+                if pos + 4 > len(data):
+                    return
                 dst_host = socket.inet_ntoa(data[pos:pos + 4])
                 pos += 4
+            elif atyp == 4:
+                if pos + 16 > len(data):
+                    return
+                dst_host = socket.inet_ntop(socket.AF_INET6, data[pos:pos + 16])
+                pos += 16
             elif atyp == 3:
+                if pos >= len(data):
+                    return
                 size = data[pos]
                 pos += 1
+                if size == 0 or pos + size > len(data):
+                    return
                 dst_host = data[pos:pos + size].decode("idna")
                 pos += size
             else:
+                return
+            if pos + 2 > len(data):
                 return
             dst_port = struct.unpack("!H", data[pos:pos + 2])[0]
             payload = data[pos + 2:]
@@ -2014,36 +2520,68 @@ class MultiPortProxyWorker(QThread):
         if not payload:
             return
 
-        loop = asyncio.get_running_loop()
-        nic = balancer.get_next_nic()
-        balancer.on_connect(nic["name"])
-        sock = None
         try:
-            sock = self._create_bound_udp_socket(nic)
-            self._upstream_sockets.add(sock)
-            await loop.sock_sendto(sock, payload, (dst_host, dst_port))
-            try:
-                response, remote = await asyncio.wait_for(loop.sock_recvfrom(sock, 65535), timeout=8.0)
-            except asyncio.TimeoutError:
-                return
-            if response and transport is not None:
-                packet = self._pack_socks5_udp_header(remote[0], remote[1], response)
-                transport.sendto(packet, client_addr)
+            if atyp == 3:
+                if not self._resolve_socks_domains:
+                    self.log_signal.emit(
+                        f"[出站池-{channel}][架构保护] sing-box UDP 出站仍携带域名 "
+                        f"{dst_host}；已拒绝，避免 Python 发起 DNS"
+                    )
+                    return
+                loop = asyncio.get_running_loop()
+                nic_for_dns = balancer.get_next_nic()
+                dst_host = await self._resolve_domain_via_nic(
+                    dst_host, nic_for_dns, loop
+                )
+
+            family = _address_family(dst_host)
+            key = (tuple(client_addr), dst_host, int(dst_port))
+            async with protocol.flow_lock:
+                flow = protocol.flows.get(key)
+                if flow is None or flow.closed:
+                    nic = balancer.get_next_nic()
+                    sock = self._create_bound_udp_socket(nic, family)
+                    try:
+                        self._upstream_sockets.add(sock)
+                        await asyncio.get_running_loop().sock_connect(
+                            sock, _socket_endpoint(dst_host, dst_port)
+                        )
+                        log_connected_socket(
+                            sock, nic, (dst_host, dst_port), "proxy-udp", family,
+                            trace=self.log_signal.emit,
+                        )
+                        balancer.on_connect(nic["name"])
+                        flow = _PersistentUdpFlow(
+                            self,
+                            protocol,
+                            key,
+                            tuple(client_addr),
+                            dst_host,
+                            dst_port,
+                            balancer,
+                            nic,
+                            sock,
+                        )
+                        protocol.flows[key] = flow
+                    except Exception:
+                        self._upstream_sockets.discard(sock)
+                        self._close_socket(sock)
+                        raise
+            await flow.send(payload)
         except Exception as e:
             self.log_signal.emit(f"[出站池-{channel}][UDP异常] {type(e).__name__}: {e}")
-        finally:
-            if sock is not None:
-                self._close_socket(sock)
-                self._upstream_sockets.discard(sock)
-            balancer.on_disconnect(nic["name"])
 
     async def _handle_socks(self, reader, writer, balancer, channel):
         task = asyncio.current_task()
         if task is not None:
             self._client_tasks.add(task)
         self._client_writers.add(writer)
+        client_socket = writer.get_extra_info("socket")
+        if client_socket is not None:
+            _tune_tcp_socket(client_socket)
 
         nic = None
+        nic_counted = False
         upstream_sock = None
         relay_tasks = []
         try:
@@ -2064,6 +2602,8 @@ class MultiPortProxyWorker(QThread):
             dst_domain = None
             if atyp == 1:
                 dst_addr = socket.inet_ntoa(await reader.readexactly(4))
+            elif atyp == 4:
+                dst_addr = socket.inet_ntop(socket.AF_INET6, await reader.readexactly(16))
             elif atyp == 3:
                 domain_len = ord(await reader.readexactly(1))
                 dst_domain = (await reader.readexactly(domain_len)).decode()
@@ -2076,7 +2616,19 @@ class MultiPortProxyWorker(QThread):
             target_display = dst_domain if dst_domain else dst_addr
 
             if cmd == 3:
-                await self._start_udp_associate(reader, writer, balancer, channel)
+                await self._start_udp_associate(
+                    reader, writer, balancer, channel, dst_port,
+                )
+                return
+
+            if dst_domain and not self._resolve_socks_domains:
+                self.log_signal.emit(
+                    f"[出站池-{channel}][架构保护] sing-box SOCKS 出站仍携带域名 "
+                    f"{dst_domain}；已拒绝，避免 Python 发起 DNS"
+                )
+                writer.write(b"\x05\x04\x00\x01\x00\x00\x00\x00\x00\x00")
+                await writer.drain()
+                writer.close()
                 return
 
             # 域名解析必须先选定一张网卡，避免 FakeIP/系统 DNS 让解析走错出口；
@@ -2135,6 +2687,10 @@ class MultiPortProxyWorker(QThread):
                     on_retry=on_retry,
                     first_nic=nic,
                 )
+                # _connect_with_one_failover increments only the adapter whose
+                # connection actually succeeded.  DNS failure happens before
+                # this point and must never decrement another live connection.
+                nic_counted = True
             except Exception:
                 writer.write(b"\x05\x05\x00\x01\x00\x00\x00\x00\x00\x00")
                 await writer.drain()
@@ -2176,7 +2732,7 @@ class MultiPortProxyWorker(QThread):
                 self._close_socket(upstream_sock)
                 self._upstream_sockets.discard(upstream_sock)
             self._client_writers.discard(writer)
-            if nic is not None:
+            if nic is not None and nic_counted:
                 balancer.on_disconnect(nic["name"])
             for rt in relay_tasks:
                 self._client_tasks.discard(rt)
@@ -2201,6 +2757,8 @@ class MultiPortProxyWorker(QThread):
 
         if self._monitor_task is not None and not self._monitor_task.done():
             self._monitor_task.cancel()
+        if self._dns_health_task is not None and not self._dns_health_task.done():
+            self._dns_health_task.cancel()
         for task in list(self._client_tasks):
             if not task.done():
                 task.cancel()
@@ -2219,6 +2777,7 @@ class MultiPortProxyWorker(QThread):
         self._udp_transports.clear()
         self._upstream_sockets.clear()
         self._monitor_task = None
+        self._dns_health_task = None
 
     def stop(self):
         self._stop_requested = True

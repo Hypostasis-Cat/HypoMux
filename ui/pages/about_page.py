@@ -16,13 +16,13 @@ from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QFrame,
 )
 from qfluentwidgets import (
-    CardWidget, TitleLabel, SubtitleLabel, StrongBodyLabel, BodyLabel,
+    TitleLabel, SubtitleLabel, StrongBodyLabel, BodyLabel,
     IconWidget, ImageLabel, SingleDirectionScrollArea, PrimaryPushButton, PushButton, MessageBoxBase,
     TextBrowser,
     themeColor,
 )
 
-from ui.components import SurfaceCardWidget
+from ui.components import SurfaceCardWidget, TranslucentCardWidget
 from ui.i18n import tr
 from ui.pages import resolve_icon
 from ui.popup_material import apply_mica_popup
@@ -191,7 +191,7 @@ class AboutPage(QWidget):
         self._top_grid.setVerticalSpacing(14)
 
         # ===== 项目信息卡 =====
-        info_card = CardWidget(container)
+        info_card = TranslucentCardWidget(container)
         info_layout = QVBoxLayout(info_card)
         info_layout.setContentsMargins(24, 20, 24, 20)
         info_layout.setSpacing(10)
@@ -244,7 +244,7 @@ class AboutPage(QWidget):
         self._info_card = info_card
 
         # ===== 网络与合规声明 =====
-        notice_card = CardWidget(container)
+        notice_card = TranslucentCardWidget(container)
         notice_layout = QVBoxLayout(notice_card)
         notice_layout.setContentsMargins(24, 20, 24, 20)
         notice_layout.setSpacing(10)
@@ -261,7 +261,7 @@ class AboutPage(QWidget):
         root.addLayout(self._top_grid)
 
         # ===== SignPath 代码签名致谢 =====
-        signpath_card = CardWidget(container)
+        signpath_card = TranslucentCardWidget(container)
         signpath_layout = QHBoxLayout(signpath_card)
         signpath_layout.setContentsMargins(24, 18, 24, 18)
         signpath_layout.setSpacing(18)
@@ -287,7 +287,7 @@ class AboutPage(QWidget):
         root.addWidget(signpath_card)
 
         # ===== 赞助模块 =====
-        sponsor_card = CardWidget(container)
+        sponsor_card = TranslucentCardWidget(container)
         sponsor_layout = QVBoxLayout(sponsor_card)
         sponsor_layout.setContentsMargins(24, 20, 24, 20)
         sponsor_layout.setSpacing(10)

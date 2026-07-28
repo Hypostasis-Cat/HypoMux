@@ -29,7 +29,12 @@ from qfluentwidgets import (
 )
 
 from ui.i18n import tr
-from ui.components import LocalizedSwitchSettingCard
+from ui.components import (
+    LocalizedSwitchSettingCard,
+    TranslucentPushSettingCard,
+    TranslucentSettingCard,
+    register_content_card_control,
+)
 from ui.pages import resolve_icon
 from ui.pages.personalization_group import PersonalizationSettingGroup
 from utils.autostart import set_autostart, is_autostart_enabled
@@ -60,9 +65,12 @@ class SettingsPage(QWidget):
     dns_changed = Signal(str, str)
     mica_effect_changed = Signal(bool)
     background_image_changed = Signal(str)
+    content_card_opacity_changed = Signal(int)
     blocked_domain_settings_changed = Signal()
     blocked_domains_requested = Signal()
     force_tun_connectivity_bypass_changed = Signal(bool)
+    wfp_strict_route_changed = Signal(bool)
+    wfp_repair_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -100,6 +108,9 @@ class SettingsPage(QWidget):
         self.personalization_group.background_image_changed.connect(
             self.background_image_changed.emit
         )
+        self.personalization_group.content_card_opacity_changed.connect(
+            self.content_card_opacity_changed.emit
+        )
         self.personalization_group.warning_message.connect(self.warning_message.emit)
         root.addWidget(self.personalization_group)
 
@@ -107,7 +118,7 @@ class SettingsPage(QWidget):
         self.global_group = SettingCardGroup(tr("settings_global"), container)
 
         # 语言
-        self.lang_card = SettingCard(
+        self.lang_card = TranslucentSettingCard(
             resolve_icon("LANGUAGE", "DICTIONARY"), tr("settings_language"), "", self.global_group
         )
         self.lang_combo = ComboBox(self.lang_card)
@@ -116,13 +127,14 @@ class SettingsPage(QWidget):
         saved_lang = settings.value("language", "zh")
         idx = self.lang_combo.findData(saved_lang)
         self.lang_combo.setCurrentIndex(idx if idx >= 0 else 0)
+        register_content_card_control(self.lang_combo)
         self.lang_combo.currentIndexChanged.connect(self._on_language_changed)
         self.lang_card.hBoxLayout.addWidget(self.lang_combo, 0, Qt.AlignRight)
         self.lang_card.hBoxLayout.addSpacing(16)
         self.global_group.addSettingCard(self.lang_card)
 
         # 关闭行为（两个单选）
-        self.close_card = SettingCard(
+        self.close_card = TranslucentSettingCard(
             resolve_icon("CLOSE", "POWER_BUTTON", "EMBED"),
             tr("settings_close_behavior"), "", self.global_group
         )
@@ -144,17 +156,19 @@ class SettingsPage(QWidget):
         self.global_group.addSettingCard(self.close_card)
 
         # 端口
-        self.port_card = SettingCard(
+        self.port_card = TranslucentSettingCard(
             resolve_icon("CONNECT", "GLOBE", "WIFI"),
             tr("settings_proxy_port"), "", self.global_group
         )
         self.socks_spin = SpinBox(self.port_card)
         self.socks_spin.setRange(1, 65534)
         self.socks_spin.setValue(settings.value("socks_port", DEFAULT_SOCKS_PORT, type=int))
+        register_content_card_control(self.socks_spin)
         self.socks_spin.valueChanged.connect(self._on_port_changed)
         self.http_spin = SpinBox(self.port_card)
         self.http_spin.setRange(1, 65534)
         self.http_spin.setValue(settings.value("http_port", DEFAULT_HTTP_PORT, type=int))
+        register_content_card_control(self.http_spin)
         self.http_spin.valueChanged.connect(self._on_port_changed)
         self._socks_label = CaptionLabel(tr("settings_socks_label"), self.port_card)
         self._http_label = CaptionLabel(tr("settings_http_label"), self.port_card)
@@ -172,7 +186,7 @@ class SettingsPage(QWidget):
         app_config = load_config()
         self.network_group = SettingCardGroup(tr("settings_network_dns"), container)
 
-        self.dns_card = SettingCard(
+        self.dns_card = TranslucentSettingCard(
             resolve_icon("CONNECT", "GLOBE", "WIFI"),
             tr("settings_dns_server"),
             tr("settings_dns_fallback_hint"),
@@ -181,12 +195,13 @@ class SettingsPage(QWidget):
         self.dns_edit = LineEdit(self.dns_card)
         self.dns_edit.setPlaceholderText(tr("settings_dns_placeholder"))
         self.dns_edit.setText(app_config.get("dns_server", DEFAULT_DNS_SERVER))
+        register_content_card_control(self.dns_edit)
         self.dns_edit.editingFinished.connect(self._on_dns_edit_finished)
         self.dns_card.hBoxLayout.addWidget(self.dns_edit, 0, Qt.AlignRight)
         self.dns_card.hBoxLayout.addSpacing(16)
         self.network_group.addSettingCard(self.dns_card)
 
-        self.doh_card = SettingCard(
+        self.doh_card = TranslucentSettingCard(
             resolve_icon("GLOBE", "CONNECT", "WIFI"),
             tr("settings_doh_policy"),
             tr("settings_doh_hint"),
@@ -194,12 +209,14 @@ class SettingsPage(QWidget):
         )
         self.doh_combo = ComboBox(self.doh_card)
         self.doh_combo.addItem(tr("settings_doh_auto"), userData="auto")
+        self.doh_combo.addItem(tr("settings_doh_off"), userData="off")
         self.doh_combo.addItem(tr("settings_doh_alidns"), userData="alidns")
         self.doh_combo.addItem(tr("settings_doh_dnspod"), userData="dnspod")
         self.doh_combo.addItem(tr("settings_doh_google"), userData="google")
         saved_doh = str(app_config.get("doh_provider", DEFAULT_DOH_PROVIDER)).lower()
         doh_index = self.doh_combo.findData(saved_doh)
         self.doh_combo.setCurrentIndex(doh_index if doh_index >= 0 else 0)
+        register_content_card_control(self.doh_combo)
         self.doh_combo.currentIndexChanged.connect(self._on_doh_policy_changed)
         self.doh_card.hBoxLayout.addWidget(self.doh_combo, 0, Qt.AlignRight)
         self.doh_card.hBoxLayout.addSpacing(16)
@@ -222,6 +239,30 @@ class SettingsPage(QWidget):
         )
         self.advanced_network_group.addSettingCard(self.force_tun_card)
 
+        self.wfp_strict_route_card = LocalizedSwitchSettingCard(
+            resolve_icon("SHIELD", "INFO", "WARNING"),
+            tr("settings_wfp_strict_route"),
+            tr("settings_wfp_strict_route_hint"),
+            parent=self.advanced_network_group,
+        )
+        self.wfp_strict_route_card.setChecked(
+            bool(app_config.get("wfp_strict_route", True))
+        )
+        self.wfp_strict_route_card.checkedChanged.connect(
+            self._on_wfp_strict_route_changed
+        )
+        self.advanced_network_group.addSettingCard(self.wfp_strict_route_card)
+
+        self.wfp_repair_card = TranslucentPushSettingCard(
+            tr("settings_wfp_repair_button"),
+            resolve_icon("SYNC", "UPDATE", "REPAIR"),
+            tr("settings_wfp_repair"),
+            tr("settings_wfp_repair_unknown"),
+            self.advanced_network_group,
+        )
+        self.wfp_repair_card.clicked.connect(self.wfp_repair_requested.emit)
+        self.advanced_network_group.addSettingCard(self.wfp_repair_card)
+
         tracker = get_tracker()
         self.blocked_enable_card = LocalizedSwitchSettingCard(
             resolve_icon("BLOCK", "CANCEL", "CLOSE"),
@@ -243,7 +284,7 @@ class SettingsPage(QWidget):
         self.blocked_expiry_card.checkedChanged.connect(self._on_blocked_expiry_changed)
         self.advanced_network_group.addSettingCard(self.blocked_expiry_card)
 
-        self.blocked_manage_card = PushSettingCard(
+        self.blocked_manage_card = TranslucentPushSettingCard(
             tr("settings_blocked_domains_open"),
             resolve_icon("BLOCK", "CANCEL", "CLOSE"),
             tr("settings_blocked_domains_manage"),
@@ -275,7 +316,7 @@ class SettingsPage(QWidget):
             cfg_path = str(get_config_path())
         except Exception:
             cfg_path = "~/.hypomux/config.json"
-        self.config_path_card = PushSettingCard(
+        self.config_path_card = TranslucentPushSettingCard(
             "…",
             resolve_icon("FOLDER", "DOCUMENT"),
             tr("settings_config_path"), cfg_path, self.startup_group
@@ -368,6 +409,13 @@ class SettingsPage(QWidget):
         """Persist through MainWindow so the active TUN lifecycle has one config source."""
         self.force_tun_connectivity_bypass_changed.emit(bool(checked))
 
+    def _on_wfp_strict_route_changed(self, checked: bool):
+        self.wfp_strict_route_changed.emit(bool(checked))
+
+    def set_wfp_compatibility_status(self, text: str):
+        """Update the device-local WFP/TUN status without changing preference."""
+        self.wfp_repair_card.contentLabel.setText(str(text))
+
     def _on_blocked_expiry_changed(self, checked: bool):
         tracker = get_tracker()
         tracker.use_expiry = checked
@@ -403,6 +451,8 @@ class SettingsPage(QWidget):
         self.dns_edit.setEnabled(enabled)
         self.doh_combo.setEnabled(enabled)
         self.force_tun_card.setEnabled(enabled)
+        self.wfp_strict_route_card.setEnabled(enabled)
+        self.wfp_repair_card.setEnabled(enabled)
         self.blocked_enable_card.setEnabled(enabled)
         self.blocked_expiry_card.setEnabled(enabled)
         self.blocked_manage_card.setEnabled(enabled)
@@ -416,6 +466,7 @@ class SettingsPage(QWidget):
         self.lang_combo.setItemText(1, tr("settings_language_en"))
         for card in (
             self.force_tun_card,
+            self.wfp_strict_route_card,
             self.blocked_enable_card,
             self.blocked_expiry_card,
             self.autostart_card,
@@ -434,12 +485,17 @@ class SettingsPage(QWidget):
         self.doh_card.titleLabel.setText(tr("settings_doh_policy"))
         self.doh_card.contentLabel.setText(tr("settings_doh_hint"))
         self.doh_combo.setItemText(0, tr("settings_doh_auto"))
-        self.doh_combo.setItemText(1, tr("settings_doh_alidns"))
-        self.doh_combo.setItemText(2, tr("settings_doh_dnspod"))
-        self.doh_combo.setItemText(3, tr("settings_doh_google"))
+        self.doh_combo.setItemText(1, tr("settings_doh_off"))
+        self.doh_combo.setItemText(2, tr("settings_doh_alidns"))
+        self.doh_combo.setItemText(3, tr("settings_doh_dnspod"))
+        self.doh_combo.setItemText(4, tr("settings_doh_google"))
         self.advanced_network_group.titleLabel.setText(tr("settings_advanced_network"))
         self.force_tun_card.titleLabel.setText(tr("settings_force_tun"))
         self.force_tun_card.contentLabel.setText(tr("settings_force_tun_hint"))
+        self.wfp_strict_route_card.titleLabel.setText(tr("settings_wfp_strict_route"))
+        self.wfp_strict_route_card.contentLabel.setText(tr("settings_wfp_strict_route_hint"))
+        self.wfp_repair_card.titleLabel.setText(tr("settings_wfp_repair"))
+        self.wfp_repair_card.button.setText(tr("settings_wfp_repair_button"))
         self.blocked_enable_card.titleLabel.setText(tr("blocked_enable"))
         self.blocked_enable_card.contentLabel.setText(tr("blocked_enable_hint"))
         self.blocked_expiry_card.titleLabel.setText(tr("blocked_expiry_toggle"))

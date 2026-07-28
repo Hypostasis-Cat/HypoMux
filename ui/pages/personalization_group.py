@@ -9,16 +9,22 @@ from PySide6.QtCore import Qt, QSettings, Signal
 from PySide6.QtGui import QColor, QImageReader
 from PySide6.QtWidgets import QFileDialog
 from qfluentwidgets import (
+    CaptionLabel,
     ComboBox,
     PushButton,
-    SettingCard,
     SettingCardGroup,
+    Slider,
     Theme,
     setTheme,
     setThemeColor,
 )
 
-from ui.components import LocalizedColorPickerButton, LocalizedSwitchSettingCard
+from ui.components import (
+    LocalizedColorPickerButton,
+    LocalizedSwitchSettingCard,
+    TranslucentSettingCard,
+    register_content_card_control,
+)
 from ui.i18n import tr
 from ui.pages import resolve_icon
 from utils.config_manager import get_config_path
@@ -36,6 +42,7 @@ class PersonalizationSettingGroup(SettingCardGroup):
     theme_color_changed = Signal()
     mica_effect_changed = Signal(bool)
     background_image_changed = Signal(str)
+    content_card_opacity_changed = Signal(int)
     warning_message = Signal(str)
 
     def __init__(self, parent=None):
@@ -45,7 +52,7 @@ class PersonalizationSettingGroup(SettingCardGroup):
         self._build_cards()
 
     def _build_cards(self):
-        self.theme_card = SettingCard(
+        self.theme_card = TranslucentSettingCard(
             resolve_icon("PALETTE", "CONSTRACT", "BRUSH"),
             tr("settings_theme"), tr("settings_theme_hint"), self,
         )
@@ -56,6 +63,7 @@ class PersonalizationSettingGroup(SettingCardGroup):
         self.theme_combo.setCurrentIndex(
             _THEME_INDEX.get(self._settings.value("theme", "auto"), 0)
         )
+        register_content_card_control(self.theme_combo)
         self.theme_combo.currentIndexChanged.connect(self._on_theme_changed)
         self.theme_card.hBoxLayout.addWidget(self.theme_combo, 0, Qt.AlignRight)
         self.theme_card.hBoxLayout.addSpacing(16)
@@ -73,7 +81,7 @@ class PersonalizationSettingGroup(SettingCardGroup):
             )
         self._theme_color_mode = saved_color_mode
 
-        self.theme_color_card = SettingCard(
+        self.theme_color_card = TranslucentSettingCard(
             resolve_icon("PALETTE", "BRUSH", "CONSTRACT"),
             tr("settings_theme_color"), tr("settings_theme_color_hint"), self,
         )
@@ -87,6 +95,7 @@ class PersonalizationSettingGroup(SettingCardGroup):
         self.theme_color_mode_combo.setCurrentIndex(
             self.theme_color_mode_combo.findData(saved_color_mode)
         )
+        register_content_card_control(self.theme_color_mode_combo)
         self.theme_color_picker = LocalizedColorPickerButton(
             saved_color, tr("settings_theme_color"), self.theme_color_card
         )
@@ -95,6 +104,7 @@ class PersonalizationSettingGroup(SettingCardGroup):
         self.theme_color_choose_button = PushButton(
             tr("settings_theme_color_choose"), self.theme_color_card
         )
+        register_content_card_control(self.theme_color_choose_button)
         self.theme_color_choose_button.setEnabled(saved_color_mode == "custom")
         self.theme_color_choose_button.clicked.connect(
             self.theme_color_picker.open_color_dialog
@@ -120,7 +130,7 @@ class PersonalizationSettingGroup(SettingCardGroup):
         self.mica_card.checkedChanged.connect(self._on_mica_effect_changed)
         self.addSettingCard(self.mica_card)
 
-        self.background_card = SettingCard(
+        self.background_card = TranslucentSettingCard(
             resolve_icon("PHOTO", "IMAGE", "ALBUM"),
             tr("settings_background_image"), tr("settings_background_image_hint"), self,
         )
@@ -130,6 +140,8 @@ class PersonalizationSettingGroup(SettingCardGroup):
         self.background_clear_button = PushButton(
             tr("settings_background_image_clear"), self.background_card
         )
+        register_content_card_control(self.background_choose_button)
+        register_content_card_control(self.background_clear_button)
         self.background_choose_button.clicked.connect(self._choose_background_image)
         self.background_clear_button.clicked.connect(self._clear_background_image)
         self.background_card.hBoxLayout.addWidget(
@@ -141,7 +153,47 @@ class PersonalizationSettingGroup(SettingCardGroup):
         )
         self.background_card.hBoxLayout.addSpacing(16)
         self.addSettingCard(self.background_card)
+
+        saved_opacity = self._settings.value(
+            "content_card_opacity", 88, type=int
+        )
+        self._content_card_opacity = max(0, min(saved_opacity, 100))
+        self.content_card_opacity_card = TranslucentSettingCard(
+            resolve_icon("TRANSPARENT", "BRUSH", "PALETTE"),
+            tr("settings_content_card_opacity"),
+            tr("settings_content_card_opacity_hint"), self,
+        )
+        self.content_card_opacity_value = CaptionLabel(
+            self._format_content_card_opacity(), self.content_card_opacity_card
+        )
+        self.content_card_opacity_slider = Slider(self.content_card_opacity_card)
+        self.content_card_opacity_slider.setOrientation(Qt.Horizontal)
+        self.content_card_opacity_slider.setRange(0, 100)
+        self.content_card_opacity_slider.setValue(self._content_card_opacity)
+        self.content_card_opacity_slider.setFixedWidth(150)
+        self.content_card_opacity_slider.valueChanged.connect(
+            self._on_content_card_opacity_changed
+        )
+        self.content_card_opacity_card.hBoxLayout.addWidget(
+            self.content_card_opacity_value, 0, Qt.AlignRight
+        )
+        self.content_card_opacity_card.hBoxLayout.addSpacing(12)
+        self.content_card_opacity_card.hBoxLayout.addWidget(
+            self.content_card_opacity_slider, 0, Qt.AlignRight
+        )
+        self.content_card_opacity_card.hBoxLayout.addSpacing(16)
+        self.addSettingCard(self.content_card_opacity_card)
         self._refresh_background_controls()
+
+    def _format_content_card_opacity(self) -> str:
+        return f"{self._content_card_opacity}%"
+
+    def _on_content_card_opacity_changed(self, opacity: int):
+        self._content_card_opacity = max(0, min(int(opacity), 100))
+        self.content_card_opacity_value.setText(self._format_content_card_opacity())
+        self._settings.setValue("content_card_opacity", self._content_card_opacity)
+        self._settings.sync()
+        self.content_card_opacity_changed.emit(self._content_card_opacity)
 
     def _on_theme_changed(self, index: int):
         theme_code = self.theme_combo.itemData(index)
@@ -220,12 +272,14 @@ class PersonalizationSettingGroup(SettingCardGroup):
             self._settings.remove("background_image")
             self._settings.sync()
         self.background_clear_button.setEnabled(has_background)
+        self.content_card_opacity_card.setVisible(has_background)
         self.mica_card.setEnabled(not has_background)
         self.mica_card.contentLabel.setText(
             tr("settings_mica_effect_background_hint")
             if has_background
             else tr("settings_mica_effect_hint")
         )
+        self.adjustSize()
 
     @staticmethod
     def _remove_cached_backgrounds(keep: Path | None = None):
@@ -265,4 +319,10 @@ class PersonalizationSettingGroup(SettingCardGroup):
         self.background_card.contentLabel.setText(tr("settings_background_image_hint"))
         self.background_choose_button.setText(tr("settings_background_image_choose"))
         self.background_clear_button.setText(tr("settings_background_image_clear"))
+        self.content_card_opacity_card.titleLabel.setText(
+            tr("settings_content_card_opacity")
+        )
+        self.content_card_opacity_card.contentLabel.setText(
+            tr("settings_content_card_opacity_hint")
+        )
         self._refresh_background_controls()

@@ -70,7 +70,7 @@ HypoMux does not collect, sell, or upload personal data or telemetry. The progra
 ##  Key Technical Features
 
 * **Virtual NIC Mode**: New in v2.0, TUN-based traffic capture improves acceleration stability across more application types.
-* **Per-Process Split Tunneling**: Route selected apps directly/bypassed or through the multi-NIC aggregation path, making download clients, game launchers, browsers, and low-latency apps easier to mix.
+* **Advanced Split Tunneling**: Route by process, domain (including subdomains), or destination IP/CIDR through direct, single-NIC, or multi-NIC aggregation paths.
 *  **Seamless Dual-Protocol Interception**: Starts asynchronous SOCKS5 and local HTTP forwarding services, then applies WinINet system proxy settings when acceleration begins.
 *  **Fail-Safe Proxy Restore**: Manual stop, startup failure, and window close paths all attempt to restore the system proxy cleanly.
 *  **5-Column Telemetry Matrix Grid**: Dynamically displays precise multi-path load distribution: [ Select | Adapter Alias | IPv4 Address | Real-time Speed (MB/s) | Active Connections ].
