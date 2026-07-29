@@ -52,14 +52,38 @@ may be dropped or coalesced by a slow UI; lifecycle and error events may not.
 
 ## Phase 2: connect without switching defaults
 
-- Add a toolkit-independent Python client for protocol v1.
-- Start the Go host only behind an explicit developer feature flag.
-- Forward Go events through a thin Qt adapter; do not import PySide6 inside
-  the client or Go engine.
-- Add crash, timeout, malformed-message, and forced-shutdown integration
-  tests.
-- Define `engine.start` and `engine.stop` only after configuration validation
-  and rollback semantics are specified.
+Goal: prove the real UI-to-host process boundary without moving any production
+network behavior.
+
+Deliverables:
+
+- A toolkit-independent `engine_client` Python package for protocol v1.
+- Request deadlines, structured local/remote errors, capability negotiation,
+  bounded JSONL messages, stderr draining, and event sequence validation.
+- Graceful `host.shutdown` followed by bounded terminate/kill fallback.
+- A thin `ui/engine_bridge.py` adapter that only translates callbacks into Qt
+  signals.
+- An explicit `HYPOMUX_GO_ENGINE_DEV=1` development flag. The host is never
+  started by default and the flag is not stored in user configuration.
+- Fake-host tests for crash, timeout, malformed output, stderr pressure, and
+  forced shutdown.
+- A real compiled child-process test for hello, health, status, events, and
+  clean exit in the Go engine workflow.
+
+Exit criteria:
+
+- With no development flag, application startup and acceleration behavior are
+  unchanged and no Go process is created.
+- With the flag enabled, the UI completes protocol negotiation without
+  blocking the Qt thread.
+- A failed or unresponsive host cannot hang the UI or survive application
+  shutdown.
+- The client and Go engine do not import PySide6; only the adapter depends on
+  Qt.
+- `engine.start` and `engine.stop` remain undefined until configuration
+  validation and rollback semantics are specified.
+- The Go executable is not included in the production installer during this
+  phase.
 
 ## Later migration slices
 

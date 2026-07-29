@@ -43,6 +43,10 @@ from utils.wfp_dns_exemption import (
 from utils import singbox_config
 from utils.acceleration_log import AccelerationLogStore
 from utils.update_checker import UpdateError, launch_installer_after_exit
+from engine_client import (
+    development_engine_enabled,
+    resolve_development_engine_command,
+)
 
 
 DEFAULT_SOCKS_PORT = 10800
@@ -214,6 +218,7 @@ def create_main_window():
     from ui.pages.blocked_domains_page import BlockedDomainsPage
     from ui.popup_material import apply_mica_popup
     from ui.components import refresh_content_card_material, set_content_card_opacity
+    from ui.engine_bridge import EngineBridge
 
     class BlockedDomainsWindow(FluentWidget):
         """单网卡被墙域名的独立云母窗口。"""
@@ -711,6 +716,7 @@ def create_main_window():
             self._shutdown_started = False
             self._force_exit = False
             self._engine_transitioning = False
+            self._go_engine_bridge = None
             self._acceleration_log = AccelerationLogStore()
             self._diagnostic_log_session = False
             self._adapter_snapshot = ()
@@ -802,6 +808,75 @@ def create_main_window():
             # Only open/close the WFP engine here; never start sing-box or
             # create a virtual adapter merely to check compatibility.
             QTimer.singleShot(600, self._run_wfp_startup_preflight)
+            # Phase 2 is deliberately hidden behind an environment flag.  The
+            # Go host only performs protocol/health supervision and never
+            # participates in the production acceleration path.
+            QTimer.singleShot(0, self._start_go_engine_development_bridge)
+
+        def _start_go_engine_development_bridge(self):
+            if self._shutdown_started or not development_engine_enabled():
+                return
+            runtime_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            command = resolve_development_engine_command(runtime_dir)
+            if command is None:
+                self.append_log(
+                    "[GoEngine][DEV] 开发模式已启用，但未找到 hypomux-engine.exe；"
+                    "请设置 HYPOMUX_ENGINE_PATH。",
+                    force=True,
+                )
+                return
+
+            bridge = EngineBridge(command, parent=self)
+            bridge.connected.connect(self._on_go_engine_connected)
+            bridge.disconnected.connect(self._on_go_engine_disconnected)
+            bridge.engine_error.connect(self._on_go_engine_error)
+            bridge.log_record.connect(
+                lambda message: self.append_log(message, force=True)
+            )
+            bridge.state_changed.connect(self._on_go_engine_state_changed)
+            self._go_engine_bridge = bridge
+            self.append_log("[GoEngine][DEV] 正在启动独立 Go 宿主并协商协议…", force=True)
+            bridge.start()
+
+        @Slot(object)
+        def _on_go_engine_connected(self, hello: dict):
+            if self.sender() is not self._go_engine_bridge:
+                return
+            self.append_log(
+                "[GoEngine][DEV] 协议握手成功："
+                f"version={hello.get('engine_version', 'unknown')}，"
+                f"pid={hello.get('pid', 'unknown')}，"
+                f"protocol={hello.get('protocol_version', 'unknown')}。"
+                "当前仍由 Python 引擎处理全部网络流量。",
+                force=True,
+            )
+
+        @Slot(str)
+        def _on_go_engine_disconnected(self, reason: str):
+            if self.sender() is not self._go_engine_bridge:
+                return
+            if reason and not self._shutdown_started:
+                self.append_log(
+                    f"[GoEngine][DEV] Go 宿主连接已断开：{reason}",
+                    force=True,
+                )
+
+        @Slot(str)
+        def _on_go_engine_error(self, message: str):
+            if self.sender() is not self._go_engine_bridge:
+                return
+            self.append_log(f"[GoEngine][DEV] {message}", force=True)
+
+        @Slot(object)
+        def _on_go_engine_state_changed(self, state: dict):
+            if self.sender() is not self._go_engine_bridge:
+                return
+            self.append_log(
+                "[GoEngine][DEV] 状态事件："
+                f"{state.get('previous', 'unknown')} → "
+                f"{state.get('state', state.get('current', 'unknown'))}",
+                force=True,
+            )
 
         def _on_theme_changed(self, *args):
             """主题切换回调：延迟重绘高亮控件，避免取到旧主题色。"""
@@ -2967,6 +3042,12 @@ def create_main_window():
                 and (self._tun_active or self._tun_starting)
             )
             self._adapter_watch_timer.stop()
+            try:
+                if self._go_engine_bridge is not None:
+                    self._go_engine_bridge.stop()
+                    self._go_engine_bridge = None
+            except Exception as e:
+                print(f"[WARN] Go engine development host cleanup failed: {e}")
             try:
                 self.routing_page.prepare_for_shutdown()
             except Exception:

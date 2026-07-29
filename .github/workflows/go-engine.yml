@@ -5,11 +5,17 @@ on:
     branches: [main]
     paths:
       - 'engine/**'
+      - 'engine_client/**'
+      - 'ui/engine_bridge.py'
+      - 'tests/test_engine_client.py'
       - '.github/workflows/go-engine.yml'
   pull_request:
     branches: [main]
     paths:
       - 'engine/**'
+      - 'engine_client/**'
+      - 'ui/engine_bridge.py'
+      - 'tests/test_engine_client.py'
       - '.github/workflows/go-engine.yml'
   workflow_dispatch:
 
@@ -58,3 +64,17 @@ jobs:
         shell: pwsh
         run: |
           go build -trimpath -o "$env:RUNNER_TEMP\hypomux-engine.exe" .\cmd\hypomux-engine
+
+      - name: Set up Python 3.13.14
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.13.14'
+
+      - name: Test the real child-process protocol
+        shell: pwsh
+        working-directory: .
+        env:
+          HYPOMUX_ENGINE_TEST_EXE: ${{ runner.temp }}\hypomux-engine.exe
+        run: |
+          python -m unittest discover -s tests -p "test_engine_client.py" -v
+          python -m compileall -q engine_client ui\engine_bridge.py

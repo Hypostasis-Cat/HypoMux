@@ -39,3 +39,24 @@ def test_installer_rejects_non_x64_compatible_systems():
 
     assert "ArchitecturesAllowed=x64compatible" in setup_script
     assert "ArchitecturesInstallIn64BitMode=x64compatible" in setup_script
+
+
+def test_go_workflow_runs_real_process_client_integration():
+    workflow = _read(".github/workflows/go-engine.yml")
+
+    assert "'engine_client/**'" in workflow
+    assert "HYPOMUX_ENGINE_TEST_EXE:" in workflow
+    assert 'test_engine_client.py" -v' in workflow
+    assert "python -m compileall -q engine_client" in workflow
+
+
+def test_production_installer_does_not_ship_experimental_go_host():
+    setup_script = _read("setup.iss").lower()
+
+    assert "hypomux-engine.exe" not in setup_script
+
+
+def test_go_sources_keep_gofmt_compatible_line_endings():
+    attributes = _read(".gitattributes")
+
+    assert "*.go text eol=lf" in attributes

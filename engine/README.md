@@ -81,3 +81,33 @@ The UI may send commands and render events, but must not own engine cleanup,
 DNS fallback, routing rollback, or connection accounting. Those behaviors
 move behind this boundary in later phases. Until then, the current Python/Qt
 path remains the production default.
+
+## Phase 2 development connection
+
+Build the host without adding it to the production installer:
+
+```powershell
+cd engine
+go build -trimpath -o ..\dist\hypomux-engine.exe .\cmd\hypomux-engine
+cd ..
+```
+
+Then launch the source application with the hidden development connection:
+
+```powershell
+$env:HYPOMUX_GO_ENGINE_DEV = "1"
+$env:HYPOMUX_ENGINE_PATH = "$PWD\dist\hypomux-engine.exe"
+..\venv\Scripts\python.exe main.py
+```
+
+The PySide6 UI performs hello and health supervision through the
+toolkit-independent `engine_client` package. It still sends every acceleration
+request through the existing Python `ProxyWorker` and `TunManager`; phase 2
+does not expose `engine.start` or `engine.stop`.
+
+Unset both variables to return to the normal production path:
+
+```powershell
+Remove-Item Env:HYPOMUX_GO_ENGINE_DEV -ErrorAction SilentlyContinue
+Remove-Item Env:HYPOMUX_ENGINE_PATH -ErrorAction SilentlyContinue
+```
