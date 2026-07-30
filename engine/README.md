@@ -38,6 +38,10 @@ and writes newline-delimited JSON responses and events to standard output.
 Standard output is reserved for protocol messages; diagnostics belong on
 standard error.
 
+The language-neutral method manifest and canonical wire examples live in
+[`protocol/v1`](../protocol/v1/README.md). Go and Python tests validate this
+same contract; the future C# client will consume it as well.
+
 Request:
 
 ```json
@@ -78,9 +82,9 @@ Protocol-v1 methods:
 - `host.shutdown`: acknowledge and gracefully stop the engine host process.
 
 Reserved lifecycle states are `stopped`, `starting`, `running`, `degraded`,
-`stopping`, and `failed`. Actual proxy/TUN start and stop commands are
-deliberately deferred until their configuration and rollback contracts are
-fully specified.
+`stopping`, and `failed`. `engine.start` currently accepts only ordinary
+proxy mode. TUN, DNS, WFP, and routing modes remain unavailable until their
+configuration, privilege, cancellation, and rollback contracts are specified.
 
 ## Compatibility policy
 

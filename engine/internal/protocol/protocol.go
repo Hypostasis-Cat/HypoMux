@@ -2,7 +2,11 @@ package protocol
 
 import "encoding/json"
 
-const Version = 1
+const (
+	Version         = 1
+	Transport       = "stdio-jsonl"
+	MaxMessageBytes = 1024 * 1024
+)
 
 // Request is one newline-delimited JSON command sent by a UI client.
 type Request struct {

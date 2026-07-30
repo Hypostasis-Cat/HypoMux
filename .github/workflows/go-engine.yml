@@ -6,20 +6,24 @@ on:
     paths:
       - 'engine/**'
       - 'engine_client/**'
+      - 'protocol/**'
       - 'ui/engine_bridge.py'
       - 'ui/go_proxy_worker.py'
       - 'tests/test_engine_client.py'
       - 'tests/test_go_proxy_worker.py'
+      - 'tests/test_protocol_contract.py'
       - '.github/workflows/go-engine.yml'
   pull_request:
     branches: [main]
     paths:
       - 'engine/**'
       - 'engine_client/**'
+      - 'protocol/**'
       - 'ui/engine_bridge.py'
       - 'ui/go_proxy_worker.py'
       - 'tests/test_engine_client.py'
       - 'tests/test_go_proxy_worker.py'
+      - 'tests/test_protocol_contract.py'
       - '.github/workflows/go-engine.yml'
   workflow_dispatch:
 
@@ -81,4 +85,5 @@ jobs:
           HYPOMUX_ENGINE_TEST_EXE: ${{ runner.temp }}\hypomux-engine.exe
         run: |
           python -m unittest discover -s tests -p "test_engine_client.py" -v
+          python -m unittest tests.test_protocol_contract -v
           python -m compileall -q engine_client ui\engine_bridge.py ui\go_proxy_worker.py

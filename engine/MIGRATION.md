@@ -4,6 +4,22 @@ HypoMux will migrate incrementally. A release must never replace both the UI
 and the network engine in one step, and the existing Python engine remains the
 fallback until the Go implementation passes the same real-network scenarios.
 
+## Frontend target and readiness rule
+
+The target frontend is native WPF with WPF UI (`lepoco/WPF-UI`) as its only
+application-wide visual library. Native WPF controls, layout, binding, and
+templates remain the foundation; a second complete visual theme must not be
+introduced.
+
+WPF is not a final cleanup step. Every engine slice must expose
+toolkit-independent DTOs, capability negotiation, reconstructible status,
+defined cancellation/lifecycle semantics, and canonical JSON fixtures that a
+C# client can consume without reading Python or Qt code.
+
+The complete visual-stack decision, ownership boundary, stages, and exit
+criteria are documented in
+[WPF frontend migration](../docs/architecture/wpf-frontend-migration.md).
+
 ## Phase 1: establish the boundary
 
 Goal: make the future engine independently buildable and give every UI a
@@ -143,7 +159,7 @@ Exit criteria:
 6. TUN/sing-box and WFP orchestration.
 7. Make the Go engine the default for all network behavior after shadow-mode
    and rollback testing.
-8. Connect the same protocol to the future WPF UI.
 
 Each slice keeps a Python fallback until its unit, integration, and Windows
-network tests pass.
+network tests pass. Each slice also has to meet the frontend-readiness rule
+above; WPF shell work can begin once the shared protocol fixtures are stable.

@@ -7,18 +7,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"runtime"
 	"strings"
 	"time"
 
+	api "github.com/Hypostasis-Cat/HypoMux/engine/internal/api/v1"
 	"github.com/Hypostasis-Cat/HypoMux/engine/internal/diagnostic"
 	"github.com/Hypostasis-Cat/HypoMux/engine/internal/platform"
 	"github.com/Hypostasis-Cat/HypoMux/engine/internal/protocol"
 	"github.com/Hypostasis-Cat/HypoMux/engine/internal/proxy"
 	engineRuntime "github.com/Hypostasis-Cat/HypoMux/engine/internal/runtime"
 )
-
-const maxRequestBytes = 1024 * 1024
 
 type Metadata struct {
 	Name    string
@@ -57,7 +55,7 @@ func New(input io.Reader, output io.Writer, metadata Metadata) *Server {
 func (s *Server) Run(ctx context.Context) error {
 	defer s.stopProxyForHostExit()
 	scanner := bufio.NewScanner(s.input)
-	scanner.Buffer(make([]byte, 64*1024), maxRequestBytes)
+	scanner.Buffer(make([]byte, 64*1024), protocol.MaxMessageBytes)
 
 	for scanner.Scan() {
 		select {
@@ -78,14 +76,14 @@ func (s *Server) Run(ctx context.Context) error {
 		}
 		stateAfter := s.runtime.Snapshot()
 		if stateAfter.Sequence != stateBefore.Sequence {
-			event := s.notification("engine.state_changed", stateAfter)
+			event := s.notification(api.EventEngineStateChanged, stateAfter)
 			if err := s.encoder.Encode(event); err != nil {
 				return fmt.Errorf("write state event: %w", err)
 			}
 		}
 		if shutdown {
-			event := s.notification("host.exiting", map[string]any{
-				"reason": "requested",
+			event := s.notification(api.EventHostExiting, api.HostExitingData{
+				Reason: "requested",
 			})
 			if err := s.encoder.Encode(event); err != nil {
 				return fmt.Errorf("write shutdown event: %w", err)
@@ -125,44 +123,34 @@ func (s *Server) handle(ctx context.Context, line []byte) (protocol.Response, bo
 	}
 
 	switch request.Method {
-	case "engine.hello":
+	case api.MethodEngineHello:
 		return protocol.Result(request.ID, s.hello()), false
-	case "engine.status":
+	case api.MethodEngineStatus:
 		return protocol.Result(request.ID, s.status()), false
-	case "engine.start":
+	case api.MethodEngineStart:
 		return s.startProxy(request), false
-	case "engine.stop":
+	case api.MethodEngineStop:
 		return s.stopProxy(request.ID), false
-	case "engine.telemetry":
+	case api.MethodEngineTelemetry:
 		return s.proxyTelemetry(request), false
-	case "health.check":
-		return protocol.Result(request.ID, map[string]any{
-			"ok":             true,
-			"state":          s.runtime.Snapshot().State,
-			"host_uptime_ms": s.uptimeMilliseconds(),
+	case api.MethodHealthCheck:
+		return protocol.Result(request.ID, api.HealthResult{
+			OK:           true,
+			State:        s.runtime.Snapshot().State,
+			HostUptimeMS: s.uptimeMilliseconds(),
 		}), false
-	case "diagnostic.run":
-		var params struct {
-			SourceIP string `json:"src_ip"`
-			TargetIP string `json:"target_ip"`
-			Count    int    `json:"count"`
-			Timeout  int    `json:"timeout_ms"`
-		}
+	case api.MethodDiagnosticRun:
+		var params api.DiagnosticRunParams
 		if len(request.Params) > 0 {
 			if err := json.Unmarshal(request.Params, &params); err != nil {
 				return protocol.Failure(request.ID, "invalid_params", "diagnostic params are not valid JSON", nil), false
 			}
 		}
-		result := diagnostic.Run(ctx, diagnostic.Config{
-			SourceIP: params.SourceIP,
-			TargetIP: params.TargetIP,
-			Count:    params.Count,
-			Timeout:  time.Duration(params.Timeout) * time.Millisecond,
-		})
+		result := diagnostic.Run(ctx, params.Config())
 		return protocol.Result(request.ID, result), false
-	case "host.shutdown":
+	case api.MethodHostShutdown:
 		_ = s.stopProxy(request.ID)
-		return protocol.Result(request.ID, map[string]any{"accepted": true}), true
+		return protocol.Result(request.ID, api.ShutdownResult{Accepted: true}), true
 	default:
 		return protocol.Failure(
 			request.ID,
@@ -173,41 +161,27 @@ func (s *Server) handle(ctx context.Context, line []byte) (protocol.Response, bo
 	}
 }
 
-func (s *Server) hello() map[string]any {
-	return map[string]any{
-		"engine":           s.metadata.Name,
-		"engine_version":   s.metadata.Version,
-		"commit":           s.metadata.Commit,
-		"protocol_version": protocol.Version,
-		"transport":        "stdio-jsonl",
-		"capabilities": []string{
-			"engine.hello",
-			"engine.status",
-			"engine.start",
-			"engine.stop",
-			"engine.telemetry",
-			"health.check",
-			"diagnostic.run",
-			"host.shutdown",
-		},
-		"os":         runtime.GOOS,
-		"arch":       runtime.GOARCH,
-		"pid":        s.identity.ProcessID,
-		"elevated":   s.identity.Elevated,
-		"started_at": s.startedAt,
-	}
+func (s *Server) hello() api.HelloResult {
+	return api.NewHelloResult(
+		s.metadata.Name,
+		s.metadata.Version,
+		s.metadata.Commit,
+		s.identity.ProcessID,
+		s.identity.Elevated,
+		s.startedAt,
+	)
 }
 
-func (s *Server) status() map[string]any {
-	result := map[string]any{
-		"engine":         s.runtime.Snapshot(),
-		"host_uptime_ms": s.uptimeMilliseconds(),
+func (s *Server) status() api.StatusResult {
+	result := api.StatusResult{
+		Engine:       s.runtime.Snapshot(),
+		HostUptimeMS: s.uptimeMilliseconds(),
 	}
 	if s.proxy != nil {
-		result["proxy"] = map[string]any{
-			"running":   s.proxy.Running(),
-			"endpoints": s.proxy.Endpoints(),
-			"telemetry": s.proxy.Snapshot(false),
+		result.Proxy = &api.ProxyStatus{
+			Running:   s.proxy.Running(),
+			Endpoints: s.proxy.Endpoints(),
+			Telemetry: s.proxy.Snapshot(false),
 		}
 	}
 	return result
@@ -223,15 +197,7 @@ func (s *Server) startProxy(request protocol.Request) protocol.Response {
 			map[string]any{"state": state},
 		)
 	}
-	var params struct {
-		Mode             string          `json:"mode"`
-		ListenHost       string          `json:"listen_host"`
-		SOCKSPort        int             `json:"socks_port"`
-		HTTPPort         int             `json:"http_port"`
-		Weighted         bool            `json:"weighted"`
-		Adapters         []proxy.Adapter `json:"adapters"`
-		ConnectTimeoutMS int             `json:"connect_timeout_ms"`
-	}
+	var params api.EngineStartParams
 	if err := json.Unmarshal(request.Params, &params); err != nil {
 		return protocol.Failure(request.ID, "invalid_params", "engine start params are not valid JSON", nil)
 	}
@@ -246,23 +212,16 @@ func (s *Server) startProxy(request protocol.Request) protocol.Response {
 	if _, err := s.runtime.Transition(engineRuntime.StateStarting, "proxy start requested"); err != nil {
 		return protocol.Failure(request.ID, "invalid_state", err.Error(), nil)
 	}
-	proxyServer, err := proxy.New(proxy.Config{
-		ListenHost:     params.ListenHost,
-		SOCKSPort:      params.SOCKSPort,
-		HTTPPort:       params.HTTPPort,
-		Weighted:       params.Weighted,
-		Adapters:       params.Adapters,
-		ConnectTimeout: time.Duration(params.ConnectTimeoutMS) * time.Millisecond,
-	})
+	proxyServer, err := proxy.New(params.ProxyConfig())
 	if err == nil {
 		var endpoints proxy.Endpoints
 		endpoints, err = proxyServer.Start()
 		if err == nil {
 			s.proxy = proxyServer
 			_, _ = s.runtime.Transition(engineRuntime.StateRunning, "proxy listeners ready")
-			return protocol.Result(request.ID, map[string]any{
-				"state":     s.runtime.Snapshot(),
-				"endpoints": endpoints,
+			return protocol.Result(request.ID, api.EngineStartResult{
+				State:     s.runtime.Snapshot(),
+				Endpoints: endpoints,
 			})
 		}
 	}
@@ -278,17 +237,17 @@ func (s *Server) startProxy(request protocol.Request) protocol.Response {
 func (s *Server) stopProxy(requestID string) protocol.Response {
 	state := s.runtime.Snapshot().State
 	if state == engineRuntime.StateStopped {
-		return protocol.Result(requestID, map[string]any{
-			"accepted": false,
-			"state":    s.runtime.Snapshot(),
+		return protocol.Result(requestID, api.EngineStopResult{
+			Accepted: false,
+			State:    s.runtime.Snapshot(),
 		})
 	}
 	if state == engineRuntime.StateFailed {
 		s.proxy = nil
 		_, _ = s.runtime.Transition(engineRuntime.StateStopped, "failed proxy cleared")
-		return protocol.Result(requestID, map[string]any{
-			"accepted": true,
-			"state":    s.runtime.Snapshot(),
+		return protocol.Result(requestID, api.EngineStopResult{
+			Accepted: true,
+			State:    s.runtime.Snapshot(),
 		})
 	}
 	if state != engineRuntime.StateRunning && state != engineRuntime.StateDegraded {
@@ -316,9 +275,9 @@ func (s *Server) stopProxy(requestID string) protocol.Response {
 	}
 	s.proxy = nil
 	_, _ = s.runtime.Transition(engineRuntime.StateStopped, "proxy stopped")
-	return protocol.Result(requestID, map[string]any{
-		"accepted": true,
-		"state":    s.runtime.Snapshot(),
+	return protocol.Result(requestID, api.EngineStopResult{
+		Accepted: true,
+		State:    s.runtime.Snapshot(),
 	})
 }
 
@@ -326,9 +285,7 @@ func (s *Server) proxyTelemetry(request protocol.Request) protocol.Response {
 	if s.proxy == nil || !s.proxy.Running() {
 		return protocol.Failure(request.ID, "invalid_state", "proxy engine is not running", nil)
 	}
-	var params struct {
-		IncludeConnections bool `json:"include_connections"`
-	}
+	var params api.EngineTelemetryParams
 	if len(request.Params) > 0 {
 		if err := json.Unmarshal(request.Params, &params); err != nil {
 			return protocol.Failure(request.ID, "invalid_params", "telemetry params are not valid JSON", nil)

@@ -1,0 +1,355 @@
+[
+  {
+    "name": "engine_hello_request",
+    "kind": "request",
+    "method": "engine.hello",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-hello",
+      "method": "engine.hello"
+    }
+  },
+  {
+    "name": "engine_hello_response",
+    "kind": "response",
+    "method": "engine.hello",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-hello",
+      "result": {
+        "engine": "hypomux-engine",
+        "engine_version": "2.2.0",
+        "commit": "0123456789abcdef",
+        "protocol_version": 1,
+        "transport": "stdio-jsonl",
+        "capabilities": [
+          "engine.hello",
+          "engine.status",
+          "engine.start",
+          "engine.stop",
+          "engine.telemetry",
+          "health.check",
+          "diagnostic.run",
+          "host.shutdown"
+        ],
+        "os": "windows",
+        "arch": "amd64",
+        "pid": 4321,
+        "elevated": false,
+        "started_at": "2026-07-30T02:00:00Z"
+      }
+    }
+  },
+  {
+    "name": "engine_status_request",
+    "kind": "request",
+    "method": "engine.status",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-status",
+      "method": "engine.status"
+    }
+  },
+  {
+    "name": "engine_status_response",
+    "kind": "response",
+    "method": "engine.status",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-status",
+      "result": {
+        "engine": {
+          "state": "stopped",
+          "sequence": 0,
+          "state_changed_at": "2026-07-30T02:00:00Z"
+        },
+        "host_uptime_ms": 125
+      }
+    }
+  },
+  {
+    "name": "health_check_request",
+    "kind": "request",
+    "method": "health.check",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-health",
+      "method": "health.check"
+    }
+  },
+  {
+    "name": "health_check_response",
+    "kind": "response",
+    "method": "health.check",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-health",
+      "result": {
+        "ok": true,
+        "state": "stopped",
+        "host_uptime_ms": 126
+      }
+    }
+  },
+  {
+    "name": "diagnostic_run_request",
+    "kind": "request",
+    "method": "diagnostic.run",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-diagnostic",
+      "method": "diagnostic.run",
+      "params": {
+        "src_ip": "192.0.2.10",
+        "target_ip": "223.5.5.5",
+        "count": 10,
+        "timeout_ms": 1000
+      }
+    }
+  },
+  {
+    "name": "diagnostic_run_response",
+    "kind": "response",
+    "method": "diagnostic.run",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-diagnostic",
+      "result": {
+        "status": "available",
+        "loss_rate": 0,
+        "avg_latency_ms": 18,
+        "jitter_ms": 3,
+        "sent": 10,
+        "received": 10,
+        "src_ip": "192.0.2.10",
+        "target_ip": "223.5.5.5",
+        "note": ""
+      }
+    }
+  },
+  {
+    "name": "engine_start_request",
+    "kind": "request",
+    "method": "engine.start",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-start",
+      "method": "engine.start",
+      "params": {
+        "mode": "proxy",
+        "listen_host": "127.0.0.1",
+        "socks_port": 10800,
+        "http_port": 10801,
+        "weighted": true,
+        "connect_timeout_ms": 6000,
+        "adapters": [
+          {
+            "name": "Ethernet",
+            "source_ip": "192.0.2.10",
+            "if_index": 11,
+            "weight": 2
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "engine_start_response",
+    "kind": "response",
+    "method": "engine.start",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-start",
+      "result": {
+        "state": {
+          "state": "running",
+          "sequence": 2,
+          "state_changed_at": "2026-07-30T02:00:01Z",
+          "reason": "proxy listeners ready"
+        },
+        "endpoints": {
+          "socks": "127.0.0.1:10800",
+          "http": "127.0.0.1:10801"
+        }
+      }
+    }
+  },
+  {
+    "name": "engine_telemetry_request",
+    "kind": "request",
+    "method": "engine.telemetry",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-telemetry",
+      "method": "engine.telemetry",
+      "params": {
+        "include_connections": true
+      }
+    }
+  },
+  {
+    "name": "engine_telemetry_response",
+    "kind": "response",
+    "method": "engine.telemetry",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-telemetry",
+      "result": {
+        "started_at": "2026-07-30T02:00:01Z",
+        "sampled_at": "2026-07-30T02:00:05Z",
+        "adapters": [
+          {
+            "name": "Ethernet",
+            "source_ip": "192.0.2.10",
+            "if_index": 11,
+            "connections": 1,
+            "bytes_up": 4096,
+            "bytes_down": 8192
+          }
+        ],
+        "active_connections": [
+          {
+            "id": 1,
+            "protocol": "socks5",
+            "client": "127.0.0.1:52000",
+            "target": "198.51.100.25:443",
+            "adapter": "Ethernet",
+            "started_at": "2026-07-30T02:00:02Z",
+            "bytes_up": 4096,
+            "bytes_down": 8192
+          }
+        ],
+        "total": {
+          "connections": 1,
+          "bytes_up": 4096,
+          "bytes_down": 8192
+        }
+      }
+    }
+  },
+  {
+    "name": "engine_stop_request",
+    "kind": "request",
+    "method": "engine.stop",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-stop",
+      "method": "engine.stop"
+    }
+  },
+  {
+    "name": "engine_stop_response",
+    "kind": "response",
+    "method": "engine.stop",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-stop",
+      "result": {
+        "accepted": true,
+        "state": {
+          "state": "stopped",
+          "sequence": 4,
+          "state_changed_at": "2026-07-30T02:00:06Z",
+          "reason": "proxy stopped"
+        }
+      }
+    }
+  },
+  {
+    "name": "host_shutdown_request",
+    "kind": "request",
+    "method": "host.shutdown",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-shutdown",
+      "method": "host.shutdown"
+    }
+  },
+  {
+    "name": "host_shutdown_response",
+    "kind": "response",
+    "method": "host.shutdown",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-shutdown",
+      "result": {
+        "accepted": true
+      }
+    }
+  },
+  {
+    "name": "unsupported_protocol_error",
+    "kind": "error",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-version",
+      "error": {
+        "code": "unsupported_protocol",
+        "message": "unsupported protocol version",
+        "details": {
+          "supported": [
+            1
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "method_not_found_error",
+    "kind": "error",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-missing",
+      "error": {
+        "code": "method_not_found",
+        "message": "unknown method",
+        "details": {
+          "method": "missing.method"
+        }
+      }
+    }
+  },
+  {
+    "name": "invalid_state_error",
+    "kind": "error",
+    "method": "engine.start",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-invalid-state",
+      "error": {
+        "code": "invalid_state",
+        "message": "engine must be stopped before it can start",
+        "details": {
+          "state": "running"
+        }
+      }
+    }
+  },
+  {
+    "name": "engine_state_changed_event",
+    "kind": "event",
+    "message": {
+      "protocol": 1,
+      "sequence": 1,
+      "event": "engine.state_changed",
+      "data": {
+        "state": "running",
+        "sequence": 2,
+        "state_changed_at": "2026-07-30T02:00:01Z",
+        "reason": "proxy listeners ready"
+      }
+    }
+  },
+  {
+    "name": "host_exiting_event",
+    "kind": "event",
+    "message": {
+      "protocol": 1,
+      "sequence": 2,
+      "event": "host.exiting",
+      "data": {
+        "reason": "requested"
+      }
+    }
+  }
+]
