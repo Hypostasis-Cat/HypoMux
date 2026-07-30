@@ -44,6 +44,16 @@ for line in sys.stdin:
         send({
             "protocol": 1,
             "sequence": 1,
+            "event": "dns.fallback_required",
+            "data": {
+                "adapter": "Ethernet",
+                "policy": "alidns",
+                "reason": "test failure",
+            },
+        })
+        send({
+            "protocol": 1,
+            "sequence": 2,
             "event": "host.exiting",
             "data": {"reason": "requested"},
         })
@@ -65,6 +75,7 @@ def test_qt_bridge_connects_without_blocking_and_stops_the_host():
     connected: list[dict] = []
     errors: list[str] = []
     disconnected: list[str] = []
+    dns_fallbacks: list[dict] = []
     bridge = EngineBridge(
         [
             sys.executable,
@@ -76,6 +87,7 @@ def test_qt_bridge_connects_without_blocking_and_stops_the_host():
     bridge.connected.connect(connected.append)
     bridge.engine_error.connect(errors.append)
     bridge.disconnected.connect(disconnected.append)
+    bridge.dns_fallback_required.connect(dns_fallbacks.append)
 
     started = time.monotonic()
     bridge.start()
@@ -88,4 +100,11 @@ def test_qt_bridge_connects_without_blocking_and_stops_the_host():
     bridge.stop()
     assert _process_events_until(lambda: bool(disconnected))
     assert disconnected == [""]
+    assert dns_fallbacks == [
+        {
+            "adapter": "Ethernet",
+            "policy": "alidns",
+            "reason": "test failure",
+        }
+    ]
     assert not bridge.is_running()

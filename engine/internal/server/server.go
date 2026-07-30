@@ -8,10 +8,12 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync"
 	"time"
 
 	api "github.com/Hypostasis-Cat/HypoMux/engine/internal/api/v1"
 	"github.com/Hypostasis-Cat/HypoMux/engine/internal/diagnostic"
+	"github.com/Hypostasis-Cat/HypoMux/engine/internal/dns"
 	"github.com/Hypostasis-Cat/HypoMux/engine/internal/platform"
 	"github.com/Hypostasis-Cat/HypoMux/engine/internal/protocol"
 	"github.com/Hypostasis-Cat/HypoMux/engine/internal/proxy"
@@ -33,6 +35,7 @@ type Server struct {
 	proxy     *proxy.Server
 	startedAt time.Time
 	started   time.Time
+	writeMu   sync.Mutex
 	eventSeq  uint64
 }
 
@@ -71,21 +74,19 @@ func (s *Server) Run(ctx context.Context) error {
 
 		stateBefore := s.runtime.Snapshot()
 		response, shutdown := s.handle(ctx, line)
-		if err := s.encoder.Encode(response); err != nil {
+		if err := s.writeMessage(response); err != nil {
 			return fmt.Errorf("write response: %w", err)
 		}
 		stateAfter := s.runtime.Snapshot()
 		if stateAfter.Sequence != stateBefore.Sequence {
-			event := s.notification(api.EventEngineStateChanged, stateAfter)
-			if err := s.encoder.Encode(event); err != nil {
+			if err := s.emitEvent(api.EventEngineStateChanged, stateAfter); err != nil {
 				return fmt.Errorf("write state event: %w", err)
 			}
 		}
 		if shutdown {
-			event := s.notification(api.EventHostExiting, api.HostExitingData{
+			if err := s.emitEvent(api.EventHostExiting, api.HostExitingData{
 				Reason: "requested",
-			})
-			if err := s.encoder.Encode(event); err != nil {
+			}); err != nil {
 				return fmt.Errorf("write shutdown event: %w", err)
 			}
 			return nil
@@ -133,6 +134,10 @@ func (s *Server) handle(ctx context.Context, line []byte) (protocol.Response, bo
 		return s.stopProxy(request.ID), false
 	case api.MethodEngineTelemetry:
 		return s.proxyTelemetry(request), false
+	case api.MethodDNSResolve:
+		return s.resolveDNS(ctx, request), false
+	case api.MethodDNSStatus:
+		return s.dnsStatus(request.ID), false
 	case api.MethodHealthCheck:
 		return protocol.Result(request.ID, api.HealthResult{
 			OK:           true,
@@ -214,6 +219,7 @@ func (s *Server) startProxy(request protocol.Request) protocol.Response {
 	}
 	proxyServer, err := proxy.New(params.ProxyConfig())
 	if err == nil {
+		proxyServer.SetDNSFallbackHandler(s.handleDNSFallback)
 		var endpoints proxy.Endpoints
 		endpoints, err = proxyServer.Start()
 		if err == nil {
@@ -294,6 +300,45 @@ func (s *Server) proxyTelemetry(request protocol.Request) protocol.Response {
 	return protocol.Result(request.ID, s.proxy.Snapshot(params.IncludeConnections))
 }
 
+func (s *Server) resolveDNS(ctx context.Context, request protocol.Request) protocol.Response {
+	if s.proxy == nil || !s.proxy.Running() {
+		return protocol.Failure(request.ID, "invalid_state", "proxy engine is not running", nil)
+	}
+	var params api.DNSResolveParams
+	if err := json.Unmarshal(request.Params, &params); err != nil {
+		return protocol.Failure(request.ID, "invalid_params", "DNS params are not valid JSON", nil)
+	}
+	result, err := s.proxy.ResolveDNS(ctx, params.Domain, params.Adapter, params.RecordType)
+	if err != nil {
+		return protocol.Failure(
+			request.ID,
+			"dns_failed",
+			"DNS resolution failed",
+			map[string]any{"message": err.Error()},
+		)
+	}
+	return protocol.Result(request.ID, result)
+}
+
+func (s *Server) dnsStatus(requestID string) protocol.Response {
+	if s.proxy == nil {
+		return protocol.Failure(requestID, "invalid_state", "proxy engine is not running", nil)
+	}
+	status, ok := s.proxy.DNSStatus()
+	if !ok {
+		return protocol.Failure(requestID, "invalid_state", "proxy engine is not running", nil)
+	}
+	return protocol.Result(requestID, status)
+}
+
+func (s *Server) handleDNSFallback(event dns.FallbackEvent) {
+	_ = s.emitEvent(api.EventDNSFallbackRequired, api.DNSFallbackRequiredData{
+		Adapter: event.Adapter,
+		Policy:  event.Policy,
+		Reason:  event.Reason,
+	})
+}
+
 func (s *Server) stopProxyForHostExit() {
 	if s.proxy == nil {
 		return
@@ -313,7 +358,15 @@ func (s *Server) uptimeMilliseconds() int64 {
 	return time.Since(s.started).Milliseconds()
 }
 
-func (s *Server) notification(name string, data any) protocol.Event {
+func (s *Server) writeMessage(message any) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	return s.encoder.Encode(message)
+}
+
+func (s *Server) emitEvent(name string, data any) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 	s.eventSeq++
-	return protocol.Notification(s.eventSeq, name, data)
+	return s.encoder.Encode(protocol.Notification(s.eventSeq, name, data))
 }

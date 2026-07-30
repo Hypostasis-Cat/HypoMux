@@ -384,3 +384,136 @@ class RealGoEngineIntegrationTests(unittest.TestCase):
             echo_listener.close()
             echo_thread.join(timeout=2.0)
         self.assertFalse(echo_error)
+
+    @unittest.skipUnless(
+        os.environ.get("HYPOMUX_DNS_TEST_SOURCE_IP")
+        and os.environ.get("HYPOMUX_DNS_TEST_IF_INDEX")
+        and os.environ.get("HYPOMUX_DNS_TEST_SERVER"),
+        "set physical adapter DNS test environment variables",
+    )
+    def test_real_go_engine_resolves_dns_on_physical_adapter(self):
+        executable = os.environ["HYPOMUX_ENGINE_TEST_EXE"]
+        source_ip = os.environ["HYPOMUX_DNS_TEST_SOURCE_IP"]
+        interface_index = int(os.environ["HYPOMUX_DNS_TEST_IF_INDEX"])
+        dns_server = os.environ["HYPOMUX_DNS_TEST_SERVER"]
+        client = EngineClient(executable)
+        started = False
+        try:
+            client.start()
+            client.request(
+                "engine.start",
+                {
+                    "mode": "proxy",
+                    "socks_port": 0,
+                    "http_port": 0,
+                    "dns": {
+                        "policy": "off",
+                        "legacy_servers": [dns_server],
+                        "cache_ttl_ms": 180_000,
+                        "query_timeout_ms": 4_000,
+                    },
+                    "adapters": [
+                        {
+                            "name": "physical-dns-test",
+                            "source_ip": source_ip,
+                            "if_index": interface_index,
+                            "dns_servers": [dns_server],
+                        }
+                    ],
+                },
+                timeout=5.0,
+            )
+            started = True
+            first = client.request(
+                "dns.resolve",
+                {
+                    "domain": "www.msftconnecttest.com",
+                    "adapter": "physical-dns-test",
+                    "record_type": "A",
+                },
+                timeout=8.0,
+            )
+            self.assertEqual(first["adapter"], "physical-dns-test")
+            self.assertIn(first["transport"], {"udp", "tcp"})
+            self.assertFalse(first["cached"])
+            socket.inet_aton(first["address"])
+
+            second = client.request(
+                "dns.resolve",
+                {
+                    "domain": "www.msftconnecttest.com",
+                    "adapter": "physical-dns-test",
+                    "record_type": "A",
+                },
+                timeout=8.0,
+            )
+            self.assertTrue(second["cached"])
+            status = client.request("dns.status")
+            self.assertGreaterEqual(status["cache_hits"], 1)
+            self.assertGreaterEqual(status["legacy_successes"], 1)
+        finally:
+            if started and client.is_running():
+                try:
+                    client.request("engine.stop", timeout=6.0)
+                except EngineClientError:
+                    pass
+            client.stop(graceful=True)
+
+    @unittest.skipUnless(
+        os.environ.get("HYPOMUX_DOH_TEST") == "1"
+        and os.environ.get("HYPOMUX_DNS_TEST_SOURCE_IP")
+        and os.environ.get("HYPOMUX_DNS_TEST_IF_INDEX"),
+        "set physical adapter DoH test environment variables",
+    )
+    def test_real_go_engine_resolves_doh_on_physical_adapter(self):
+        executable = os.environ["HYPOMUX_ENGINE_TEST_EXE"]
+        source_ip = os.environ["HYPOMUX_DNS_TEST_SOURCE_IP"]
+        interface_index = int(os.environ["HYPOMUX_DNS_TEST_IF_INDEX"])
+        client = EngineClient(executable)
+        started = False
+        try:
+            client.start()
+            client.request(
+                "engine.start",
+                {
+                    "mode": "proxy",
+                    "socks_port": 0,
+                    "http_port": 0,
+                    "dns": {
+                        "policy": "alidns",
+                        "cache_ttl_ms": 180_000,
+                        "query_timeout_ms": 8_000,
+                    },
+                    "adapters": [
+                        {
+                            "name": "physical-doh-test",
+                            "source_ip": source_ip,
+                            "if_index": interface_index,
+                        }
+                    ],
+                },
+                timeout=5.0,
+            )
+            started = True
+            result = client.request(
+                "dns.resolve",
+                {
+                    "domain": "www.msftconnecttest.com",
+                    "adapter": "physical-doh-test",
+                    "record_type": "A",
+                },
+                timeout=12.0,
+            )
+            self.assertEqual(result["transport"], "doh")
+            self.assertIn("dns.alidns.com@", result["server"])
+            socket.inet_aton(result["address"])
+            status = client.request("dns.status")
+            self.assertGreaterEqual(status["doh_successes"], 1)
+            self.assertEqual(status["automatic_fallbacks"], 0)
+        finally:
+            if started and client.is_running():
+                try:
+                    client.request("engine.stop", timeout=6.0)
+                except EngineClientError:
+                    pass
+            client.stop(graceful=True)

@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Hypostasis-Cat/HypoMux/engine/internal/dns"
 )
 
 func TestSOCKSAndHTTPConnectRelayAndTelemetry(t *testing.T) {
@@ -128,6 +130,81 @@ func TestStopClosesHandshakeOnlyClients(t *testing.T) {
 	}
 }
 
+func TestSOCKSDomainIsResolvedBeforeBoundTCPDial(t *testing.T) {
+	echoAddress, stopEcho := startEchoServer(t)
+	defer stopEcho()
+	server, err := New(Config{
+		SOCKSPort: 0,
+		HTTPPort:  0,
+		DNS: dns.Config{
+			Policy:        dns.PolicyOff,
+			LegacyServers: []string{"192.0.2.53"},
+		},
+		Adapters: []Adapter{{
+			Name:     "loopback",
+			SourceIP: "127.0.0.1",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoints, err := server.Start()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stopServer(t, server)
+
+	resolver, err := dns.New(server.ctx, server.config.DNS, func(
+		_ context.Context,
+		network string,
+		_ string,
+		_ dns.Binding,
+	) (net.Conn, error) {
+		client, dnsServer := net.Pipe()
+		go answerDNSAOnce(dnsServer, network, net.ParseIP("127.0.0.1").To4())
+		return client, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.resolver = resolver
+	var dialTarget string
+	server.dialTCP = func(
+		ctx context.Context,
+		_ *net.Dialer,
+		target string,
+	) (net.Conn, error) {
+		dialTarget = target
+		var dialer net.Dialer
+		return dialer.DialContext(ctx, "tcp4", target)
+	}
+
+	_, portText, _ := net.SplitHostPort(echoAddress)
+	port, _ := strconv.Atoi(portText)
+	client, err := net.DialTimeout("tcp", endpoints.SOCKS, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	_ = client.SetDeadline(time.Now().Add(3 * time.Second))
+	_, _ = client.Write([]byte{5, 1, 0})
+	if _, err := io.ReadFull(client, make([]byte, 2)); err != nil {
+		t.Fatal(err)
+	}
+	domain := []byte("resolved.example")
+	request := append([]byte{5, 1, 0, 3, byte(len(domain))}, domain...)
+	request = binary.BigEndian.AppendUint16(request, uint16(port))
+	_, _ = client.Write(request)
+	reply := make([]byte, 10)
+	if _, err := io.ReadFull(client, reply); err != nil || reply[1] != 0 {
+		t.Fatalf("SOCKS reply = %v, %v", reply, err)
+	}
+	if dialTarget != echoAddress {
+		t.Fatalf("bound TCP target = %q, want literal %q", dialTarget, echoAddress)
+	}
+	assertEcho(t, client, []byte("domain-data"))
+}
+
 func TestHTTPForwardProxyRewritesAbsoluteRequestTarget(t *testing.T) {
 	origin := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.URL.Path != "/through-proxy" || request.URL.RawQuery != "value=1" {
@@ -238,4 +315,45 @@ func stopServer(t *testing.T, server *Server) {
 	if err := server.Stop(ctx); err != nil {
 		t.Fatalf("Stop() failed: %v", err)
 	}
+}
+
+func answerDNSAOnce(connection net.Conn, network string, address net.IP) {
+	defer connection.Close()
+	var query []byte
+	if network == "tcp4" {
+		var length uint16
+		if binary.Read(connection, binary.BigEndian, &length) != nil {
+			return
+		}
+		query = make([]byte, int(length))
+		if _, err := io.ReadFull(connection, query); err != nil {
+			return
+		}
+	} else {
+		buffer := make([]byte, 4096)
+		count, err := connection.Read(buffer)
+		if err != nil {
+			return
+		}
+		query = append([]byte(nil), buffer[:count]...)
+	}
+	if len(query) < 12 || address == nil {
+		return
+	}
+	response := make([]byte, 12, len(query)+16)
+	copy(response[:2], query[:2])
+	binary.BigEndian.PutUint16(response[2:4], 0x8180)
+	binary.BigEndian.PutUint16(response[4:6], 1)
+	binary.BigEndian.PutUint16(response[6:8], 1)
+	response = append(response, query[12:]...)
+	response = append(response, 0xc0, 0x0c)
+	response = binary.BigEndian.AppendUint16(response, 1)
+	response = binary.BigEndian.AppendUint16(response, 1)
+	response = binary.BigEndian.AppendUint32(response, 60)
+	response = binary.BigEndian.AppendUint16(response, 4)
+	response = append(response, address...)
+	if network == "tcp4" {
+		_ = binary.Write(connection, binary.BigEndian, uint16(len(response)))
+	}
+	_, _ = connection.Write(response)
 }

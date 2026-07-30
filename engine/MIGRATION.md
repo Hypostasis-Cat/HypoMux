@@ -149,15 +149,45 @@ Exit criteria:
 - Per-adapter byte and connection telemetry reaches the existing UI contract.
 - With no development flag, production proxy and TUN behavior are unchanged.
 
+## Phase 5: source-bound DNS and DoH
+
+Goal: remove implicit system DNS from the staged Go proxy while preserving
+the selected-adapter routing and the existing Python production fallback.
+
+Deliverables:
+
+- Adapter-bound traditional UDP/TCP DNS and certificate-verified DoH over
+  literal endpoint IPs.
+- `auto`, `off`, and explicit-provider policy with no Windows system-resolver
+  fallback.
+- Bounded positive TTL cache and shared in-flight lookups scoped by adapter.
+- Domain resolution before every adapter-bound proxy dial, including
+  pre-relay failover.
+- `dns.resolve`, `dns.status`, DNS telemetry, and canonical protocol fixtures.
+- Qt development configuration bridge; existing Python and sing-box TUN DNS
+  remain the production fallback.
+
+Exit criteria:
+
+- A repository search finds no hostname-based upstream dial in the Go proxy.
+- Unit and integration tests cover wire parsing, policy, cache, cancellation,
+  domain proxying, and protocol compatibility.
+- A real compiled Windows engine proves source-bound DNS on a physical
+  adapter.
+- With no development flag, production proxy and TUN DNS behavior is
+  unchanged.
+
+The detailed invariants and contract are documented in
+[DNS/DoH engine migration](../docs/architecture/dns-engine-migration.md).
+
 ## Later migration slices
 
-1. DNS resolution, DoH fallback, caching, and leak prevention.
-2. Move the TUN multi-port TCP outbound pool onto the shared Go transport.
-3. SOCKS5 UDP with source validation.
-4. IPv4/IPv6 dual-stack behavior.
-5. Continuous adapter health and domain-aware scheduling.
-6. TUN/sing-box and WFP orchestration.
-7. Make the Go engine the default for all network behavior after shadow-mode
+1. Move the TUN multi-port TCP outbound pool onto the shared Go transport.
+2. SOCKS5 UDP with source validation.
+3. IPv4/IPv6 dual-stack behavior.
+4. Continuous adapter health and domain-aware scheduling.
+5. TUN/sing-box and WFP orchestration.
+6. Make the Go engine the default for all network behavior after shadow-mode
    and rollback testing.
 
 Each slice keeps a Python fallback until its unit, integration, and Windows

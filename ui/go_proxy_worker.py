@@ -31,6 +31,8 @@ class GoProxyWorker(QObject):
         http_port: int,
         use_weighted: bool,
         bandwidth_limits: dict[str, int] | None = None,
+        dns_server: str = "223.5.5.5",
+        doh_provider: str = "auto",
         parent: QObject | None = None,
     ):
         super().__init__(parent)
@@ -59,9 +61,24 @@ class GoProxyWorker(QObject):
                         ),
                         1,
                     ),
+                    "dns_servers": [
+                        str(server).strip()
+                        for server in (
+                            nic.get("dns_servers")
+                            if isinstance(nic.get("dns_servers"), list)
+                            else []
+                        )
+                        if str(server).strip()
+                    ],
                 }
                 for nic in selected_nics
             ],
+            "dns": {
+                "policy": str(doh_provider or "auto").strip().lower(),
+                "legacy_servers": [str(dns_server or "223.5.5.5").strip()],
+                "cache_ttl_ms": 180_000,
+                "query_timeout_ms": 4_000,
+            },
         }
         self._stop_requested = threading.Event()
         self._thread: threading.Thread | None = None

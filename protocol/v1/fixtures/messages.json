@@ -28,6 +28,8 @@
           "engine.start",
           "engine.stop",
           "engine.telemetry",
+          "dns.resolve",
+          "dns.status",
           "health.check",
           "diagnostic.run",
           "host.shutdown"
@@ -142,12 +144,23 @@
         "http_port": 10801,
         "weighted": true,
         "connect_timeout_ms": 6000,
+        "dns": {
+          "policy": "auto",
+          "legacy_servers": [
+            "223.5.5.5"
+          ],
+          "cache_ttl_ms": 180000,
+          "query_timeout_ms": 4000
+        },
         "adapters": [
           {
             "name": "Ethernet",
             "source_ip": "192.0.2.10",
             "if_index": 11,
-            "weight": 2
+            "weight": 2,
+            "dns_servers": [
+              "192.0.2.53"
+            ]
           }
         ]
       }
@@ -219,11 +232,150 @@
             "bytes_down": 8192
           }
         ],
+        "dns": {
+          "policy": "auto",
+          "legacy_servers": [
+            "223.5.5.5",
+            "119.29.29.29"
+          ],
+          "doh_endpoints": [
+            {
+              "ip": "223.5.5.5",
+              "host": "dns.alidns.com",
+              "path": "/dns-query"
+            },
+            {
+              "ip": "1.12.12.12",
+              "host": "doh.pub",
+              "path": "/dns-query"
+            },
+            {
+              "ip": "120.53.53.53",
+              "host": "doh.pub",
+              "path": "/dns-query"
+            },
+            {
+              "ip": "8.8.8.8",
+              "host": "dns.google",
+              "path": "/dns-query"
+            },
+            {
+              "ip": "8.8.4.4",
+              "host": "dns.google",
+              "path": "/dns-query"
+            }
+          ],
+          "cache_entries": 1,
+          "inflight": 0,
+          "queries": 2,
+          "cache_hits": 1,
+          "doh_successes": 1,
+          "doh_failures": 0,
+          "legacy_successes": 0,
+          "legacy_failures": 0,
+          "automatic_fallbacks": 0
+        },
         "total": {
           "connections": 1,
           "bytes_up": 4096,
           "bytes_down": 8192
         }
+      }
+    }
+  },
+  {
+    "name": "dns_resolve_request",
+    "kind": "request",
+    "method": "dns.resolve",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-dns-resolve",
+      "method": "dns.resolve",
+      "params": {
+        "domain": "example.com",
+        "adapter": "Ethernet",
+        "record_type": "A"
+      }
+    }
+  },
+  {
+    "name": "dns_resolve_response",
+    "kind": "response",
+    "method": "dns.resolve",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-dns-resolve",
+      "result": {
+        "domain": "example.com",
+        "address": "93.184.216.34",
+        "record_type": "A",
+        "adapter": "Ethernet",
+        "transport": "doh",
+        "server": "dns.alidns.com@223.5.5.5:443",
+        "cached": false,
+        "expires_at": "2026-07-30T02:03:05Z"
+      }
+    }
+  },
+  {
+    "name": "dns_status_request",
+    "kind": "request",
+    "method": "dns.status",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-dns-status",
+      "method": "dns.status"
+    }
+  },
+  {
+    "name": "dns_status_response",
+    "kind": "response",
+    "method": "dns.status",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-dns-status",
+      "result": {
+        "policy": "auto",
+        "legacy_servers": [
+          "223.5.5.5",
+          "119.29.29.29"
+        ],
+        "doh_endpoints": [
+          {
+            "ip": "223.5.5.5",
+            "host": "dns.alidns.com",
+            "path": "/dns-query"
+          },
+          {
+            "ip": "1.12.12.12",
+            "host": "doh.pub",
+            "path": "/dns-query"
+          },
+          {
+            "ip": "120.53.53.53",
+            "host": "doh.pub",
+            "path": "/dns-query"
+          },
+          {
+            "ip": "8.8.8.8",
+            "host": "dns.google",
+            "path": "/dns-query"
+          },
+          {
+            "ip": "8.8.4.4",
+            "host": "dns.google",
+            "path": "/dns-query"
+          }
+        ],
+        "cache_entries": 1,
+        "inflight": 0,
+        "queries": 2,
+        "cache_hits": 1,
+        "doh_successes": 1,
+        "doh_failures": 0,
+        "legacy_successes": 0,
+        "legacy_failures": 0,
+        "automatic_fallbacks": 0
       }
     }
   },
@@ -326,6 +478,22 @@
     }
   },
   {
+    "name": "dns_failed_error",
+    "kind": "error",
+    "method": "dns.resolve",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-dns-failed",
+      "error": {
+        "code": "dns_failed",
+        "message": "DNS resolution failed",
+        "details": {
+          "message": "DoH resolution failed: context deadline exceeded"
+        }
+      }
+    }
+  },
+  {
     "name": "engine_state_changed_event",
     "kind": "event",
     "message": {
@@ -341,11 +509,25 @@
     }
   },
   {
-    "name": "host_exiting_event",
+    "name": "dns_fallback_required_event",
     "kind": "event",
     "message": {
       "protocol": 1,
       "sequence": 2,
+      "event": "dns.fallback_required",
+      "data": {
+        "adapter": "Ethernet",
+        "policy": "alidns",
+        "reason": "DoH provider failed three consecutive lookups"
+      }
+    }
+  },
+  {
+    "name": "host_exiting_event",
+    "kind": "event",
+    "message": {
+      "protocol": 1,
+      "sequence": 3,
       "event": "host.exiting",
       "data": {
         "reason": "requested"

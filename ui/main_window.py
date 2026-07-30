@@ -835,6 +835,9 @@ def create_main_window():
                 lambda message: self.append_log(message, force=True)
             )
             bridge.state_changed.connect(self._on_go_engine_state_changed)
+            bridge.dns_fallback_required.connect(
+                self._on_go_dns_fallback_required
+            )
             self._go_engine_bridge = bridge
             self.append_log("[GoEngine][DEV] 正在启动独立 Go 宿主并协商协议…", force=True)
             bridge.start()
@@ -877,6 +880,23 @@ def create_main_window():
                 f"{state.get('previous', 'unknown')} → "
                 f"{state.get('state', state.get('current', 'unknown'))}",
                 force=True,
+            )
+
+        @Slot(object)
+        def _on_go_dns_fallback_required(self, data: dict):
+            if self.sender() is not self._go_engine_bridge:
+                return
+            adapter = str(data.get("adapter") or "unknown")
+            policy = str(data.get("policy") or "unknown")
+            reason = str(data.get("reason") or "DoH unavailable")
+            self.append_log(
+                f"[GoEngine][DNS] fallback required | adapter={adapter} "
+                f"| policy={policy} | {reason}",
+                force=True,
+            )
+            self.show_warning(
+                "所选 DoH 提供商连续解析失败；请切换为“自动优选”或"
+                "“关闭（仅传统 DNS）”后重新启动加速。"
             )
 
         def _on_theme_changed(self, *args):
@@ -2734,6 +2754,12 @@ def create_main_window():
                 }
                 if use_go_proxy:
                     worker_args["bridge"] = self._go_engine_bridge
+                    worker_args["dns_server"] = self._app_config.get(
+                        "dns_server", "223.5.5.5"
+                    )
+                    worker_args["doh_provider"] = self._app_config.get(
+                        "doh_provider", "auto"
+                    )
                     self.append_log(
                         "[GoEngine][TCP] 开发迁移模式：普通代理流量将由 Go 引擎处理。",
                         force=True,

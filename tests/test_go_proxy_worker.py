@@ -58,7 +58,12 @@ def test_go_proxy_worker_matches_proxy_worker_lifecycle_contract():
     worker = GoProxyWorker(
         bridge=bridge,
         selected_nics=[
-            {"name": "Ethernet", "ip": "192.0.2.10", "if_index": 11}
+            {
+                "name": "Ethernet",
+                "ip": "192.0.2.10",
+                "if_index": 11,
+                "dns_servers": ["192.0.2.53"],
+            }
         ],
         listen_host="127.0.0.1",
         listen_port=10800,
@@ -92,3 +97,6 @@ def test_go_proxy_worker_matches_proxy_worker_lifecycle_contract():
     assert [method for method, _ in bridge.requests].count("engine.stop") == 1
     start_params = bridge.requests[0][1]
     assert start_params["adapters"][0]["weight"] == 3
+    assert start_params["adapters"][0]["dns_servers"] == ["192.0.2.53"]
+    assert start_params["dns"]["policy"] == "auto"
+    assert start_params["dns"]["legacy_servers"] == ["223.5.5.5"]

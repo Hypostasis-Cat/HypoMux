@@ -43,6 +43,18 @@
       "cancellation": "not_applicable"
     },
     {
+      "name": "dns.resolve",
+      "idempotency": "read_only_probe",
+      "privilege": "none",
+      "cancellation": "caller_deadline_and_host_context"
+    },
+    {
+      "name": "dns.status",
+      "idempotency": "read_only",
+      "privilege": "none",
+      "cancellation": "not_applicable"
+    },
+    {
       "name": "health.check",
       "idempotency": "read_only",
       "privilege": "none",
@@ -68,6 +80,11 @@
       "coalescible": false
     },
     {
+      "name": "dns.fallback_required",
+      "delivery": "lossless_ordered_once_per_adapter",
+      "coalescible": false
+    },
+    {
       "name": "host.exiting",
       "delivery": "lossless_ordered",
       "coalescible": false
@@ -82,6 +99,7 @@
     "invalid_state",
     "unsupported_mode",
     "start_failed",
-    "stop_failed"
+    "stop_failed",
+    "dns_failed"
   ]
 }

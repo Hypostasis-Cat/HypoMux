@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Hypostasis-Cat/HypoMux/engine/internal/diagnostic"
+	"github.com/Hypostasis-Cat/HypoMux/engine/internal/dns"
 	"github.com/Hypostasis-Cat/HypoMux/engine/internal/protocol"
 	"github.com/Hypostasis-Cat/HypoMux/engine/internal/proxy"
 	engineRuntime "github.com/Hypostasis-Cat/HypoMux/engine/internal/runtime"
@@ -21,12 +22,15 @@ const (
 	MethodEngineStart     = "engine.start"
 	MethodEngineStop      = "engine.stop"
 	MethodEngineTelemetry = "engine.telemetry"
+	MethodDNSResolve      = "dns.resolve"
+	MethodDNSStatus       = "dns.status"
 	MethodHealthCheck     = "health.check"
 	MethodDiagnosticRun   = "diagnostic.run"
 	MethodHostShutdown    = "host.shutdown"
 
-	EventEngineStateChanged = "engine.state_changed"
-	EventHostExiting        = "host.exiting"
+	EventEngineStateChanged  = "engine.state_changed"
+	EventDNSFallbackRequired = "dns.fallback_required"
+	EventHostExiting         = "host.exiting"
 )
 
 var capabilities = []string{
@@ -35,6 +39,8 @@ var capabilities = []string{
 	MethodEngineStart,
 	MethodEngineStop,
 	MethodEngineTelemetry,
+	MethodDNSResolve,
+	MethodDNSStatus,
 	MethodHealthCheck,
 	MethodDiagnosticRun,
 	MethodHostShutdown,
@@ -125,6 +131,23 @@ type EngineStartParams struct {
 	Weighted         bool            `json:"weighted"`
 	Adapters         []proxy.Adapter `json:"adapters"`
 	ConnectTimeoutMS int             `json:"connect_timeout_ms"`
+	DNS              DNSStartConfig  `json:"dns"`
+}
+
+type DNSStartConfig struct {
+	Policy         string   `json:"policy"`
+	LegacyServers  []string `json:"legacy_servers"`
+	CacheTTLMS     int      `json:"cache_ttl_ms"`
+	QueryTimeoutMS int      `json:"query_timeout_ms"`
+}
+
+func (c DNSStartConfig) ResolverConfig() dns.Config {
+	return dns.Config{
+		Policy:        c.Policy,
+		LegacyServers: append([]string(nil), c.LegacyServers...),
+		CacheTTL:      time.Duration(c.CacheTTLMS) * time.Millisecond,
+		QueryTimeout:  time.Duration(c.QueryTimeoutMS) * time.Millisecond,
+	}
 }
 
 func (p EngineStartParams) ProxyConfig() proxy.Config {
@@ -135,6 +158,7 @@ func (p EngineStartParams) ProxyConfig() proxy.Config {
 		Weighted:       p.Weighted,
 		Adapters:       p.Adapters,
 		ConnectTimeout: time.Duration(p.ConnectTimeoutMS) * time.Millisecond,
+		DNS:            p.DNS.ResolverConfig(),
 	}
 }
 
@@ -150,6 +174,18 @@ type EngineStopResult struct {
 
 type EngineTelemetryParams struct {
 	IncludeConnections bool `json:"include_connections"`
+}
+
+type DNSResolveParams struct {
+	Domain     string         `json:"domain"`
+	Adapter    string         `json:"adapter"`
+	RecordType dns.RecordType `json:"record_type"`
+}
+
+type DNSFallbackRequiredData struct {
+	Adapter string `json:"adapter"`
+	Policy  string `json:"policy"`
+	Reason  string `json:"reason"`
 }
 
 type ShutdownResult struct {

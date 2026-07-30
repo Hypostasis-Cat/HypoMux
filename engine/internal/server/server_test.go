@@ -180,6 +180,33 @@ func TestServerStartsStopsAndReportsProxyTelemetry(t *testing.T) {
 	}
 }
 
+func TestServerReportsDNSStatusAndStructuredResolutionFailure(t *testing.T) {
+	input := strings.Join([]string{
+		`{"protocol":1,"id":"start-1","method":"engine.start","params":{"mode":"proxy","socks_port":0,"http_port":0,"dns":{"policy":"off","legacy_servers":["127.0.0.1"]},"adapters":[{"name":"loopback","source_ip":"127.0.0.1"}]}}`,
+		`{"protocol":1,"id":"dns-status-1","method":"dns.status"}`,
+		`{"protocol":1,"id":"dns-resolve-1","method":"dns.resolve","params":{"domain":"bad_domain","adapter":"loopback","record_type":"A"}}`,
+		`{"protocol":1,"id":"stop-1","method":"engine.stop"}`,
+		`{"protocol":1,"id":"shutdown-1","method":"host.shutdown"}`,
+	}, "\n")
+	var output bytes.Buffer
+
+	if err := New(strings.NewReader(input), &output, Metadata{}).Run(context.Background()); err != nil {
+		t.Fatalf("Run() failed: %v", err)
+	}
+	messages := decodeMessages(t, output.String())
+	if len(messages) != 8 {
+		t.Fatalf("message count = %d, want 8\n%s", len(messages), output.String())
+	}
+	status := resultObject(t, messages[2])
+	if status["policy"] != "off" {
+		t.Fatalf("DNS status = %#v", status)
+	}
+	errorObject, ok := messages[3]["error"].(map[string]any)
+	if !ok || errorObject["code"] != "dns_failed" {
+		t.Fatalf("DNS failure = %#v", messages[3])
+	}
+}
+
 func decodeMessages(t *testing.T, output string) []map[string]any {
 	t.Helper()
 	var messages []map[string]any

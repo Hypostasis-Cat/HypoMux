@@ -48,7 +48,11 @@ class SharedProtocolContractTests(unittest.TestCase):
         events = self.manifest["events"]
         self.assertEqual(
             [item["name"] for item in events],
-            ["engine.state_changed", "host.exiting"],
+            [
+                "engine.state_changed",
+                "dns.fallback_required",
+                "host.exiting",
+            ],
         )
         self.assertTrue(self.manifest["error_codes"])
 
@@ -103,7 +107,11 @@ class SharedProtocolContractTests(unittest.TestCase):
         self.assertEqual(response_methods, advertised)
         self.assertEqual(
             event_names,
-            {"engine.state_changed", "host.exiting"},
+            {
+                "engine.state_changed",
+                "dns.fallback_required",
+                "host.exiting",
+            },
         )
 
 

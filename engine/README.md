@@ -3,7 +3,8 @@
 This directory is the migration boundary between the desktop UI and the
 network engine. The executable provides a versioned IPC contract, owns the
 production source-bound ICMP diagnostic, and contains the staged SOCKS5/HTTP
-TCP proxy. TUN, dedicated DNS, UDP, and routing paths remain incremental.
+TCP proxy with source-bound DNS/DoH. TUN, UDP, and routing paths remain
+incremental.
 
 See [MIGRATION.md](MIGRATION.md) for the staged migration plan and the mapping
 from current Qt signals to transport-independent engine events.
@@ -75,7 +76,11 @@ Protocol-v1 methods:
 - `engine.stop`: close listeners and cancel all accepted and relayed
   connections with a bounded shutdown.
 - `engine.telemetry`: read cumulative per-adapter bytes, active connection
-  counts, and optional connection details.
+  counts, optional connection details, and DNS counters.
+- `dns.resolve`: resolve an A or AAAA record through a running engine and a
+  selected adapter for diagnostics.
+- `dns.status`: inspect DNS policy, upstreams, cache, in-flight work, and
+  counters without starting a query.
 - `health.check`: verify that the engine process and protocol loop respond.
 - `diagnostic.run`: run the same source-bound ICMP diagnostic exposed by the
   one-shot `diagnose` command.
@@ -83,8 +88,14 @@ Protocol-v1 methods:
 
 Reserved lifecycle states are `stopped`, `starting`, `running`, `degraded`,
 `stopping`, and `failed`. `engine.start` currently accepts only ordinary
-proxy mode. TUN, DNS, WFP, and routing modes remain unavailable until their
+proxy mode. TUN, WFP, and routing modes remain unavailable until their
 configuration, privilege, cancellation, and rollback contracts are specified.
+
+Ordinary proxy domain targets are resolved by the Go engine before the
+adapter-bound TCP dial. `auto` races the built-in DoH endpoints and uses only
+source-bound traditional DNS if DoH is unavailable; explicit providers remain
+strict. No ordinary proxy DNS path uses the Windows system resolver. TUN DNS
+remains owned by sing-box until its later orchestration phase.
 
 ## Compatibility policy
 
@@ -99,8 +110,8 @@ configuration, privilege, cancellation, and rollback contracts are specified.
 
 The UI may send commands and render events, but must not own engine cleanup,
 DNS fallback, routing rollback, or connection accounting. Those behaviors
-move behind this boundary in later phases. Until then, the current Python/Qt
-path remains the production default.
+move behind this boundary in migration slices. The current Python/Qt path
+remains the production default.
 
 ## Development connection
 

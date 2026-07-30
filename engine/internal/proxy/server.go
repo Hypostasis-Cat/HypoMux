@@ -10,20 +10,25 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/Hypostasis-Cat/HypoMux/engine/internal/dns"
 )
 
 type Server struct {
 	config    Config
 	scheduler *scheduler
 	registry  *registry
+	resolver  *dns.Resolver
+	dialTCP   func(context.Context, *net.Dialer, string) (net.Conn, error)
 
-	mu        sync.RWMutex
-	ctx       context.Context
-	cancel    context.CancelFunc
-	listeners []net.Listener
-	endpoints Endpoints
-	running   bool
-	wg        sync.WaitGroup
+	mu                 sync.RWMutex
+	ctx                context.Context
+	cancel             context.CancelFunc
+	listeners          []net.Listener
+	endpoints          Endpoints
+	running            bool
+	wg                 sync.WaitGroup
+	dnsFallbackHandler func(dns.FallbackEvent)
 }
 
 func New(config Config) (*Server, error) {
@@ -31,11 +36,19 @@ func New(config Config) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Server{
+	server := &Server{
 		config:    normalized,
 		scheduler: newScheduler(normalized.Adapters, normalized.Weighted),
 		registry:  newRegistry(normalized.Adapters),
-	}, nil
+	}
+	server.dialTCP = func(
+		ctx context.Context,
+		dialer *net.Dialer,
+		target string,
+	) (net.Conn, error) {
+		return dialer.DialContext(ctx, "tcp4", target)
+	}
+	return server, nil
 }
 
 func (s *Server) Start() (Endpoints, error) {
@@ -45,16 +58,28 @@ func (s *Server) Start() (Endpoints, error) {
 		return s.endpoints, nil
 	}
 
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+	resolver, err := dns.New(s.ctx, s.config.DNS, s.dialDNS)
+	if err != nil {
+		s.cancel()
+		return Endpoints{}, fmt.Errorf("create DNS resolver: %w", err)
+	}
+	resolver.SetFallbackHandler(s.dnsFallbackHandler)
+	s.resolver = resolver
+
 	socks, err := net.Listen("tcp4", listenAddress(s.config.ListenHost, s.config.SOCKSPort))
 	if err != nil {
+		s.cancel()
+		s.resolver = nil
 		return Endpoints{}, fmt.Errorf("listen SOCKS: %w", err)
 	}
 	httpListener, err := net.Listen("tcp4", listenAddress(s.config.ListenHost, s.config.HTTPPort))
 	if err != nil {
 		_ = socks.Close()
+		s.cancel()
+		s.resolver = nil
 		return Endpoints{}, fmt.Errorf("listen HTTP: %w", err)
 	}
-	s.ctx, s.cancel = context.WithCancel(context.Background())
 	s.listeners = []net.Listener{socks, httpListener}
 	s.endpoints = Endpoints{
 		SOCKS: socks.Addr().String(),
@@ -114,7 +139,82 @@ func (s *Server) Endpoints() Endpoints {
 }
 
 func (s *Server) Snapshot(includeConnections bool) TelemetrySnapshot {
-	return s.registry.Snapshot(includeConnections)
+	result := s.registry.Snapshot(includeConnections)
+	if s.resolver != nil {
+		status := s.resolver.Status()
+		result.DNS = &status
+	}
+	return result
+}
+
+func (s *Server) DNSStatus() (dns.Status, bool) {
+	s.mu.RLock()
+	resolver := s.resolver
+	running := s.running
+	s.mu.RUnlock()
+	if resolver == nil || !running {
+		return dns.Status{}, false
+	}
+	return resolver.Status(), true
+}
+
+func (s *Server) ResolveDNS(
+	ctx context.Context,
+	domain string,
+	adapterName string,
+	recordType dns.RecordType,
+) (dns.Result, error) {
+	s.mu.RLock()
+	resolver := s.resolver
+	running := s.running
+	s.mu.RUnlock()
+	if resolver == nil || !running {
+		return dns.Result{}, fmt.Errorf("proxy engine is not running")
+	}
+	var selected *Adapter
+	for index := range s.config.Adapters {
+		adapter := &s.config.Adapters[index]
+		if adapterName == "" || adapter.Name == adapterName {
+			selected = adapter
+			break
+		}
+	}
+	if selected == nil {
+		return dns.Result{}, fmt.Errorf("unknown adapter %q", adapterName)
+	}
+	return resolver.Resolve(ctx, dns.Query{
+		Domain:     domain,
+		RecordType: recordType,
+		Binding:    adapterDNSBinding(*selected),
+	})
+}
+
+func (s *Server) SetDNSFallbackHandler(handler func(dns.FallbackEvent)) {
+	s.mu.Lock()
+	s.dnsFallbackHandler = handler
+	resolver := s.resolver
+	s.mu.Unlock()
+	if resolver != nil {
+		resolver.SetFallbackHandler(handler)
+	}
+}
+
+func (s *Server) dialDNS(
+	ctx context.Context,
+	network string,
+	address string,
+	binding dns.Binding,
+) (net.Conn, error) {
+	adapter := Adapter{
+		Name:     binding.Name,
+		SourceIP: binding.SourceIP,
+		IfIndex:  binding.IfIndex,
+	}
+	dialer, err := boundNetworkDialer(adapter, s.config.DNS.QueryTimeout, network)
+	if err != nil {
+		return nil, err
+	}
+	return dialer.DialContext(ctx, network, address)
 }
 
 func (s *Server) acceptLoop(listener net.Listener, protocol string) {

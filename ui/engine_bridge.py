@@ -25,6 +25,7 @@ class EngineBridge(QObject):
     engine_error = Signal(str)
     log_record = Signal(str)
     telemetry_snapshot = Signal(object)
+    dns_fallback_required = Signal(object)
 
     def __init__(self, command: EngineCommand, parent: QObject | None = None):
         super().__init__(parent)
@@ -103,6 +104,8 @@ class EngineBridge(QObject):
             self.log_record.emit(str(data.get("message", "")))
         elif name == "telemetry.snapshot":
             self.telemetry_snapshot.emit(data)
+        elif name == "dns.fallback_required":
+            self.dns_fallback_required.emit(data)
 
     def _on_stderr(self, message: str):
         self.log_record.emit(f"[GoEngine][stderr] {message}")

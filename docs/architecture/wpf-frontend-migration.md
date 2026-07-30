@@ -118,7 +118,7 @@ Exit criteria:
 Current status:
 
 - The baseline manifest, named Go DTOs, and canonical fixtures for all
-  capabilities advertised through engine migration phase 4 are complete.
+  capabilities advertised through engine migration phase 5 are complete.
 - Each later engine slice extends this same manifest and fixture set before
   its protocol capability is advertised.
 
@@ -205,9 +205,9 @@ entire migration.
 
 ## Effect on the current engine roadmap
 
-The next backend slices remain DNS/DoH and the TUN multi-port TCP outbound
-pool. Before either surface is declared complete, its protocol DTOs and
-canonical fixtures must be added under F1 rules.
+The ordinary-proxy DNS/DoH slice now meets the F1 rules. The next backend
+slice is the TUN multi-port TCP outbound pool; its protocol DTOs and canonical
+fixtures must be defined before that surface is declared complete.
 
 WPF implementation begins with the F2 read-only shell after F1 is complete.
 It must not block continued Go engine work, and it must not become the

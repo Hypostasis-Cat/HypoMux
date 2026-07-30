@@ -5,6 +5,8 @@ import (
 	"net"
 	"strings"
 	"time"
+
+	"github.com/Hypostasis-Cat/HypoMux/engine/internal/dns"
 )
 
 const (
@@ -14,10 +16,11 @@ const (
 )
 
 type Adapter struct {
-	Name     string `json:"name"`
-	SourceIP string `json:"source_ip"`
-	IfIndex  int    `json:"if_index,omitempty"`
-	Weight   int    `json:"weight,omitempty"`
+	Name       string   `json:"name"`
+	SourceIP   string   `json:"source_ip"`
+	IfIndex    int      `json:"if_index,omitempty"`
+	Weight     int      `json:"weight,omitempty"`
+	DNSServers []string `json:"dns_servers,omitempty"`
 }
 
 type Config struct {
@@ -27,6 +30,7 @@ type Config struct {
 	Weighted       bool          `json:"weighted"`
 	Adapters       []Adapter     `json:"adapters"`
 	ConnectTimeout time.Duration `json:"-"`
+	DNS            dns.Config    `json:"-"`
 }
 
 type Endpoints struct {
@@ -78,6 +82,16 @@ func normalizeConfig(config Config) (Config, error) {
 		if adapter.IfIndex < 0 {
 			return Config{}, fmt.Errorf("adapter %q has invalid interface index", adapter.Name)
 		}
+		binding, err := dns.NormalizeBinding(dns.Binding{
+			Name:       adapter.Name,
+			SourceIP:   adapter.SourceIP,
+			IfIndex:    adapter.IfIndex,
+			DNSServers: adapter.DNSServers,
+		})
+		if err != nil {
+			return Config{}, err
+		}
+		adapter.DNSServers = binding.DNSServers
 		if adapter.Weight <= 0 {
 			adapter.Weight = 1
 		}
@@ -97,5 +111,10 @@ func normalizeConfig(config Config) (Config, error) {
 	} else if config.ConnectTimeout > 30*time.Second {
 		config.ConnectTimeout = 30 * time.Second
 	}
+	dnsConfig, err := dns.NormalizeConfig(config.DNS)
+	if err != nil {
+		return Config{}, err
+	}
+	config.DNS = dnsConfig
 	return config, nil
 }

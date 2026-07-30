@@ -5,6 +5,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/Hypostasis-Cat/HypoMux/engine/internal/dns"
 )
 
 type AdapterTelemetry struct {
@@ -32,6 +34,7 @@ type TelemetrySnapshot struct {
 	SampledAt   time.Time            `json:"sampled_at"`
 	Adapters    []AdapterTelemetry   `json:"adapters"`
 	Connections []ConnectionSnapshot `json:"active_connections,omitempty"`
+	DNS         *dns.Status          `json:"dns,omitempty"`
 	Total       struct {
 		Connections uint64 `json:"connections"`
 		BytesUp     uint64 `json:"bytes_up"`

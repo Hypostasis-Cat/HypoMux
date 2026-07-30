@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/Hypostasis-Cat/HypoMux/engine/internal/diagnostic"
+	"github.com/Hypostasis-Cat/HypoMux/engine/internal/dns"
 	"github.com/Hypostasis-Cat/HypoMux/engine/internal/protocol"
 	"github.com/Hypostasis-Cat/HypoMux/engine/internal/proxy"
 	engineRuntime "github.com/Hypostasis-Cat/HypoMux/engine/internal/runtime"
@@ -81,7 +82,11 @@ func TestManifestMatchesCompiledProtocol(t *testing.T) {
 		t.Fatalf("manifest states = %#v, compiled = %#v", manifest.States, wantStates)
 	}
 
-	wantEvents := []string{EventEngineStateChanged, EventHostExiting}
+	wantEvents := []string{
+		EventEngineStateChanged,
+		EventDNSFallbackRequired,
+		EventHostExiting,
+	}
 	events := make([]string, 0, len(manifest.Events))
 	for _, event := range manifest.Events {
 		events = append(events, event.Name)
@@ -172,7 +177,11 @@ func TestCanonicalFixturesDecodeIntoTransportDTOs(t *testing.T) {
 			t.Errorf("missing canonical response fixture for %q", method)
 		}
 	}
-	for _, event := range []string{EventEngineStateChanged, EventHostExiting} {
+	for _, event := range []string{
+		EventEngineStateChanged,
+		EventDNSFallbackRequired,
+		EventHostExiting,
+	} {
 		if !events[event] {
 			t.Errorf("missing canonical event fixture for %q", event)
 		}
@@ -187,9 +196,16 @@ func decodeRequestParams(t *testing.T, request protocol.Request) {
 		target = &EngineStartParams{}
 	case MethodEngineTelemetry:
 		target = &EngineTelemetryParams{}
+	case MethodDNSResolve:
+		target = &DNSResolveParams{}
 	case MethodDiagnosticRun:
 		target = &DiagnosticRunParams{}
-	case MethodEngineHello, MethodEngineStatus, MethodEngineStop, MethodHealthCheck, MethodHostShutdown:
+	case MethodEngineHello,
+		MethodEngineStatus,
+		MethodEngineStop,
+		MethodDNSStatus,
+		MethodHealthCheck,
+		MethodHostShutdown:
 		if len(request.Params) != 0 {
 			t.Fatalf("%s fixture must not have params", request.Method)
 		}
@@ -216,6 +232,10 @@ func decodeResult(t *testing.T, method string, payload json.RawMessage) {
 		target = &EngineStopResult{}
 	case MethodEngineTelemetry:
 		target = &proxy.TelemetrySnapshot{}
+	case MethodDNSResolve:
+		target = &dns.Result{}
+	case MethodDNSStatus:
+		target = &dns.Status{}
 	case MethodHealthCheck:
 		target = &HealthResult{}
 	case MethodDiagnosticRun:
@@ -236,6 +256,8 @@ func decodeEventData(t *testing.T, event string, payload json.RawMessage) {
 	switch event {
 	case EventEngineStateChanged:
 		target = &engineRuntime.Snapshot{}
+	case EventDNSFallbackRequired:
+		target = &DNSFallbackRequiredData{}
 	case EventHostExiting:
 		target = &HostExitingData{}
 	default:
