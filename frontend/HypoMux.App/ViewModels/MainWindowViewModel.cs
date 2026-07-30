@@ -41,6 +41,16 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     private string _newRuleValue = string.Empty;
     private string _newRuleOutbound = "direct";
     private RoutingRuleOption? _selectedRoutingRule;
+    private string _downloadRateText = "0.00 MB/s";
+    private string _uploadRateText = "0.00 MB/s";
+    private string _sessionDataText = "0.00 MB";
+    private string _jitterText = "0 ms";
+    private int _totalConnections;
+    private DateTimeOffset? _previousTelemetryAt;
+    private long _previousTotalDown;
+    private long _previousTotalUp;
+    private readonly Dictionary<string, (long Down, long Up)> _previousAdapterTotals =
+        new(StringComparer.OrdinalIgnoreCase);
     private bool _disposed;
 
     public MainWindowViewModel()
@@ -62,6 +72,12 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             () => IsConnected && IsAccelerating);
         RescanAdaptersCommand = new RelayCommand(
             ScanAdapters,
+            () => !IsAccelerating);
+        SelectAllAdaptersCommand = new RelayCommand(
+            () => SetAllAdaptersSelected(true),
+            () => !IsAccelerating);
+        ClearAdapterSelectionCommand = new RelayCommand(
+            () => SetAllAdaptersSelected(false),
             () => !IsAccelerating);
         AddRoutingRuleCommand = new RelayCommand(AddRoutingRule);
         RemoveRoutingRuleCommand = new RelayCommand(
@@ -87,6 +103,10 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     public AsyncRelayCommand StopCommand { get; }
 
     public RelayCommand RescanAdaptersCommand { get; }
+
+    public RelayCommand SelectAllAdaptersCommand { get; }
+
+    public RelayCommand ClearAdapterSelectionCommand { get; }
 
     public RelayCommand AddRoutingRuleCommand { get; }
 
@@ -226,6 +246,36 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         private set => SetProperty(ref _diagnosticResult, value);
     }
 
+    public string DownloadRateText
+    {
+        get => _downloadRateText;
+        private set => SetProperty(ref _downloadRateText, value);
+    }
+
+    public string UploadRateText
+    {
+        get => _uploadRateText;
+        private set => SetProperty(ref _uploadRateText, value);
+    }
+
+    public string SessionDataText
+    {
+        get => _sessionDataText;
+        private set => SetProperty(ref _sessionDataText, value);
+    }
+
+    public string JitterText
+    {
+        get => _jitterText;
+        private set => SetProperty(ref _jitterText, value);
+    }
+
+    public int TotalConnections
+    {
+        get => _totalConnections;
+        private set => SetProperty(ref _totalConnections, value);
+    }
+
     public string NewRuleMatchType
     {
         get => _newRuleMatchType;
@@ -277,7 +327,9 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
                 Outbound = rule.Outbound,
             });
         }
-        ScanAdapters(settings.SelectedAdapterIds ?? []);
+        ScanAdapters(
+            settings.SelectedAdapterIds ?? [],
+            settings.AdapterWeights ?? new Dictionary<string, int>());
         try
         {
             SystemProxyService.RestoreIfOwned();
@@ -624,7 +676,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
                     "engine.telemetry",
                     new { include_connections = true },
                     cancellationToken: _lifetime.Token);
-                ReplaceTelemetry(telemetry.Adapters);
+                UpdateTelemetry(telemetry);
             }
             else
             {
@@ -683,6 +735,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
                 + $"抖动：{result.JitterMs:0.##} ms\n"
                 + $"收发：{result.Received}/{result.Sent}\n"
                 + result.Note;
+            JitterText = $"{result.JitterMs:0.##} ms";
         }
         catch (Exception exception)
         {
@@ -709,13 +762,22 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
-    private void ScanAdapters() => ScanAdapters(
-        Adapters
+    private void ScanAdapters()
+    {
+        var selected = Adapters
             .Where(adapter => adapter.IsSelected)
             .Select(adapter => adapter.Id)
-            .ToArray());
+            .ToArray();
+        var weights = Adapters.ToDictionary(
+            adapter => adapter.Id,
+            adapter => adapter.Weight,
+            StringComparer.OrdinalIgnoreCase);
+        ScanAdapters(selected, weights);
+    }
 
-    private void ScanAdapters(IReadOnlyList<string> selectedIds)
+    private void ScanAdapters(
+        IReadOnlyList<string> selectedIds,
+        IReadOnlyDictionary<string, int> weights)
     {
         var selected = selectedIds.ToHashSet(StringComparer.OrdinalIgnoreCase);
         var found = NetworkAdapterService.GetActiveAdapters();
@@ -723,12 +785,24 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         foreach (var adapter in found)
         {
             adapter.IsSelected = selected.Count == 0 || selected.Contains(adapter.Id);
+            if (weights.TryGetValue(adapter.Id, out var weight))
+            {
+                adapter.Weight = weight;
+            }
             Adapters.Add(adapter);
         }
 
         if (string.IsNullOrWhiteSpace(DiagnosticSourceIp))
         {
             DiagnosticSourceIp = found.FirstOrDefault()?.SourceIp ?? string.Empty;
+        }
+    }
+
+    private void SetAllAdaptersSelected(bool selected)
+    {
+        foreach (var adapter in Adapters)
+        {
+            adapter.IsSelected = selected;
         }
     }
 
@@ -747,6 +821,10 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
                     .Where(adapter => adapter.IsSelected)
                     .Select(adapter => adapter.Id)
                     .ToArray(),
+                Adapters.ToDictionary(
+                    adapter => adapter.Id,
+                    adapter => adapter.Weight,
+                    StringComparer.OrdinalIgnoreCase),
                 RoutingRules
                     .Where(rule => !string.IsNullOrWhiteSpace(rule.Value))
                     .Select(rule => new RoutingRuleSetting(
@@ -808,7 +886,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
                 if_index = adapter.IfIndex,
                 source_ipv6 = adapter.SourceIpv6,
                 ipv6_if_index = adapter.Ipv6IfIndex,
-                weight = 1,
+                weight = adapter.Weight,
                 dns_servers = adapter.DnsServers,
             })
             .ToArray();
@@ -895,28 +973,72 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             },
             null);
 
-    private void ReplaceTelemetry(IReadOnlyList<AdapterTelemetryDto> telemetry)
+    private void UpdateTelemetry(EngineTelemetryDto telemetry)
     {
-        var byName = telemetry.ToDictionary(
+        var elapsedSeconds = _previousTelemetryAt is null
+            ? 0
+            : Math.Max(
+                (telemetry.SampledAt - _previousTelemetryAt.Value).TotalSeconds,
+                0);
+        var byName = telemetry.Adapters.ToDictionary(
             item => item.Name,
             StringComparer.OrdinalIgnoreCase);
         foreach (var adapter in Adapters)
         {
             if (byName.TryGetValue(adapter.Name, out var item))
             {
+                if (elapsedSeconds > 0
+                    && _previousAdapterTotals.TryGetValue(
+                        adapter.Name,
+                        out var previous))
+                {
+                    adapter.DownloadRate =
+                        Math.Max(item.BytesDown - previous.Down, 0)
+                        / elapsedSeconds;
+                    adapter.UploadRate =
+                        Math.Max(item.BytesUp - previous.Up, 0)
+                        / elapsedSeconds;
+                }
+                else
+                {
+                    adapter.DownloadRate = 0;
+                    adapter.UploadRate = 0;
+                }
+
                 adapter.Connections = item.Connections;
                 adapter.BytesUp = item.BytesUp;
                 adapter.BytesDown = item.BytesDown;
                 adapter.HealthState = item.HealthState;
+                _previousAdapterTotals[adapter.Name] =
+                    (item.BytesDown, item.BytesUp);
             }
             else
             {
                 adapter.Connections = 0;
                 adapter.BytesUp = 0;
                 adapter.BytesDown = 0;
+                adapter.DownloadRate = 0;
+                adapter.UploadRate = 0;
                 adapter.HealthState = "idle";
             }
         }
+
+        var downRate = elapsedSeconds > 0
+            ? Math.Max(telemetry.Total.BytesDown - _previousTotalDown, 0)
+                / elapsedSeconds
+            : 0;
+        var upRate = elapsedSeconds > 0
+            ? Math.Max(telemetry.Total.BytesUp - _previousTotalUp, 0)
+                / elapsedSeconds
+            : 0;
+        DownloadRateText = FormatRate(downRate);
+        UploadRateText = FormatRate(upRate);
+        SessionDataText = FormatBytes(
+            telemetry.Total.BytesDown + telemetry.Total.BytesUp);
+        TotalConnections = telemetry.Total.Connections;
+        _previousTelemetryAt = telemetry.SampledAt;
+        _previousTotalDown = telemetry.Total.BytesDown;
+        _previousTotalUp = telemetry.Total.BytesUp;
     }
 
     private void ClearTelemetry()
@@ -926,8 +1048,19 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             adapter.Connections = 0;
             adapter.BytesUp = 0;
             adapter.BytesDown = 0;
+            adapter.DownloadRate = 0;
+            adapter.UploadRate = 0;
             adapter.HealthState = "idle";
         }
+
+        DownloadRateText = "0.00 MB/s";
+        UploadRateText = "0.00 MB/s";
+        SessionDataText = "0.00 MB";
+        TotalConnections = 0;
+        _previousTelemetryAt = null;
+        _previousTotalDown = 0;
+        _previousTotalUp = 0;
+        _previousAdapterTotals.Clear();
     }
 
     private void AppendLog(string message)
@@ -947,6 +1080,8 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         StartCommand.NotifyCanExecuteChanged();
         StopCommand.NotifyCanExecuteChanged();
         RescanAdaptersCommand.NotifyCanExecuteChanged();
+        SelectAllAdaptersCommand.NotifyCanExecuteChanged();
+        ClearAdapterSelectionCommand.NotifyCanExecuteChanged();
     }
 
     private static T? Deserialize<T>(JsonElement element)
@@ -976,6 +1111,18 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             ? $"{(int)duration.TotalHours}h {duration.Minutes}m"
             : $"{duration.Minutes}m {duration.Seconds}s";
     }
+
+    private static string FormatRate(double bytesPerSecond) =>
+        bytesPerSecond >= 1024 * 1024
+            ? $"{bytesPerSecond / (1024 * 1024):0.00} MB/s"
+            : bytesPerSecond >= 1024
+                ? $"{bytesPerSecond / 1024:0.0} KB/s"
+                : $"{bytesPerSecond:0} B/s";
+
+    private static string FormatBytes(long bytes) =>
+        bytes >= 1024L * 1024 * 1024
+            ? $"{bytes / (1024d * 1024 * 1024):0.00} GB"
+            : $"{bytes / (1024d * 1024):0.00} MB";
 
     public async ValueTask DisposeAsync()
     {

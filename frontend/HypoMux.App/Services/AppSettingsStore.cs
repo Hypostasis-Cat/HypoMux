@@ -12,6 +12,7 @@ public sealed record AppSettings(
     bool StrictRoute = true,
     bool CloseToTray = true,
     IReadOnlyList<string>? SelectedAdapterIds = null,
+    IReadOnlyDictionary<string, int>? AdapterWeights = null,
     IReadOnlyList<RoutingRuleSetting>? RoutingRules = null);
 
 public sealed record RoutingRuleSetting(
