@@ -36,10 +36,6 @@ func (s *Server) handleSOCKS(reader *bufio.Reader, client net.Conn, session *con
 	if _, err := io.ReadFull(reader, request); err != nil || request[0] != 5 {
 		return nil
 	}
-	if request[1] != 1 {
-		writeSOCKSReply(client, 7)
-		return nil
-	}
 	host, ok := readSOCKSHost(reader, request[3])
 	if !ok {
 		writeSOCKSReply(client, 8)
@@ -49,7 +45,23 @@ func (s *Server) handleSOCKS(reader *bufio.Reader, client net.Conn, session *con
 	if _, err := io.ReadFull(reader, portBytes); err != nil {
 		return nil
 	}
-	target := net.JoinHostPort(host, strconv.Itoa(int(binary.BigEndian.Uint16(portBytes))))
+	port := int(binary.BigEndian.Uint16(portBytes))
+	if request[1] == 3 {
+		if session.channel == "" {
+			writeSOCKSReply(client, 7)
+			return nil
+		}
+		started, err := s.handleUDPAssociation(reader, client, session, host, port)
+		if err != nil && !started {
+			writeSOCKSReply(client, 1)
+		}
+		return nil
+	}
+	if request[1] != 1 {
+		writeSOCKSReply(client, 7)
+		return nil
+	}
+	target := net.JoinHostPort(host, strconv.Itoa(port))
 	upstream, adapter, err := s.connect(session, target)
 	if err != nil {
 		writeSOCKSReply(client, 5)

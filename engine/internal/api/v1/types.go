@@ -53,18 +53,19 @@ func Capabilities() []string {
 }
 
 type HelloResult struct {
-	Engine          string    `json:"engine"`
-	EngineVersion   string    `json:"engine_version"`
-	Commit          string    `json:"commit"`
-	ProtocolVersion int       `json:"protocol_version"`
-	Transport       string    `json:"transport"`
-	Capabilities    []string  `json:"capabilities"`
-	Modes           []string  `json:"modes"`
-	OS              string    `json:"os"`
-	Arch            string    `json:"arch"`
-	PID             int       `json:"pid"`
-	Elevated        bool      `json:"elevated"`
-	StartedAt       time.Time `json:"started_at"`
+	Engine          string              `json:"engine"`
+	EngineVersion   string              `json:"engine_version"`
+	Commit          string              `json:"commit"`
+	ProtocolVersion int                 `json:"protocol_version"`
+	Transport       string              `json:"transport"`
+	Capabilities    []string            `json:"capabilities"`
+	Modes           []string            `json:"modes"`
+	ModeFeatures    map[string][]string `json:"mode_features"`
+	OS              string              `json:"os"`
+	Arch            string              `json:"arch"`
+	PID             int                 `json:"pid"`
+	Elevated        bool                `json:"elevated"`
+	StartedAt       time.Time           `json:"started_at"`
 }
 
 func NewHelloResult(
@@ -83,11 +84,15 @@ func NewHelloResult(
 		Transport:       protocol.Transport,
 		Capabilities:    Capabilities(),
 		Modes:           []string{"proxy", "tun_tcp_pool"},
-		OS:              runtime.GOOS,
-		Arch:            runtime.GOARCH,
-		PID:             pid,
-		Elevated:        elevated,
-		StartedAt:       startedAt,
+		ModeFeatures: map[string][]string{
+			"proxy":        {"socks5_connect", "http_connect", "source_bound_dns"},
+			"tun_tcp_pool": {"tcp_connect", "udp_associate"},
+		},
+		OS:        runtime.GOOS,
+		Arch:      runtime.GOARCH,
+		PID:       pid,
+		Elevated:  elevated,
+		StartedAt: startedAt,
 	}
 }
 

@@ -38,6 +38,17 @@
           "proxy",
           "tun_tcp_pool"
         ],
+        "mode_features": {
+          "proxy": [
+            "socks5_connect",
+            "http_connect",
+            "source_bound_dns"
+          ],
+          "tun_tcp_pool": [
+            "tcp_connect",
+            "udp_associate"
+          ]
+        },
         "os": "windows",
         "arch": "amd64",
         "pid": 4321,
@@ -379,6 +390,47 @@
         "domain": "example.com",
         "adapter": "Ethernet",
         "record_type": "A"
+      }
+    }
+  },
+  {
+    "name": "tun_udp_telemetry_response",
+    "kind": "response",
+    "method": "engine.telemetry",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-tun-udp-telemetry",
+      "result": {
+        "started_at": "2026-07-30T02:10:01Z",
+        "sampled_at": "2026-07-30T02:10:05Z",
+        "adapters": [
+          {
+            "name": "Wi-Fi",
+            "source_ip": "192.0.2.20",
+            "if_index": 12,
+            "connections": 1,
+            "bytes_up": 1200,
+            "bytes_down": 2400
+          }
+        ],
+        "active_connections": [
+          {
+            "id": 7,
+            "protocol": "socks5_udp",
+            "channel": "nic_wifi",
+            "client": "127.0.0.1:53000",
+            "target": "203.0.113.53:443",
+            "adapter": "Wi-Fi",
+            "started_at": "2026-07-30T02:10:02Z",
+            "bytes_up": 1200,
+            "bytes_down": 2400
+          }
+        ],
+        "total": {
+          "connections": 1,
+          "bytes_up": 1200,
+          "bytes_down": 2400
+        }
       }
     }
   },

@@ -1,6 +1,6 @@
 # TUN multi-port TCP pool migration
 
-Status: Phase 6 implementation plan
+Status: Phase 6 implemented; UDP ownership continues in Phase 7
 
 ## Scope
 
@@ -20,7 +20,7 @@ independent component first, so enabling it cannot silently discard UDP.
 | FakeIP and TUN DNS | sing-box, using the existing verified DNS plan |
 | Three loopback TCP SOCKS listeners | Go engine |
 | TCP source/interface binding and failover | Go engine |
-| UDP ASSOCIATE and QUIC | Python until Phase 7 |
+| UDP ASSOCIATE and QUIC | Go engine beginning with Phase 7 |
 | UI lifecycle and rollback coordinator | current Qt UI; future WPF client uses the same DTOs |
 
 sing-box resolves domain names before sending TUN TCP traffic to the local
@@ -92,9 +92,10 @@ idempotent.
 
 This phase deliberately does not add a UI switch that routes live TUN traffic
 through the TCP-only pool. It would either break QUIC or require two local
-pools and protocol-specific route duplication. Phase 7 will add source-bound
-SOCKS5 UDP to the same channel endpoints; only then may the Qt development
-flag select the Go TUN pool end to end.
+pools and protocol-specific route duplication. Phase 7 adds source-bound
+SOCKS5 UDP to the same channel endpoints. A later orchestration slice may
+select the Go TUN pool end to end only after it also preserves DNS preflight
+and transactional rollback.
 
 The ordinary proxy development flag and the production Python TUN path are
 unchanged.
@@ -106,8 +107,9 @@ unchanged.
 - A channel cannot select an adapter outside its declared subset.
 - SOCKS CONNECT relays through a real channel endpoint and records the
   channel plus the selected physical adapter.
-- Domain, IPv6, UDP ASSOCIATE, unknown channel adapter, and invalid listener
-  configurations fail explicitly.
+- Domain, IPv6, unknown channel adapter, and invalid listener configurations
+  fail explicitly. The original Phase 6 TCP-only UDP rejection is superseded
+  by the Phase 7 UDP contract.
 - Stop closes handshake-only and active relay clients within the existing
   five-second engine deadline.
 - `engine.hello`, `engine.start`, `engine.status`, and canonical fixtures

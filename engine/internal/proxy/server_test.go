@@ -131,6 +131,43 @@ func TestStopClosesHandshakeOnlyClients(t *testing.T) {
 	}
 }
 
+func TestOrdinaryProxyStillRejectsUDPAssociate(t *testing.T) {
+	server, err := New(Config{
+		SOCKSPort: 0,
+		HTTPPort:  0,
+		Adapters: []Adapter{{
+			Name:     "loopback",
+			SourceIP: "127.0.0.1",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoints, err := server.Start()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stopServer(t, server)
+	client, err := net.DialTimeout("tcp", endpoints.SOCKS, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	_ = client.SetDeadline(time.Now().Add(time.Second))
+	_, _ = client.Write([]byte{5, 1, 0})
+	if _, err := io.ReadFull(client, make([]byte, 2)); err != nil {
+		t.Fatal(err)
+	}
+	_, _ = client.Write([]byte{5, 3, 0, 1, 0, 0, 0, 0, 0, 0})
+	reply := make([]byte, 10)
+	if _, err := io.ReadFull(client, reply); err != nil {
+		t.Fatal(err)
+	}
+	if reply[1] != 7 {
+		t.Fatalf("ordinary proxy UDP reply = %d, want command unsupported", reply[1])
+	}
+}
+
 func TestTUNTCPPoolRelaysWithinChannelAndReportsTelemetry(t *testing.T) {
 	echoAddress, stopEcho := startEchoServer(t)
 	defer stopEcho()
@@ -249,7 +286,7 @@ func TestTUNTCPPoolStartupRollsBackEarlierListeners(t *testing.T) {
 	}
 }
 
-func TestTUNTCPPoolRejectsDomainIPv6AndUDP(t *testing.T) {
+func TestTUNTCPPoolRejectsDomainAndIPv6(t *testing.T) {
 	server, err := New(Config{
 		Adapters: []Adapter{{Name: "loopback", SourceIP: "127.0.0.1"}},
 		Channels: []Channel{
@@ -288,13 +325,6 @@ func TestTUNTCPPoolRejectsDomainIPv6AndUDP(t *testing.T) {
 			addressType: 4,
 			address:     net.ParseIP("2001:db8::1").To16(),
 			wantReply:   5,
-		},
-		{
-			name:        "UDP ASSOCIATE",
-			command:     3,
-			addressType: 1,
-			address:     []byte{0, 0, 0, 0},
-			wantReply:   7,
 		},
 	}
 	for _, test := range tests {

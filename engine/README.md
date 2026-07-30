@@ -3,8 +3,8 @@
 This directory is the migration boundary between the desktop UI and the
 network engine. The executable provides a versioned IPC contract, owns the
 production source-bound ICMP diagnostic, and contains the staged SOCKS5/HTTP
-TCP proxy with source-bound DNS/DoH plus the staged TUN multi-port TCP pool.
-UDP and routing ownership remain incremental.
+TCP proxy with source-bound DNS/DoH plus the staged TUN multi-port TCP/UDP
+pool. Routing and TUN lifecycle ownership remain incremental.
 
 See [MIGRATION.md](MIGRATION.md) for the staged migration plan and the mapping
 from current Qt signals to transport-independent engine events.
@@ -72,7 +72,7 @@ Protocol-v1 methods:
 - `engine.hello`: negotiate the protocol and inspect capabilities.
 - `engine.status`: read the canonical engine lifecycle state.
 - `engine.start`: start either the ordinary SOCKS5/HTTP TCP proxy or the
-  named-channel TUN TCP pool with explicit adapters, source IPv4 addresses,
+  named-channel TUN TCP/UDP pool with explicit adapters, source IPv4 addresses,
   ports, and scheduling weights.
 - `engine.stop`: close listeners and cancel all accepted and relayed
   connections with a bounded shutdown.
@@ -89,9 +89,10 @@ Protocol-v1 methods:
 
 Reserved lifecycle states are `stopped`, `starting`, `running`, `degraded`,
 `stopping`, and `failed`. `engine.hello.modes` advertises `proxy` and
-`tun_tcp_pool`. The TUN pool mode owns only literal-IPv4 SOCKS CONNECT
-listeners; live TUN activation, UDP, WFP, and routing remain unavailable until
-their source validation and orchestration contracts are implemented.
+`tun_tcp_pool`. `engine.hello.mode_features` reports the exact transports
+available in each mode. The TUN pool owns literal-IPv4 SOCKS CONNECT and
+source-validated UDP ASSOCIATE; live TUN activation, WFP, and routing remain
+unavailable until their orchestration contracts are implemented.
 
 Ordinary proxy domain targets are resolved by the Go engine before the
 adapter-bound TCP dial. `auto` races the built-in DoH endpoints and uses only
@@ -144,9 +145,9 @@ python main.py
 ```
 
 This flag also starts the persistent host. TUN mode continues to use the
-Python `MultiPortProxyWorker` and `TunManager`; the TCP-only Go TUN pool is
-currently exercised through protocol and integration tests, not by the live
-UI switch.
+Python `MultiPortProxyWorker` and `TunManager`; the Go TUN pool is currently
+exercised through protocol and TCP/UDP integration tests, not by the live UI
+switch.
 
 Unset both variables to return to the normal production path:
 

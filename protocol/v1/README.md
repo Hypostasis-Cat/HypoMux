@@ -21,5 +21,7 @@ byte counters are non-negative integers. Clients must use `engine.hello`
 capabilities instead of assuming every v1 engine implements every method.
 
 `engine.hello.modes` currently advertises `proxy` and `tun_tcp_pool`. The
-latter is a TCP-only named-channel local SOCKS pool; live TUN activation
-remains gated until the UDP migration slice is complete.
+latter is a named-channel local SOCKS pool. Clients must inspect the additive
+`engine.hello.mode_features` map before assuming a mode supports a particular
+transport. The current TUN pool reports `tcp_connect` and `udp_associate`.
+Live TUN activation remains gated on the later orchestration slice.

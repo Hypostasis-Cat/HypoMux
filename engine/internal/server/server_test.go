@@ -48,6 +48,14 @@ func TestServerHandshakeStatusAndShutdown(t *testing.T) {
 	if !ok || len(modes) != 2 || modes[1] != "tun_tcp_pool" {
 		t.Fatalf("hello modes = %#v", helloResult["modes"])
 	}
+	features, ok := helloResult["mode_features"].(map[string]any)
+	if !ok {
+		t.Fatalf("hello mode_features = %#v", helloResult["mode_features"])
+	}
+	tunFeatures, ok := features["tun_tcp_pool"].([]any)
+	if !ok || len(tunFeatures) != 2 || tunFeatures[1] != "udp_associate" {
+		t.Fatalf("TUN mode features = %#v", features["tun_tcp_pool"])
+	}
 
 	healthResult := resultObject(t, messages[1])
 	if healthResult["ok"] != true {

@@ -15,13 +15,18 @@ import (
 )
 
 type Server struct {
-	config     Config
-	scheduler  *scheduler
-	schedulers map[string]*scheduler
-	registry   *registry
-	resolver   *dns.Resolver
-	dialTCP    func(context.Context, *net.Dialer, string) (net.Conn, error)
-	listenTCP  func(string, string) (net.Listener, error)
+	config           Config
+	scheduler        *scheduler
+	schedulers       map[string]*scheduler
+	registry         *registry
+	resolver         *dns.Resolver
+	dialTCP          func(context.Context, *net.Dialer, string) (net.Conn, error)
+	dialUDP          func(context.Context, *net.Dialer, string) (net.Conn, error)
+	listenTCP        func(string, string) (net.Listener, error)
+	listenUDP        func(string, *net.UDPAddr) (*net.UDPConn, error)
+	udpFlowLimit     int
+	udpIdleTimeout   time.Duration
+	udpSweepInterval time.Duration
 
 	mu                 sync.RWMutex
 	ctx                context.Context
@@ -58,6 +63,17 @@ func New(config Config) (*Server, error) {
 		return dialer.DialContext(ctx, "tcp4", target)
 	}
 	server.listenTCP = net.Listen
+	server.dialUDP = func(
+		ctx context.Context,
+		dialer *net.Dialer,
+		target string,
+	) (net.Conn, error) {
+		return dialer.DialContext(ctx, "udp4", target)
+	}
+	server.listenUDP = net.ListenUDP
+	server.udpFlowLimit = defaultUDPFlowLimit
+	server.udpIdleTimeout = defaultUDPFlowIdleTimeout
+	server.udpSweepInterval = defaultUDPFlowSweepInterval
 	return server, nil
 }
 

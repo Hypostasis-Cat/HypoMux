@@ -90,11 +90,24 @@ func newRegistry(adapters []Adapter) *registry {
 }
 
 func (r *registry) Begin(protocol string, channel string, client net.Conn) *connection {
+	clientAddress := ""
+	if address := client.RemoteAddr(); address != nil {
+		clientAddress = address.String()
+	}
+	return r.BeginAddress(protocol, channel, clientAddress, client)
+}
+
+func (r *registry) BeginAddress(
+	protocol string,
+	channel string,
+	clientAddress string,
+	client net.Conn,
+) *connection {
 	session := &connection{
 		id:         r.nextID.Add(1),
 		protocol:   protocol,
 		channel:    channel,
-		client:     client.RemoteAddr().String(),
+		client:     clientAddress,
 		startedAt:  time.Now().UTC(),
 		clientConn: client,
 	}

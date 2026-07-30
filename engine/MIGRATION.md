@@ -211,13 +211,39 @@ Exit criteria:
 The detailed ownership, lifecycle, and activation rules are documented in
 [TUN multi-port TCP pool migration](../docs/architecture/tun-tcp-pool-migration.md).
 
+## Phase 7: source-bound SOCKS5 UDP and QUIC
+
+Goal: complete the Go TUN pool data plane with persistent, source-validated
+UDP flows while preserving QUIC five-tuple stability.
+
+Deliverables:
+
+- Loopback-only UDP ASSOCIATE relays scoped to their TCP control connection.
+- First-client endpoint locking and rejection of other local UDP sources.
+- Persistent per-destination physical sockets bound to the selected adapter.
+- Bounded flow count, 120-second idle expiry, and deterministic teardown.
+- UDP flow adapter/channel/byte telemetry.
+- `mode_features` capability negotiation for TCP and UDP support.
+- Explicit rejection of fragmented, domain, IPv6, malformed, and empty TUN
+  datagrams until their dedicated slices.
+
+Exit criteria:
+
+- Real UDP echo integration proves request/reply relay and stable physical
+  flow reuse.
+- Tests cover source validation, channel isolation, packet validation, flow
+  limits, expiry, TCP-control close, and engine shutdown.
+- Production Python TUN and sing-box DNS behavior remains unchanged.
+
+The detailed invariants are documented in
+[TUN SOCKS5 UDP and QUIC migration](../docs/architecture/tun-udp-migration.md).
+
 ## Later migration slices
 
-1. SOCKS5 UDP with source validation on the Phase 6 channel endpoints.
-2. IPv4/IPv6 dual-stack behavior.
-3. Continuous adapter health and domain-aware scheduling.
-4. TUN/sing-box and WFP orchestration.
-5. Make the Go engine the default for all network behavior after shadow-mode
+1. IPv4/IPv6 dual-stack behavior.
+2. Continuous adapter health and domain-aware scheduling.
+3. TUN/sing-box and WFP orchestration.
+4. Make the Go engine the default for all network behavior after shadow-mode
    and rollback testing.
 
 Each slice keeps a Python fallback until its unit, integration, and Windows
