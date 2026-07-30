@@ -21,6 +21,7 @@ from engine_client import (
     EngineTimeoutError,
     development_engine_enabled,
     go_proxy_development_enabled,
+    go_tun_development_enabled,
     resolve_development_engine_command,
 )
 from engine_client.process import start_engine_process
@@ -245,9 +246,12 @@ class DevelopmentSelectionTests(unittest.TestCase):
         self.assertFalse(development_engine_enabled({}))
         self.assertTrue(development_engine_enabled({"HYPOMUX_GO_ENGINE_DEV": "true"}))
         self.assertTrue(development_engine_enabled({"HYPOMUX_GO_PROXY_DEV": "1"}))
+        self.assertTrue(development_engine_enabled({"HYPOMUX_GO_TUN_DEV": "on"}))
         self.assertFalse(development_engine_enabled({"HYPOMUX_GO_ENGINE_DEV": "0"}))
         self.assertFalse(go_proxy_development_enabled({}))
         self.assertTrue(go_proxy_development_enabled({"HYPOMUX_GO_PROXY_DEV": "yes"}))
+        self.assertFalse(go_tun_development_enabled({}))
+        self.assertTrue(go_tun_development_enabled({"HYPOMUX_GO_TUN_DEV": "yes"}))
 
     def test_configured_engine_path_must_exist(self):
         with tempfile.TemporaryDirectory() as directory:

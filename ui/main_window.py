@@ -46,6 +46,7 @@ from utils.update_checker import UpdateError, launch_installer_after_exit
 from engine_client import (
     development_engine_enabled,
     go_proxy_development_enabled,
+    go_tun_development_enabled,
     resolve_development_engine_command,
 )
 
@@ -221,6 +222,7 @@ def create_main_window():
     from ui.components import refresh_content_card_material, set_content_card_opacity
     from ui.engine_bridge import EngineBridge
     from ui.go_proxy_worker import GoProxyWorker
+    from ui.go_tun_pool_worker import GoTunPoolWorker, can_use_go_tun_pool
 
     class BlockedDomainsWindow(FluentWidget):
         """单网卡被墙域名的独立云母窗口。"""
@@ -851,7 +853,8 @@ def create_main_window():
                 f"version={hello.get('engine_version', 'unknown')}，"
                 f"pid={hello.get('pid', 'unknown')}，"
                 f"protocol={hello.get('protocol_version', 'unknown')}。"
-                "设置 HYPOMUX_GO_PROXY_DEV=1 后，普通代理模式可切换到 Go TCP 引擎。",
+                "设置 HYPOMUX_GO_PROXY_DEV=1 可切换普通代理；"
+                "设置 HYPOMUX_GO_TUN_DEV=1 可切换 TUN TCP/UDP 出站池。",
                 force=True,
             )
 
@@ -2067,21 +2070,45 @@ def create_main_window():
             self._launch_tun_pool(selected_nics)
 
         def _launch_tun_pool(self, selected: list):
-            """通过后台路由预检后，再启动 Python 出站池。"""
+            """通过后台路由预检后，再启动可用的 TUN 出站池。"""
             if not self._tun_starting or self._shutdown_started:
                 return
-            # 1) 先拉起 Python 多端口出站池（默认 2001/2002/2003；冲突时自动换端口）
+            # 1) 先拉起多端口出站池（默认 2001/2002/2003；冲突时自动换端口）
             try:
                 use_weighted = self.home_page.is_weighted_scheduler()
                 bw_limits = self.home_page.get_schedule_weights() if use_weighted else None
-                self._pool_worker = MultiPortProxyWorker(
+                go_tun_requested = go_tun_development_enabled()
+                use_go_tun = (
+                    go_tun_requested
+                    and can_use_go_tun_pool(self._go_engine_bridge)
+                )
+                common_args = dict(
                     selected_nics=selected,
                     use_weighted=use_weighted,
                     bandwidth_limits=bw_limits,
                     allow_degraded_start=self._force_tun_connectivity_bypass_enabled(),
-                    resolve_socks_domains=False,
                     parent=self,
                 )
+                if use_go_tun:
+                    self._pool_worker = GoTunPoolWorker(
+                        bridge=self._go_engine_bridge,
+                        **common_args,
+                    )
+                    self.append_log(
+                        "[GoEngine][TUN] 已选择 Go TCP/UDP 出站池；"
+                        "sing-box 仍负责 DNS、TUN 与 WFP。",
+                        force=True,
+                    )
+                else:
+                    if go_tun_requested:
+                        self.append_log(
+                            "[GoEngine][TUN] 引擎能力不完整，已回退到 Python 出站池。",
+                            force=True,
+                        )
+                    self._pool_worker = MultiPortProxyWorker(
+                        resolve_socks_domains=False,
+                        **common_args,
+                    )
                 self._pool_worker.set_dns_servers([self._app_config.get("dns_server", "223.5.5.5")])
                 self._pool_worker.set_doh_provider(self._app_config.get("doh_provider", "auto"))
                 self._pool_worker.set_dns_mode_override(self._tun_dns_mode_override)
@@ -2111,10 +2138,7 @@ def create_main_window():
 
         def _on_tun_pool_started(self, info: str):
             sender = self.sender()
-            if (
-                isinstance(sender, MultiPortProxyWorker)
-                and sender is not self._pool_worker
-            ):
+            if sender is not None and sender is not self._pool_worker:
                 return
             if not self._tun_starting or self._pool_worker is None:
                 return
@@ -2125,16 +2149,22 @@ def create_main_window():
                 "tun_outbound_pool", "started", endpoints=info,
                 dns_mode=self._tun_dns_mode,
             )
+            pool_owner = (
+                "Go"
+                if isinstance(self._pool_worker, GoTunPoolWorker)
+                else "Python"
+            )
             if self._tun_dns_mode == MultiPortProxyWorker.DNS_MODE_LEGACY_COMPAT:
                 self.append_log(
                     "[TUN][DNS] 传统 DNS 已移入 sing-box；"
                     f"strict_route={'开启' if self._wfp_strict_route_enabled() else '关闭'}，"
-                    "Python 出站池不再发送 DNS。",
+                    f"{pool_owner} 出站池不再发送 DNS。",
                     force=True,
                 )
             else:
                 self.append_log(
-                    "[TUN][DNS] DoH 已移入 sing-box；Python 出站池仅接收解析后的 IP。",
+                    f"[TUN][DNS] DoH 已移入 sing-box；"
+                    f"{pool_owner} 出站池仅接收解析后的 IP。",
                     force=True,
                 )
             self.home_page.set_engine_startup_status(tr("tun_starting"))
@@ -2179,10 +2209,7 @@ def create_main_window():
         def _on_tun_dns_compatibility_required(self, reason: str):
             """Retry exactly once without strict_route after persistent DoH loss."""
             sender = self.sender()
-            if (
-                isinstance(sender, MultiPortProxyWorker)
-                and sender is not self._pool_worker
-            ):
+            if sender is not None and sender is not self._pool_worker:
                 return
             if (
                 not self._tun_active
@@ -2326,10 +2353,7 @@ def create_main_window():
 
         def _on_tun_pool_error(self, message: str):
             sender = self.sender()
-            if (
-                isinstance(sender, MultiPortProxyWorker)
-                and sender is not self._pool_worker
-            ):
+            if sender is not None and sender is not self._pool_worker:
                 return
             if not self._tun_starting and not self._tun_active:
                 return
@@ -2387,10 +2411,7 @@ def create_main_window():
         @Slot(str)
         def _on_tun_pool_connectivity(self, detail: str):
             sender = self.sender()
-            if (
-                isinstance(sender, MultiPortProxyWorker)
-                and sender is not self._pool_worker
-            ):
+            if sender is not None and sender is not self._pool_worker:
                 return
             self._tun_last_connectivity_at = time.monotonic()
             if self._tun_starting and self._tun_active and self._tun_kernel_ready:
@@ -2430,12 +2451,9 @@ def create_main_window():
 
         @Slot(str)
         def _on_tun_pool_stopped(self, message: str):
-            """Rollback TUN when its sole Python egress pool vanishes silently."""
+            """Rollback TUN when its sole egress pool vanishes silently."""
             sender = self.sender()
-            if (
-                isinstance(sender, MultiPortProxyWorker)
-                and sender is not self._pool_worker
-            ):
+            if sender is not None and sender is not self._pool_worker:
                 return
             if not self._tun_starting and not self._tun_active:
                 return
@@ -2705,7 +2723,7 @@ def create_main_window():
                 except Exception:
                     pass
                 self._retire_tun_thread(manager, self._retired_tun_managers)
-            # 2) 关 Python 出站池
+            # 2) 关闭当前 Python 或 Go 出站池
             self._teardown_pool()
             self._tun_active = False
             self._tun_starting = False

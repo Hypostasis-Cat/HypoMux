@@ -9,6 +9,7 @@ from typing import Mapping
 
 DEVELOPMENT_FLAG = "HYPOMUX_GO_ENGINE_DEV"
 PROXY_DEVELOPMENT_FLAG = "HYPOMUX_GO_PROXY_DEV"
+TUN_DEVELOPMENT_FLAG = "HYPOMUX_GO_TUN_DEV"
 ENGINE_PATH_VARIABLE = "HYPOMUX_ENGINE_PATH"
 
 
@@ -16,7 +17,7 @@ def development_engine_enabled(environment: Mapping[str, str] | None = None) -> 
     env = os.environ if environment is None else environment
     return _enabled(env.get(DEVELOPMENT_FLAG)) or _enabled(
         env.get(PROXY_DEVELOPMENT_FLAG)
-    )
+    ) or _enabled(env.get(TUN_DEVELOPMENT_FLAG))
 
 
 def go_proxy_development_enabled(
@@ -24,6 +25,13 @@ def go_proxy_development_enabled(
 ) -> bool:
     env = os.environ if environment is None else environment
     return _enabled(env.get(PROXY_DEVELOPMENT_FLAG))
+
+
+def go_tun_development_enabled(
+    environment: Mapping[str, str] | None = None,
+) -> bool:
+    env = os.environ if environment is None else environment
+    return _enabled(env.get(TUN_DEVELOPMENT_FLAG))
 
 
 def _enabled(value: object) -> bool:

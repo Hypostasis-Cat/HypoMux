@@ -238,11 +238,42 @@ Exit criteria:
 The detailed invariants are documented in
 [TUN SOCKS5 UDP and QUIC migration](../docs/architecture/tun-udp-migration.md).
 
+## Phase 8: development TUN orchestration
+
+Goal: connect the completed Go TCP/UDP pool to the real Qt/sing-box TUN
+transaction without changing the production default.
+
+Deliverables:
+
+- Environment-only `HYPOMUX_GO_TUN_DEV` selection with mode/feature
+  negotiation and pre-acquisition Python fallback.
+- A DNS-planner facade that preserves the verified sing-box DNS plan without
+  opening Python SOCKS listeners.
+- A Qt-compatible Go TUN worker exposing actual channel ports, DNS state,
+  telemetry, connectivity evidence, and bounded lifecycle methods.
+- Existing sing-box configuration, WFP compatibility restart, connectivity
+  validation, and full rollback paths reused for both pool implementations.
+- Explicit engine-state cleanup after partial Go startup failure.
+
+Exit criteria:
+
+- Tests cover selection, DNS-plan handoff, channel DTOs, stop, failure, and
+  telemetry behavior.
+- The Go path can be activated only when TCP and UDP TUN features are both
+  advertised.
+- Without the flag, Python TUN behavior is unchanged.
+- No failure can leave sing-box active without a pool or the Go engine
+  running after TUN rollback.
+
+The transaction and ownership rules are documented in
+[TUN orchestration migration](../docs/architecture/tun-orchestration-migration.md).
+
 ## Later migration slices
 
 1. IPv4/IPv6 dual-stack behavior.
 2. Continuous adapter health and domain-aware scheduling.
-3. TUN/sing-box and WFP orchestration.
+3. Move sing-box/WFP lifecycle ownership after development orchestration
+   shadow testing.
 4. Make the Go engine the default for all network behavior after shadow-mode
    and rollback testing.
 

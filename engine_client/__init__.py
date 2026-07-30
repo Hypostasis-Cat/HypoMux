@@ -4,6 +4,7 @@ from .client import EngineClient
 from .development import (
     development_engine_enabled,
     go_proxy_development_enabled,
+    go_tun_development_enabled,
     resolve_development_engine_command,
 )
 from .exceptions import (
@@ -25,5 +26,6 @@ __all__ = [
     "EngineTimeoutError",
     "development_engine_enabled",
     "go_proxy_development_enabled",
+    "go_tun_development_enabled",
     "resolve_development_engine_command",
 ]

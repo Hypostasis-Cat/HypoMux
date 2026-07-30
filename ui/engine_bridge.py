@@ -69,6 +69,17 @@ class EngineBridge(QObject):
         capabilities = hello.get("capabilities")
         return isinstance(capabilities, list) and method in capabilities
 
+    def supports_mode_feature(self, mode: str, feature: str) -> bool:
+        hello = self._client.hello or {}
+        modes = hello.get("modes")
+        features = hello.get("mode_features")
+        if not isinstance(modes, list) or mode not in modes:
+            return False
+        if not isinstance(features, dict):
+            return False
+        mode_features = features.get(mode)
+        return isinstance(mode_features, list) and feature in mode_features
+
     def request(self, method: str, params: Any = None, *, timeout: float | None = None):
         """Send an engine request from a non-UI worker thread."""
         return self._client.request(method, params, timeout=timeout)

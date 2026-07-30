@@ -145,14 +145,24 @@ python main.py
 ```
 
 This flag also starts the persistent host. TUN mode continues to use the
-Python `MultiPortProxyWorker` and `TunManager`; the Go TUN pool is currently
-exercised through protocol and TCP/UDP integration tests, not by the live UI
-switch.
+Python `MultiPortProxyWorker` and `TunManager` by default. To route the live
+TUN TCP/UDP outbound pool through Go while keeping sing-box DNS/TUN/WFP
+ownership and the pre-acquisition Python fallback:
 
-Unset both variables to return to the normal production path:
+```powershell
+$env:HYPOMUX_GO_TUN_DEV = "1"
+$env:HYPOMUX_ENGINE_PATH = "$PWD\dist\hypomux-engine.exe"
+python main.py
+```
+
+The TUN switch is accepted only when protocol negotiation reports
+`tun_tcp_pool` with both `tcp_connect` and `udp_associate`.
+
+Unset the variables to return to the normal production path:
 
 ```powershell
 Remove-Item Env:HYPOMUX_GO_ENGINE_DEV -ErrorAction SilentlyContinue
 Remove-Item Env:HYPOMUX_GO_PROXY_DEV -ErrorAction SilentlyContinue
+Remove-Item Env:HYPOMUX_GO_TUN_DEV -ErrorAction SilentlyContinue
 Remove-Item Env:HYPOMUX_ENGINE_PATH -ErrorAction SilentlyContinue
 ```

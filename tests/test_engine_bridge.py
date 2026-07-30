@@ -33,6 +33,11 @@ for line in sys.stdin:
                     "health.check",
                     "host.shutdown",
                 ],
+                "modes": ["proxy", "tun_tcp_pool"],
+                "mode_features": {
+                    "proxy": ["tcp_connect"],
+                    "tun_tcp_pool": ["tcp_connect", "udp_associate"],
+                },
             },
         })
     elif request["method"] == "host.shutdown":
@@ -96,6 +101,8 @@ def test_qt_bridge_connects_without_blocking_and_stops_the_host():
     assert connected[0]["engine"] == "bridge-test"
     assert not errors
     assert bridge.is_running()
+    assert bridge.supports_mode_feature("tun_tcp_pool", "udp_associate")
+    assert not bridge.supports_mode_feature("proxy", "udp_associate")
 
     bridge.stop()
     assert _process_events_until(lambda: bool(disconnected))
