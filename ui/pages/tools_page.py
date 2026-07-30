@@ -6,7 +6,7 @@ HypoMux 网络体检页 (ToolsPage)
 - 任务2：标题与体检按钮下方并入网卡选择 FlowLayout 卡片，
   其勾选状态与首页 HomePage 双向实时同步（经 MainWindow 信号中转）。
 
-无缝接入第二阶段的 Rust 异步诊断内核 diagnostic.exe：
+接入 Go 引擎的异步网络诊断命令：
 - PrimaryPushButton 触发体检，IndeterminateProgressRing 指示运行态
 - 每张网卡一张静态 Fluent 结果卡：三色 InfoBadge + 丢包/延迟/抖动
 

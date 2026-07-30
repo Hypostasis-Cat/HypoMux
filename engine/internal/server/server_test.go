@@ -13,6 +13,7 @@ func TestServerHandshakeStatusAndShutdown(t *testing.T) {
 		`{"protocol":1,"id":"hello-1","method":"engine.hello"}`,
 		`{"protocol":1,"id":"health-1","method":"health.check"}`,
 		`{"protocol":1,"id":"status-1","method":"engine.status"}`,
+		`{"protocol":1,"id":"diagnostic-1","method":"diagnostic.run","params":{"src_ip":"invalid"}}`,
 		`{"protocol":1,"id":"missing-1","method":"engine.missing"}`,
 		`{"protocol":1,"id":"shutdown-1","method":"host.shutdown"}`,
 	}, "\n")
@@ -29,8 +30,8 @@ func TestServerHandshakeStatusAndShutdown(t *testing.T) {
 	}
 
 	messages := decodeMessages(t, output.String())
-	if len(messages) != 6 {
-		t.Fatalf("message count = %d, want 6\n%s", len(messages), output.String())
+	if len(messages) != 7 {
+		t.Fatalf("message count = %d, want 7\n%s", len(messages), output.String())
 	}
 
 	helloResult := resultObject(t, messages[0])
@@ -61,20 +62,25 @@ func TestServerHandshakeStatusAndShutdown(t *testing.T) {
 		t.Fatalf("status state = %#v", engineStatus["state"])
 	}
 
-	errorObject, ok := messages[3]["error"].(map[string]any)
-	if !ok || errorObject["code"] != "method_not_found" {
-		t.Fatalf("unknown method error = %#v", messages[3]["error"])
+	diagnosticResult := resultObject(t, messages[3])
+	if diagnosticResult["status"] != "unavailable" || diagnosticResult["note"] != "invalid --src-ip" {
+		t.Fatalf("diagnostic result = %#v", diagnosticResult)
 	}
 
-	shutdownResult := resultObject(t, messages[4])
+	errorObject, ok := messages[4]["error"].(map[string]any)
+	if !ok || errorObject["code"] != "method_not_found" {
+		t.Fatalf("unknown method error = %#v", messages[4]["error"])
+	}
+
+	shutdownResult := resultObject(t, messages[5])
 	if shutdownResult["accepted"] != true {
 		t.Fatalf("shutdown accepted = %#v", shutdownResult["accepted"])
 	}
-	if messages[5]["event"] != "host.exiting" {
-		t.Fatalf("shutdown event = %#v", messages[5]["event"])
+	if messages[6]["event"] != "host.exiting" {
+		t.Fatalf("shutdown event = %#v", messages[6]["event"])
 	}
-	if messages[5]["sequence"] != float64(1) {
-		t.Fatalf("shutdown event sequence = %#v", messages[5]["sequence"])
+	if messages[6]["sequence"] != float64(1) {
+		t.Fatalf("shutdown event sequence = %#v", messages[6]["sequence"])
 	}
 }
 

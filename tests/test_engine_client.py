@@ -263,7 +263,14 @@ class RealGoEngineIntegrationTests(unittest.TestCase):
             hello = client.start()
             self.assertEqual(hello["protocol_version"], 1)
             self.assertIn("engine.status", hello["capabilities"])
+            self.assertIn("diagnostic.run", hello["capabilities"])
             self.assertTrue(client.request("health.check")["ok"])
+            diagnostic = client.request(
+                "diagnostic.run",
+                {"src_ip": "invalid", "target_ip": "223.5.5.5"},
+            )
+            self.assertEqual(diagnostic["status"], "unavailable")
+            self.assertEqual(diagnostic["note"], "invalid --src-ip")
             self.assertEqual(
                 client.request("engine.status")["engine"]["state"],
                 "stopped",

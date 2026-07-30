@@ -225,7 +225,7 @@ I18N_MAP = {
 
         # === 网络体检页 ===
         "tools_title": "网卡链路体检",
-        "tools_hint": "调用 Rust 诊断内核，对选中网卡逐张发射 ICMP 探针，评估丢包与抖动，给出红/黄/绿三级链路质量。",
+        "tools_hint": "调用 Go 引擎，对选中网卡逐张发射源地址绑定的 ICMP 探针，评估丢包与抖动，给出红/黄/绿三级链路质量。",
         "tools_start": "开始网卡体检",
         "tools_running": "正在体检...",
         "tools_no_result": "尚未体检，点击上方按钮开始。",
@@ -565,7 +565,7 @@ I18N_MAP = {
 
         # === Diagnostics Page ===
         "tools_title": "Adapter Link Health Check",
-        "tools_hint": "Invoke the Rust diagnostic kernel to send ICMP probes per selected adapter, measuring loss and jitter for a red/yellow/green quality grade.",
+        "tools_hint": "Invoke the Go engine to send source-bound ICMP probes per selected adapter, measuring loss and jitter for a red/yellow/green quality grade.",
         "tools_start": "Start Health Check",
         "tools_running": "Checking...",
         "tools_no_result": "No results yet. Click the button above to start.",
@@ -631,7 +631,7 @@ I18N_MAP = {
         "settings_dns_invalid": "Invalid DNS address, enter a valid IPv4 address",
         "settings_dns_save_failed": "Failed to save DNS settings, check config file permissions",
         "settings_config_path": "Config file location",
-        "about_intro": "HypoMux is a multi-NIC dual-protocol traffic-splitting accelerator for Windows. It aggregates the bandwidth of multiple adapters (including PPPoE dial-up links) and ships a Rust diagnostic kernel that grades each link red/yellow/green.",
+        "about_intro": "HypoMux is a multi-NIC dual-protocol traffic-splitting accelerator for Windows. It aggregates the bandwidth of multiple adapters (including PPPoE dial-up links) and uses its Go engine to grade each link red/yellow/green.",
         "about_open_github": "GitHub",
         "about_check_update": "Check for Updates",
         "about_checking_update": "Checking…",

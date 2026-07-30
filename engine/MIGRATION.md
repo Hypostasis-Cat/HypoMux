@@ -85,6 +85,29 @@ Exit criteria:
 - The Go executable is not included in the production installer during this
   phase.
 
+## Phase 3: production diagnostic ownership
+
+Goal: replace the standalone Rust diagnostic with a signed Go engine while
+preserving the existing UI result contract.
+
+Deliverables:
+
+- Source-bound IPv4 ICMP probing through Windows `IcmpSendEcho2Ex`.
+- Shared diagnostic implementation for the one-shot `diagnose` command and
+  protocol-v1 `diagnostic.run`.
+- Python diagnostic runner switched to `hypomux-engine.exe diagnose`.
+- Go engine built, signed, and installed under `{app}\bin`.
+- Upgrade cleanup for the legacy root-level `diagnostic.exe`.
+- Rust/Cargo sources and the checked-in Rust executable removed.
+
+Exit criteria:
+
+- Diagnostic status thresholds and JSON fields remain compatible.
+- Go unit tests, Python runner tests, real-process tests, and build
+  configuration tests pass.
+- The production build and both SignPath modes sign `hypomux-engine.exe`.
+- A repository search finds no live Rust/Cargo build path.
+
 ## Later migration slices
 
 1. Connection ownership, counters, and telemetry.
@@ -92,9 +115,10 @@ Exit criteria:
 3. DNS resolution, DoH fallback, caching, and leak prevention.
 4. SOCKS5 UDP with source validation.
 5. IPv4/IPv6 dual-stack behavior.
-6. Adapter scheduling and health checks.
+6. Adapter scheduling and continuous health checks.
 7. TUN/sing-box and WFP orchestration.
-8. Make Go the default after shadow-mode and rollback testing.
+8. Make the Go engine the default for all network behavior after shadow-mode
+   and rollback testing.
 9. Connect the same protocol to the future WPF UI.
 
 Each slice keeps a Python fallback until its unit, integration, and Windows

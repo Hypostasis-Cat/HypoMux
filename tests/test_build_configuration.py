@@ -50,10 +50,18 @@ def test_go_workflow_runs_real_process_client_integration():
     assert "python -m compileall -q engine_client" in workflow
 
 
-def test_production_installer_does_not_ship_experimental_go_host():
+def test_production_build_and_installer_ship_the_go_engine():
+    workflow = _read(".github/workflows/build.yml").lower()
     setup_script = _read("setup.iss").lower()
 
-    assert "hypomux-engine.exe" not in setup_script
+    assert "actions/setup-go@v7" in workflow
+    assert "go -c engine build" in workflow
+    assert "path: hypomux-engine.exe" in workflow
+    assert "cargo" not in workflow
+    assert "hypomux-diagnostic" not in workflow
+    assert 'source: "hypomux-engine.exe"; destdir: "{app}\\bin"' in setup_script
+    assert 'name: "{app}\\diagnostic.exe"' in setup_script
+    assert 'source: "diagnostic.exe"' not in setup_script
 
 
 def test_go_sources_keep_gofmt_compatible_line_endings():

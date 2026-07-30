@@ -1,10 +1,9 @@
 # HypoMux Go Engine
 
 This directory is the migration boundary between the desktop UI and the
-network engine. Phase 1 does **not** replace the production Python engine.
-It provides a separately buildable process, a versioned IPC contract, and a
-tested lifecycle model so the current PySide6 UI and a future WPF UI can use
-the same engine API.
+network engine. The executable provides a versioned IPC contract and now owns
+the production source-bound ICMP diagnostic. The remaining proxy, TUN, DNS,
+and scheduling paths are still migrated incrementally.
 
 See [MIGRATION.md](MIGRATION.md) for the staged migration plan and the mapping
 from current Qt signals to transport-independent engine events.
@@ -19,9 +18,18 @@ go vet ./...
 go build -trimpath -o ..\dist\hypomux-engine.exe .\cmd\hypomux-engine
 ```
 
-The only non-standard dependency in phase 1 is the version-pinned
-`golang.org/x/sys/windows` package. It is currently used for a read-only
-process elevation check.
+The only non-standard dependency is the version-pinned
+`golang.org/x/sys/windows` package. It is used for Windows process identity
+and IP Helper API access.
+
+Run the production-compatible one-shot diagnostic:
+
+```powershell
+.\dist\hypomux-engine.exe diagnose --src-ip 192.168.1.100 --target-ip 223.5.5.5
+```
+
+The command emits one JSON object with the same status, loss, latency, jitter,
+and counter fields consumed by the desktop UI.
 
 ## Protocol v1
 
@@ -54,11 +62,13 @@ Event:
 {"protocol":1,"sequence":1,"event":"host.exiting","data":{"reason":"requested"}}
 ```
 
-Phase 1 methods:
+Protocol-v1 methods:
 
 - `engine.hello`: negotiate the protocol and inspect capabilities.
 - `engine.status`: read the canonical engine lifecycle state.
 - `health.check`: verify that the engine process and protocol loop respond.
+- `diagnostic.run`: run the same source-bound ICMP diagnostic exposed by the
+  one-shot `diagnose` command.
 - `host.shutdown`: acknowledge and gracefully stop the engine host process.
 
 Reserved lifecycle states are `stopped`, `starting`, `running`, `degraded`,
@@ -82,9 +92,9 @@ DNS fallback, routing rollback, or connection accounting. Those behaviors
 move behind this boundary in later phases. Until then, the current Python/Qt
 path remains the production default.
 
-## Phase 2 development connection
+## Development connection
 
-Build the host without adding it to the production installer:
+Build the host:
 
 ```powershell
 cd engine

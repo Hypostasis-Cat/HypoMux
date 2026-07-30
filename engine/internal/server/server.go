@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Hypostasis-Cat/HypoMux/engine/internal/diagnostic"
 	"github.com/Hypostasis-Cat/HypoMux/engine/internal/platform"
 	"github.com/Hypostasis-Cat/HypoMux/engine/internal/protocol"
 	engineRuntime "github.com/Hypostasis-Cat/HypoMux/engine/internal/runtime"
@@ -67,7 +68,7 @@ func (s *Server) Run(ctx context.Context) error {
 			continue
 		}
 
-		response, shutdown := s.handle(line)
+		response, shutdown := s.handle(ctx, line)
 		if err := s.encoder.Encode(response); err != nil {
 			return fmt.Errorf("write response: %w", err)
 		}
@@ -88,7 +89,7 @@ func (s *Server) Run(ctx context.Context) error {
 	return nil
 }
 
-func (s *Server) handle(line []byte) (protocol.Response, bool) {
+func (s *Server) handle(ctx context.Context, line []byte) (protocol.Response, bool) {
 	var request protocol.Request
 	decoder := json.NewDecoder(bytes.NewReader(line))
 	if err := decoder.Decode(&request); err != nil {
@@ -123,6 +124,25 @@ func (s *Server) handle(line []byte) (protocol.Response, bool) {
 			"state":          s.runtime.Snapshot().State,
 			"host_uptime_ms": s.uptimeMilliseconds(),
 		}), false
+	case "diagnostic.run":
+		var params struct {
+			SourceIP string `json:"src_ip"`
+			TargetIP string `json:"target_ip"`
+			Count    int    `json:"count"`
+			Timeout  int    `json:"timeout_ms"`
+		}
+		if len(request.Params) > 0 {
+			if err := json.Unmarshal(request.Params, &params); err != nil {
+				return protocol.Failure(request.ID, "invalid_params", "diagnostic params are not valid JSON", nil), false
+			}
+		}
+		result := diagnostic.Run(ctx, diagnostic.Config{
+			SourceIP: params.SourceIP,
+			TargetIP: params.TargetIP,
+			Count:    params.Count,
+			Timeout:  time.Duration(params.Timeout) * time.Millisecond,
+		})
+		return protocol.Result(request.ID, result), false
 	case "host.shutdown":
 		return protocol.Result(request.ID, map[string]any{"accepted": true}), true
 	default:
@@ -146,6 +166,7 @@ func (s *Server) hello() map[string]any {
 			"engine.hello",
 			"engine.status",
 			"health.check",
+			"diagnostic.run",
 			"host.shutdown",
 		},
 		"os":         runtime.GOOS,

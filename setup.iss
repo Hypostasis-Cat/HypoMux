@@ -71,13 +71,17 @@ Source: "dist\main.dist\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdir
 
   ; 2. support 运行时资源已由 Nuitka 复制进 dist\main.dist（包含二维码与 SignPath 致谢图标）。
 
-  ; 3. 释放同级诊断内核与 bin 目录下网络接管三大运行时资产
-Source: "diagnostic.exe"; DestDir: "{app}"; Flags: ignoreversion
+  ; 3. Go 引擎与 bin 目录下网络接管运行时资产
+Source: "hypomux-engine.exe"; DestDir: "{app}\bin"; Flags: ignoreversion
 Source: "bin\sing-box.exe"; DestDir: "{app}\bin"; Flags: ignoreversion
 Source: "bin\wintun.dll"; DestDir: "{app}\bin"; Flags: ignoreversion
 Source: "bin\libcronet.dll"; DestDir: "{app}\bin"; Flags: ignoreversion
 
 ; 4. 程序图标也在 support 中，由 Nuitka 一并复制到 {app}\support。
+
+[InstallDelete]
+; v2.2.0 以前的安装包把 Rust 诊断程序放在根目录；升级时主动清理。
+Type: files; Name: "{app}\diagnostic.exe"
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; AppUserModelID: "{#MyAppUserModelID}"

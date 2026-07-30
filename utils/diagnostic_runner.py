@@ -1,12 +1,11 @@
 """
 HypoMux 网卡诊断调用层 - diagnostic_runner
 
-【第二阶段 · 任务3 后端】异步呼叫 Rust 诊断内核 diagnostic.exe。
+异步调用 Go 引擎的网络诊断命令。
 
 职责：
-- 智能定位 diagnostic.exe（兼容源码运行与 Nuitka 打包：始终从「主程序所在目录」
-  按相对路径解析，安装后它与 HypoMux.exe 同级）。
-- 通过 asyncio.create_subprocess_exec 异步拉起内核，传入 --src-ip / --target-ip，
+- 智能定位 hypomux-engine.exe（兼容源码运行、开发构建与 Nuitka 安装目录）。
+- 通过 asyncio.create_subprocess_exec 异步拉起 ``diagnose`` 命令，传入 --src-ip / --target-ip，
   全程不阻塞调用方事件循环；隐藏子进程窗口。
 - 解析内核 stdout 的单行 JSON，规整为结构化 dict 返回。
 - 任何异常（exe 缺失 / 超时 / JSON 损坏）均优雅降级为 unavailable 结果，绝不抛出。
@@ -23,16 +22,17 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-DIAGNOSTIC_EXE_NAME = "diagnostic.exe"
+ENGINE_EXE_NAME = "hypomux-engine.exe"
+ENGINE_PATH_ENV = "HYPOMUX_ENGINE_PATH"
 DEFAULT_TARGET_IP = "223.5.5.5"   # 阿里云公共 DNS
 PROBE_TIMEOUT_SEC = 20            # 10 包 * 1s + 余量
 
 
 def _base_dir() -> str:
-    """返回主程序所在目录（diagnostic.exe 的预期位置）。
+    """返回主程序所在目录。
 
     - 打包态 (Nuitka/PyInstaller)：sys.frozen / __compiled__ 为真，
-      用 sys.executable 所在目录（diagnostic.exe 与 HypoMux.exe 同级）。
+      使用 sys.executable 所在目录（引擎位于它的 bin 子目录）。
     - 源码态：用本文件上溯到项目根目录（utils/ 的上一级）。
     """
     is_frozen = getattr(sys, "frozen", False) or ("__compiled__" in globals())
@@ -43,20 +43,33 @@ def _base_dir() -> str:
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-def get_diagnostic_path() -> Optional[str]:
-    """解析 diagnostic.exe 的绝对路径；找不到返回 None。
+def get_engine_path() -> Optional[str]:
+    """解析 hypomux-engine.exe 的绝对路径；找不到返回 None。
 
-    依次尝试：主程序目录、当前工作目录。
+    环境变量用于开发/测试覆盖；安装包使用 ``bin`` 子目录。
     """
+    configured = os.environ.get(ENGINE_PATH_ENV, "").strip()
+    base_dir = _base_dir()
+    current_dir = os.getcwd()
     candidates = [
-        os.path.join(_base_dir(), DIAGNOSTIC_EXE_NAME),
-        os.path.join(os.getcwd(), DIAGNOSTIC_EXE_NAME),
+        configured,
+        os.path.join(base_dir, "bin", ENGINE_EXE_NAME),
+        os.path.join(base_dir, ENGINE_EXE_NAME),
+        os.path.join(base_dir, "dist", ENGINE_EXE_NAME),
+        os.path.join(base_dir, "engine", ENGINE_EXE_NAME),
+        os.path.join(current_dir, "bin", ENGINE_EXE_NAME),
+        os.path.join(current_dir, ENGINE_EXE_NAME),
     ]
-    for path in candidates:
+    for path in dict.fromkeys(path for path in candidates if path):
         if os.path.isfile(path):
-            return path
-    logger.warning(f"未找到 {DIAGNOSTIC_EXE_NAME}，尝试过: {candidates}")
+            return os.path.abspath(path)
+    logger.warning(f"未找到 {ENGINE_EXE_NAME}，尝试过: {candidates}")
     return None
+
+
+def get_diagnostic_path() -> Optional[str]:
+    """兼容旧调用方；诊断程序现已合并到 Go 引擎。"""
+    return get_engine_path()
 
 
 def _fallback_result(src_ip: str, target_ip: str, note: str) -> Dict[str, Any]:
@@ -168,9 +181,9 @@ async def run_diagnostic(
     if not src_ip:
         return _fallback_result(src_ip, target_ip, "empty src_ip")
 
-    exe_path = get_diagnostic_path()
+    exe_path = get_engine_path()
     if not exe_path:
-        return _fallback_result(src_ip, target_ip, "diagnostic.exe not found")
+        return _fallback_result(src_ip, target_ip, "hypomux-engine.exe not found")
 
     # 隐藏子进程控制台窗口（Windows）
     creationflags = 0
@@ -180,6 +193,7 @@ async def run_diagnostic(
     try:
         proc = await asyncio.create_subprocess_exec(
             exe_path,
+            "diagnose",
             "--src-ip", src_ip,
             "--target-ip", target_ip,
             stdout=asyncio.subprocess.PIPE,
@@ -187,7 +201,7 @@ async def run_diagnostic(
             creationflags=creationflags,
         )
     except Exception as e:
-        logger.warning(f"启动 diagnostic.exe 失败: {e}")
+        logger.warning(f"启动 hypomux-engine.exe 失败: {e}")
         return _fallback_result(src_ip, target_ip, f"spawn failed: {e}")
 
     try:
@@ -197,10 +211,10 @@ async def run_diagnostic(
             proc.kill()
         except Exception:
             pass
-        logger.warning("diagnostic.exe 执行超时")
+        logger.warning("hypomux-engine.exe diagnose 执行超时")
         return _fallback_result(src_ip, target_ip, "timeout")
     except Exception as e:
-        logger.warning(f"diagnostic.exe 通信异常: {e}")
+        logger.warning(f"hypomux-engine.exe diagnose 通信异常: {e}")
         return _fallback_result(src_ip, target_ip, f"communicate failed: {e}")
 
     text = (stdout_data or b"").decode("utf-8", errors="replace").strip()
@@ -214,7 +228,7 @@ async def run_diagnostic(
     try:
         raw = json.loads(json_line)
     except json.JSONDecodeError as e:
-        logger.warning(f"解析 diagnostic.exe JSON 失败: {e} | 原始: {json_line[:200]}")
+        logger.warning(f"解析 Go 诊断 JSON 失败: {e} | 原始: {json_line[:200]}")
         return _fallback_result(src_ip, target_ip, "bad json")
 
     result = _normalize(raw, src_ip, target_ip)
