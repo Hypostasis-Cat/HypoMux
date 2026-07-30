@@ -33,6 +33,7 @@ type Server struct {
 	identity  platform.Identity
 	runtime   *engineRuntime.Runtime
 	proxy     *proxy.Server
+	mode      string
 	startedAt time.Time
 	started   time.Time
 	writeMu   sync.Mutex
@@ -184,6 +185,7 @@ func (s *Server) status() api.StatusResult {
 	}
 	if s.proxy != nil {
 		result.Proxy = &api.ProxyStatus{
+			Mode:      s.mode,
 			Running:   s.proxy.Running(),
 			Endpoints: s.proxy.Endpoints(),
 			Telemetry: s.proxy.Snapshot(false),
@@ -206,15 +208,35 @@ func (s *Server) startProxy(request protocol.Request) protocol.Response {
 	if err := json.Unmarshal(request.Params, &params); err != nil {
 		return protocol.Failure(request.ID, "invalid_params", "engine start params are not valid JSON", nil)
 	}
-	if params.Mode != "" && params.Mode != "proxy" {
+	mode := params.Mode
+	if mode == "" {
+		mode = "proxy"
+	}
+	if mode != "proxy" && mode != "tun_tcp_pool" {
 		return protocol.Failure(
 			request.ID,
 			"unsupported_mode",
-			"only proxy mode is available in this migration phase",
+			"unsupported engine mode",
 			map[string]any{"mode": params.Mode},
 		)
 	}
-	if _, err := s.runtime.Transition(engineRuntime.StateStarting, "proxy start requested"); err != nil {
+	if mode == "proxy" && len(params.Channels) != 0 {
+		return protocol.Failure(
+			request.ID,
+			"invalid_params",
+			"proxy mode cannot configure TUN channels",
+			nil,
+		)
+	}
+	if mode == "tun_tcp_pool" && len(params.Channels) == 0 {
+		return protocol.Failure(
+			request.ID,
+			"invalid_params",
+			"tun_tcp_pool mode requires channels",
+			nil,
+		)
+	}
+	if _, err := s.runtime.Transition(engineRuntime.StateStarting, mode+" start requested"); err != nil {
 		return protocol.Failure(request.ID, "invalid_state", err.Error(), nil)
 	}
 	proxyServer, err := proxy.New(params.ProxyConfig())
@@ -224,9 +246,11 @@ func (s *Server) startProxy(request protocol.Request) protocol.Response {
 		endpoints, err = proxyServer.Start()
 		if err == nil {
 			s.proxy = proxyServer
-			_, _ = s.runtime.Transition(engineRuntime.StateRunning, "proxy listeners ready")
+			s.mode = mode
+			_, _ = s.runtime.Transition(engineRuntime.StateRunning, mode+" listeners ready")
 			return protocol.Result(request.ID, api.EngineStartResult{
 				State:     s.runtime.Snapshot(),
+				Mode:      mode,
 				Endpoints: endpoints,
 			})
 		}
@@ -250,6 +274,7 @@ func (s *Server) stopProxy(requestID string) protocol.Response {
 	}
 	if state == engineRuntime.StateFailed {
 		s.proxy = nil
+		s.mode = ""
 		_, _ = s.runtime.Transition(engineRuntime.StateStopped, "failed proxy cleared")
 		return protocol.Result(requestID, api.EngineStopResult{
 			Accepted: true,
@@ -280,6 +305,7 @@ func (s *Server) stopProxy(requestID string) protocol.Response {
 		}
 	}
 	s.proxy = nil
+	s.mode = ""
 	_, _ = s.runtime.Transition(engineRuntime.StateStopped, "proxy stopped")
 	return protocol.Result(requestID, api.EngineStopResult{
 		Accepted: true,
@@ -304,6 +330,14 @@ func (s *Server) resolveDNS(ctx context.Context, request protocol.Request) proto
 	if s.proxy == nil || !s.proxy.Running() {
 		return protocol.Failure(request.ID, "invalid_state", "proxy engine is not running", nil)
 	}
+	if s.mode != "proxy" {
+		return protocol.Failure(
+			request.ID,
+			"invalid_state",
+			"DNS methods are unavailable in tun_tcp_pool mode",
+			nil,
+		)
+	}
 	var params api.DNSResolveParams
 	if err := json.Unmarshal(request.Params, &params); err != nil {
 		return protocol.Failure(request.ID, "invalid_params", "DNS params are not valid JSON", nil)
@@ -323,6 +357,14 @@ func (s *Server) resolveDNS(ctx context.Context, request protocol.Request) proto
 func (s *Server) dnsStatus(requestID string) protocol.Response {
 	if s.proxy == nil {
 		return protocol.Failure(requestID, "invalid_state", "proxy engine is not running", nil)
+	}
+	if s.mode != "proxy" {
+		return protocol.Failure(
+			requestID,
+			"invalid_state",
+			"DNS methods are unavailable in tun_tcp_pool mode",
+			nil,
+		)
 	}
 	status, ok := s.proxy.DNSStatus()
 	if !ok {
@@ -347,6 +389,7 @@ func (s *Server) stopProxyForHostExit() {
 	_ = s.proxy.Stop(ctx)
 	cancel()
 	s.proxy = nil
+	s.mode = ""
 	state := s.runtime.Snapshot().State
 	if state == engineRuntime.StateRunning || state == engineRuntime.StateDegraded {
 		_, _ = s.runtime.Transition(engineRuntime.StateStopping, "host exiting")

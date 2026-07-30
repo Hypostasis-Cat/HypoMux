@@ -180,14 +180,44 @@ Exit criteria:
 The detailed invariants and contract are documented in
 [DNS/DoH engine migration](../docs/architecture/dns-engine-migration.md).
 
+## Phase 6: TUN multi-port TCP outbound pool
+
+Goal: move the independently testable TCP half of the TUN local SOCKS pool
+onto the shared Go transport without breaking the still-Python UDP/QUIC path.
+
+Deliverables:
+
+- `tun_tcp_pool` engine mode with three named, loopback-only SOCKS listeners.
+- Per-channel adapter subsets and isolated round-robin/weighted schedulers.
+- Atomic multi-listener startup, preferred-port fallback, and actual endpoint
+  reporting.
+- Literal-IPv4-only TUN CONNECT handling so sing-box remains the sole TUN DNS
+  owner.
+- Channel identity in connection telemetry and toolkit-independent protocol
+  DTOs for the future WPF client.
+- Explicitly unchanged production TUN activation until source-bound UDP is
+  implemented.
+
+Exit criteria:
+
+- Channel isolation, collision fallback, atomic rollback, TCP relay,
+  telemetry, unsupported command/address rejection, and bounded stop are
+  covered by Go integration tests.
+- Protocol contract fixtures describe both ordinary proxy and TUN TCP pool
+  modes.
+- With no development flags, current Python TUN, UDP, DNS, sing-box and WFP
+  behavior is unchanged.
+
+The detailed ownership, lifecycle, and activation rules are documented in
+[TUN multi-port TCP pool migration](../docs/architecture/tun-tcp-pool-migration.md).
+
 ## Later migration slices
 
-1. Move the TUN multi-port TCP outbound pool onto the shared Go transport.
-2. SOCKS5 UDP with source validation.
-3. IPv4/IPv6 dual-stack behavior.
-4. Continuous adapter health and domain-aware scheduling.
-5. TUN/sing-box and WFP orchestration.
-6. Make the Go engine the default for all network behavior after shadow-mode
+1. SOCKS5 UDP with source validation on the Phase 6 channel endpoints.
+2. IPv4/IPv6 dual-stack behavior.
+3. Continuous adapter health and domain-aware scheduling.
+4. TUN/sing-box and WFP orchestration.
+5. Make the Go engine the default for all network behavior after shadow-mode
    and rollback testing.
 
 Each slice keeps a Python fallback until its unit, integration, and Windows

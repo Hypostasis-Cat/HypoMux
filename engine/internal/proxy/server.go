@@ -15,11 +15,13 @@ import (
 )
 
 type Server struct {
-	config    Config
-	scheduler *scheduler
-	registry  *registry
-	resolver  *dns.Resolver
-	dialTCP   func(context.Context, *net.Dialer, string) (net.Conn, error)
+	config     Config
+	scheduler  *scheduler
+	schedulers map[string]*scheduler
+	registry   *registry
+	resolver   *dns.Resolver
+	dialTCP    func(context.Context, *net.Dialer, string) (net.Conn, error)
+	listenTCP  func(string, string) (net.Listener, error)
 
 	mu                 sync.RWMutex
 	ctx                context.Context
@@ -37,9 +39,16 @@ func New(config Config) (*Server, error) {
 		return nil, err
 	}
 	server := &Server{
-		config:    normalized,
-		scheduler: newScheduler(normalized.Adapters, normalized.Weighted),
-		registry:  newRegistry(normalized.Adapters),
+		config:     normalized,
+		scheduler:  newScheduler(normalized.Adapters, normalized.Weighted),
+		schedulers: make(map[string]*scheduler, len(normalized.Channels)),
+		registry:   newRegistry(normalized.Adapters),
+	}
+	for _, channel := range normalized.Channels {
+		server.schedulers[channel.Name] = newScheduler(
+			adaptersForChannel(normalized.Adapters, channel),
+			normalized.Weighted,
+		)
 	}
 	server.dialTCP = func(
 		ctx context.Context,
@@ -48,6 +57,7 @@ func New(config Config) (*Server, error) {
 	) (net.Conn, error) {
 		return dialer.DialContext(ctx, "tcp4", target)
 	}
+	server.listenTCP = net.Listen
 	return server, nil
 }
 
@@ -59,21 +69,26 @@ func (s *Server) Start() (Endpoints, error) {
 	}
 
 	s.ctx, s.cancel = context.WithCancel(context.Background())
-	resolver, err := dns.New(s.ctx, s.config.DNS, s.dialDNS)
-	if err != nil {
-		s.cancel()
-		return Endpoints{}, fmt.Errorf("create DNS resolver: %w", err)
+	if len(s.config.Channels) == 0 {
+		resolver, err := dns.New(s.ctx, s.config.DNS, s.dialDNS)
+		if err != nil {
+			s.cancel()
+			return Endpoints{}, fmt.Errorf("create DNS resolver: %w", err)
+		}
+		resolver.SetFallbackHandler(s.dnsFallbackHandler)
+		s.resolver = resolver
 	}
-	resolver.SetFallbackHandler(s.dnsFallbackHandler)
-	s.resolver = resolver
 
-	socks, err := net.Listen("tcp4", listenAddress(s.config.ListenHost, s.config.SOCKSPort))
+	if len(s.config.Channels) > 0 {
+		return s.startChannelListeners()
+	}
+	socks, err := s.listenTCP("tcp4", listenAddress(s.config.ListenHost, s.config.SOCKSPort))
 	if err != nil {
 		s.cancel()
 		s.resolver = nil
 		return Endpoints{}, fmt.Errorf("listen SOCKS: %w", err)
 	}
-	httpListener, err := net.Listen("tcp4", listenAddress(s.config.ListenHost, s.config.HTTPPort))
+	httpListener, err := s.listenTCP("tcp4", listenAddress(s.config.ListenHost, s.config.HTTPPort))
 	if err != nil {
 		_ = socks.Close()
 		s.cancel()
@@ -87,8 +102,40 @@ func (s *Server) Start() (Endpoints, error) {
 	}
 	s.running = true
 	s.wg.Add(2)
-	go s.acceptLoop(socks, "socks5")
-	go s.acceptLoop(httpListener, "http")
+	go s.acceptLoop(socks, "socks5", "")
+	go s.acceptLoop(httpListener, "http", "")
+	return s.endpoints, nil
+}
+
+func (s *Server) startChannelListeners() (Endpoints, error) {
+	listeners := make([]net.Listener, 0, len(s.config.Channels))
+	endpoints := make(map[string]string, len(s.config.Channels))
+	for _, channel := range s.config.Channels {
+		listener, err := s.listenTCP(
+			"tcp4",
+			listenAddress(s.config.ListenHost, channel.Port),
+		)
+		if err != nil && channel.Port != 0 {
+			listener, err = s.listenTCP("tcp4", listenAddress(s.config.ListenHost, 0))
+		}
+		if err != nil {
+			for _, opened := range listeners {
+				_ = opened.Close()
+			}
+			s.cancel()
+			return Endpoints{}, fmt.Errorf("listen channel %q: %w", channel.Name, err)
+		}
+		listeners = append(listeners, listener)
+		endpoints[channel.Name] = listener.Addr().String()
+	}
+	s.listeners = listeners
+	s.endpoints = Endpoints{Channels: endpoints}
+	s.running = true
+	for index, listener := range listeners {
+		channel := s.config.Channels[index].Name
+		s.wg.Add(1)
+		go s.acceptLoop(listener, "socks5", channel)
+	}
 	return s.endpoints, nil
 }
 
@@ -217,7 +264,7 @@ func (s *Server) dialDNS(
 	return dialer.DialContext(ctx, network, address)
 }
 
-func (s *Server) acceptLoop(listener net.Listener, protocol string) {
+func (s *Server) acceptLoop(listener net.Listener, protocol string, channel string) {
 	defer s.wg.Done()
 	for {
 		client, err := listener.Accept()
@@ -239,7 +286,7 @@ func (s *Server) acceptLoop(listener net.Listener, protocol string) {
 			_ = client.Close()
 			return
 		}
-		session := s.registry.Begin(protocol, client)
+		session := s.registry.Begin(protocol, channel, client)
 		s.wg.Add(1)
 		s.mu.RUnlock()
 		go s.handleClient(protocol, client, session)
@@ -264,7 +311,21 @@ func (s *Server) handleClient(protocol string, client net.Conn, session *connect
 func (s *Server) connect(session *connection, target string) (net.Conn, Adapter, error) {
 	ctx, cancel := context.WithTimeout(s.ctx, s.config.ConnectTimeout)
 	defer cancel()
-	upstream, adapter, err := s.dialUpstream(ctx, target)
+	channelScheduler := s.scheduler
+	literalIPv4Only := false
+	if session.channel != "" {
+		channelScheduler = s.schedulers[session.channel]
+		literalIPv4Only = true
+	}
+	if channelScheduler == nil {
+		return nil, Adapter{}, fmt.Errorf("unknown channel %q", session.channel)
+	}
+	upstream, adapter, err := s.dialUpstream(
+		ctx,
+		target,
+		channelScheduler,
+		literalIPv4Only,
+	)
 	if err != nil {
 		return nil, Adapter{}, err
 	}

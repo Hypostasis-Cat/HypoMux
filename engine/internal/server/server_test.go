@@ -44,6 +44,10 @@ func TestServerHandshakeStatusAndShutdown(t *testing.T) {
 	if helloResult["engine_version"] != "test" {
 		t.Fatalf("hello engine_version = %#v", helloResult["engine_version"])
 	}
+	modes, ok := helloResult["modes"].([]any)
+	if !ok || len(modes) != 2 || modes[1] != "tun_tcp_pool" {
+		t.Fatalf("hello modes = %#v", helloResult["modes"])
+	}
 
 	healthResult := resultObject(t, messages[1])
 	if healthResult["ok"] != true {
@@ -204,6 +208,40 @@ func TestServerReportsDNSStatusAndStructuredResolutionFailure(t *testing.T) {
 	errorObject, ok := messages[3]["error"].(map[string]any)
 	if !ok || errorObject["code"] != "dns_failed" {
 		t.Fatalf("DNS failure = %#v", messages[3])
+	}
+}
+
+func TestServerStartsAndReportsTUNTCPPoolMode(t *testing.T) {
+	input := strings.Join([]string{
+		`{"protocol":1,"id":"start-1","method":"engine.start","params":{"mode":"tun_tcp_pool","adapters":[{"name":"loopback","source_ip":"127.0.0.1"}],"channels":[{"name":"nic_ethernet","port":0,"adapter_names":["loopback"]},{"name":"nic_wifi","port":0,"adapter_names":["loopback"]},{"name":"aggregation","port":0,"adapter_names":["loopback"]}]}}`,
+		`{"protocol":1,"id":"status-1","method":"engine.status"}`,
+		`{"protocol":1,"id":"dns-status-1","method":"dns.status"}`,
+		`{"protocol":1,"id":"stop-1","method":"engine.stop"}`,
+		`{"protocol":1,"id":"shutdown-1","method":"host.shutdown"}`,
+	}, "\n")
+	var output bytes.Buffer
+
+	if err := New(strings.NewReader(input), &output, Metadata{}).Run(context.Background()); err != nil {
+		t.Fatalf("Run() failed: %v", err)
+	}
+	messages := decodeMessages(t, output.String())
+	start := resultObject(t, messages[0])
+	if start["mode"] != "tun_tcp_pool" {
+		t.Fatalf("start mode = %#v", start["mode"])
+	}
+	endpoints := start["endpoints"].(map[string]any)
+	channels, ok := endpoints["channels"].(map[string]any)
+	if !ok || len(channels) != 3 {
+		t.Fatalf("channel endpoints = %#v", endpoints["channels"])
+	}
+	status := resultObject(t, messages[2])
+	pool := status["proxy"].(map[string]any)
+	if pool["mode"] != "tun_tcp_pool" {
+		t.Fatalf("status mode = %#v", pool["mode"])
+	}
+	dnsError, ok := messages[3]["error"].(map[string]any)
+	if !ok || dnsError["code"] != "invalid_state" {
+		t.Fatalf("TUN DNS status unexpectedly available: %#v", messages[3])
 	}
 }
 

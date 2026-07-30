@@ -19,3 +19,7 @@ changing lifecycle ordering requires a newly negotiated protocol version.
 Timestamps are UTC RFC 3339 values. Durations are integer milliseconds and
 byte counters are non-negative integers. Clients must use `engine.hello`
 capabilities instead of assuming every v1 engine implements every method.
+
+`engine.hello.modes` currently advertises `proxy` and `tun_tcp_pool`. The
+latter is a TCP-only named-channel local SOCKS pool; live TUN activation
+remains gated until the UDP migration slice is complete.

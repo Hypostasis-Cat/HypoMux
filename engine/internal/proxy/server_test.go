@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/binary"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -127,6 +128,199 @@ func TestStopClosesHandshakeOnlyClients(t *testing.T) {
 	_ = client.SetReadDeadline(time.Now().Add(time.Second))
 	if _, err := client.Read(make([]byte, 1)); err == nil {
 		t.Fatal("client remained open after stop")
+	}
+}
+
+func TestTUNTCPPoolRelaysWithinChannelAndReportsTelemetry(t *testing.T) {
+	echoAddress, stopEcho := startEchoServer(t)
+	defer stopEcho()
+	server, err := New(Config{
+		Adapters: []Adapter{
+			{Name: "wired", SourceIP: "127.0.0.1"},
+			{Name: "wireless", SourceIP: "127.0.0.2"},
+		},
+		Channels: []Channel{
+			{Name: "nic_ethernet", AdapterNames: []string{"wired"}},
+			{Name: "nic_wifi", AdapterNames: []string{"wireless"}},
+			{
+				Name:         "aggregation",
+				AdapterNames: []string{"wired", "wireless"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoints, err := server.Start()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stopServer(t, server)
+	if len(endpoints.Channels) != 3 {
+		t.Fatalf("channel endpoints = %#v", endpoints.Channels)
+	}
+
+	client := dialSOCKSIPv4(t, endpoints.Channels["nic_ethernet"], echoAddress, 1)
+	defer client.Close()
+	assertEcho(t, client, []byte("tun-channel"))
+
+	snapshot := server.Snapshot(true)
+	if len(snapshot.Connections) != 1 {
+		t.Fatalf("connections = %#v", snapshot.Connections)
+	}
+	connection := snapshot.Connections[0]
+	if connection.Channel != "nic_ethernet" || connection.Adapter != "wired" {
+		t.Fatalf("channel selection escaped subset: %#v", connection)
+	}
+}
+
+func TestTUNTCPPoolPreferredPortCollisionFallsBack(t *testing.T) {
+	occupied, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer occupied.Close()
+	_, portText, _ := net.SplitHostPort(occupied.Addr().String())
+	port, _ := strconv.Atoi(portText)
+
+	server, err := New(Config{
+		Adapters: []Adapter{{Name: "loopback", SourceIP: "127.0.0.1"}},
+		Channels: []Channel{
+			{Name: ChannelEthernet, AdapterNames: []string{"loopback"}},
+			{Name: ChannelWiFi, AdapterNames: []string{"loopback"}},
+			{
+				Name:         ChannelAggregation,
+				Port:         port,
+				AdapterNames: []string{"loopback"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoints, err := server.Start()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stopServer(t, server)
+	if endpoints.Channels["aggregation"] == occupied.Addr().String() {
+		t.Fatalf("occupied preferred endpoint was reused: %s", occupied.Addr())
+	}
+}
+
+func TestTUNTCPPoolStartupRollsBackEarlierListeners(t *testing.T) {
+	server, err := New(Config{
+		Adapters: []Adapter{{Name: "loopback", SourceIP: "127.0.0.1"}},
+		Channels: []Channel{
+			{Name: ChannelEthernet, AdapterNames: []string{"loopback"}},
+			{Name: ChannelWiFi, Port: 2002, AdapterNames: []string{"loopback"}},
+			{Name: ChannelAggregation, Port: 2003, AdapterNames: []string{"loopback"}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var firstEndpoint string
+	attempts := 0
+	server.listenTCP = func(network string, address string) (net.Listener, error) {
+		attempts++
+		if attempts > 1 {
+			return nil, errors.New("injected listener failure")
+		}
+		listener, err := net.Listen(network, address)
+		if err == nil {
+			firstEndpoint = listener.Addr().String()
+		}
+		return listener, err
+	}
+	if _, err := server.Start(); err == nil {
+		t.Fatal("partial channel startup unexpectedly succeeded")
+	}
+	if firstEndpoint == "" {
+		t.Fatal("test did not create the first listener")
+	}
+	connection, dialErr := net.DialTimeout("tcp", firstEndpoint, 200*time.Millisecond)
+	if dialErr == nil {
+		_ = connection.Close()
+		t.Fatalf("rolled-back listener remained reachable at %s", firstEndpoint)
+	}
+	if server.Running() {
+		t.Fatal("server reports running after startup rollback")
+	}
+}
+
+func TestTUNTCPPoolRejectsDomainIPv6AndUDP(t *testing.T) {
+	server, err := New(Config{
+		Adapters: []Adapter{{Name: "loopback", SourceIP: "127.0.0.1"}},
+		Channels: []Channel{
+			{Name: ChannelEthernet, AdapterNames: []string{"loopback"}},
+			{Name: ChannelWiFi, AdapterNames: []string{"loopback"}},
+			{Name: ChannelAggregation, AdapterNames: []string{"loopback"}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoints, err := server.Start()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stopServer(t, server)
+	endpoint := endpoints.Channels["aggregation"]
+
+	tests := []struct {
+		name        string
+		command     byte
+		addressType byte
+		address     []byte
+		wantReply   byte
+	}{
+		{
+			name:        "domain",
+			command:     1,
+			addressType: 3,
+			address:     append([]byte{byte(len("example.com"))}, []byte("example.com")...),
+			wantReply:   5,
+		},
+		{
+			name:        "IPv6",
+			command:     1,
+			addressType: 4,
+			address:     net.ParseIP("2001:db8::1").To16(),
+			wantReply:   5,
+		},
+		{
+			name:        "UDP ASSOCIATE",
+			command:     3,
+			addressType: 1,
+			address:     []byte{0, 0, 0, 0},
+			wantReply:   7,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			client, err := net.DialTimeout("tcp", endpoint, time.Second)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer client.Close()
+			_ = client.SetDeadline(time.Now().Add(2 * time.Second))
+			_, _ = client.Write([]byte{5, 1, 0})
+			if _, err := io.ReadFull(client, make([]byte, 2)); err != nil {
+				t.Fatal(err)
+			}
+			request := []byte{5, test.command, 0, test.addressType}
+			request = append(request, test.address...)
+			request = binary.BigEndian.AppendUint16(request, 443)
+			_, _ = client.Write(request)
+			reply := make([]byte, 10)
+			if _, err := io.ReadFull(client, reply); err != nil {
+				t.Fatal(err)
+			}
+			if reply[1] != test.wantReply {
+				t.Fatalf("reply = %d, want %d", reply[1], test.wantReply)
+			}
+		})
 	}
 }
 
@@ -306,6 +500,39 @@ func assertEcho(t *testing.T, connection net.Conn, payload []byte) {
 	if string(reply) != string(payload) {
 		t.Fatalf("echo = %q, want %q", reply, payload)
 	}
+}
+
+func dialSOCKSIPv4(
+	t *testing.T,
+	endpoint string,
+	target string,
+	command byte,
+) net.Conn {
+	t.Helper()
+	host, portText, err := net.SplitHostPort(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, _ := strconv.Atoi(portText)
+	client, err := net.DialTimeout("tcp", endpoint, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = client.SetDeadline(time.Now().Add(3 * time.Second))
+	_, _ = client.Write([]byte{5, 1, 0})
+	if _, err := io.ReadFull(client, make([]byte, 2)); err != nil {
+		_ = client.Close()
+		t.Fatal(err)
+	}
+	request := append([]byte{5, command, 0, 1}, net.ParseIP(host).To4()...)
+	request = binary.BigEndian.AppendUint16(request, uint16(port))
+	_, _ = client.Write(request)
+	reply := make([]byte, 10)
+	if _, err := io.ReadFull(client, reply); err != nil || reply[1] != 0 {
+		_ = client.Close()
+		t.Fatalf("SOCKS reply = %v, %v", reply, err)
+	}
+	return client
 }
 
 func stopServer(t *testing.T, server *Server) {

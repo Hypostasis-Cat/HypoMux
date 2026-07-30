@@ -34,6 +34,10 @@
           "diagnostic.run",
           "host.shutdown"
         ],
+        "modes": [
+          "proxy",
+          "tun_tcp_pool"
+        ],
         "os": "windows",
         "arch": "amd64",
         "pid": 4321,
@@ -180,9 +184,89 @@
           "state_changed_at": "2026-07-30T02:00:01Z",
           "reason": "proxy listeners ready"
         },
+        "mode": "proxy",
         "endpoints": {
           "socks": "127.0.0.1:10800",
           "http": "127.0.0.1:10801"
+        }
+      }
+    }
+  },
+  {
+    "name": "tun_tcp_pool_start_request",
+    "kind": "request",
+    "method": "engine.start",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-tun-pool-start",
+      "method": "engine.start",
+      "params": {
+        "mode": "tun_tcp_pool",
+        "listen_host": "127.0.0.1",
+        "weighted": true,
+        "connect_timeout_ms": 6000,
+        "adapters": [
+          {
+            "name": "Ethernet",
+            "source_ip": "192.0.2.10",
+            "if_index": 11,
+            "weight": 2
+          },
+          {
+            "name": "Wi-Fi",
+            "source_ip": "192.0.2.20",
+            "if_index": 12,
+            "weight": 1
+          }
+        ],
+        "channels": [
+          {
+            "name": "nic_ethernet",
+            "port": 2001,
+            "adapter_names": [
+              "Ethernet"
+            ]
+          },
+          {
+            "name": "nic_wifi",
+            "port": 2002,
+            "adapter_names": [
+              "Wi-Fi"
+            ]
+          },
+          {
+            "name": "aggregation",
+            "port": 2003,
+            "adapter_names": [
+              "Ethernet",
+              "Wi-Fi"
+            ]
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "tun_tcp_pool_start_response",
+    "kind": "response",
+    "method": "engine.start",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-tun-pool-start",
+      "result": {
+        "state": {
+          "state": "running",
+          "sequence": 2,
+          "state_changed_at": "2026-07-30T02:00:01Z",
+          "reason": "tun_tcp_pool listeners ready"
+        },
+        "mode": "tun_tcp_pool",
+        "endpoints": {
+          "channels": {
+            "nic_ethernet": "127.0.0.1:2001",
+            "nic_wifi": "127.0.0.1:2002",
+            "aggregation": "127.0.0.1:2003"
+          }
         }
       }
     }

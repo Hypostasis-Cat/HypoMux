@@ -59,6 +59,7 @@ type HelloResult struct {
 	ProtocolVersion int       `json:"protocol_version"`
 	Transport       string    `json:"transport"`
 	Capabilities    []string  `json:"capabilities"`
+	Modes           []string  `json:"modes"`
 	OS              string    `json:"os"`
 	Arch            string    `json:"arch"`
 	PID             int       `json:"pid"`
@@ -81,6 +82,7 @@ func NewHelloResult(
 		ProtocolVersion: protocol.Version,
 		Transport:       protocol.Transport,
 		Capabilities:    Capabilities(),
+		Modes:           []string{"proxy", "tun_tcp_pool"},
 		OS:              runtime.GOOS,
 		Arch:            runtime.GOARCH,
 		PID:             pid,
@@ -102,6 +104,7 @@ type StatusResult struct {
 }
 
 type ProxyStatus struct {
+	Mode      string                  `json:"mode"`
 	Running   bool                    `json:"running"`
 	Endpoints proxy.Endpoints         `json:"endpoints"`
 	Telemetry proxy.TelemetrySnapshot `json:"telemetry"`
@@ -130,6 +133,7 @@ type EngineStartParams struct {
 	HTTPPort         int             `json:"http_port"`
 	Weighted         bool            `json:"weighted"`
 	Adapters         []proxy.Adapter `json:"adapters"`
+	Channels         []proxy.Channel `json:"channels,omitempty"`
 	ConnectTimeoutMS int             `json:"connect_timeout_ms"`
 	DNS              DNSStartConfig  `json:"dns"`
 }
@@ -157,6 +161,7 @@ func (p EngineStartParams) ProxyConfig() proxy.Config {
 		HTTPPort:       p.HTTPPort,
 		Weighted:       p.Weighted,
 		Adapters:       p.Adapters,
+		Channels:       p.Channels,
 		ConnectTimeout: time.Duration(p.ConnectTimeoutMS) * time.Millisecond,
 		DNS:            p.DNS.ResolverConfig(),
 	}
@@ -164,6 +169,7 @@ func (p EngineStartParams) ProxyConfig() proxy.Config {
 
 type EngineStartResult struct {
 	State     engineRuntime.Snapshot `json:"state"`
+	Mode      string                 `json:"mode"`
 	Endpoints proxy.Endpoints        `json:"endpoints"`
 }
 

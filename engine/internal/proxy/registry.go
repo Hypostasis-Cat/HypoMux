@@ -21,6 +21,7 @@ type AdapterTelemetry struct {
 type ConnectionSnapshot struct {
 	ID        uint64    `json:"id"`
 	Protocol  string    `json:"protocol"`
+	Channel   string    `json:"channel,omitempty"`
 	Client    string    `json:"client"`
 	Target    string    `json:"target,omitempty"`
 	Adapter   string    `json:"adapter,omitempty"`
@@ -52,6 +53,7 @@ type adapterCounters struct {
 type connection struct {
 	id         uint64
 	protocol   string
+	channel    string
 	client     string
 	startedAt  time.Time
 	clientConn net.Conn
@@ -87,10 +89,11 @@ func newRegistry(adapters []Adapter) *registry {
 	return result
 }
 
-func (r *registry) Begin(protocol string, client net.Conn) *connection {
+func (r *registry) Begin(protocol string, channel string, client net.Conn) *connection {
 	session := &connection{
 		id:         r.nextID.Add(1),
 		protocol:   protocol,
+		channel:    channel,
 		client:     client.RemoteAddr().String(),
 		startedAt:  time.Now().UTC(),
 		clientConn: client,
@@ -206,6 +209,7 @@ func (r *registry) Snapshot(includeConnections bool) TelemetrySnapshot {
 		item := ConnectionSnapshot{
 			ID:        session.id,
 			Protocol:  session.protocol,
+			Channel:   session.channel,
 			Client:    session.client,
 			Target:    session.target,
 			Adapter:   session.adapter,

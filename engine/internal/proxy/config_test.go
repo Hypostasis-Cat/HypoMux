@@ -42,6 +42,62 @@ func TestNormalizeConfigValidatesMigrationBoundary(t *testing.T) {
 	}
 }
 
+func TestNormalizeConfigValidatesTUNChannelBoundary(t *testing.T) {
+	config, err := normalizeConfig(Config{
+		Adapters: []Adapter{
+			{Name: "Ethernet", SourceIP: "127.0.0.1"},
+			{Name: "Wi-Fi", SourceIP: "127.0.0.2"},
+		},
+		Channels: []Channel{
+			{Name: "nic_ethernet", Port: 2001, AdapterNames: []string{"Ethernet"}},
+			{Name: "nic_wifi", Port: 2002, AdapterNames: []string{"Wi-Fi"}},
+			{
+				Name:         "aggregation",
+				Port:         2003,
+				AdapterNames: []string{"Ethernet", "Wi-Fi"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("normalizeConfig() failed: %v", err)
+	}
+	if got := len(adaptersForChannel(config.Adapters, config.Channels[1])); got != 1 {
+		t.Fatalf("Wi-Fi channel adapter count = %d", got)
+	}
+
+	invalid := []Config{
+		{
+			SOCKSPort: 10800,
+			Adapters:  config.Adapters,
+			Channels:  config.Channels,
+		},
+		{
+			Adapters: config.Adapters,
+			Channels: []Channel{
+				{Name: "aggregation", Port: 2001, AdapterNames: []string{"missing"}},
+			},
+		},
+		{
+			Adapters: config.Adapters,
+			Channels: []Channel{
+				{Name: "one", Port: 2001, AdapterNames: []string{"Ethernet"}},
+				{Name: "two", Port: 2001, AdapterNames: []string{"Wi-Fi"}},
+			},
+		},
+		{
+			Adapters: config.Adapters,
+			Channels: []Channel{
+				{Name: "empty", Port: 2001},
+			},
+		},
+	}
+	for index, candidate := range invalid {
+		if _, err := normalizeConfig(candidate); err == nil {
+			t.Errorf("invalid TUN channel configuration %d accepted", index)
+		}
+	}
+}
+
 func TestSchedulerRoundRobinWeightedAndExclusion(t *testing.T) {
 	adapters := []Adapter{
 		{Name: "a", SourceIP: "127.0.0.1", Weight: 2},
