@@ -39,8 +39,13 @@ func (s *Server) dialUpstream(
 		attempts = 2
 	}
 	var failures []error
+	domain := ""
+	if targetIP == nil {
+		domain = normalizeDomain(host)
+	}
+	var comparativeFailures []string
 	for range attempts {
-		adapter, ok := channelScheduler.Select(excluded)
+		adapter, ok := channelScheduler.SelectForDomain(excluded, domain)
 		if !ok {
 			break
 		}
@@ -48,8 +53,8 @@ func (s *Server) dialUpstream(
 		resolvedIP := targetIP
 		if resolvedIP == nil {
 			if s.resolver == nil {
-				channelScheduler.MarkFailure(adapter.Name)
 				failures = append(failures, fmt.Errorf("%s DNS resolver is unavailable", adapter.Name))
+				comparativeFailures = append(comparativeFailures, adapter.Name)
 				continue
 			}
 			resolved, resolveErr := s.resolver.Resolve(ctx, dns.Query{
@@ -66,21 +71,21 @@ func (s *Server) dialUpstream(
 					})
 				}
 				if resolveErr != nil {
-					channelScheduler.MarkFailure(adapter.Name)
 					failures = append(
 						failures,
 						fmt.Errorf("%s resolve %s: %w", adapter.Name, host, resolveErr),
 					)
+					comparativeFailures = append(comparativeFailures, adapter.Name)
 					continue
 				}
 			}
 			resolvedIP = net.ParseIP(resolved.Address)
 			if resolvedIP == nil {
-				channelScheduler.MarkFailure(adapter.Name)
 				failures = append(
 					failures,
 					fmt.Errorf("%s resolver returned invalid address", adapter.Name),
 				)
+				comparativeFailures = append(comparativeFailures, adapter.Name)
 				continue
 			}
 		}
@@ -101,10 +106,20 @@ func (s *Server) dialUpstream(
 		}
 		connection, err := s.dialTCP(ctx, dialer, dialTarget)
 		if err == nil {
-			channelScheduler.MarkSuccess(adapter.Name)
+			channelScheduler.MarkSuccess(adapter.Name, domain)
+			for _, failedAdapter := range comparativeFailures {
+				channelScheduler.health.recordComparativeDomainFailure(
+					failedAdapter,
+					domain,
+				)
+			}
 			return connection, adapter, nil
 		}
-		channelScheduler.MarkFailure(adapter.Name)
+		if isLocalConnectFailure(err) {
+			channelScheduler.MarkFailure(adapter.Name)
+		} else if domain != "" {
+			comparativeFailures = append(comparativeFailures, adapter.Name)
+		}
 		failures = append(failures, fmt.Errorf("%s connect: %w", adapter.Name, err))
 	}
 	if len(failures) == 0 {

@@ -18,6 +18,7 @@ type Server struct {
 	config           Config
 	scheduler        *scheduler
 	schedulers       map[string]*scheduler
+	health           *healthTable
 	registry         *registry
 	resolver         *dns.Resolver
 	dialTCP          func(context.Context, *net.Dialer, string) (net.Conn, error)
@@ -43,16 +44,19 @@ func New(config Config) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+	health := newHealthTable(normalized.Adapters)
 	server := &Server{
 		config:     normalized,
-		scheduler:  newScheduler(normalized.Adapters, normalized.Weighted),
+		scheduler:  newScheduler(normalized.Adapters, normalized.Weighted, health),
 		schedulers: make(map[string]*scheduler, len(normalized.Channels)),
+		health:     health,
 		registry:   newRegistry(normalized.Adapters),
 	}
 	for _, channel := range normalized.Channels {
 		server.schedulers[channel.Name] = newScheduler(
 			adaptersForChannel(normalized.Adapters, channel),
 			normalized.Weighted,
+			health,
 		)
 	}
 	server.dialTCP = func(
@@ -211,11 +215,47 @@ func (s *Server) Endpoints() Endpoints {
 
 func (s *Server) Snapshot(includeConnections bool) TelemetrySnapshot {
 	result := s.registry.Snapshot(includeConnections)
+	health, quarantines := s.health.snapshot()
+	for index := range result.Adapters {
+		item := health[result.Adapters[index].Name]
+		result.Adapters[index].HealthState = item.State
+		result.Adapters[index].ConsecutiveFailures = item.ConsecutiveFailures
+		result.Adapters[index].HealthSuccesses = item.Successes
+		result.Adapters[index].HealthFailures = item.Failures
+		result.Adapters[index].DomainQuarantines = item.DomainQuarantines
+		result.Adapters[index].LastSuccessAt = timePointer(item.LastSuccessAt)
+		result.Adapters[index].LastFailureAt = timePointer(item.LastFailureAt)
+		result.Adapters[index].CooldownUntil = timePointer(item.CooldownUntil)
+	}
+	result.DomainQuarantines = make(
+		[]DomainQuarantineTelemetry,
+		0,
+		len(quarantines),
+	)
+	for _, quarantine := range quarantines {
+		result.DomainQuarantines = append(
+			result.DomainQuarantines,
+			DomainQuarantineTelemetry{
+				Adapter:   quarantine.Adapter,
+				Domain:    quarantine.Domain,
+				Evidence:  quarantine.Evidence,
+				ExpiresAt: quarantine.ExpiresAt,
+			},
+		)
+	}
 	if s.resolver != nil {
 		status := s.resolver.Status()
 		result.DNS = &status
 	}
 	return result
+}
+
+func timePointer(value time.Time) *time.Time {
+	if value.IsZero() {
+		return nil
+	}
+	result := value
+	return &result
 }
 
 func (s *Server) DNSStatus() (dns.Status, bool) {

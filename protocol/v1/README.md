@@ -26,4 +26,7 @@ latter is a named-channel local SOCKS pool. Clients must inspect the additive
 transport. The current TUN pool reports `tcp_connect` and `udp_associate`.
 Both proxy modes report `ipv6_egress` when additive adapter fields
 `source_ipv6` and `ipv6_if_index` are supported. Live TUN activation remains
-gated on development orchestration.
+gated on development orchestration. Both modes report `adaptive_health` when
+their schedulers share continuous adapter health, and ordinary `proxy` also
+reports `domain_quarantine`. TUN does not claim domain awareness because
+sing-box resolves its destinations before forwarding literal IP targets.

@@ -109,6 +109,8 @@ Deliverables:
 - A method/event matrix with privilege, cancellation, timeout, and
   idempotency semantics.
 - Stable configuration and telemetry DTOs that do not expose Python types.
+- Additive adapter health DTOs (`healthy`, `cooldown`, `probing`) and
+  ordinary-proxy domain quarantine DTOs with UTC expiry timestamps.
 
 Exit criteria:
 
@@ -147,6 +149,8 @@ Deliverables:
 - Typed settings editing and validation.
 - Start/stop controls for Go-owned ordinary proxy mode.
 - Live adapter health, traffic, and connection telemetry.
+- A domain-isolation view sourced from engine telemetry rather than Python
+  worker internals; TUN views must not imply domain visibility.
 - Navigation guards and clear running/starting/stopping/error states.
 
 Exit criteria:

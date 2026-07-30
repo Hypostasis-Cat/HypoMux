@@ -17,6 +17,8 @@ REQUIRED_PROXY_FEATURES = (
     "http_connect",
     "source_bound_dns",
     "ipv6_egress",
+    "adaptive_health",
+    "domain_quarantine",
 )
 
 
@@ -152,7 +154,7 @@ class GoProxyWorker(QObject):
         try:
             if not can_use_go_proxy(self._bridge):
                 raise RuntimeError(
-                    "Go engine does not advertise the complete dual-stack proxy"
+                    "Go engine does not advertise the required proxy health features"
                 )
             result = self._bridge.request("engine.start", self._config, timeout=10.0)
             endpoints = result.get("endpoints", {}) if isinstance(result, dict) else {}
@@ -212,6 +214,16 @@ class GoProxyWorker(QObject):
                     "down_mbps": round(down, 2),
                     "up_mbps": round(up, 2),
                     "connections": connections,
+                    "health_state": str(
+                        adapter.get("health_state") or "healthy"
+                    ),
+                    "consecutive_failures": int(
+                        adapter.get("consecutive_failures", 0) or 0
+                    ),
+                    "cooldown_until": adapter.get("cooldown_until"),
+                    "domain_quarantines": int(
+                        adapter.get("domain_quarantines", 0) or 0
+                    ),
                 }
                 current[name] = (bytes_up, bytes_down)
                 total_down += down

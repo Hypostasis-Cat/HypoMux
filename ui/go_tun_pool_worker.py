@@ -19,7 +19,12 @@ from ui.engine_bridge import EngineBridge
 from utils.tun_dns_planner import TunDnsPlanner
 
 
-REQUIRED_TUN_FEATURES = ("tcp_connect", "udp_associate", "ipv6_egress")
+REQUIRED_TUN_FEATURES = (
+    "tcp_connect",
+    "udp_associate",
+    "ipv6_egress",
+    "adaptive_health",
+)
 
 
 def can_use_go_tun_pool(bridge: EngineBridge | None) -> bool:
@@ -149,7 +154,7 @@ class GoTunPoolWorker(QObject):
         try:
             if not can_use_go_tun_pool(self._bridge):
                 raise RuntimeError(
-                    "Go engine does not advertise the complete TUN TCP/UDP pool"
+                    "Go engine does not advertise the required TUN pool health features"
                 )
             ready, details = self._planner.prepare()
             for detail in details:
@@ -353,6 +358,16 @@ class GoTunPoolWorker(QObject):
                 "down_mbps": round(down, 2),
                 "up_mbps": round(up, 2),
                 "connections": connections,
+                "health_state": str(
+                    adapter.get("health_state") or "healthy"
+                ),
+                "consecutive_failures": int(
+                    adapter.get("consecutive_failures", 0) or 0
+                ),
+                "cooldown_until": adapter.get("cooldown_until"),
+                "domain_quarantines": int(
+                    adapter.get("domain_quarantines", 0) or 0
+                ),
             }
             current[name] = (bytes_up, bytes_down)
             total_down += down

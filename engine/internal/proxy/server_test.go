@@ -399,8 +399,8 @@ func TestTUNTCPPoolRelaysLiteralIPv6WithBoundSource(t *testing.T) {
 	if snapshot.Adapters[1].SourceIPv6 != "::1" {
 		t.Fatalf("IPv6 adapter telemetry = %#v", snapshot.Adapters[1])
 	}
-	if _, poisoned := server.schedulers[ChannelAggregation].
-		unavailableUntil["ipv4-only"]; poisoned {
+	health, _ := server.health.snapshot()
+	if health["ipv4-only"].Failures != 0 {
 		t.Fatal("IPv6-incompatible adapter was incorrectly marked unhealthy")
 	}
 }

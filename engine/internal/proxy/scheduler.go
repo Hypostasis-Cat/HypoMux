@@ -2,49 +2,49 @@ package proxy
 
 import (
 	"sync"
-	"time"
 )
 
-const adapterFailureCooldown = 15 * time.Second
-
 type scheduler struct {
-	mu               sync.Mutex
-	adapters         []Adapter
-	weighted         bool
-	next             int
-	currentWeight    map[string]int
-	unavailableUntil map[string]time.Time
+	mu            sync.Mutex
+	adapters      []Adapter
+	weighted      bool
+	next          int
+	currentWeight map[string]int
+	health        *healthTable
 }
 
-func newScheduler(adapters []Adapter, weighted bool) *scheduler {
+func newScheduler(
+	adapters []Adapter,
+	weighted bool,
+	sharedHealth ...*healthTable,
+) *scheduler {
+	health := (*healthTable)(nil)
+	if len(sharedHealth) > 0 {
+		health = sharedHealth[0]
+	}
+	if health == nil {
+		health = newHealthTable(adapters)
+	}
 	return &scheduler{
-		adapters:         append([]Adapter(nil), adapters...),
-		weighted:         weighted,
-		currentWeight:    make(map[string]int, len(adapters)),
-		unavailableUntil: make(map[string]time.Time),
+		adapters:      append([]Adapter(nil), adapters...),
+		weighted:      weighted,
+		currentWeight: make(map[string]int, len(adapters)),
+		health:        health,
 	}
 }
 
 func (s *scheduler) Select(excluded map[string]struct{}) (Adapter, bool) {
+	return s.SelectForDomain(excluded, "")
+}
+
+func (s *scheduler) SelectForDomain(
+	excluded map[string]struct{},
+	domain string,
+) (Adapter, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	now := time.Now()
-	available := make([]Adapter, 0, len(s.adapters))
-	fallback := make([]Adapter, 0, len(s.adapters))
-	for _, adapter := range s.adapters {
-		if _, skip := excluded[adapter.Name]; skip {
-			continue
-		}
-		fallback = append(fallback, adapter)
-		if !s.unavailableUntil[adapter.Name].After(now) {
-			available = append(available, adapter)
-		}
-	}
-	candidates := available
-	if len(candidates) == 0 {
-		candidates = fallback
-	}
+	candidates := s.health.candidates(s.adapters, excluded, domain)
 	if len(candidates) == 0 {
 		return Adapter{}, false
 	}
@@ -57,15 +57,15 @@ func (s *scheduler) Select(excluded map[string]struct{}) (Adapter, bool) {
 }
 
 func (s *scheduler) MarkFailure(name string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.unavailableUntil[name] = time.Now().Add(adapterFailureCooldown)
+	s.health.recordLocalFailure(name)
 }
 
-func (s *scheduler) MarkSuccess(name string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	delete(s.unavailableUntil, name)
+func (s *scheduler) MarkSuccess(name string, domain ...string) {
+	value := ""
+	if len(domain) > 0 {
+		value = domain[0]
+	}
+	s.health.recordSuccess(name, value)
 }
 
 func (s *scheduler) selectWeighted(candidates []Adapter) Adapter {

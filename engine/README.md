@@ -77,7 +77,8 @@ Protocol-v1 methods:
 - `engine.stop`: close listeners and cancel all accepted and relayed
   connections with a bounded shutdown.
 - `engine.telemetry`: read cumulative per-adapter bytes, active connection
-  counts, optional connection details, and DNS counters.
+  counts, optional connection details, DNS counters, adaptive health state,
+  and ordinary-proxy domain quarantines.
 - `dns.resolve`: resolve an A or AAAA record through a running engine and a
   selected adapter for diagnostics.
 - `dns.status`: inspect DNS policy, upstreams, cache, in-flight work, and
@@ -101,6 +102,14 @@ through adapters that advertise an explicit IPv6 source. `auto` races the
 built-in DoH endpoints and uses only source-bound traditional DNS if DoH is
 unavailable; explicit providers remain strict. No ordinary proxy DNS path
 uses the Windows system resolver. TUN DNS remains owned by sing-box.
+
+Adapter-local transport failures use a shared bounded backoff across ordinary
+proxy and every TUN channel. Expired cooldowns become recovery candidates and
+a successful connection restores the adapter immediately. Ordinary proxy
+domain isolation requires repeated comparative evidence: one adapter fails
+while another succeeds for the same domain. All-adapter failures are never
+learned as a domain quarantine, and TUN literal-IP traffic never manufactures
+domain state.
 
 ## Compatibility policy
 

@@ -10,14 +10,29 @@ import (
 )
 
 type AdapterTelemetry struct {
-	Name        string `json:"name"`
-	SourceIP    string `json:"source_ip"`
-	IfIndex     int    `json:"if_index"`
-	SourceIPv6  string `json:"source_ipv6,omitempty"`
-	IPv6IfIndex int    `json:"ipv6_if_index,omitempty"`
-	Connections uint64 `json:"connections"`
-	BytesUp     uint64 `json:"bytes_up"`
-	BytesDown   uint64 `json:"bytes_down"`
+	Name                string     `json:"name"`
+	SourceIP            string     `json:"source_ip"`
+	IfIndex             int        `json:"if_index"`
+	SourceIPv6          string     `json:"source_ipv6,omitempty"`
+	IPv6IfIndex         int        `json:"ipv6_if_index,omitempty"`
+	Connections         uint64     `json:"connections"`
+	BytesUp             uint64     `json:"bytes_up"`
+	BytesDown           uint64     `json:"bytes_down"`
+	HealthState         string     `json:"health_state"`
+	ConsecutiveFailures int        `json:"consecutive_failures"`
+	HealthSuccesses     uint64     `json:"health_successes"`
+	HealthFailures      uint64     `json:"health_failures"`
+	LastSuccessAt       *time.Time `json:"last_success_at,omitempty"`
+	LastFailureAt       *time.Time `json:"last_failure_at,omitempty"`
+	CooldownUntil       *time.Time `json:"cooldown_until,omitempty"`
+	DomainQuarantines   int        `json:"domain_quarantines"`
+}
+
+type DomainQuarantineTelemetry struct {
+	Adapter   string    `json:"adapter"`
+	Domain    string    `json:"domain"`
+	Evidence  int       `json:"evidence"`
+	ExpiresAt time.Time `json:"expires_at"`
 }
 
 type ConnectionSnapshot struct {
@@ -33,12 +48,13 @@ type ConnectionSnapshot struct {
 }
 
 type TelemetrySnapshot struct {
-	StartedAt   time.Time            `json:"started_at"`
-	SampledAt   time.Time            `json:"sampled_at"`
-	Adapters    []AdapterTelemetry   `json:"adapters"`
-	Connections []ConnectionSnapshot `json:"active_connections,omitempty"`
-	DNS         *dns.Status          `json:"dns,omitempty"`
-	Total       struct {
+	StartedAt         time.Time                   `json:"started_at"`
+	SampledAt         time.Time                   `json:"sampled_at"`
+	Adapters          []AdapterTelemetry          `json:"adapters"`
+	Connections       []ConnectionSnapshot        `json:"active_connections,omitempty"`
+	DomainQuarantines []DomainQuarantineTelemetry `json:"domain_quarantines,omitempty"`
+	DNS               *dns.Status                 `json:"dns,omitempty"`
+	Total             struct {
 		Connections uint64 `json:"connections"`
 		BytesUp     uint64 `json:"bytes_up"`
 		BytesDown   uint64 `json:"bytes_down"`

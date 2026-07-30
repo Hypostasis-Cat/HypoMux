@@ -271,7 +271,9 @@ func (a *udpAssociation) createFlow(
 			if upstream != nil {
 				_ = upstream.Close()
 			}
-			a.scheduler.MarkFailure(adapter.Name)
+			if isLocalConnectFailure(err) {
+				a.scheduler.MarkFailure(adapter.Name)
+			}
 			failures = append(failures, fmt.Errorf("%s UDP setup: %w", adapter.Name, err))
 			continue
 		}

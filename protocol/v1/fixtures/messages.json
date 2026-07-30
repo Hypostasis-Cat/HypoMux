@@ -43,12 +43,15 @@
             "socks5_connect",
             "http_connect",
             "source_bound_dns",
-            "ipv6_egress"
+            "ipv6_egress",
+            "adaptive_health",
+            "domain_quarantine"
           ],
           "tun_tcp_pool": [
             "tcp_connect",
             "udp_associate",
-            "ipv6_egress"
+            "ipv6_egress",
+            "adaptive_health"
           ]
         },
         "os": "windows",
@@ -320,7 +323,23 @@
             "ipv6_if_index": 11,
             "connections": 1,
             "bytes_up": 4096,
-            "bytes_down": 8192
+            "bytes_down": 8192,
+            "health_state": "cooldown",
+            "consecutive_failures": 2,
+            "health_successes": 18,
+            "health_failures": 2,
+            "last_success_at": "2026-07-30T02:00:02Z",
+            "last_failure_at": "2026-07-30T02:00:04Z",
+            "cooldown_until": "2026-07-30T02:00:09Z",
+            "domain_quarantines": 1
+          }
+        ],
+        "domain_quarantines": [
+          {
+            "adapter": "Ethernet",
+            "domain": "example.com",
+            "evidence": 2,
+            "expires_at": "2026-07-30T02:30:04Z"
           }
         ],
         "active_connections": [
@@ -418,7 +437,12 @@
             "if_index": 12,
             "connections": 1,
             "bytes_up": 1200,
-            "bytes_down": 2400
+            "bytes_down": 2400,
+            "health_state": "healthy",
+            "consecutive_failures": 0,
+            "health_successes": 7,
+            "health_failures": 0,
+            "domain_quarantines": 0
           }
         ],
         "active_connections": [

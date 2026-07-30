@@ -12,7 +12,12 @@ class _FakeBridge:
     def __init__(
         self,
         *,
-        features=("tcp_connect", "udp_associate", "ipv6_egress"),
+        features=(
+            "tcp_connect",
+            "udp_associate",
+            "ipv6_egress",
+            "adaptive_health",
+        ),
     ):
         self.features = set(features)
         self.requests: list[tuple[str, object]] = []
@@ -50,6 +55,9 @@ class _FakeBridge:
                         "connections": 2,
                         "bytes_up": 1024,
                         "bytes_down": 2048,
+                        "health_state": "probing",
+                        "consecutive_failures": 1,
+                        "domain_quarantines": 0,
                     }
                 ]
             }
@@ -172,6 +180,8 @@ def test_go_tun_pool_worker_matches_multi_port_lifecycle_contract():
     }
     assert _process_events_until(lambda: bool(telemetry), timeout=2.0)
     assert telemetry[-1]["Ethernet"]["connections"] == 2
+    assert telemetry[-1]["Ethernet"]["health_state"] == "probing"
+    assert telemetry[-1]["Ethernet"]["consecutive_failures"] == 1
     assert connectivity
 
     worker.stop()
@@ -201,10 +211,12 @@ def test_go_tun_pool_worker_matches_multi_port_lifecycle_contract():
     }
 
 
-def test_go_tun_pool_requires_complete_dual_stack_features():
+def test_go_tun_pool_requires_adaptive_health_feature():
     assert can_use_go_tun_pool(_FakeBridge())
     assert not can_use_go_tun_pool(
-        _FakeBridge(features=("tcp_connect", "udp_associate"))
+        _FakeBridge(
+            features=("tcp_connect", "udp_associate", "ipv6_egress")
+        )
     )
 
 

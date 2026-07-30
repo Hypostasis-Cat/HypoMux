@@ -16,6 +16,8 @@ class _FakeBridge:
             "http_connect",
             "source_bound_dns",
             "ipv6_egress",
+            "adaptive_health",
+            "domain_quarantine",
         ),
     ):
         self.requests: list[tuple[str, object]] = []
@@ -48,6 +50,10 @@ class _FakeBridge:
                         "connections": 2,
                         "bytes_up": 1024,
                         "bytes_down": 2048,
+                        "health_state": "cooldown",
+                        "consecutive_failures": 2,
+                        "cooldown_until": "2026-07-30T04:00:05Z",
+                        "domain_quarantines": 1,
                     }
                 ]
             }
@@ -102,6 +108,9 @@ def test_go_proxy_worker_matches_proxy_worker_lifecycle_contract():
     ]
     assert _process_events_until(lambda: bool(telemetry), timeout=2.0)
     assert telemetry[-1]["Ethernet"]["connections"] == 2
+    assert telemetry[-1]["Ethernet"]["health_state"] == "cooldown"
+    assert telemetry[-1]["Ethernet"]["consecutive_failures"] == 2
+    assert telemetry[-1]["Ethernet"]["domain_quarantines"] == 1
 
     worker.stop()
     assert _process_events_until(lambda: bool(stopped))
@@ -119,7 +128,7 @@ def test_go_proxy_worker_matches_proxy_worker_lifecycle_contract():
     assert start_params["dns"]["legacy_servers"] == ["223.5.5.5"]
 
 
-def test_go_proxy_requires_complete_dual_stack_capability():
+def test_go_proxy_requires_complete_adaptive_health_capability():
     assert can_use_go_proxy(_FakeBridge())
     assert not can_use_go_proxy(
         _FakeBridge(
@@ -127,6 +136,8 @@ def test_go_proxy_requires_complete_dual_stack_capability():
                 "socks5_connect",
                 "http_connect",
                 "source_bound_dns",
+                "ipv6_egress",
+                "adaptive_health",
             )
         )
     )

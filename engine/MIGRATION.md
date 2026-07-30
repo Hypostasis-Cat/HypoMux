@@ -299,12 +299,45 @@ Exit criteria:
 The address-family and binding rules are documented in
 [dual-stack physical egress migration](../docs/architecture/dual-stack-egress-migration.md).
 
+## Phase 10: shared adaptive health and domain-aware scheduling
+
+Goal: move runtime adapter recovery and safe domain-specific isolation into
+the Go scheduler without inventing domain visibility in the TUN data plane.
+
+Deliverables:
+
+- One concurrent health table shared by ordinary proxy and every named TUN
+  channel for each physical adapter.
+- Adapter-local failure classification with bounded 2/5/15/30-second
+  backoff, automatic recovery eligibility, and immediate success healing.
+- Ordinary-proxy domain quarantine based only on repeated comparative
+  evidence where another adapter succeeds for the same domain.
+- Thirty-minute in-memory quarantine expiry plus all-adapter fallback so a
+  learned domain decision cannot create a total outage.
+- Additive adapter health and domain quarantine telemetry suitable for the
+  current Qt client and future WPF DTOs.
+- `adaptive_health` negotiation for both modes and `domain_quarantine`
+  negotiation for ordinary proxy only.
+
+Exit criteria:
+
+- Tests prove backoff bounds, recovery, shared cross-channel state, domain
+  normalization, evidence thresholds, expiry, and all-quarantined fallback.
+- Remote refusal and all-adapter DNS/target failures do not poison global
+  adapter health or create domain quarantines.
+- Protocol fixtures, Qt feature gates, telemetry forwarding, repeated Go
+  concurrency/vet/build, and Python regression gates pass.
+- Python remains the production fallback and sing-box remains the sole TUN
+  DNS/domain-routing owner.
+
+The ownership and learning rules are documented in
+[adaptive health scheduling migration](../docs/architecture/adapter-health-scheduling-migration.md).
+
 ## Later migration slices
 
-1. Continuous adapter health and domain-aware scheduling.
-2. Move sing-box/WFP lifecycle ownership after development orchestration
+1. Move sing-box/WFP lifecycle ownership after development orchestration
    shadow testing.
-3. Make the Go engine the default for all network behavior after shadow-mode
+2. Make the Go engine the default for all network behavior after shadow-mode
    and rollback testing.
 
 Each slice keeps a Python fallback until its unit, integration, and Windows
