@@ -1,6 +1,6 @@
 # Managed TUN lifecycle migration
 
-Status: implemented behind the Phase 11 development capability gate
+Status: implemented in Phase 11 and selected by default in Phase 12
 
 ## Scope
 
@@ -19,7 +19,7 @@ sing-box remains the implementation of FakeIP, DNS, Wintun, automatic routes,
 and WFP strict routing. Go now owns when that implementation may start, how it
 is contained, and how all of its resources are stopped and cleaned.
 
-The production Python path remains unchanged.
+The Python path remains available only as the Phase 12 compatibility rollback.
 
 ## Why activation is two phase
 
@@ -108,7 +108,12 @@ consumed unchanged by the future WPF client.
 
 ## Rollback boundary
 
-`HYPOMUX_GO_TUN_DEV=1` remains the only selection switch. Missing or partial
-capability negotiation falls back to the complete Python pool and
-`TunManager` before resource acquisition. Once the Go pool starts, all
-subsequent failures use Go rollback; no mixed-owner retry is allowed.
+The default `auto` backend selects this lifecycle when the complete capability
+set is negotiated. `HYPOMUX_NETWORK_BACKEND=python` selects the complete
+Python pool and `TunManager` before resource acquisition, while
+`HYPOMUX_NETWORK_BACKEND=go` turns a missing capability into a visible
+pre-acquisition failure. Once the Go pool starts, all subsequent failures use
+Go rollback; no mixed-owner retry is allowed.
+
+The default-selection and final compatibility-removal boundary are documented
+in [default network backend cutover](default-network-backend-cutover.md).

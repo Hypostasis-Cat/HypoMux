@@ -211,11 +211,12 @@ entire migration.
 
 ## Effect on the current engine roadmap
 
-The ordinary-proxy DNS/DoH slice now meets the F1 rules. The next backend
-slice is the TUN multi-port TCP outbound pool; its protocol DTOs and canonical
-fixtures must be defined before that surface is declared complete.
+The backend boundary now covers ordinary proxy, DNS/DoH, TUN TCP/UDP egress,
+dual-stack binding, adaptive health, and managed sing-box/TUN/WFP lifecycle.
+The packaged Go host is selected by default without changing protocol v1, so
+the existing canonical fixtures remain the WPF client's source of truth.
 
-WPF implementation begins with the F2 read-only shell after F1 is complete.
-It must not block continued Go engine work, and it must not become the
-production control path until the corresponding Go capability has passed its
-own migration gate.
+WPF implementation can proceed with the F2 read-only shell while the backend
+runs its unified strict-Go physical Windows gate. It must not become the
+production control path until the corresponding Go capability has passed that
+gate.

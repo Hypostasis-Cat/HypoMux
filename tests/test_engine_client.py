@@ -13,6 +13,9 @@ import time
 import unittest
 
 from engine_client import (
+    BACKEND_AUTO,
+    BACKEND_GO,
+    BACKEND_PYTHON,
     EngineClient,
     EngineProcessError,
     EngineProtocolError,
@@ -20,9 +23,16 @@ from engine_client import (
     EngineStateError,
     EngineTimeoutError,
     development_engine_enabled,
+    engine_host_enabled,
+    go_backend_required,
+    go_proxy_enabled,
     go_proxy_development_enabled,
+    go_tun_enabled,
     go_tun_development_enabled,
+    network_backend,
+    resolve_engine_command,
     resolve_development_engine_command,
+    select_go_backend,
 )
 from engine_client.process import start_engine_process
 
@@ -242,6 +252,73 @@ class EngineClientTests(unittest.TestCase):
 
 
 class DevelopmentSelectionTests(unittest.TestCase):
+    def test_go_is_the_default_with_an_explicit_python_rollback(self):
+        self.assertEqual(network_backend({}), BACKEND_AUTO)
+        self.assertTrue(engine_host_enabled({}))
+        self.assertTrue(go_proxy_enabled({}))
+        self.assertTrue(go_tun_enabled({}))
+        self.assertFalse(go_backend_required({}))
+
+        python_environment = {"HYPOMUX_NETWORK_BACKEND": "python"}
+        self.assertEqual(
+            network_backend(python_environment),
+            BACKEND_PYTHON,
+        )
+        self.assertFalse(engine_host_enabled(python_environment))
+        self.assertFalse(go_proxy_enabled(python_environment))
+        self.assertFalse(go_tun_enabled(python_environment))
+
+        go_environment = {"HYPOMUX_NETWORK_BACKEND": "go"}
+        self.assertEqual(network_backend(go_environment), BACKEND_GO)
+        self.assertTrue(go_backend_required(go_environment))
+
+    def test_backend_aliases_and_invalid_values_are_bounded(self):
+        self.assertEqual(
+            network_backend({"HYPOMUX_NETWORK_BACKEND": "legacy"}),
+            BACKEND_PYTHON,
+        )
+        self.assertEqual(
+            network_backend({"HYPOMUX_NETWORK_BACKEND": "engine"}),
+            BACKEND_GO,
+        )
+        self.assertEqual(
+            network_backend({"HYPOMUX_NETWORK_BACKEND": "typo"}),
+            BACKEND_AUTO,
+        )
+        self.assertEqual(
+            network_backend({"HYPOMUX_GO_TUN_DEV": "1"}),
+            BACKEND_AUTO,
+        )
+        self.assertFalse(
+            go_backend_required({"HYPOMUX_GO_PROXY_DEV": "1"}),
+        )
+        self.assertEqual(
+            network_backend(
+                {
+                    "HYPOMUX_NETWORK_BACKEND": "python",
+                    "HYPOMUX_GO_TUN_DEV": "1",
+                }
+            ),
+            BACKEND_PYTHON,
+        )
+
+    def test_capability_selection_falls_back_only_in_auto_mode(self):
+        self.assertTrue(select_go_backend(True, "proxy", {}))
+        self.assertFalse(select_go_backend(False, "proxy", {}))
+        self.assertFalse(
+            select_go_backend(
+                True,
+                "proxy",
+                {"HYPOMUX_NETWORK_BACKEND": "python"},
+            )
+        )
+        with self.assertRaisesRegex(RuntimeError, "complete proxy capability"):
+            select_go_backend(
+                False,
+                "proxy",
+                {"HYPOMUX_NETWORK_BACKEND": "go"},
+            )
+
     def test_development_flag_is_explicit_and_not_persisted(self):
         self.assertFalse(development_engine_enabled({}))
         self.assertTrue(development_engine_enabled({"HYPOMUX_GO_ENGINE_DEV": "true"}))
@@ -268,6 +345,19 @@ class DevelopmentSelectionTests(unittest.TestCase):
                     root,
                     {"HYPOMUX_ENGINE_PATH": str(root / "missing.exe")},
                 )
+            )
+
+    def test_packaged_bin_engine_is_the_first_default_candidate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            packaged = root / "bin" / "hypomux-engine.exe"
+            packaged.parent.mkdir()
+            packaged.write_bytes(b"packaged")
+            (root / "hypomux-engine.exe").write_bytes(b"source")
+
+            self.assertEqual(
+                resolve_engine_command(root),
+                [str(packaged)],
             )
 
 

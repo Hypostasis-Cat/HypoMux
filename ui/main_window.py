@@ -45,10 +45,13 @@ from utils import singbox_config
 from utils.acceleration_log import AccelerationLogStore
 from utils.update_checker import UpdateError, launch_installer_after_exit
 from engine_client import (
-    development_engine_enabled,
-    go_proxy_development_enabled,
-    go_tun_development_enabled,
-    resolve_development_engine_command,
+    engine_host_enabled,
+    go_backend_required,
+    go_proxy_enabled,
+    go_tun_enabled,
+    network_backend,
+    resolve_engine_command,
+    select_go_backend,
 )
 
 
@@ -840,21 +843,36 @@ def create_main_window():
             # Only open/close the WFP engine here; never start sing-box or
             # create a virtual adapter merely to check compatibility.
             QTimer.singleShot(600, self._run_wfp_startup_preflight)
-            # Staged Go paths remain hidden behind environment flags. The
-            # ordinary TCP proxy can be exercised without changing TUN/WFP.
-            QTimer.singleShot(0, self._start_go_engine_development_bridge)
+            # The packaged Go host is the default network backend. Capability
+            # checks still happen before proxy or TUN resources are acquired.
+            QTimer.singleShot(0, self._start_go_engine_bridge)
 
-        def _start_go_engine_development_bridge(self):
-            if self._shutdown_started or not development_engine_enabled():
+        def _start_go_engine_bridge(self):
+            if self._shutdown_started:
                 return
-            runtime_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            command = resolve_development_engine_command(runtime_dir)
-            if command is None:
+            if not engine_host_enabled():
                 self.append_log(
-                    "[GoEngine][DEV] 开发模式已启用，但未找到 hypomux-engine.exe；"
-                    "请设置 HYPOMUX_ENGINE_PATH。",
+                    "[NetworkBackend] 已显式选择 Python 兼容后端；"
+                    "Go 网络宿主不会启动。",
                     force=True,
                 )
+                return
+            runtime_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            command = resolve_engine_command(runtime_dir)
+            if command is None:
+                if go_backend_required():
+                    message = (
+                        "[GoEngine] 严格 Go 模式未找到 hypomux-engine.exe；"
+                        "网络会话将拒绝启动。请检查安装包或设置 "
+                        "HYPOMUX_ENGINE_PATH。"
+                    )
+                else:
+                    message = (
+                        "[GoEngine] 未找到 hypomux-engine.exe；本次网络会话将在"
+                        "获取资源前回退到 Python 兼容后端。源码调试可设置 "
+                        "HYPOMUX_ENGINE_PATH。"
+                    )
+                self.append_log(message, force=True)
                 return
 
             bridge = EngineBridge(command, parent=self)
@@ -870,7 +888,11 @@ def create_main_window():
                 self._on_go_dns_fallback_required
             )
             self._go_engine_bridge = bridge
-            self.append_log("[GoEngine][DEV] 正在启动独立 Go 宿主并协商协议…", force=True)
+            self.append_log(
+                f"[GoEngine] 正在启动网络宿主并协商协议 "
+                f"(backend={network_backend()})…",
+                force=True,
+            )
             bridge.start()
 
         @Slot(object)
@@ -878,12 +900,10 @@ def create_main_window():
             if self.sender() is not self._go_engine_bridge:
                 return
             self.append_log(
-                "[GoEngine][DEV] 协议握手成功："
-                f"version={hello.get('engine_version', 'unknown')}，"
-                f"pid={hello.get('pid', 'unknown')}，"
-                f"protocol={hello.get('protocol_version', 'unknown')}。"
-                "设置 HYPOMUX_GO_PROXY_DEV=1 可切换普通代理；"
-                "设置 HYPOMUX_GO_TUN_DEV=1 可切换 TUN TCP/UDP 出站池。",
+                "[GoEngine] 协议已就绪 | "
+                f"version={hello.get('engine_version', 'unknown')} | "
+                f"pid={hello.get('pid', 'unknown')} | "
+                f"protocol={hello.get('protocol_version', 'unknown')}",
                 force=True,
             )
 
@@ -893,7 +913,7 @@ def create_main_window():
                 return
             if reason and not self._shutdown_started:
                 self.append_log(
-                    f"[GoEngine][DEV] Go 宿主连接已断开：{reason}",
+                    f"[GoEngine] 网络宿主连接已断开：{reason}",
                     force=True,
                 )
 
@@ -901,14 +921,14 @@ def create_main_window():
         def _on_go_engine_error(self, message: str):
             if self.sender() is not self._go_engine_bridge:
                 return
-            self.append_log(f"[GoEngine][DEV] {message}", force=True)
+            self.append_log(f"[GoEngine] {message}", force=True)
 
         @Slot(object)
         def _on_go_engine_state_changed(self, state: dict):
             if self.sender() is not self._go_engine_bridge:
                 return
             self.append_log(
-                "[GoEngine][DEV] 状态事件："
+                "[GoEngine] 状态事件："
                 f"{state.get('previous', 'unknown')} → "
                 f"{state.get('state', state.get('current', 'unknown'))}",
                 force=True,
@@ -2117,10 +2137,11 @@ def create_main_window():
             try:
                 use_weighted = self.home_page.is_weighted_scheduler()
                 bw_limits = self.home_page.get_schedule_weights() if use_weighted else None
-                go_tun_requested = go_tun_development_enabled()
-                use_go_tun = (
-                    go_tun_requested
-                    and can_use_go_tun_pool(self._go_engine_bridge)
+                go_tun_requested = go_tun_enabled()
+                go_tun_ready = can_use_go_tun_pool(self._go_engine_bridge)
+                use_go_tun = select_go_backend(
+                    go_tun_ready,
+                    "managed TUN",
                 )
                 common_args = dict(
                     selected_nics=selected,
@@ -2136,7 +2157,7 @@ def create_main_window():
                     )
                     self.append_log(
                         "[GoEngine][TUN] 已选择 Go TCP/UDP 出站池；"
-                        "sing-box 仍负责 DNS、TUN 与 WFP。",
+                        "Go 宿主管理 sing-box、TUN/WFP、路由与回滚。",
                         force=True,
                     )
                 else:
@@ -2814,9 +2835,11 @@ def create_main_window():
             bw_limits = self.home_page.get_schedule_weights() if use_weighted else None
 
             try:
-                use_go_proxy = (
-                    go_proxy_development_enabled()
-                    and can_use_go_proxy(self._go_engine_bridge)
+                go_proxy_requested = go_proxy_enabled()
+                go_proxy_ready = can_use_go_proxy(self._go_engine_bridge)
+                use_go_proxy = select_go_backend(
+                    go_proxy_ready,
+                    "proxy",
                 )
                 worker_type = GoProxyWorker if use_go_proxy else ProxyWorker
                 worker_args = {
@@ -2836,12 +2859,13 @@ def create_main_window():
                         "doh_provider", "auto"
                     )
                     self.append_log(
-                        "[GoEngine][TCP] 开发迁移模式：普通代理流量将由 Go 引擎处理。",
+                        "[GoEngine][TCP] 普通代理流量由默认 Go 引擎处理。",
                         force=True,
                     )
-                elif go_proxy_development_enabled():
+                elif go_proxy_requested:
                     self.append_log(
-                        "[GoEngine][TCP] Go 引擎尚未就绪，保留 Python 代理回退路径。",
+                        "[GoEngine][TCP] Go 引擎尚未就绪；本次启动在获取资源前"
+                        "回退到 Python 兼容后端。",
                         force=True,
                     )
                 self.proxy_worker = worker_type(**worker_args)
@@ -3159,7 +3183,8 @@ def create_main_window():
             # HypoMux-Tun 适配器清理。只有异常缺少 manager 但状态仍显示 TUN 时，
             # 才保留最后一轮独立兜底，避免正常关闭重复执行 PowerShell。
             needs_emergency_tun_sweep = (
-                self._tun_manager is None
+                not engine_host_enabled()
+                and self._tun_manager is None
                 and (self._tun_active or self._tun_starting)
             )
             self._adapter_watch_timer.stop()
@@ -3217,7 +3242,7 @@ def create_main_window():
                         self._go_engine_bridge.stop()
                         self._go_engine_bridge = None
                 except Exception as e:
-                    print(f"[WARN] Go engine development host cleanup failed: {e}")
+                    print(f"[WARN] Go engine host cleanup failed: {e}")
 
                 try:
                     set_system_proxy(False)

@@ -1,8 +1,9 @@
 # Engine migration plan
 
 HypoMux will migrate incrementally. A release must never replace both the UI
-and the network engine in one step, and the existing Python engine remains the
-fallback until the Go implementation passes the same real-network scenarios.
+and the network engine in one step. The Go engine is now the default network
+backend, while the existing Python engine remains an explicit compatibility
+rollback until Go passes the same real-network scenarios.
 
 ## Frontend target and readiness rule
 
@@ -364,16 +365,52 @@ Exit criteria:
   the pool in bounded order.
 - Protocol fixtures, Qt DTO/lifecycle tests, Go test/vet/build, and Python
   regression gates pass.
-- Without the development flag, the Python `TunManager` path is unchanged.
+- The Python `TunManager` path remains available through the explicit backend
+  rollback until the unified Windows qualification pass.
 
 The process, transaction, and cleanup rules are documented in
 [managed TUN lifecycle migration](../docs/architecture/managed-tun-lifecycle-migration.md).
 
+## Phase 12: default Go network backend
+
+Goal: make the packaged Go host the normal network path without removing the
+last recoverable Python implementation before physical qualification.
+
+Deliverables:
+
+- Default `auto` backend that starts the packaged host and selects Go per mode
+  after complete capability negotiation.
+- Installer-aware discovery of `{app}\bin\hypomux-engine.exe`, with
+  `HYPOMUX_ENGINE_PATH` retained for source builds.
+- Strict `HYPOMUX_NETWORK_BACKEND=go` qualification mode and explicit
+  `HYPOMUX_NETWORK_BACKEND=python` emergency rollback.
+- Pre-acquisition-only fallback; a live session never mixes Go and Python
+  ownership.
+- Default startup cleanup that never kills all `sing-box.exe` processes by
+  image name and scopes route/device recovery to `HypoMux-Tun`.
+- Compatibility handling for the three migration-era `HYPOMUX_GO_*_DEV`
+  variables without broadening a legacy per-mode flag into strict selection.
+
+Exit criteria:
+
+- Default, strict-Go, explicit-Python, invalid-value, and legacy-alias
+  selection tests pass.
+- Installed `bin` discovery wins over source-layout candidates.
+- Ordinary proxy and TUN selection still require their full negotiated
+  feature sets.
+- Go test/vet/build, protocol, Python client, startup-cleanup, and real child
+  process gates pass.
+- The working tree contains no packaging or protocol change that requires a
+  synchronized WPF client update.
+
+The policy and final removal boundary are documented in
+[default network backend cutover](../docs/architecture/default-network-backend-cutover.md).
+
 ## Later migration slices
 
-1. Make the Go engine the default for all network behavior after shadow-mode
-   and rollback testing.
+1. Run the unified strict-Go Windows physical qualification matrix.
+2. Remove the Python network engine and its image-wide process cleanup after
+   that matrix passes without residual routes, adapters, or processes.
 
-Each slice keeps a Python fallback until its unit, integration, and Windows
-network tests pass. Each slice also has to meet the frontend-readiness rule
-above; WPF shell work can begin once the shared protocol fixtures are stable.
+Every remaining slice also has to meet the frontend-readiness rule above; WPF
+shell work can proceed against the stable shared protocol fixtures.

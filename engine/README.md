@@ -133,10 +133,11 @@ domain state.
 
 The UI may send commands and render events, but must not own engine cleanup,
 DNS fallback, routing rollback, or connection accounting. Those behaviors
-move behind this boundary in migration slices. The current Python/Qt path
-remains the production default.
+move behind this boundary in migration slices. Go is the default network
+backend; Python remains a bounded pre-acquisition compatibility rollback until
+the unified Windows qualification pass is complete.
 
-## Development connection
+## Runtime backend selection
 
 Build the host:
 
@@ -146,45 +147,46 @@ go build -trimpath -o ..\dist\hypomux-engine.exe .\cmd\hypomux-engine
 cd ..
 ```
 
-Then launch the source application with the hidden development connection:
+Installed builds discover the signed host at
+`<runtime>\bin\hypomux-engine.exe` and use it by default. Source builds can
+point at a local executable:
 
 ```powershell
-$env:HYPOMUX_GO_ENGINE_DEV = "1"
-$env:HYPOMUX_ENGINE_PATH = "$PWD\dist\hypomux-engine.exe"
-..\venv\Scripts\python.exe main.py
-```
-
-The PySide6 UI performs hello and health supervision through the
-toolkit-independent `engine_client` package. To route ordinary proxy mode
-through Go while retaining the Python fallback:
-
-```powershell
-$env:HYPOMUX_GO_PROXY_DEV = "1"
 $env:HYPOMUX_ENGINE_PATH = "$PWD\dist\hypomux-engine.exe"
 python main.py
 ```
 
-This flag also starts the persistent host. TUN mode continues to use the
-Python `MultiPortProxyWorker` and `TunManager` by default. To route the live
-TUN TCP/UDP outbound pool through Go while also moving the sing-box
-process/TUN/WFP lifetime into the Go host and keeping the pre-acquisition
-Python fallback:
+The default `auto` policy starts the host, negotiates capabilities, and selects
+Go independently for ordinary proxy and TUN sessions. A missing or incomplete
+mode falls back to the complete Python implementation before listeners or TUN
+resources are acquired.
+
+Use strict Go mode during release qualification:
 
 ```powershell
-$env:HYPOMUX_GO_TUN_DEV = "1"
-$env:HYPOMUX_ENGINE_PATH = "$PWD\dist\hypomux-engine.exe"
+$env:HYPOMUX_NETWORK_BACKEND = "go"
 python main.py
 ```
 
-The TUN switch is accepted only when protocol negotiation reports
-`tun_tcp_pool` with TCP, UDP, IPv6, adaptive health, and
-`managed_tun_lifecycle`, together with all three `tun.*` methods.
-
-Unset the variables to return to the normal production path:
+Strict mode reports a visible pre-acquisition error instead of hiding a
+missing packaged host or capability behind Python. To use the bounded
+compatibility rollback:
 
 ```powershell
-Remove-Item Env:HYPOMUX_GO_ENGINE_DEV -ErrorAction SilentlyContinue
-Remove-Item Env:HYPOMUX_GO_PROXY_DEV -ErrorAction SilentlyContinue
-Remove-Item Env:HYPOMUX_GO_TUN_DEV -ErrorAction SilentlyContinue
+$env:HYPOMUX_NETWORK_BACKEND = "python"
+python main.py
+```
+
+Unset the variables to return to the default `auto` policy:
+
+```powershell
+Remove-Item Env:HYPOMUX_NETWORK_BACKEND -ErrorAction SilentlyContinue
 Remove-Item Env:HYPOMUX_ENGINE_PATH -ErrorAction SilentlyContinue
 ```
+
+The older `HYPOMUX_GO_ENGINE_DEV`, `HYPOMUX_GO_PROXY_DEV`, and
+`HYPOMUX_GO_TUN_DEV` flags remain accepted by compatibility helpers. They are
+equivalent to the default `auto` behavior and do not enable strict mode.
+
+The complete cutover and compatibility-removal rules are documented in
+[default network backend cutover](../docs/architecture/default-network-backend-cutover.md).

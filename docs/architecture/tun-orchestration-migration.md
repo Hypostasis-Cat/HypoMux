@@ -1,13 +1,18 @@
 # TUN orchestration migration
 
-Status: implemented behind the Phase 8 development flag
+Status: implemented behind the Phase 8 development flag; selected by default
+since Phase 12
 
 ## Scope
 
-Phase 8 connects the Phase 6/7 Go TUN pool to the existing Qt TUN startup
-transaction behind `HYPOMUX_GO_TUN_DEV=1`. It does not change the production
-default, move sing-box/Wintun/WFP process ownership, or make Go responsible
-for TUN DNS.
+Phase 8 originally connected the Phase 6/7 Go TUN pool to the existing Qt TUN
+startup transaction behind `HYPOMUX_GO_TUN_DEV=1`. Phase 11 subsequently
+moved sing-box/TUN/WFP lifecycle ownership, and Phase 12 made the complete
+managed path the default. The development-gate details below are retained as
+historical migration context.
+
+Current selection rules are defined in
+[default network backend cutover](default-network-backend-cutover.md).
 
 The purpose of this phase is to exercise the real mixed control plane:
 

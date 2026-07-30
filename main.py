@@ -16,6 +16,8 @@ import sys
 import ctypes
 import subprocess
 
+from engine_client import BACKEND_PYTHON, network_backend
+
 
 SINGLE_INSTANCE_KEY = "HypoMux_Single_Instance_Lock"
 WAKE_MESSAGE = b"WAKE_UP"
@@ -81,11 +83,19 @@ def _run_silent_command(command: list[str], timeout: int = 5):
 
 
 def force_evict_zombie_backends():
-    """启动前清理上轮崩溃遗留的 sing-box 后端进程、TUN 虚拟适配器及残留路由。
+    """启动前清理精确的 HypoMux TUN 残留。
 
-    清理顺序：进程 → 适配器 → 路由。
+    默认 Go 路径只处理 HypoMux-Tun 适配器和默认路由；按映像名清理旧
+    sing-box 进程仅保留给显式 Python 兼容后端。
     """
-    _run_silent_command(["taskkill", "/F", "/IM", "sing-box.exe", "/T"], timeout=3)
+    # Image-wide process cleanup belongs only to the explicit legacy backend.
+    # The default Go path owns an exact Job/PID and must not terminate a
+    # different application's sing-box process.
+    if network_backend() == BACKEND_PYTHON:
+        _run_silent_command(
+            ["taskkill", "/F", "/IM", "sing-box.exe", "/T"],
+            timeout=3,
+        )
     _run_silent_command([
         "powershell", "-NoProfile", "-Command",
         "$targets = @(Get-PnpDevice -Class Net -ErrorAction SilentlyContinue | "
@@ -99,9 +109,11 @@ def force_evict_zombie_backends():
     _run_silent_command(
         [
             "powershell", "-NoProfile", "-Command",
-            "Get-NetRoute -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' "
-            "-ErrorAction SilentlyContinue | "
-            "Where-Object { $_.InterfaceAlias -eq 'HypoMux-Tun' } | "
+            "Get-NetRoute -ErrorAction SilentlyContinue | "
+            "Where-Object { "
+            "$_.InterfaceAlias -eq 'HypoMux-Tun' -and "
+            "($_.DestinationPrefix -eq '0.0.0.0/0' -or "
+            "$_.DestinationPrefix -eq '::/0') } | "
             "Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue",
         ],
         timeout=5,
