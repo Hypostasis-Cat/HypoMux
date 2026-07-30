@@ -86,6 +86,7 @@ def _get_windows_startupinfo():
 
 # GetAdaptersAddresses 常量
 _AF_INET = 2                     # AF_INET
+_AF_INET6 = 23                   # AF_INET6
 _AF_UNSPEC = 0
 _GAA_FLAG_SKIP_ANYCAST = 0x0002
 _GAA_FLAG_SKIP_MULTICAST = 0x0004
@@ -210,6 +211,34 @@ def _sockaddr_to_ipv4(socket_address: _SOCKET_ADDRESS) -> Optional[str]:
     # sa_data[2:6] 即为 4 字节 IPv4 地址（网络字节序）
     raw = bytes(sockaddr.sa_data[2:6])
     return socket.inet_ntoa(raw)
+
+
+def _sockaddr_to_ipv6(socket_address: _SOCKET_ADDRESS) -> Optional[str]:
+    """从 SOCKET_ADDRESS 中提取 IPv6 字符串（仅处理 AF_INET6）。"""
+    sockaddr_ptr = socket_address.lpSockaddr
+    if not sockaddr_ptr or socket_address.iSockaddrLength < 24:
+        return None
+    sockaddr = sockaddr_ptr.contents
+    if sockaddr.sa_family != _AF_INET6:
+        return None
+    # sockaddr_in6: family(2) + port(2) + flowinfo(4) + address(16) + scope(4)
+    raw = ctypes.string_at(sockaddr_ptr, socket_address.iSockaddrLength)
+    return socket.inet_ntop(socket.AF_INET6, raw[8:24])
+
+
+def _is_usable_ipv6_source(value: str) -> bool:
+    """只接受可作为公网/ULA 出站源的非链路本地 IPv6 单播地址。"""
+    try:
+        address = ipaddress.IPv6Address(str(value).split("%", 1)[0].strip())
+    except ipaddress.AddressValueError:
+        return False
+    return not (
+        address.is_unspecified
+        or address.is_loopback
+        or address.is_multicast
+        or address.is_link_local
+        or address.ipv4_mapped is not None
+    )
 
 
 def _adapter_dns_servers_ipv4(adapter: _IP_ADAPTER_ADDRESSES) -> List[str]:
@@ -372,7 +401,7 @@ def get_adapter_full_info() -> List[Dict]:
         for _ in range(3):
             buffer = ctypes.create_string_buffer(buf_len.value)
             ret = iphlpapi.GetAdaptersAddresses(
-                _AF_INET, flags, None,
+                _AF_UNSPEC, flags, None,
                 ctypes.cast(buffer, ctypes.POINTER(_IP_ADAPTER_ADDRESSES)),
                 ctypes.byref(buf_len),
             )
@@ -393,6 +422,7 @@ def get_adapter_full_info() -> List[Dict]:
             # 排除回环 / 隧道；仅保留 UP 且 IfIndex 有效的网卡
             if oper_up and adapter.IfIndex != 0 and iftype not in _EXCLUDED_IF_TYPES:
                 ipv4_list: List[str] = []
+                ipv6_list: List[str] = []
                 ipv4_prefix_lengths: Dict[str, int] = {}
                 dns_servers = _adapter_dns_servers_ipv4(adapter)
                 gateways = _adapter_gateways_ipv4(adapter)
@@ -405,6 +435,9 @@ def get_adapter_full_info() -> List[Dict]:
                         prefix_length = int(unicast.OnLinkPrefixLength)
                         if 1 <= prefix_length <= 32:
                             ipv4_prefix_lengths[ipv4] = prefix_length
+                    ipv6 = _sockaddr_to_ipv6(unicast.Address)
+                    if ipv6 and _is_usable_ipv6_source(ipv6):
+                        ipv6_list.append(ipv6)
                     unicast_ptr = unicast.Next
 
                 if ipv4_list:
@@ -415,6 +448,8 @@ def get_adapter_full_info() -> List[Dict]:
                         "is_ppp": iftype == _IF_TYPE_PPP,
                         "friendly": friendly,
                         "ipv4_list": ipv4_list,
+                        "ipv6_list": ipv6_list,
+                        "ipv6_if_index": int(adapter.Ipv6IfIndex or adapter.IfIndex),
                         # The fallback scanner later selects ipv4_list[0], so
                         # preserve that address's actual on-link prefix.
                         "prefix_length": ipv4_prefix_lengths.get(ipv4_list[0], 24),
@@ -547,6 +582,11 @@ def _parse_adapter_from_json(adapter_json: Dict) -> Optional[Dict]:
             "index": int(adapter_json.get("InterfaceIndex", -1)),
             "alias": alias,
             "ipv4": adapter_json.get("IPv4Address", "N/A"),
+            "ipv6": str(adapter_json.get("IPv6Address") or "").strip(),
+            "ipv6_if_index": int(
+                adapter_json.get("IPv6InterfaceIndex")
+                or adapter_json.get("InterfaceIndex", -1)
+            ),
             "prefix_length": int(adapter_json.get("IPv4PrefixLength") or 24),
             "dns_servers": _normalize_dns_servers(adapter_json.get("DNSServers")),
             "is_auto": adapter_json.get("AutomaticMetric", True),
@@ -622,6 +662,14 @@ def scan_network_adapters() -> Tuple[bool, List[Dict], str]:
             Select-Object -First 1
         $ipv4Addr = $ipv4Info.IPAddress
         $ipv4PrefixLength = $ipv4Info.PrefixLength
+        $ipv6Info = Get-NetIPAddress -InterfaceIndex $ifIndex -AddressFamily IPv6 -ErrorAction SilentlyContinue |
+            Where-Object {
+                $_.AddressState -eq 'Preferred' -and
+                -not $_.SkipAsSource -and
+                $_.IPAddress -notmatch '^(fe80:|::1$|::$)'
+            } |
+            Select-Object -First 1
+        $ipv6Addr = $ipv6Info.IPAddress
         $dnsServers = @(
             Get-DnsClientServerAddress -InterfaceIndex $ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue |
             Select-Object -ExpandProperty ServerAddresses -ErrorAction SilentlyContinue |
@@ -642,6 +690,8 @@ def scan_network_adapters() -> Tuple[bool, List[Dict], str]:
                 InterfaceAlias = $ifAlias
                 IPv4Address = $ipv4Addr
                 IPv4PrefixLength = $ipv4PrefixLength
+                IPv6Address = $ipv6Addr
+                IPv6InterfaceIndex = $ifIndex
                 DNSServers = $dnsServers
                 AutomaticMetric = $autoMetric
                 InterfaceMetric = $ifMetric
@@ -698,6 +748,8 @@ def scan_network_adapters() -> Tuple[bool, List[Dict], str]:
                     "index": n["index"],
                     "alias": alias,
                     "ipv4": ", ".join(n["ipv4_list"]),
+                    "ipv6": n.get("ipv6_list", [""])[0] if n.get("ipv6_list") else "",
+                    "ipv6_if_index": n.get("ipv6_if_index", n["index"]),
                     "prefix_length": int(n.get("prefix_length", 24) or 24),
                     "dns_servers": n.get("dns_servers", []),
                     "is_auto": True,

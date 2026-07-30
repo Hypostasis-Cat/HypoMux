@@ -19,7 +19,7 @@ from ui.engine_bridge import EngineBridge
 from utils.tun_dns_planner import TunDnsPlanner
 
 
-REQUIRED_TUN_FEATURES = ("tcp_connect", "udp_associate")
+REQUIRED_TUN_FEATURES = ("tcp_connect", "udp_associate", "ipv6_egress")
 
 
 def can_use_go_tun_pool(bridge: EngineBridge | None) -> bool:
@@ -225,8 +225,16 @@ class GoTunPoolWorker(QObject):
                 {
                     "name": name,
                     "source_ip": str(nic.get("ip") or nic.get("ipv4") or ""),
+                    "source_ipv6": str(nic.get("ipv6") or ""),
                     "if_index": int(
                         nic.get("if_index", nic.get("index", 0)) or 0
+                    ),
+                    "ipv6_if_index": int(
+                        nic.get(
+                            "ipv6_if_index",
+                            nic.get("if_index", nic.get("index", 0)),
+                        )
+                        or 0
                     ),
                     "weight": max(int(self._weights.get(name, 1) or 1), 1),
                     "dns_servers": [

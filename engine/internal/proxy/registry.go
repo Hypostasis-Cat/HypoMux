@@ -13,6 +13,8 @@ type AdapterTelemetry struct {
 	Name        string `json:"name"`
 	SourceIP    string `json:"source_ip"`
 	IfIndex     int    `json:"if_index"`
+	SourceIPv6  string `json:"source_ipv6,omitempty"`
+	IPv6IfIndex int    `json:"ipv6_if_index,omitempty"`
 	Connections uint64 `json:"connections"`
 	BytesUp     uint64 `json:"bytes_up"`
 	BytesDown   uint64 `json:"bytes_down"`
@@ -197,6 +199,8 @@ func (r *registry) Snapshot(includeConnections bool) TelemetrySnapshot {
 			Name:        counters.adapter.Name,
 			SourceIP:    counters.adapter.SourceIP,
 			IfIndex:     counters.adapter.IfIndex,
+			SourceIPv6:  counters.adapter.SourceIPv6,
+			IPv6IfIndex: counters.adapter.IPv6IfIndex,
 			Connections: counters.active.Load(),
 			BytesUp:     counters.bytesUp.Load(),
 			BytesDown:   counters.bytesDown.Load(),

@@ -12,6 +12,31 @@ from engine_client import EngineClientError
 from ui.engine_bridge import EngineBridge
 
 
+REQUIRED_PROXY_FEATURES = (
+    "socks5_connect",
+    "http_connect",
+    "source_bound_dns",
+    "ipv6_egress",
+)
+
+
+def can_use_go_proxy(bridge: EngineBridge | None) -> bool:
+    if bridge is None or not bridge.is_running():
+        return False
+    feature_checker = getattr(bridge, "supports_mode_feature", None)
+    if not callable(feature_checker):
+        return False
+    if not all(
+        bridge.supports(method)
+        for method in ("engine.start", "engine.stop", "engine.telemetry")
+    ):
+        return False
+    return all(
+        feature_checker("proxy", feature)
+        for feature in REQUIRED_PROXY_FEATURES
+    )
+
+
 class GoProxyWorker(QObject):
     """Mirror the ProxyWorker signal/lifecycle surface for staged migration."""
 
@@ -48,8 +73,16 @@ class GoProxyWorker(QObject):
                 {
                     "name": str(nic.get("name") or nic.get("alias") or ""),
                     "source_ip": str(nic.get("ip") or nic.get("ipv4") or ""),
+                    "source_ipv6": str(nic.get("ipv6") or ""),
                     "if_index": int(
                         nic.get("if_index", nic.get("index", 0)) or 0
+                    ),
+                    "ipv6_if_index": int(
+                        nic.get(
+                            "ipv6_if_index",
+                            nic.get("if_index", nic.get("index", 0)),
+                        )
+                        or 0
                     ),
                     "weight": max(
                         int(
@@ -117,10 +150,10 @@ class GoProxyWorker(QObject):
     def _run(self):
         started = False
         try:
-            if not self._bridge.is_running():
-                raise RuntimeError("Go engine host is not connected")
-            if not self._bridge.supports("engine.start"):
-                raise RuntimeError("Go engine does not advertise engine.start")
+            if not can_use_go_proxy(self._bridge):
+                raise RuntimeError(
+                    "Go engine does not advertise the complete dual-stack proxy"
+                )
             result = self._bridge.request("engine.start", self._config, timeout=10.0)
             endpoints = result.get("endpoints", {}) if isinstance(result, dict) else {}
             socks = str(endpoints.get("socks", ""))

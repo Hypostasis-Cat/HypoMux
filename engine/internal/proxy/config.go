@@ -19,11 +19,13 @@ const (
 )
 
 type Adapter struct {
-	Name       string   `json:"name"`
-	SourceIP   string   `json:"source_ip"`
-	IfIndex    int      `json:"if_index,omitempty"`
-	Weight     int      `json:"weight,omitempty"`
-	DNSServers []string `json:"dns_servers,omitempty"`
+	Name        string   `json:"name"`
+	SourceIP    string   `json:"source_ip"`
+	IfIndex     int      `json:"if_index,omitempty"`
+	SourceIPv6  string   `json:"source_ipv6,omitempty"`
+	IPv6IfIndex int      `json:"ipv6_if_index,omitempty"`
+	Weight      int      `json:"weight,omitempty"`
+	DNSServers  []string `json:"dns_servers,omitempty"`
 }
 
 type Channel struct {
@@ -82,10 +84,12 @@ func normalizeConfig(config Config) (Config, error) {
 
 	seenNames := make(map[string]struct{}, len(config.Adapters))
 	seenIPs := make(map[string]struct{}, len(config.Adapters))
+	seenIPv6 := make(map[string]struct{}, len(config.Adapters))
 	adapters := make([]Adapter, 0, len(config.Adapters))
 	for _, adapter := range config.Adapters {
 		adapter.Name = strings.TrimSpace(adapter.Name)
 		adapter.SourceIP = strings.TrimSpace(adapter.SourceIP)
+		adapter.SourceIPv6 = strings.TrimSpace(adapter.SourceIPv6)
 		if adapter.Name == "" {
 			return Config{}, fmt.Errorf("adapter name is required")
 		}
@@ -96,6 +100,28 @@ func normalizeConfig(config Config) (Config, error) {
 		adapter.SourceIP = ip.To4().String()
 		if adapter.IfIndex < 0 {
 			return Config{}, fmt.Errorf("adapter %q has invalid interface index", adapter.Name)
+		}
+		if adapter.IPv6IfIndex < 0 {
+			return Config{}, fmt.Errorf("adapter %q has invalid IPv6 interface index", adapter.Name)
+		}
+		if adapter.SourceIPv6 != "" {
+			ipv6 := net.ParseIP(adapter.SourceIPv6)
+			if ipv6 == nil || ipv6.To4() != nil {
+				return Config{}, fmt.Errorf(
+					"adapter %q has invalid IPv6 source address",
+					adapter.Name,
+				)
+			}
+			if ipv6.IsUnspecified() || ipv6.IsMulticast() || ipv6.IsLinkLocalUnicast() {
+				return Config{}, fmt.Errorf(
+					"adapter %q has unusable IPv6 source address",
+					adapter.Name,
+				)
+			}
+			adapter.SourceIPv6 = ipv6.String()
+			if adapter.IPv6IfIndex == 0 {
+				adapter.IPv6IfIndex = adapter.IfIndex
+			}
 		}
 		binding, err := dns.NormalizeBinding(dns.Binding{
 			Name:       adapter.Name,
@@ -115,6 +141,15 @@ func normalizeConfig(config Config) (Config, error) {
 		}
 		if _, exists := seenIPs[adapter.SourceIP]; exists {
 			return Config{}, fmt.Errorf("duplicate adapter source IP %q", adapter.SourceIP)
+		}
+		if adapter.SourceIPv6 != "" {
+			if _, exists := seenIPv6[adapter.SourceIPv6]; exists {
+				return Config{}, fmt.Errorf(
+					"duplicate adapter source IPv6 %q",
+					adapter.SourceIPv6,
+				)
+			}
+			seenIPv6[adapter.SourceIPv6] = struct{}{}
 		}
 		seenNames[adapter.Name] = struct{}{}
 		seenIPs[adapter.SourceIP] = struct{}{}

@@ -85,8 +85,13 @@ func NewHelloResult(
 		Capabilities:    Capabilities(),
 		Modes:           []string{"proxy", "tun_tcp_pool"},
 		ModeFeatures: map[string][]string{
-			"proxy":        {"socks5_connect", "http_connect", "source_bound_dns"},
-			"tun_tcp_pool": {"tcp_connect", "udp_associate"},
+			"proxy": {
+				"socks5_connect",
+				"http_connect",
+				"source_bound_dns",
+				"ipv6_egress",
+			},
+			"tun_tcp_pool": {"tcp_connect", "udp_associate", "ipv6_egress"},
 		},
 		OS:        runtime.GOOS,
 		Arch:      runtime.GOARCH,

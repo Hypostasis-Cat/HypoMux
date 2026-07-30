@@ -191,7 +191,9 @@ def configure_bound_ipv6_socket(
     selected adapter can legitimately have a temporary/privacy address; the
     interface pin is the authoritative routing constraint.
     """
-    if_index = int(nic.get("if_index", nic.get("index", 0)) or 0)
+    if_index = int(
+        nic.get("ipv6_if_index", nic.get("if_index", nic.get("index", 0))) or 0
+    )
     source_ip = str(nic.get("ipv6") or "").strip()
     name = str(nic.get("name") or source_ip)
     if if_index <= 0:
@@ -322,7 +324,7 @@ def log_connected_ipv6_socket(
         "expected_if=%s ipv6_unicast_if=set"
     ) % (
         purpose, nic.get("name", nic.get("ipv6", "")), destination[0], destination[1], local,
-        nic.get("if_index", nic.get("index")),
+        nic.get("ipv6_if_index", nic.get("if_index", nic.get("index"))),
     )
     logger.info(message)
     _notify_trace(trace, message)

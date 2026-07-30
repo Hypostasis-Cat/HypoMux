@@ -48,6 +48,9 @@ def test_go_workflow_runs_real_process_client_integration():
     assert "'ui/go_proxy_worker.py'" in workflow
     assert "'ui/go_tun_pool_worker.py'" in workflow
     assert "'utils/tun_dns_planner.py'" in workflow
+    assert "'utils/network_utils.py'" in workflow
+    assert "'utils/socket_binding.py'" in workflow
+    assert "'utils/singbox_config.py'" in workflow
     assert "HYPOMUX_ENGINE_TEST_EXE:" in workflow
     assert 'test_engine_client.py" -v' in workflow
     assert "python -m compileall -q engine_client" in workflow

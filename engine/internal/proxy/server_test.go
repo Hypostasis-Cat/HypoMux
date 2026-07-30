@@ -286,7 +286,7 @@ func TestTUNTCPPoolStartupRollsBackEarlierListeners(t *testing.T) {
 	}
 }
 
-func TestTUNTCPPoolRejectsDomainAndIPv6(t *testing.T) {
+func TestTUNTCPPoolRejectsDomainAndIPv6WithoutBoundSource(t *testing.T) {
 	server, err := New(Config{
 		Adapters: []Adapter{{Name: "loopback", SourceIP: "127.0.0.1"}},
 		Channels: []Channel{
@@ -351,6 +351,57 @@ func TestTUNTCPPoolRejectsDomainAndIPv6(t *testing.T) {
 				t.Fatalf("reply = %d, want %d", reply[1], test.wantReply)
 			}
 		})
+	}
+}
+
+func TestTUNTCPPoolRelaysLiteralIPv6WithBoundSource(t *testing.T) {
+	echoAddress, stopEcho := startEchoServerIPv6(t)
+	defer stopEcho()
+	server, err := New(Config{
+		Adapters: []Adapter{
+			{Name: "ipv4-only", SourceIP: "127.0.0.1"},
+			{
+				Name:       "dual-stack",
+				SourceIP:   "127.0.0.2",
+				SourceIPv6: "::1",
+			},
+		},
+		Channels: []Channel{
+			{Name: ChannelEthernet, AdapterNames: []string{"ipv4-only"}},
+			{Name: ChannelWiFi, AdapterNames: []string{"dual-stack"}},
+			{
+				Name:         ChannelAggregation,
+				AdapterNames: []string{"ipv4-only", "dual-stack"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoints, err := server.Start()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stopServer(t, server)
+
+	client := dialSOCKSIPv6(
+		t,
+		endpoints.Channels[ChannelAggregation],
+		echoAddress,
+	)
+	defer client.Close()
+	assertEcho(t, client, []byte("tun-ipv6"))
+	snapshot := server.Snapshot(true)
+	if len(snapshot.Connections) != 1 ||
+		snapshot.Connections[0].Adapter != "dual-stack" {
+		t.Fatalf("IPv6 connection telemetry = %#v", snapshot.Connections)
+	}
+	if snapshot.Adapters[1].SourceIPv6 != "::1" {
+		t.Fatalf("IPv6 adapter telemetry = %#v", snapshot.Adapters[1])
+	}
+	if _, poisoned := server.schedulers[ChannelAggregation].
+		unavailableUntil["ipv4-only"]; poisoned {
+		t.Fatal("IPv6-incompatible adapter was incorrectly marked unhealthy")
 	}
 }
 
@@ -563,6 +614,60 @@ func dialSOCKSIPv4(
 		t.Fatalf("SOCKS reply = %v, %v", reply, err)
 	}
 	return client
+}
+
+func dialSOCKSIPv6(t *testing.T, endpoint string, target string) net.Conn {
+	t.Helper()
+	host, portText, err := net.SplitHostPort(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, _ := strconv.Atoi(portText)
+	client, err := net.DialTimeout("tcp", endpoint, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = client.SetDeadline(time.Now().Add(3 * time.Second))
+	_, _ = client.Write([]byte{5, 1, 0})
+	if _, err := io.ReadFull(client, make([]byte, 2)); err != nil {
+		_ = client.Close()
+		t.Fatal(err)
+	}
+	request := append([]byte{5, 1, 0, 4}, net.ParseIP(host).To16()...)
+	request = binary.BigEndian.AppendUint16(request, uint16(port))
+	_, _ = client.Write(request)
+	reply := make([]byte, 10)
+	if _, err := io.ReadFull(client, reply); err != nil || reply[1] != 0 {
+		_ = client.Close()
+		t.Fatalf("SOCKS IPv6 reply = %v, %v", reply, err)
+	}
+	return client
+}
+
+func startEchoServerIPv6(t *testing.T) (string, func()) {
+	t.Helper()
+	listener, err := net.Listen("tcp6", "[::1]:0")
+	if err != nil {
+		t.Skipf("IPv6 loopback unavailable: %v", err)
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			connection, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer connection.Close()
+				_, _ = io.Copy(connection, connection)
+			}()
+		}
+	}()
+	return listener.Addr().String(), func() {
+		_ = listener.Close()
+		<-done
+	}
 }
 
 func stopServer(t *testing.T, server *Server) {

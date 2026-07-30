@@ -259,8 +259,8 @@ Exit criteria:
 
 - Tests cover selection, DNS-plan handoff, channel DTOs, stop, failure, and
   telemetry behavior.
-- The Go path can be activated only when TCP and UDP TUN features are both
-  advertised.
+- The Go path can be activated only when TCP, UDP, and IPv6 egress TUN
+  features are all advertised.
 - Without the flag, Python TUN behavior is unchanged.
 - No failure can leave sing-box active without a pool or the Go engine
   running after TUN rollback.
@@ -268,13 +268,43 @@ Exit criteria:
 The transaction and ownership rules are documented in
 [TUN orchestration migration](../docs/architecture/tun-orchestration-migration.md).
 
+## Phase 9: source-bound dual-stack egress
+
+Goal: add IPv6 without allowing any TCP or UDP socket to escape the selected
+physical adapter.
+
+Deliverables:
+
+- Additive adapter DTO fields for IPv6 source and authoritative interface
+  index, propagated from Windows scanning through Qt to Go.
+- Family-aware adapter eligibility and `tcp4`/`tcp6` plus `udp4`/`udp6`
+  physical dials.
+- Windows `IPV6_UNICAST_IF` and explicit local IPv6 source binding.
+- Literal IPv6 SOCKS CONNECT and UDP datagram support while TUN domains,
+  UDP domains, and fragmentation remain rejected.
+- A negotiated `ipv6_egress` mode feature so older engines fall back before
+  the live TUN transaction acquires resources.
+- Exact-path and process-name exclusion for the Go host so its bound physical
+  sockets cannot be recaptured by sing-box TUN.
+
+Exit criteria:
+
+- Real IPv6 loopback TCP and UDP relay tests pass when IPv6 is available.
+- IPv6-incompatible adapters are skipped without poisoning IPv4 health.
+- IPv4 wire behavior, DNS ownership, TUN transaction, and WFP ownership are
+  unchanged.
+- Scanner, DTO, protocol fixture, telemetry, Go test/vet/build, and child
+  process regression gates pass.
+
+The address-family and binding rules are documented in
+[dual-stack physical egress migration](../docs/architecture/dual-stack-egress-migration.md).
+
 ## Later migration slices
 
-1. IPv4/IPv6 dual-stack behavior.
-2. Continuous adapter health and domain-aware scheduling.
-3. Move sing-box/WFP lifecycle ownership after development orchestration
+1. Continuous adapter health and domain-aware scheduling.
+2. Move sing-box/WFP lifecycle ownership after development orchestration
    shadow testing.
-4. Make the Go engine the default for all network behavior after shadow-mode
+3. Make the Go engine the default for all network behavior after shadow-mode
    and rollback testing.
 
 Each slice keeps a Python fallback until its unit, integration, and Windows

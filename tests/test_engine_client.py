@@ -286,6 +286,10 @@ class RealGoEngineIntegrationTests(unittest.TestCase):
             self.assertIn("engine.status", hello["capabilities"])
             self.assertIn("diagnostic.run", hello["capabilities"])
             self.assertIn("engine.start", hello["capabilities"])
+            self.assertIn(
+                "ipv6_egress",
+                hello["mode_features"]["tun_tcp_pool"],
+            )
             self.assertTrue(client.request("health.check")["ok"])
             diagnostic = client.request(
                 "diagnostic.run",

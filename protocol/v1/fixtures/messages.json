@@ -42,11 +42,13 @@
           "proxy": [
             "socks5_connect",
             "http_connect",
-            "source_bound_dns"
+            "source_bound_dns",
+            "ipv6_egress"
           ],
           "tun_tcp_pool": [
             "tcp_connect",
-            "udp_associate"
+            "udp_associate",
+            "ipv6_egress"
           ]
         },
         "os": "windows",
@@ -221,12 +223,16 @@
             "name": "Ethernet",
             "source_ip": "192.0.2.10",
             "if_index": 11,
+            "source_ipv6": "2001:db8:1::10",
+            "ipv6_if_index": 11,
             "weight": 2
           },
           {
             "name": "Wi-Fi",
             "source_ip": "192.0.2.20",
             "if_index": 12,
+            "source_ipv6": "2001:db8:2::20",
+            "ipv6_if_index": 12,
             "weight": 1
           }
         ],
@@ -310,6 +316,8 @@
             "name": "Ethernet",
             "source_ip": "192.0.2.10",
             "if_index": 11,
+            "source_ipv6": "2001:db8:1::10",
+            "ipv6_if_index": 11,
             "connections": 1,
             "bytes_up": 4096,
             "bytes_down": 8192

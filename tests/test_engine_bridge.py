@@ -35,8 +35,12 @@ for line in sys.stdin:
                 ],
                 "modes": ["proxy", "tun_tcp_pool"],
                 "mode_features": {
-                    "proxy": ["tcp_connect"],
-                    "tun_tcp_pool": ["tcp_connect", "udp_associate"],
+                    "proxy": ["tcp_connect", "ipv6_egress"],
+                    "tun_tcp_pool": [
+                        "tcp_connect",
+                        "udp_associate",
+                        "ipv6_egress",
+                    ],
                 },
             },
         })

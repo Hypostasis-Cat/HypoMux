@@ -4,18 +4,31 @@ import time
 
 from PySide6.QtCore import QCoreApplication
 
-from ui.go_proxy_worker import GoProxyWorker
+from ui.go_proxy_worker import GoProxyWorker, can_use_go_proxy
 
 
 class _FakeBridge:
-    def __init__(self):
+    def __init__(
+        self,
+        *,
+        features=(
+            "socks5_connect",
+            "http_connect",
+            "source_bound_dns",
+            "ipv6_egress",
+        ),
+    ):
         self.requests: list[tuple[str, object]] = []
+        self.features = set(features)
 
     def is_running(self):
         return True
 
     def supports(self, method: str):
         return method in {"engine.start", "engine.stop", "engine.telemetry"}
+
+    def supports_mode_feature(self, mode: str, feature: str):
+        return mode == "proxy" and feature in self.features
 
     def request(self, method: str, params=None, *, timeout=None):
         self.requests.append((method, params))
@@ -61,7 +74,9 @@ def test_go_proxy_worker_matches_proxy_worker_lifecycle_contract():
             {
                 "name": "Ethernet",
                 "ip": "192.0.2.10",
+                "ipv6": "2001:db8::10",
                 "if_index": 11,
+                "ipv6_if_index": 12,
                 "dns_servers": ["192.0.2.53"],
             }
         ],
@@ -97,6 +112,21 @@ def test_go_proxy_worker_matches_proxy_worker_lifecycle_contract():
     assert [method for method, _ in bridge.requests].count("engine.stop") == 1
     start_params = bridge.requests[0][1]
     assert start_params["adapters"][0]["weight"] == 3
+    assert start_params["adapters"][0]["source_ipv6"] == "2001:db8::10"
+    assert start_params["adapters"][0]["ipv6_if_index"] == 12
     assert start_params["adapters"][0]["dns_servers"] == ["192.0.2.53"]
     assert start_params["dns"]["policy"] == "auto"
     assert start_params["dns"]["legacy_servers"] == ["223.5.5.5"]
+
+
+def test_go_proxy_requires_complete_dual_stack_capability():
+    assert can_use_go_proxy(_FakeBridge())
+    assert not can_use_go_proxy(
+        _FakeBridge(
+            features=(
+                "socks5_connect",
+                "http_connect",
+                "source_bound_dns",
+            )
+        )
+    )

@@ -13,23 +13,31 @@ func (s *Server) dialUpstream(
 	ctx context.Context,
 	target string,
 	channelScheduler *scheduler,
-	literalIPv4Only bool,
+	literalIPOnly bool,
 ) (net.Conn, Adapter, error) {
-	host, _, splitErr := net.SplitHostPort(target)
+	host, port, splitErr := net.SplitHostPort(target)
 	if splitErr != nil {
 		return nil, Adapter{}, fmt.Errorf("target: %w", splitErr)
 	}
-	if literalIPv4Only {
-		ip := net.ParseIP(host)
-		if ip == nil || ip.To4() == nil {
-			return nil, Adapter{}, errors.New("TUN TCP pool requires a literal IPv4 target")
+	targetIP := net.ParseIP(host)
+	if literalIPOnly && targetIP == nil {
+		return nil, Adapter{}, errors.New("TUN TCP pool requires a literal IP target")
+	}
+
+	excluded := make(map[string]struct{}, len(channelScheduler.adapters))
+	if targetIP != nil {
+		network := networkForIP("tcp", targetIP)
+		for _, adapter := range channelScheduler.adapters {
+			if !adapterSupportsNetwork(adapter, network) {
+				excluded[adapter.Name] = struct{}{}
+			}
 		}
 	}
-	attempts := len(channelScheduler.adapters)
+
+	attempts := len(channelScheduler.adapters) - len(excluded)
 	if attempts > 2 {
 		attempts = 2
 	}
-	excluded := make(map[string]struct{}, attempts)
 	var failures []error
 	for range attempts {
 		adapter, ok := channelScheduler.Select(excluded)
@@ -37,14 +45,8 @@ func (s *Server) dialUpstream(
 			break
 		}
 		excluded[adapter.Name] = struct{}{}
-		dialTarget := target
-		host, port, splitErr := net.SplitHostPort(target)
-		if splitErr != nil {
-			channelScheduler.MarkFailure(adapter.Name)
-			failures = append(failures, fmt.Errorf("%s target: %w", adapter.Name, splitErr))
-			continue
-		}
-		if net.ParseIP(host) == nil {
+		resolvedIP := targetIP
+		if resolvedIP == nil {
 			if s.resolver == nil {
 				channelScheduler.MarkFailure(adapter.Name)
 				failures = append(failures, fmt.Errorf("%s DNS resolver is unavailable", adapter.Name))
@@ -56,16 +58,42 @@ func (s *Server) dialUpstream(
 				Binding:    adapterDNSBinding(adapter),
 			})
 			if resolveErr != nil {
+				if adapter.SourceIPv6 != "" {
+					resolved, resolveErr = s.resolver.Resolve(ctx, dns.Query{
+						Domain:     host,
+						RecordType: dns.RecordAAAA,
+						Binding:    adapterDNSBinding(adapter),
+					})
+				}
+				if resolveErr != nil {
+					channelScheduler.MarkFailure(adapter.Name)
+					failures = append(
+						failures,
+						fmt.Errorf("%s resolve %s: %w", adapter.Name, host, resolveErr),
+					)
+					continue
+				}
+			}
+			resolvedIP = net.ParseIP(resolved.Address)
+			if resolvedIP == nil {
 				channelScheduler.MarkFailure(adapter.Name)
 				failures = append(
 					failures,
-					fmt.Errorf("%s resolve %s: %w", adapter.Name, host, resolveErr),
+					fmt.Errorf("%s resolver returned invalid address", adapter.Name),
 				)
 				continue
 			}
-			dialTarget = net.JoinHostPort(resolved.Address, port)
 		}
-		dialer, err := boundDialer(adapter, s.config.ConnectTimeout)
+		network := networkForIP("tcp", resolvedIP)
+		if !adapterSupportsNetwork(adapter, network) {
+			failures = append(
+				failures,
+				fmt.Errorf("%s has no %s source address", adapter.Name, network),
+			)
+			continue
+		}
+		dialTarget := net.JoinHostPort(resolvedIP.String(), port)
+		dialer, err := boundNetworkDialer(adapter, s.config.ConnectTimeout, network)
 		if err != nil {
 			channelScheduler.MarkFailure(adapter.Name)
 			failures = append(failures, fmt.Errorf("%s bind: %w", adapter.Name, err))
@@ -83,6 +111,20 @@ func (s *Server) dialUpstream(
 		return nil, Adapter{}, errors.New("no adapter available")
 	}
 	return nil, Adapter{}, errors.Join(failures...)
+}
+
+func networkForIP(transport string, ip net.IP) string {
+	if ip.To4() != nil {
+		return transport + "4"
+	}
+	return transport + "6"
+}
+
+func adapterSupportsNetwork(adapter Adapter, network string) bool {
+	if network == "tcp6" || network == "udp6" {
+		return adapter.SourceIPv6 != ""
+	}
+	return adapter.SourceIP != ""
 }
 
 func adapterDNSBinding(adapter Adapter) dns.Binding {

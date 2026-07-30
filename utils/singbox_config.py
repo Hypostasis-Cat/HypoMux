@@ -258,6 +258,7 @@ def build_config(
                 "main.exe",
                 "python.exe",
                 "pythonw.exe",
+                "hypomux-engine.exe",
             ],
             "outbound": OUTBOUND_DIRECT,
         },

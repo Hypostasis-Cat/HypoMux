@@ -343,9 +343,13 @@ class IPv6TransportTests(unittest.TestCase):
                 return self.value
 
         sock = Socket()
-        configure_bound_ipv6_socket(sock, {"name": "v6", "if_index": 19}, "test")
+        configure_bound_ipv6_socket(
+            sock,
+            {"name": "v6", "if_index": 19, "ipv6_if_index": 23},
+            "test",
+        )
         self.assertEqual(IPV6_UNICAST_IF, 31)
-        self.assertEqual(sock.value, 19)
+        self.assertEqual(sock.value, 23)
 
 
 class AdapterTopologyRiskTests(unittest.TestCase):

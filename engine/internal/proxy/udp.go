@@ -218,11 +218,25 @@ func (a *udpAssociation) createFlow(
 	target string,
 	firstPayload []byte,
 ) (*udpFlow, error) {
-	attempts := len(a.scheduler.adapters)
+	host, _, err := net.SplitHostPort(target)
+	if err != nil {
+		return nil, fmt.Errorf("UDP target: %w", err)
+	}
+	targetIP := net.ParseIP(host)
+	if targetIP == nil {
+		return nil, errors.New("UDP target must be a literal IP address")
+	}
+	network := networkForIP("udp", targetIP)
+	excluded := make(map[string]struct{}, len(a.scheduler.adapters))
+	for _, adapter := range a.scheduler.adapters {
+		if !adapterSupportsNetwork(adapter, network) {
+			excluded[adapter.Name] = struct{}{}
+		}
+	}
+	attempts := len(a.scheduler.adapters) - len(excluded)
 	if attempts > 2 {
 		attempts = 2
 	}
-	excluded := make(map[string]struct{}, attempts)
 	var failures []error
 	for range attempts {
 		adapter, ok := a.scheduler.Select(excluded)
@@ -233,7 +247,7 @@ func (a *udpAssociation) createFlow(
 		dialer, err := boundNetworkDialer(
 			adapter,
 			a.server.config.ConnectTimeout,
-			"udp4",
+			network,
 		)
 		if err != nil {
 			a.scheduler.MarkFailure(adapter.Name)
@@ -378,23 +392,41 @@ func (a *udpAssociation) close() {
 }
 
 func parseSOCKSUDPPacket(payload []byte) (socksUDPPacket, bool) {
-	if len(payload) < 10 || payload[0] != 0 || payload[1] != 0 || payload[2] != 0 {
+	if len(payload) < 4 || payload[0] != 0 || payload[1] != 0 || payload[2] != 0 {
 		return socksUDPPacket{}, false
 	}
-	if payload[3] != 1 {
+	var ip net.IP
+	var portOffset int
+	switch payload[3] {
+	case 1:
+		if len(payload) < 10 {
+			return socksUDPPacket{}, false
+		}
+		ip = net.IP(payload[4:8]).To4()
+		portOffset = 8
+	case 4:
+		if len(payload) < 22 {
+			return socksUDPPacket{}, false
+		}
+		ip = net.IP(payload[4:20])
+		if ip.To4() != nil {
+			return socksUDPPacket{}, false
+		}
+		portOffset = 20
+	default:
 		return socksUDPPacket{}, false
 	}
-	ip := net.IP(payload[4:8]).To4()
 	if ip == nil {
 		return socksUDPPacket{}, false
 	}
-	port := int(binary.BigEndian.Uint16(payload[8:10]))
-	if port == 0 || len(payload) == 10 {
+	port := int(binary.BigEndian.Uint16(payload[portOffset : portOffset+2]))
+	payloadOffset := portOffset + 2
+	if port == 0 || len(payload) == payloadOffset {
 		return socksUDPPacket{}, false
 	}
 	return socksUDPPacket{
 		target:  net.JoinHostPort(ip.String(), strconv.Itoa(port)),
-		payload: payload[10:],
+		payload: payload[payloadOffset:],
 	}, true
 }
 
@@ -403,16 +435,25 @@ func packSOCKSUDPReply(target string, payload []byte) ([]byte, bool) {
 	if err != nil {
 		return nil, false
 	}
-	ip := net.ParseIP(host).To4()
+	ip := net.ParseIP(host)
 	port, err := strconv.Atoi(portText)
 	if ip == nil || err != nil || port <= 0 || port > 65535 {
 		return nil, false
 	}
-	packet := make([]byte, 10+len(payload))
-	packet[3] = 1
-	copy(packet[4:8], ip)
-	binary.BigEndian.PutUint16(packet[8:10], uint16(port))
-	copy(packet[10:], payload)
+	var packet []byte
+	if ipv4 := ip.To4(); ipv4 != nil {
+		packet = make([]byte, 10+len(payload))
+		packet[3] = 1
+		copy(packet[4:8], ipv4)
+		binary.BigEndian.PutUint16(packet[8:10], uint16(port))
+		copy(packet[10:], payload)
+	} else {
+		packet = make([]byte, 22+len(payload))
+		packet[3] = 4
+		copy(packet[4:20], ip.To16())
+		binary.BigEndian.PutUint16(packet[20:22], uint16(port))
+		copy(packet[22:], payload)
+	}
 	return packet, true
 }
 

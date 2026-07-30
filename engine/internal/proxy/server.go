@@ -60,7 +60,11 @@ func New(config Config) (*Server, error) {
 		dialer *net.Dialer,
 		target string,
 	) (net.Conn, error) {
-		return dialer.DialContext(ctx, "tcp4", target)
+		network := "tcp4"
+		if local, ok := dialer.LocalAddr.(*net.TCPAddr); ok && local.IP.To4() == nil {
+			network = "tcp6"
+		}
+		return dialer.DialContext(ctx, network, target)
 	}
 	server.listenTCP = net.Listen
 	server.dialUDP = func(
@@ -68,7 +72,11 @@ func New(config Config) (*Server, error) {
 		dialer *net.Dialer,
 		target string,
 	) (net.Conn, error) {
-		return dialer.DialContext(ctx, "udp4", target)
+		network := "udp4"
+		if local, ok := dialer.LocalAddr.(*net.UDPAddr); ok && local.IP.To4() == nil {
+			network = "udp6"
+		}
+		return dialer.DialContext(ctx, network, target)
 	}
 	server.listenUDP = net.ListenUDP
 	server.udpFlowLimit = defaultUDPFlowLimit
@@ -328,10 +336,10 @@ func (s *Server) connect(session *connection, target string) (net.Conn, Adapter,
 	ctx, cancel := context.WithTimeout(s.ctx, s.config.ConnectTimeout)
 	defer cancel()
 	channelScheduler := s.scheduler
-	literalIPv4Only := false
+	literalIPOnly := false
 	if session.channel != "" {
 		channelScheduler = s.schedulers[session.channel]
-		literalIPv4Only = true
+		literalIPOnly = true
 	}
 	if channelScheduler == nil {
 		return nil, Adapter{}, fmt.Errorf("unknown channel %q", session.channel)
@@ -340,7 +348,7 @@ func (s *Server) connect(session *connection, target string) (net.Conn, Adapter,
 		ctx,
 		target,
 		channelScheduler,
-		literalIPv4Only,
+		literalIPOnly,
 	)
 	if err != nil {
 		return nil, Adapter{}, err

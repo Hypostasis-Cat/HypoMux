@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"io"
 	"net"
-	"strconv"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -319,6 +318,74 @@ func TestParseAndPackSOCKSUDPIPv4(t *testing.T) {
 	}
 }
 
+func TestParseAndPackSOCKSUDPIPv6(t *testing.T) {
+	address := net.ParseIP("2001:db8::1").To16()
+	payload := append([]byte{0, 0, 0, 4}, address...)
+	payload = binary.BigEndian.AppendUint16(payload, 443)
+	payload = append(payload, []byte("payload")...)
+	packet, ok := parseSOCKSUDPPacket(payload)
+	if !ok || packet.target != "[2001:db8::1]:443" ||
+		string(packet.payload) != "payload" {
+		t.Fatalf("parsed IPv6 packet = %#v, %v", packet, ok)
+	}
+	reply, ok := packSOCKSUDPReply(packet.target, packet.payload)
+	if !ok || string(reply) != string(payload) {
+		t.Fatalf("packed IPv6 reply = %v, %v", reply, ok)
+	}
+}
+
+func TestSOCKSUDPRelaysLiteralIPv6WithStableFlow(t *testing.T) {
+	echoAddress, packets, stopEcho := startUDPEchoServerIPv6(t)
+	defer stopEcho()
+	server, err := New(Config{
+		Adapters: []Adapter{{
+			Name:       "loopback",
+			SourceIP:   "127.0.0.1",
+			SourceIPv6: "::1",
+		}},
+		Channels: []Channel{
+			{Name: ChannelEthernet, AdapterNames: []string{"loopback"}},
+			{Name: ChannelWiFi, AdapterNames: []string{"loopback"}},
+			{Name: ChannelAggregation, AdapterNames: []string{"loopback"}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var dials atomic.Int64
+	server.dialUDP = func(
+		ctx context.Context,
+		dialer *net.Dialer,
+		target string,
+	) (net.Conn, error) {
+		dials.Add(1)
+		return dialer.DialContext(ctx, "udp6", target)
+	}
+	endpoints, err := server.Start()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stopServer(t, server)
+	control, relay := startUDPAssociation(
+		t,
+		endpoints.Channels[ChannelAggregation],
+		0,
+	)
+	defer control.Close()
+	client := listenUDPClient(t)
+	defer client.Close()
+
+	for _, value := range []string{"ipv6-one", "ipv6-two"} {
+		sendSOCKSUDP(t, client, relay, echoAddress, []byte(value))
+		if reply := readSOCKSUDP(t, client); string(reply) != value {
+			t.Fatalf("IPv6 UDP reply = %q, want %q", reply, value)
+		}
+	}
+	if dials.Load() != 1 || packets.Load() != 2 {
+		t.Fatalf("IPv6 UDP dials=%d packets=%d", dials.Load(), packets.Load())
+	}
+}
+
 func newTUNPoolTestServer(t *testing.T) *Server {
 	t.Helper()
 	server, err := New(Config{
@@ -348,6 +415,34 @@ func startUDPEchoServer(t *testing.T) (string, *atomic.Int64, func()) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	var packets atomic.Int64
+	done := make(chan struct{})
+	go func() {
+		buffer := make([]byte, 65535)
+		for {
+			count, client, err := listener.ReadFromUDP(buffer)
+			if err != nil {
+				close(done)
+				return
+			}
+			packets.Add(1)
+			_, _ = listener.WriteToUDP(buffer[:count], client)
+		}
+	}()
+	return listener.LocalAddr().String(), &packets, func() {
+		_ = listener.Close()
+		<-done
+	}
+}
+
+func startUDPEchoServerIPv6(t *testing.T) (string, *atomic.Int64, func()) {
+	t.Helper()
+	listener, err := net.ListenUDP("udp6", &net.UDPAddr{
+		IP: net.ParseIP("::1"),
+	})
+	if err != nil {
+		t.Skipf("IPv6 UDP loopback unavailable: %v", err)
 	}
 	var packets atomic.Int64
 	done := make(chan struct{})
@@ -420,16 +515,10 @@ func sendSOCKSUDP(
 	payload []byte,
 ) {
 	t.Helper()
-	host, portText, err := net.SplitHostPort(target)
-	if err != nil {
-		t.Fatal(err)
+	packet, ok := packSOCKSUDPReply(target, payload)
+	if !ok {
+		t.Fatalf("could not encode SOCKS UDP target %q", target)
 	}
-	port, _ := strconv.Atoi(portText)
-	packet := make([]byte, 10+len(payload))
-	packet[3] = 1
-	copy(packet[4:8], net.ParseIP(host).To4())
-	binary.BigEndian.PutUint16(packet[8:10], uint16(port))
-	copy(packet[10:], payload)
 	if _, err := client.WriteToUDP(packet, relay); err != nil {
 		t.Fatal(err)
 	}

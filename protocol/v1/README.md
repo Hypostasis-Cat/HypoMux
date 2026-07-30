@@ -24,4 +24,6 @@ capabilities instead of assuming every v1 engine implements every method.
 latter is a named-channel local SOCKS pool. Clients must inspect the additive
 `engine.hello.mode_features` map before assuming a mode supports a particular
 transport. The current TUN pool reports `tcp_connect` and `udp_associate`.
-Live TUN activation remains gated on the later orchestration slice.
+Both proxy modes report `ipv6_egress` when additive adapter fields
+`source_ipv6` and `ipv6_if_index` are supported. Live TUN activation remains
+gated on development orchestration.

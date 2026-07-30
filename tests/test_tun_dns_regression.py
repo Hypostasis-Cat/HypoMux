@@ -18,6 +18,26 @@ from ui.main_window import _should_finish_acceleration_log
 
 
 class TunDnsRegressionTests(unittest.TestCase):
+    def test_go_engine_process_is_excluded_from_tun_recapture(self):
+        config = build_config(
+            app_process_path=[
+                r"C:\HypoMux\HypoMux.exe",
+                r"C:\HypoMux\bin\hypomux-engine.exe",
+            ]
+        )
+        route_rules = config["route"]["rules"]
+        path_rule = next(rule for rule in route_rules if "process_path" in rule)
+        self.assertIn(
+            r"C:\HypoMux\bin\hypomux-engine.exe",
+            path_rule["process_path"],
+        )
+        name_rule = next(
+            rule
+            for rule in route_rules
+            if "hypomux-engine.exe" in rule.get("process_name", [])
+        )
+        self.assertEqual(name_rule["outbound"], "direct")
+
     def test_internal_tun_restart_keeps_diagnostic_session_open(self):
         common = {
             "active": True,

@@ -24,9 +24,9 @@ independent component first, so enabling it cannot silently discard UDP.
 | UI lifecycle and rollback coordinator | current Qt UI; future WPF client uses the same DTOs |
 
 sing-box resolves domain names before sending TUN TCP traffic to the local
-pool. Consequently, `tun_tcp_pool` accepts only literal IPv4 SOCKS CONNECT
-targets. A domain request is rejected instead of causing a second resolver
-path. IPv6 remains a later, explicit dual-stack slice.
+pool. Consequently, `tun_tcp_pool` accepts only literal SOCKS CONNECT targets.
+A domain request is rejected instead of causing a second resolver path.
+Phase 6 accepts IPv4; Phase 9 adds explicit source-bound IPv6.
 
 ## Channel model
 
@@ -107,9 +107,9 @@ unchanged.
 - A channel cannot select an adapter outside its declared subset.
 - SOCKS CONNECT relays through a real channel endpoint and records the
   channel plus the selected physical adapter.
-- Domain, IPv6, unknown channel adapter, and invalid listener configurations
-  fail explicitly. The original Phase 6 TCP-only UDP rejection is superseded
-  by the Phase 7 UDP contract.
+- Domain, unknown channel adapter, and invalid listener configurations fail
+  explicitly. The original Phase 6 IPv6 and TCP-only UDP rejections are
+  superseded by the Phase 9 dual-stack and Phase 7 UDP contracts.
 - Stop closes handshake-only and active relay clients within the existing
   five-second engine deadline.
 - `engine.hello`, `engine.start`, `engine.status`, and canonical fixtures

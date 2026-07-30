@@ -42,6 +42,38 @@ func TestNormalizeConfigValidatesMigrationBoundary(t *testing.T) {
 	}
 }
 
+func TestNormalizeConfigAcceptsOptionalIPv6AndRejectsUnsafeSources(t *testing.T) {
+	config, err := normalizeConfig(Config{
+		Adapters: []Adapter{{
+			Name:        "dual-stack",
+			SourceIP:    "127.0.0.1",
+			IfIndex:     11,
+			SourceIPv6:  "2001:0db8::1",
+			IPv6IfIndex: 12,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("normalizeConfig() failed: %v", err)
+	}
+	adapter := config.Adapters[0]
+	if adapter.SourceIPv6 != "2001:db8::1" || adapter.IPv6IfIndex != 12 {
+		t.Fatalf("normalized IPv6 adapter = %#v", adapter)
+	}
+
+	for _, source := range []string{"192.0.2.1", "::", "ff02::1", "fe80::1"} {
+		_, err := normalizeConfig(Config{
+			Adapters: []Adapter{{
+				Name:       "invalid",
+				SourceIP:   "127.0.0.1",
+				SourceIPv6: source,
+			}},
+		})
+		if err == nil {
+			t.Errorf("unsafe IPv6 source %q unexpectedly accepted", source)
+		}
+	}
+}
+
 func TestNormalizeConfigValidatesTUNChannelBoundary(t *testing.T) {
 	config, err := normalizeConfig(Config{
 		Adapters: []Adapter{

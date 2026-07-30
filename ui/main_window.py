@@ -17,6 +17,7 @@ QApplication 已存在，避免 "Must construct a QApplication before a QWidget"
 
 import asyncio
 import ctypes
+import ipaddress
 import json
 import os
 import platform
@@ -179,6 +180,31 @@ def _first_valid_ipv4(raw) -> str:
     return ""
 
 
+def _first_valid_ipv6(raw) -> str:
+    """从扫描结果提取首个可用于物理出站绑定的 IPv6 单播地址。"""
+    candidates: List[str] = []
+    if isinstance(raw, list):
+        candidates.extend(str(item) for item in raw)
+    else:
+        candidates.extend(str(raw).split(","))
+    for candidate in candidates:
+        text = candidate.strip().split("%", 1)[0]
+        try:
+            address = ipaddress.IPv6Address(text)
+        except ipaddress.AddressValueError:
+            continue
+        if (
+            address.is_unspecified
+            or address.is_loopback
+            or address.is_multicast
+            or address.is_link_local
+            or address.ipv4_mapped is not None
+        ):
+            continue
+        return address.compressed
+    return ""
+
+
 def create_main_window():
     """工厂函数：创建 MainWindow 实例（此时 QApplication 已存在）"""
     from PySide6.QtCore import Qt, QThread, Signal, Slot, QTimer, QSettings, QRect, QRectF, QPoint, QEvent
@@ -221,7 +247,7 @@ def create_main_window():
     from ui.popup_material import apply_mica_popup
     from ui.components import refresh_content_card_material, set_content_card_opacity
     from ui.engine_bridge import EngineBridge
-    from ui.go_proxy_worker import GoProxyWorker
+    from ui.go_proxy_worker import GoProxyWorker, can_use_go_proxy
     from ui.go_tun_pool_worker import GoTunPoolWorker, can_use_go_tun_pool
 
     class BlockedDomainsWindow(FluentWidget):
@@ -682,6 +708,7 @@ def create_main_window():
             self._pending_socks_addr = ""
             self._pending_http_addr = ""
             self._retired_proxy_workers = []
+            self._go_engine_command = []
             self._last_up_mbps = 0.0
             self._last_conn_count = 0
 
@@ -830,6 +857,7 @@ def create_main_window():
                 return
 
             bridge = EngineBridge(command, parent=self)
+            self._go_engine_command = list(command)
             bridge.connected.connect(self._on_go_engine_connected)
             bridge.disconnected.connect(self._on_go_engine_disconnected)
             bridge.engine_error.connect(self._on_go_engine_error)
@@ -1549,6 +1577,10 @@ def create_main_window():
                     "index": a["index"],
                     "name": a["alias"],
                     "ip": ip,
+                    "ipv6": _first_valid_ipv6(a.get("ipv6", "")),
+                    "ipv6_if_index": int(
+                        a.get("ipv6_if_index", a["index"]) or a["index"]
+                    ),
                     "dns_servers": a.get("dns_servers", []),
                     "iftype": a.get("iftype", -1),
                     "is_ppp": bool(a.get("is_ppp", False)),
@@ -1607,9 +1639,11 @@ def create_main_window():
             # 预先为每张网卡补一个 'ip' 字段（首个有效 IPv4），供卡片显示
             for a in adapters:
                 a["ip"] = _first_valid_ipv4(a.get("ipv4", ""))
+                a["ipv6"] = _first_valid_ipv6(a.get("ipv6", ""))
             snapshot = tuple(sorted(
                 (
                     str(a.get("alias", "")), str(a.get("index", -1)), str(a.get("ipv4", "")),
+                    str(a.get("ipv6", "")), str(a.get("ipv6_if_index", -1)),
                     str(a.get("gateway", "")), tuple(a.get("dns_servers", []) or []),
                     str(a.get("metric", -1)), bool(a.get("is_auto", True)),
                 )
@@ -1907,13 +1941,18 @@ def create_main_window():
         def _app_process_paths(self) -> List[str]:
             """收集源码运行/Nuitka 打包运行时可能出现的宿主进程路径。"""
             paths = []
-            for raw in (
+            candidates = [
                 sys.executable,
                 sys.argv[0] if sys.argv else "",
                 Path(sys.executable).with_name("HypoMux.exe"),
                 Path(sys.executable).with_name("main.exe"),
                 Path(sys.executable).with_name("python.exe"),
-            ):
+                Path(sys.executable).with_name("hypomux-engine.exe"),
+                Path(sys.executable).parent / "bin" / "hypomux-engine.exe",
+            ]
+            if self._go_engine_command:
+                candidates.append(self._go_engine_command[0])
+            for raw in candidates:
                 try:
                     path = str(Path(raw).resolve())
                 except Exception:
@@ -2757,9 +2796,7 @@ def create_main_window():
             try:
                 use_go_proxy = (
                     go_proxy_development_enabled()
-                    and self._go_engine_bridge is not None
-                    and self._go_engine_bridge.is_running()
-                    and self._go_engine_bridge.supports("engine.start")
+                    and can_use_go_proxy(self._go_engine_bridge)
                 )
                 worker_type = GoProxyWorker if use_go_proxy else ProxyWorker
                 worker_args = {

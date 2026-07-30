@@ -37,7 +37,9 @@ The relay accepts only complete SOCKS5 UDP datagrams:
 - RSV must be zero and FRAG must be zero; fragmentation is not implemented.
 - Only literal IPv4 destinations are accepted in this phase.
 - Domains are rejected because sing-box remains the only TUN DNS owner.
-- IPv6 is rejected until the dual-stack migration slice.
+- IPv6 is rejected until the dual-stack migration slice. Phase 9 supersedes
+  this boundary with literal, source-bound IPv6 while preserving the domain
+  and fragmentation rejections.
 - Destination port zero and empty payloads are rejected.
 - Datagram and flow counts are bounded.
 
@@ -85,7 +87,8 @@ Each physical UDP flow appears as an active connection with:
 - cumulative payload bytes up and down
 
 `engine.hello.mode_features.tun_tcp_pool` becomes `["tcp_connect",
-"udp_associate"]`. Clients must inspect this additive feature map before
+"udp_associate"]` in this phase and gains `ipv6_egress` in Phase 9. Clients
+must inspect this additive feature map before
 assuming UDP support; the existing `modes` array alone only proves that the
 mode can start.
 
@@ -112,8 +115,9 @@ passes real Windows network testing.
   channel's adapter subset.
 - The first accepted client UDP endpoint is locked and spoofed local sources
   are ignored.
-- Domain, IPv6, fragmentation, malformed headers, port zero, empty payload,
-  and flow-limit overflow create no upstream flow.
+- Domain, fragmentation, malformed headers, port zero, empty payload, and
+  flow-limit overflow create no upstream flow. The Phase 7 IPv6 rejection is
+  superseded by Phase 9 source-bound IPv6.
 - Replies contain a correct SOCKS5 UDP IPv4 header and return to the locked
   client endpoint.
 - Idle expiry, TCP-control close, engine stop, and host shutdown release all

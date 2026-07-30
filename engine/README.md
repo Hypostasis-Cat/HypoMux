@@ -72,8 +72,8 @@ Protocol-v1 methods:
 - `engine.hello`: negotiate the protocol and inspect capabilities.
 - `engine.status`: read the canonical engine lifecycle state.
 - `engine.start`: start either the ordinary SOCKS5/HTTP TCP proxy or the
-  named-channel TUN TCP/UDP pool with explicit adapters, source IPv4 addresses,
-  ports, and scheduling weights.
+  named-channel TUN TCP/UDP pool with explicit adapters, required source IPv4,
+  optional source IPv6, interface indices, ports, and scheduling weights.
 - `engine.stop`: close listeners and cancel all accepted and relayed
   connections with a bounded shutdown.
 - `engine.telemetry`: read cumulative per-adapter bytes, active connection
@@ -91,14 +91,16 @@ Reserved lifecycle states are `stopped`, `starting`, `running`, `degraded`,
 `stopping`, and `failed`. `engine.hello.modes` advertises `proxy` and
 `tun_tcp_pool`. `engine.hello.mode_features` reports the exact transports
 available in each mode. The TUN pool owns literal-IPv4 SOCKS CONNECT and
-source-validated UDP ASSOCIATE; live TUN activation, WFP, and routing remain
-unavailable until their orchestration contracts are implemented.
+literal-IPv6 SOCKS CONNECT plus source-validated dual-stack UDP ASSOCIATE.
+Live TUN activation remains behind the development orchestration switch;
+sing-box, WFP, and routing keep their current ownership.
 
 Ordinary proxy domain targets are resolved by the Go engine before the
-adapter-bound TCP dial. `auto` races the built-in DoH endpoints and uses only
-source-bound traditional DNS if DoH is unavailable; explicit providers remain
-strict. No ordinary proxy DNS path uses the Windows system resolver. TUN DNS
-remains owned by sing-box until its later orchestration phase.
+adapter-bound TCP dial. A records remain preferred, with AAAA fallback only
+through adapters that advertise an explicit IPv6 source. `auto` races the
+built-in DoH endpoints and uses only source-bound traditional DNS if DoH is
+unavailable; explicit providers remain strict. No ordinary proxy DNS path
+uses the Windows system resolver. TUN DNS remains owned by sing-box.
 
 ## Compatibility policy
 

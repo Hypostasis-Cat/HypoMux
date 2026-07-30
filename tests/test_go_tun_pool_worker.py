@@ -9,7 +9,11 @@ from utils.tun_dns_planner import TunDnsPlanner
 
 
 class _FakeBridge:
-    def __init__(self, *, features=("tcp_connect", "udp_associate")):
+    def __init__(
+        self,
+        *,
+        features=("tcp_connect", "udp_associate", "ipv6_egress"),
+    ):
         self.features = set(features)
         self.requests: list[tuple[str, object]] = []
         self.fail_start = False
@@ -122,14 +126,18 @@ def _worker(bridge: _FakeBridge) -> GoTunPoolWorker:
             {
                 "name": "Ethernet",
                 "ip": "192.0.2.10",
+                "ipv6": "2001:db8:1::10",
                 "if_index": 11,
+                "ipv6_if_index": 21,
                 "iftype": 6,
                 "dns_servers": ["192.0.2.53"],
             },
             {
                 "name": "Wi-Fi",
                 "ip": "198.51.100.10",
+                "ipv6": "2001:db8:2::10",
                 "if_index": 12,
+                "ipv6_if_index": 22,
                 "iftype": 71,
                 "dns_servers": ["198.51.100.53"],
             },
@@ -180,6 +188,8 @@ def test_go_tun_pool_worker_matches_multi_port_lifecycle_contract():
     assert start_params["weighted"] is True
     assert start_params["adapters"][0]["weight"] == 3
     assert start_params["adapters"][1]["weight"] == 2
+    assert start_params["adapters"][0]["source_ipv6"] == "2001:db8:1::10"
+    assert start_params["adapters"][0]["ipv6_if_index"] == 21
     channels = {
         channel["name"]: channel["adapter_names"]
         for channel in start_params["channels"]
@@ -191,9 +201,11 @@ def test_go_tun_pool_worker_matches_multi_port_lifecycle_contract():
     }
 
 
-def test_go_tun_pool_requires_both_transport_features():
+def test_go_tun_pool_requires_complete_dual_stack_features():
     assert can_use_go_tun_pool(_FakeBridge())
-    assert not can_use_go_tun_pool(_FakeBridge(features=("tcp_connect",)))
+    assert not can_use_go_tun_pool(
+        _FakeBridge(features=("tcp_connect", "udp_associate"))
+    )
 
 
 def test_dns_planner_produces_singbox_plan_without_starting_python_pool():

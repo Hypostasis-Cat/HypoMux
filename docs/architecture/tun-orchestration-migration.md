@@ -49,7 +49,8 @@ The existing verified TUN DNS behavior is preserved:
    restart after three consecutive failures.
 
 The planner opens no SOCKS listeners and relays no application traffic.
-Go TUN endpoints accept only literal IPv4 destinations resolved by sing-box.
+Go TUN endpoints accept only literal destinations resolved by sing-box;
+Phase 9 adds source-bound IPv6 without adding a second DNS owner.
 
 ## Startup transaction
 
