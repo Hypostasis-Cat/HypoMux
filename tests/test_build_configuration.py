@@ -45,6 +45,7 @@ def test_go_workflow_runs_real_process_client_integration():
     workflow = _read(".github/workflows/go-engine.yml")
 
     assert "'engine_client/**'" in workflow
+    assert "'ui/go_proxy_worker.py'" in workflow
     assert "HYPOMUX_ENGINE_TEST_EXE:" in workflow
     assert 'test_engine_client.py" -v' in workflow
     assert "python -m compileall -q engine_client" in workflow

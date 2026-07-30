@@ -1,9 +1,9 @@
 # HypoMux Go Engine
 
 This directory is the migration boundary between the desktop UI and the
-network engine. The executable provides a versioned IPC contract and now owns
-the production source-bound ICMP diagnostic. The remaining proxy, TUN, DNS,
-and scheduling paths are still migrated incrementally.
+network engine. The executable provides a versioned IPC contract, owns the
+production source-bound ICMP diagnostic, and contains the staged SOCKS5/HTTP
+TCP proxy. TUN, dedicated DNS, UDP, and routing paths remain incremental.
 
 See [MIGRATION.md](MIGRATION.md) for the staged migration plan and the mapping
 from current Qt signals to transport-independent engine events.
@@ -66,6 +66,12 @@ Protocol-v1 methods:
 
 - `engine.hello`: negotiate the protocol and inspect capabilities.
 - `engine.status`: read the canonical engine lifecycle state.
+- `engine.start`: start the ordinary SOCKS5/HTTP TCP proxy with explicit
+  adapters, source IPv4 addresses, ports, and scheduling weights.
+- `engine.stop`: close listeners and cancel all accepted and relayed
+  connections with a bounded shutdown.
+- `engine.telemetry`: read cumulative per-adapter bytes, active connection
+  counts, and optional connection details.
 - `health.check`: verify that the engine process and protocol loop respond.
 - `diagnostic.run`: run the same source-bound ICMP diagnostic exposed by the
   one-shot `diagnose` command.
@@ -111,13 +117,22 @@ $env:HYPOMUX_ENGINE_PATH = "$PWD\dist\hypomux-engine.exe"
 ```
 
 The PySide6 UI performs hello and health supervision through the
-toolkit-independent `engine_client` package. It still sends every acceleration
-request through the existing Python `ProxyWorker` and `TunManager`; phase 2
-does not expose `engine.start` or `engine.stop`.
+toolkit-independent `engine_client` package. To route ordinary proxy mode
+through Go while retaining the Python fallback:
+
+```powershell
+$env:HYPOMUX_GO_PROXY_DEV = "1"
+$env:HYPOMUX_ENGINE_PATH = "$PWD\dist\hypomux-engine.exe"
+python main.py
+```
+
+This flag also starts the persistent host. TUN mode continues to use the
+Python `MultiPortProxyWorker` and `TunManager`.
 
 Unset both variables to return to the normal production path:
 
 ```powershell
 Remove-Item Env:HYPOMUX_GO_ENGINE_DEV -ErrorAction SilentlyContinue
+Remove-Item Env:HYPOMUX_GO_PROXY_DEV -ErrorAction SilentlyContinue
 Remove-Item Env:HYPOMUX_ENGINE_PATH -ErrorAction SilentlyContinue
 ```

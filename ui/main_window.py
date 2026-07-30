@@ -45,6 +45,7 @@ from utils.acceleration_log import AccelerationLogStore
 from utils.update_checker import UpdateError, launch_installer_after_exit
 from engine_client import (
     development_engine_enabled,
+    go_proxy_development_enabled,
     resolve_development_engine_command,
 )
 
@@ -219,6 +220,7 @@ def create_main_window():
     from ui.popup_material import apply_mica_popup
     from ui.components import refresh_content_card_material, set_content_card_opacity
     from ui.engine_bridge import EngineBridge
+    from ui.go_proxy_worker import GoProxyWorker
 
     class BlockedDomainsWindow(FluentWidget):
         """单网卡被墙域名的独立云母窗口。"""
@@ -808,9 +810,8 @@ def create_main_window():
             # Only open/close the WFP engine here; never start sing-box or
             # create a virtual adapter merely to check compatibility.
             QTimer.singleShot(600, self._run_wfp_startup_preflight)
-            # Phase 2 is deliberately hidden behind an environment flag.  The
-            # Go host only performs protocol/health supervision and never
-            # participates in the production acceleration path.
+            # Staged Go paths remain hidden behind environment flags. The
+            # ordinary TCP proxy can be exercised without changing TUN/WFP.
             QTimer.singleShot(0, self._start_go_engine_development_bridge)
 
         def _start_go_engine_development_bridge(self):
@@ -847,7 +848,7 @@ def create_main_window():
                 f"version={hello.get('engine_version', 'unknown')}，"
                 f"pid={hello.get('pid', 'unknown')}，"
                 f"protocol={hello.get('protocol_version', 'unknown')}。"
-                "当前仍由 Python 引擎处理全部网络流量。",
+                "设置 HYPOMUX_GO_PROXY_DEV=1 后，普通代理模式可切换到 Go TCP 引擎。",
                 force=True,
             )
 
@@ -2716,14 +2717,33 @@ def create_main_window():
             bw_limits = self.home_page.get_schedule_weights() if use_weighted else None
 
             try:
-                self.proxy_worker = ProxyWorker(
-                    selected_nics=selected,
-                    listen_host="127.0.0.1",
-                    listen_port=socks_port,
-                    http_port=http_port,
-                    use_weighted=use_weighted,
-                    bandwidth_limits=bw_limits,
+                use_go_proxy = (
+                    go_proxy_development_enabled()
+                    and self._go_engine_bridge is not None
+                    and self._go_engine_bridge.is_running()
+                    and self._go_engine_bridge.supports("engine.start")
                 )
+                worker_type = GoProxyWorker if use_go_proxy else ProxyWorker
+                worker_args = {
+                    "selected_nics": selected,
+                    "listen_host": "127.0.0.1",
+                    "listen_port": socks_port,
+                    "http_port": http_port,
+                    "use_weighted": use_weighted,
+                    "bandwidth_limits": bw_limits,
+                }
+                if use_go_proxy:
+                    worker_args["bridge"] = self._go_engine_bridge
+                    self.append_log(
+                        "[GoEngine][TCP] 开发迁移模式：普通代理流量将由 Go 引擎处理。",
+                        force=True,
+                    )
+                elif go_proxy_development_enabled():
+                    self.append_log(
+                        "[GoEngine][TCP] Go 引擎尚未就绪，保留 Python 代理回退路径。",
+                        force=True,
+                    )
+                self.proxy_worker = worker_type(**worker_args)
                 self.proxy_worker.log_signal.connect(self.on_proxy_log)
                 self.proxy_worker.traffic_signal.connect(self.on_proxy_traffic)
                 self.proxy_worker.started_ok.connect(self.on_proxy_started)
@@ -3043,12 +3063,6 @@ def create_main_window():
             )
             self._adapter_watch_timer.stop()
             try:
-                if self._go_engine_bridge is not None:
-                    self._go_engine_bridge.stop()
-                    self._go_engine_bridge = None
-            except Exception as e:
-                print(f"[WARN] Go engine development host cleanup failed: {e}")
-            try:
                 self.routing_page.prepare_for_shutdown()
             except Exception:
                 pass
@@ -3096,6 +3110,13 @@ def create_main_window():
                     except Exception:
                         pass
                 self._retired_proxy_workers.clear()
+
+                try:
+                    if self._go_engine_bridge is not None:
+                        self._go_engine_bridge.stop()
+                        self._go_engine_bridge = None
+                except Exception as e:
+                    print(f"[WARN] Go engine development host cleanup failed: {e}")
 
                 try:
                     set_system_proxy(False)

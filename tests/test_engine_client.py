@@ -3,9 +3,12 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import socket
+import struct
 import sys
 import tempfile
 import textwrap
+import threading
 import time
 import unittest
 
@@ -17,9 +20,20 @@ from engine_client import (
     EngineStateError,
     EngineTimeoutError,
     development_engine_enabled,
+    go_proxy_development_enabled,
     resolve_development_engine_command,
 )
 from engine_client.process import start_engine_process
+
+
+def _recv_exact(connection: socket.socket, size: int) -> bytes:
+    chunks = bytearray()
+    while len(chunks) < size:
+        chunk = connection.recv(size - len(chunks))
+        if not chunk:
+            raise ConnectionError("socket closed before expected payload")
+        chunks.extend(chunk)
+    return bytes(chunks)
 
 
 FAKE_ENGINE_SOURCE = r"""
@@ -230,7 +244,10 @@ class DevelopmentSelectionTests(unittest.TestCase):
     def test_development_flag_is_explicit_and_not_persisted(self):
         self.assertFalse(development_engine_enabled({}))
         self.assertTrue(development_engine_enabled({"HYPOMUX_GO_ENGINE_DEV": "true"}))
+        self.assertTrue(development_engine_enabled({"HYPOMUX_GO_PROXY_DEV": "1"}))
         self.assertFalse(development_engine_enabled({"HYPOMUX_GO_ENGINE_DEV": "0"}))
+        self.assertFalse(go_proxy_development_enabled({}))
+        self.assertTrue(go_proxy_development_enabled({"HYPOMUX_GO_PROXY_DEV": "yes"}))
 
     def test_configured_engine_path_must_exist(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -264,6 +281,7 @@ class RealGoEngineIntegrationTests(unittest.TestCase):
             self.assertEqual(hello["protocol_version"], 1)
             self.assertIn("engine.status", hello["capabilities"])
             self.assertIn("diagnostic.run", hello["capabilities"])
+            self.assertIn("engine.start", hello["capabilities"])
             self.assertTrue(client.request("health.check")["ok"])
             diagnostic = client.request(
                 "diagnostic.run",
@@ -287,3 +305,82 @@ class RealGoEngineIntegrationTests(unittest.TestCase):
         self.assertIsNotNone(process.stdin)
         process.stdin.close()
         self.assertEqual(process.wait(timeout=2.0), 0)
+
+    def test_real_go_proxy_relays_socks_and_reports_telemetry(self):
+        executable = os.environ["HYPOMUX_ENGINE_TEST_EXE"]
+        echo_listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        echo_listener.bind(("127.0.0.1", 0))
+        echo_listener.listen()
+        echo_listener.settimeout(3.0)
+        echo_address = echo_listener.getsockname()
+        echo_error: list[Exception] = []
+
+        def echo_once():
+            try:
+                connection, _ = echo_listener.accept()
+                with connection:
+                    while True:
+                        data = connection.recv(65536)
+                        if not data:
+                            return
+                        connection.sendall(data)
+            except Exception as exc:
+                echo_error.append(exc)
+
+        echo_thread = threading.Thread(target=echo_once, daemon=True)
+        echo_thread.start()
+        events: list[dict] = []
+        client = EngineClient(executable, on_event=events.append)
+        proxy_socket = None
+        try:
+            client.start()
+            started = client.request(
+                "engine.start",
+                {
+                    "mode": "proxy",
+                    "socks_port": 0,
+                    "http_port": 0,
+                    "adapters": [
+                        {"name": "loopback", "source_ip": "127.0.0.1"}
+                    ],
+                },
+                timeout=5.0,
+            )
+            socks_host, socks_port = started["endpoints"]["socks"].rsplit(":", 1)
+            proxy_socket = socket.create_connection(
+                (socks_host, int(socks_port)), timeout=2.0
+            )
+            proxy_socket.settimeout(2.0)
+            proxy_socket.sendall(b"\x05\x01\x00")
+            self.assertEqual(_recv_exact(proxy_socket, 2), b"\x05\x00")
+            request = (
+                b"\x05\x01\x00\x01"
+                + socket.inet_aton(echo_address[0])
+                + struct.pack("!H", echo_address[1])
+            )
+            proxy_socket.sendall(request)
+            self.assertEqual(_recv_exact(proxy_socket, 10)[1], 0)
+            proxy_socket.sendall(b"go-proxy-integration")
+            self.assertEqual(
+                _recv_exact(proxy_socket, len(b"go-proxy-integration")),
+                b"go-proxy-integration",
+            )
+            telemetry = client.request("engine.telemetry")
+            self.assertGreaterEqual(telemetry["total"]["connections"], 1)
+            self.assertGreaterEqual(
+                telemetry["total"]["bytes_up"], len(b"go-proxy-integration")
+            )
+            proxy_socket.close()
+            proxy_socket = None
+            stopped = client.request("engine.stop", timeout=5.0)
+            self.assertTrue(stopped["accepted"])
+            self.assertTrue(
+                any(event.get("event") == "engine.state_changed" for event in events)
+            )
+        finally:
+            if proxy_socket is not None:
+                proxy_socket.close()
+            client.stop(graceful=True)
+            echo_listener.close()
+            echo_thread.join(timeout=2.0)
+        self.assertFalse(echo_error)

@@ -14,9 +14,8 @@ from engine_client.process import EngineCommand
 class EngineBridge(QObject):
     """Translate engine callbacks into queued Qt signals.
 
-    This adapter deliberately does not expose start/stop acceleration commands.
-    During phase 2 it only supervises the development host and forwards its
-    transport-independent messages.
+    Network lifecycle requests are exposed only to non-UI worker threads.
+    Production UI code continues to receive queued Qt signals.
     """
 
     connected = Signal(object)
@@ -63,6 +62,15 @@ class EngineBridge(QObject):
 
     def is_running(self) -> bool:
         return self._client.is_running()
+
+    def supports(self, method: str) -> bool:
+        hello = self._client.hello or {}
+        capabilities = hello.get("capabilities")
+        return isinstance(capabilities, list) and method in capabilities
+
+    def request(self, method: str, params: Any = None, *, timeout: float | None = None):
+        """Send an engine request from a non-UI worker thread."""
+        return self._client.request(method, params, timeout=timeout)
 
     def _start_client(self):
         try:

@@ -136,6 +136,50 @@ func TestServerRejectsTrailingJSON(t *testing.T) {
 	}
 }
 
+func TestServerStartsStopsAndReportsProxyTelemetry(t *testing.T) {
+	input := strings.Join([]string{
+		`{"protocol":1,"id":"start-1","method":"engine.start","params":{"mode":"proxy","socks_port":0,"http_port":0,"adapters":[{"name":"loopback","source_ip":"127.0.0.1"}]}}`,
+		`{"protocol":1,"id":"telemetry-1","method":"engine.telemetry"}`,
+		`{"protocol":1,"id":"stop-1","method":"engine.stop"}`,
+		`{"protocol":1,"id":"shutdown-1","method":"host.shutdown"}`,
+	}, "\n")
+	var output bytes.Buffer
+
+	if err := New(strings.NewReader(input), &output, Metadata{}).Run(context.Background()); err != nil {
+		t.Fatalf("Run() failed: %v", err)
+	}
+
+	messages := decodeMessages(t, output.String())
+	if len(messages) != 7 {
+		t.Fatalf("message count = %d, want 7\n%s", len(messages), output.String())
+	}
+	start := resultObject(t, messages[0])
+	endpoints, ok := start["endpoints"].(map[string]any)
+	if !ok || endpoints["socks"] == "" || endpoints["http"] == "" {
+		t.Fatalf("start endpoints = %#v", start["endpoints"])
+	}
+	if messages[1]["event"] != "engine.state_changed" {
+		t.Fatalf("start event = %#v", messages[1])
+	}
+	telemetry := resultObject(t, messages[2])
+	if _, ok := telemetry["adapters"].([]any); !ok {
+		t.Fatalf("telemetry adapters = %#v", telemetry["adapters"])
+	}
+	stop := resultObject(t, messages[3])
+	if stop["accepted"] != true {
+		t.Fatalf("stop result = %#v", stop)
+	}
+	if messages[4]["event"] != "engine.state_changed" {
+		t.Fatalf("stop event = %#v", messages[4])
+	}
+	if resultObject(t, messages[5])["accepted"] != true {
+		t.Fatalf("shutdown result = %#v", messages[5])
+	}
+	if messages[6]["event"] != "host.exiting" {
+		t.Fatalf("shutdown event = %#v", messages[6])
+	}
+}
+
 func decodeMessages(t *testing.T, output string) []map[string]any {
 	t.Helper()
 	var messages []map[string]any

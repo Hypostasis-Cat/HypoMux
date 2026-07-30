@@ -108,18 +108,42 @@ Exit criteria:
 - The production build and both SignPath modes sign `hypomux-engine.exe`.
 - A repository search finds no live Rust/Cargo build path.
 
+## Phase 4: staged TCP proxy ownership
+
+Goal: move ordinary proxy-mode TCP connections into Go without changing the
+production default or the TUN pipeline.
+
+Deliverables:
+
+- Loopback-only SOCKS5 CONNECT and HTTP/HTTPS CONNECT listeners.
+- Source IPv4 and Windows `IP_UNICAST_IF` binding for every upstream socket.
+- Round-robin and smooth weighted scheduling with one pre-relay failover.
+- A connection registry with live cancellation, cumulative bytes, active
+  counts, and optional connection snapshots.
+- `engine.start`, `engine.stop`, and `engine.telemetry` protocol methods plus
+  lifecycle events.
+- A Qt-compatible development worker selected by
+  `HYPOMUX_GO_PROXY_DEV=1`; Python remains the automatic fallback.
+
+Exit criteria:
+
+- SOCKS5 and HTTP CONNECT relay through a real compiled child process.
+- Listener startup is atomic and shutdown closes handshake-only and active
+  relay clients within a fixed deadline.
+- Per-adapter byte and connection telemetry reaches the existing UI contract.
+- With no development flag, production proxy and TUN behavior are unchanged.
+
 ## Later migration slices
 
-1. Connection ownership, counters, and telemetry.
-2. TCP proxy transport and cancellation.
-3. DNS resolution, DoH fallback, caching, and leak prevention.
-4. SOCKS5 UDP with source validation.
-5. IPv4/IPv6 dual-stack behavior.
-6. Adapter scheduling and continuous health checks.
-7. TUN/sing-box and WFP orchestration.
-8. Make the Go engine the default for all network behavior after shadow-mode
+1. DNS resolution, DoH fallback, caching, and leak prevention.
+2. Move the TUN multi-port TCP outbound pool onto the shared Go transport.
+3. SOCKS5 UDP with source validation.
+4. IPv4/IPv6 dual-stack behavior.
+5. Continuous adapter health and domain-aware scheduling.
+6. TUN/sing-box and WFP orchestration.
+7. Make the Go engine the default for all network behavior after shadow-mode
    and rollback testing.
-9. Connect the same protocol to the future WPF UI.
+8. Connect the same protocol to the future WPF UI.
 
 Each slice keeps a Python fallback until its unit, integration, and Windows
 network tests pass.
