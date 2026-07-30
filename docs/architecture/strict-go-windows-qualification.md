@@ -40,6 +40,26 @@ python -m engine_client.qualification `
   --output .\qualification\installed-preflight.json
 ```
 
+SignPath test certificates intentionally use an untrusted test root. They may
+be used for the pre-release physical matrix only by pinning the exact
+certificate thumbprint:
+
+```powershell
+python -m engine_client.qualification `
+  --engine "C:\Program Files\HypoMux\bin\hypomux-engine.exe" `
+  --require-elevated `
+  --require-signed `
+  --allow-test-signer-thumbprint "<exact certificate SHA-1 thumbprint>" `
+  --output .\qualification\test-signed-preflight.json
+```
+
+The exception accepts only an Authenticode signature whose status is
+`UnknownError` or `NotTrusted` because of the untrusted test root and whose
+certificate thumbprint exactly matches the explicit pin. It never accepts
+`NotSigned`, `HashMismatch`, or an arbitrary untrusted signer. Production
+qualification must omit this option and pass with Windows trust status
+`Valid`.
+
 The command exits nonzero when a required check fails. Its report contains:
 
 - report schema, UTC timestamps, and host architecture;
@@ -63,6 +83,7 @@ a session requires both elevation and a valid Authenticode signature:
 ```powershell
 python -m engine_client.qualification_session prepare `
   --engine "C:\Program Files\HypoMux\bin\hypomux-engine.exe" `
+  --allow-test-signer-thumbprint "<exact certificate SHA-1 thumbprint>" `
   --output-dir ".\qualification\phase14"
 ```
 

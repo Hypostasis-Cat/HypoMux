@@ -172,10 +172,50 @@ class QualificationContractTests(unittest.TestCase):
         check = next(
             item
             for item in report["checks"]
-            if item["name"] == "engine_authenticode_valid"
+            if item["name"] == "engine_signature_policy"
         )
         self.assertTrue(check["required"])
         self.assertFalse(check["passed"])
+
+    def test_exact_pinned_test_signer_is_accepted_without_trusting_root(self):
+        thumbprint = "F7408E1AF9B519E5D9D97D1862775020861B673A"
+        report = run_read_only_qualification(
+            "hypomux-engine.exe",
+            require_signed=True,
+            allowed_test_signer_thumbprints=[thumbprint],
+            snapshotter=_clean_snapshot,
+            signature_inspector=lambda _path: {
+                "status": "UnknownError",
+                "signature_type": "Authenticode",
+                "signer_thumbprint": thumbprint.lower(),
+            },
+            client_factory=_FakeClient,
+        )
+        self.assertTrue(report["passed"])
+        self.assertEqual(
+            report["engine"]["signature_acceptance"],
+            "pinned-test",
+        )
+
+    def test_pinned_signer_never_allows_a_hash_mismatch_status(self):
+        thumbprint = "F7408E1AF9B519E5D9D97D1862775020861B673A"
+        report = run_read_only_qualification(
+            "hypomux-engine.exe",
+            require_signed=True,
+            allowed_test_signer_thumbprints=[thumbprint],
+            snapshotter=_clean_snapshot,
+            signature_inspector=lambda _path: {
+                "status": "HashMismatch",
+                "signature_type": "Authenticode",
+                "signer_thumbprint": thumbprint,
+            },
+            client_factory=_FakeClient,
+        )
+        self.assertFalse(report["passed"])
+        self.assertEqual(
+            report["engine"]["signature_acceptance"],
+            "rejected",
+        )
 
     def test_owned_singbox_process_fails_postflight(self):
         snapshots = iter(

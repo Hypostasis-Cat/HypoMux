@@ -43,6 +43,7 @@ def _passing_report(engine: Path) -> dict:
             for name in (
                 *POSTFLIGHT_CHECKS,
                 "engine_authenticode_valid",
+                "engine_signature_policy",
                 "engine_elevated",
             )
         ],
@@ -133,7 +134,7 @@ class QualificationSessionTests(unittest.TestCase):
         report = _passing_report(self.engine)
         for check in report["checks"]:
             if check["name"] in {
-                "engine_authenticode_valid",
+                "engine_signature_policy",
                 "engine_elevated",
             }:
                 check["passed"] = False
@@ -148,7 +149,7 @@ class QualificationSessionTests(unittest.TestCase):
             {"require_signed": True, "require_elevated": True},
         )
         self.assertIn(
-            "postflight check failed: engine_authenticode_valid",
+            "postflight check failed: engine_signature_policy",
             errors,
         )
         self.assertIn("postflight check failed: engine_elevated", errors)

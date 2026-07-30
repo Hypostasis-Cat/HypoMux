@@ -123,7 +123,7 @@ def validate_postflight(
     required_checks = list(POSTFLIGHT_CHECKS)
     policy = policy or {}
     if policy.get("require_signed"):
-        required_checks.append("engine_authenticode_valid")
+        required_checks.append("engine_signature_policy")
     if policy.get("require_elevated"):
         required_checks.append("engine_elevated")
     for name in required_checks:
@@ -170,6 +170,7 @@ def prepare_session(
     *,
     require_elevated: bool = True,
     require_signed: bool = True,
+    allowed_test_signer_thumbprints: Sequence[str] = (),
 ) -> tuple[Path, dict[str, Any]]:
     engine_path = Path(engine).expanduser().resolve()
     if not engine_path.is_file():
@@ -185,6 +186,7 @@ def prepare_session(
         [str(engine_path)],
         require_elevated=require_elevated,
         require_signed=require_signed,
+        allowed_test_signer_thumbprints=allowed_test_signer_thumbprints,
     )
     preflight_path = output / "preflight.json"
     _write_json(preflight_path, preflight)
@@ -205,6 +207,13 @@ def prepare_session(
         "policy": {
             "require_elevated": require_elevated,
             "require_signed": require_signed,
+            "allowed_test_signer_thumbprints": sorted(
+                {
+                    str(value).replace(" ", "").upper()
+                    for value in allowed_test_signer_thumbprints
+                    if str(value).strip()
+                }
+            ),
         },
         "preflight": {
             "path": _relative_artifact(preflight_path, session_path),
@@ -293,6 +302,10 @@ def capture_postflight(
         [str(candidate.get("executable", ""))],
         require_elevated=bool(policy.get("require_elevated")),
         require_signed=bool(policy.get("require_signed")),
+        allowed_test_signer_thumbprints=policy.get(
+            "allowed_test_signer_thumbprints",
+            (),
+        ),
     )
     report_path = path.parent / f"postflight-{scenario_id}.json"
     _write_json(report_path, report)
@@ -343,6 +356,12 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="do not require signature/elevation; never qualifies Python removal",
     )
+    prepare.add_argument(
+        "--allow-test-signer-thumbprint",
+        action="append",
+        default=[],
+        help="pin an exact SignPath test certificate thumbprint; repeatable",
+    )
 
     for name in ("record", "capture"):
         command = commands.add_parser(name)
@@ -371,6 +390,9 @@ def main(arguments: Sequence[str] | None = None) -> int:
             options.output_dir,
             require_elevated=not options.development,
             require_signed=not options.development,
+            allowed_test_signer_thumbprints=(
+                options.allow_test_signer_thumbprint
+            ),
         )
         summary = session_summary(session)
         summary["session"] = str(path)

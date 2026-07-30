@@ -327,8 +327,14 @@ func TestServerSnapshotPublishesAdaptiveHealth(t *testing.T) {
 }
 
 func TestLocalConnectFailureClassification(t *testing.T) {
+	if !isLocalConnectFailure(syscall.Errno(10022)) {
+		t.Fatal("Windows disabled-socket error was not classified as local")
+	}
 	if !isLocalConnectFailure(syscall.Errno(10051)) {
 		t.Fatal("Windows network-unreachable error was not classified as local")
+	}
+	if !isLocalConnectFailure(syscall.Errno(1214)) {
+		t.Fatal("Windows disabled-interface error was not classified as local")
 	}
 	if isLocalConnectFailure(syscall.Errno(10061)) {
 		t.Fatal("remote connection refusal was classified as local")

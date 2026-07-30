@@ -55,6 +55,10 @@ $signature = Get-AuthenticodeSignature -LiteralPath $env:HYPOMUX_QUALIFICATION_E
 [ordered]@{
   status = [string]$signature.Status
   status_message = [string]$signature.StatusMessage
+  signature_type = [string]$signature.SignatureType
+  signer_subject = [string]$signature.SignerCertificate.Subject
+  signer_issuer = [string]$signature.SignerCertificate.Issuer
+  signer_thumbprint = [string]$signature.SignerCertificate.Thumbprint
 } | ConvertTo-Json -Compress
 """
 
@@ -206,6 +210,7 @@ def run_read_only_qualification(
     *,
     require_elevated: bool = False,
     require_signed: bool = False,
+    allowed_test_signer_thumbprints: Sequence[str] = (),
     snapshotter: Callable[[], dict[str, Any]] = capture_windows_snapshot,
     signature_inspector: Callable[[str], dict[str, Any]] = inspect_authenticode,
     client_factory: Callable[..., EngineClient] = EngineClient,
@@ -279,11 +284,46 @@ def run_read_only_qualification(
         signature = {"status": "AuditFailed", "status_message": str(exc)}
     report["engine"]["authenticode"] = signature
     signature_valid = signature.get("status") == "Valid"
+    allowed_thumbprints = {
+        str(value).replace(" ", "").upper()
+        for value in allowed_test_signer_thumbprints
+        if str(value).strip()
+    }
+    signer_thumbprint = (
+        str(signature.get("signer_thumbprint", ""))
+        .replace(" ", "")
+        .upper()
+    )
+    pinned_test_signature = (
+        signature.get("status") in {"UnknownError", "NotTrusted"}
+        and signature.get("signature_type") == "Authenticode"
+        and bool(signer_thumbprint)
+        and signer_thumbprint in allowed_thumbprints
+    )
+    signature_acceptance = (
+        "trusted"
+        if signature_valid
+        else "pinned-test"
+        if pinned_test_signature
+        else "rejected"
+    )
+    report["engine"]["signature_acceptance"] = signature_acceptance
     _add_check(
         checks,
         "engine_authenticode_valid",
         signature_valid,
         signature,
+        required=False,
+    )
+    _add_check(
+        checks,
+        "engine_signature_policy",
+        signature_valid or pinned_test_signature,
+        {
+            "acceptance": signature_acceptance,
+            "signer_thumbprint": signer_thumbprint,
+            "allowed_test_signer_thumbprints": sorted(allowed_thumbprints),
+        },
         required=require_signed,
     )
 
@@ -430,6 +470,15 @@ def _parse_arguments(arguments: Sequence[str] | None = None) -> argparse.Namespa
     parser.add_argument("--output", required=True, help="JSON report path")
     parser.add_argument("--require-elevated", action="store_true")
     parser.add_argument("--require-signed", action="store_true")
+    parser.add_argument(
+        "--allow-test-signer-thumbprint",
+        action="append",
+        default=[],
+        help=(
+            "allow an Authenticode test signer with this exact SHA-1 "
+            "certificate thumbprint when its root is untrusted; repeatable"
+        ),
+    )
     return parser.parse_args(arguments)
 
 
@@ -447,6 +496,7 @@ def main(arguments: Sequence[str] | None = None) -> int:
         command,
         require_elevated=options.require_elevated,
         require_signed=options.require_signed,
+        allowed_test_signer_thumbprints=options.allow_test_signer_thumbprint,
     )
     output = Path(options.output).expanduser().resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
