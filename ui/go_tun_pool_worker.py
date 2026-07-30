@@ -9,7 +9,11 @@ from typing import Any, Callable
 from PySide6.QtCore import QObject, Signal
 
 from engine_client import EngineClientError
-from proxy_worker import (
+from engine_client.capabilities import (
+    TUN_REQUIRED_FEATURES,
+    TUN_REQUIRED_METHODS,
+)
+from engine_client.tun_contract import (
     PORT_AGGREGATION,
     PORT_ETHERNET,
     PORT_WIFI,
@@ -17,16 +21,6 @@ from proxy_worker import (
 )
 from ui.engine_bridge import EngineBridge
 from utils.tun_dns_planner import TunDnsPlanner
-
-
-REQUIRED_TUN_FEATURES = (
-    "tcp_connect",
-    "udp_associate",
-    "ipv6_egress",
-    "adaptive_health",
-    "managed_tun_lifecycle",
-)
-
 
 def can_use_go_tun_pool(bridge: EngineBridge | None) -> bool:
     if bridge is None or not bridge.is_running():
@@ -36,24 +30,17 @@ def can_use_go_tun_pool(bridge: EngineBridge | None) -> bool:
         return False
     if not all(
         bridge.supports(method)
-        for method in (
-            "engine.start",
-            "engine.stop",
-            "engine.telemetry",
-            "tun.activate",
-            "tun.status",
-            "tun.deactivate",
-        )
+        for method in TUN_REQUIRED_METHODS
     ):
         return False
     return all(
         feature_checker("tun_tcp_pool", feature)
-        for feature in REQUIRED_TUN_FEATURES
+        for feature in TUN_REQUIRED_FEATURES
     )
 
 
 class GoTunPoolWorker(QObject):
-    """Mirror the MultiPortProxyWorker surface used by MainWindow."""
+    """Expose the Qt lifecycle surface while Go owns the TUN egress pool."""
 
     log_signal = Signal(str)
     traffic_signal = Signal(dict)

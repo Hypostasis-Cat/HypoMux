@@ -406,10 +406,45 @@ Exit criteria:
 The policy and final removal boundary are documented in
 [default network backend cutover](../docs/architecture/default-network-backend-cutover.md).
 
+## Phase 13: strict-Go Windows qualification gate
+
+Goal: make the final Python removal decision depend on reproducible evidence
+instead of an informal manual launch.
+
+Deliverables:
+
+- Toolkit-independent proxy/TUN capability contracts shared by Qt selection
+  and the qualification tool.
+- A read-only command that verifies engine packaging, protocol, initial state,
+  process reaping, and exact before/after HypoMux TUN residue in JSON.
+- Optional elevation and Authenticode requirements for installed release
+  candidates.
+- A physical Windows matrix covering selected-adapter TCP/UDP, DNS/DoH,
+  IPv4/IPv6, WFP, TUN, crash, adapter churn, sleep/resume, upgrade, and
+  uninstall recovery.
+- Shared TUN ports, DNS-mode constants, adapter grouping, and runtime asset
+  paths extracted from Qt/Python worker classes.
+- An explicit hold on rewriting the DNS preflight comparison baseline until
+  the physical matrix passes.
+
+Exit criteria:
+
+- Unit tests prove exact missing-capability reporting, clean pass, residue
+  failure, toolkit-independent adapter grouping, and runtime path discovery.
+- The real built engine produces a passing read-only report without starting
+  a network mode.
+- CI retains the JSON report and fails on protocol, capability, process, or
+  residue regressions.
+- All non-disruptive Go/Python/contract/build gates pass locally.
+
+The report and operator procedure are documented in
+[strict-Go Windows qualification](../docs/architecture/strict-go-windows-qualification.md).
+
 ## Later migration slices
 
-1. Run the unified strict-Go Windows physical qualification matrix.
-2. Remove the Python network engine and its image-wide process cleanup after
+1. Complete the operator-run strict-Go Windows physical matrix.
+2. Remove the Python network engine, DNS facade baseline, and image-wide
+   process cleanup after
    that matrix passes without residual routes, adapters, or processes.
 
 Every remaining slice also has to meet the frontend-readiness rule above; WPF

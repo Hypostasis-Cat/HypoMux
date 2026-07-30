@@ -1,4 +1,4 @@
-"""Qt-compatible development worker backed by the persistent Go engine."""
+"""Qt-compatible default proxy worker backed by the persistent Go engine."""
 
 from __future__ import annotations
 
@@ -9,17 +9,11 @@ from typing import Any
 from PySide6.QtCore import QObject, Signal
 
 from engine_client import EngineClientError
-from ui.engine_bridge import EngineBridge
-
-
-REQUIRED_PROXY_FEATURES = (
-    "socks5_connect",
-    "http_connect",
-    "source_bound_dns",
-    "ipv6_egress",
-    "adaptive_health",
-    "domain_quarantine",
+from engine_client.capabilities import (
+    PROXY_REQUIRED_FEATURES,
+    PROXY_REQUIRED_METHODS,
 )
+from ui.engine_bridge import EngineBridge
 
 
 def can_use_go_proxy(bridge: EngineBridge | None) -> bool:
@@ -30,17 +24,17 @@ def can_use_go_proxy(bridge: EngineBridge | None) -> bool:
         return False
     if not all(
         bridge.supports(method)
-        for method in ("engine.start", "engine.stop", "engine.telemetry")
+        for method in PROXY_REQUIRED_METHODS
     ):
         return False
     return all(
         feature_checker("proxy", feature)
-        for feature in REQUIRED_PROXY_FEATURES
+        for feature in PROXY_REQUIRED_FEATURES
     )
 
 
 class GoProxyWorker(QObject):
-    """Mirror the ProxyWorker signal/lifecycle surface for staged migration."""
+    """Expose the Qt lifecycle surface while Go owns the proxy session."""
 
     log_signal = Signal(str)
     traffic_signal = Signal(dict)

@@ -16,10 +16,10 @@ from __future__ import annotations
 import asyncio
 import os
 import subprocess
-import sys
 from typing import Optional
 
 from PySide6.QtCore import QThread, Signal
+from utils.runtime_paths import get_singbox_path
 
 # CREATE_NO_WINDOW：彻底隐藏 sing-box 控制台黑窗口
 _CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
@@ -89,23 +89,6 @@ def _safe_close_stream(stream):
             transport.close()
     except Exception:
         pass
-
-
-def _bin_dir() -> str:
-    """返回 bin/ 目录绝对路径（兼容源码运行与 Nuitka 打包）。"""
-    is_frozen = getattr(sys, "frozen", False) or ("__compiled__" in globals())
-    if is_frozen:
-        base = os.path.dirname(os.path.abspath(sys.executable or sys.argv[0]))
-    else:
-        # utils/tun_manager.py -> 项目根
-        base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    return os.path.join(base, "bin")
-
-
-def get_singbox_path() -> Optional[str]:
-    """解析 sing-box.exe 绝对路径；找不到返回 None。"""
-    candidate = os.path.join(_bin_dir(), "sing-box.exe")
-    return candidate if os.path.isfile(candidate) else None
 
 
 class TunManager(QThread):

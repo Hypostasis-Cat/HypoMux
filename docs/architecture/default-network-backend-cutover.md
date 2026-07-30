@@ -80,3 +80,6 @@ for the unified Windows physical test pass. They can be removed only after:
    crash, upgrade, and uninstall recovery pass on a real Windows system;
 3. the installed and signed `{app}\bin\hypomux-engine.exe` path is verified;
 4. no rollback leaves a route, Wintun adapter, sing-box process, or engine host.
+
+The executable report format and operator matrix are defined in
+[strict-Go Windows qualification](strict-go-windows-qualification.md).

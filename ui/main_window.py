@@ -53,6 +53,10 @@ from engine_client import (
     resolve_engine_command,
     select_go_backend,
 )
+from engine_client.tun_contract import (
+    DNS_MODE_DOH_STRICT,
+    DNS_MODE_LEGACY_COMPAT,
+)
 
 
 DEFAULT_SOCKS_PORT = 10800
@@ -720,7 +724,7 @@ def create_main_window():
             self._run_mode = self._app_config.get("run_mode", "tun")
             self._routing_rules = self._app_config.get("routing_rules", [])
             self._pool_worker = None      # MultiPortProxyWorker（TUN 模式下的出站池）
-            self._tun_dns_mode = MultiPortProxyWorker.DNS_MODE_DOH_STRICT
+            self._tun_dns_mode = DNS_MODE_DOH_STRICT
             self._tun_dns_mode_override = ""
             self._tun_dns_fallback_attempted = False
             self._tun_strict_route_fallback_attempted = False
@@ -2215,7 +2219,7 @@ def create_main_window():
                 if isinstance(self._pool_worker, GoTunPoolWorker)
                 else "Python"
             )
-            if self._tun_dns_mode == MultiPortProxyWorker.DNS_MODE_LEGACY_COMPAT:
+            if self._tun_dns_mode == DNS_MODE_LEGACY_COMPAT:
                 self.append_log(
                     "[TUN][DNS] 传统 DNS 已移入 sing-box；"
                     f"strict_route={'开启' if self._wfp_strict_route_enabled() else '关闭'}，"
@@ -2293,7 +2297,7 @@ def create_main_window():
                 return
             if (
                 not self._tun_active
-                or self._tun_dns_mode != MultiPortProxyWorker.DNS_MODE_DOH_STRICT
+                or self._tun_dns_mode != DNS_MODE_DOH_STRICT
                 or self._tun_dns_fallback_attempted
             ):
                 return
@@ -2322,7 +2326,7 @@ def create_main_window():
             self._tun_restart_deadline = time.monotonic() + 8.0
             self._tun_restart_resume_timer.stop()
             if force_legacy_dns:
-                self._tun_dns_mode_override = MultiPortProxyWorker.DNS_MODE_LEGACY_COMPAT
+                self._tun_dns_mode_override = DNS_MODE_LEGACY_COMPAT
             self._tun_restart_waiting_workers = [
                 worker for worker in (self._tun_manager, self._pool_worker)
                 if worker is not None and worker.isRunning()

@@ -8,15 +8,9 @@ from pathlib import Path
 from PySide6.QtCore import QObject, Signal
 
 from engine_client import EngineClientError
+from engine_client.capabilities import TUN_LIFECYCLE_METHODS
 from ui.engine_bridge import EngineBridge
-from utils.tun_manager import get_singbox_path
-
-
-REQUIRED_TUN_LIFECYCLE_METHODS = (
-    "tun.activate",
-    "tun.status",
-    "tun.deactivate",
-)
+from utils.runtime_paths import get_singbox_path
 
 
 def can_use_go_tun_lifecycle(bridge: EngineBridge | None) -> bool:
@@ -26,13 +20,13 @@ def can_use_go_tun_lifecycle(bridge: EngineBridge | None) -> bool:
     if not callable(feature_checker):
         return False
     return (
-        all(bridge.supports(method) for method in REQUIRED_TUN_LIFECYCLE_METHODS)
+        all(bridge.supports(method) for method in TUN_LIFECYCLE_METHODS)
         and feature_checker("tun_tcp_pool", "managed_tun_lifecycle")
     )
 
 
 class GoTunManager(QObject):
-    """Mirror ``TunManager`` while the persistent Go host owns the sidecar."""
+    """Expose Qt lifecycle signals while Go owns the managed sidecar."""
 
     log_signal = Signal(str)
     started_ok = Signal(str)

@@ -2,9 +2,9 @@
 
 This directory is the migration boundary between the desktop UI and the
 network engine. The executable provides a versioned IPC contract, owns the
-production source-bound ICMP diagnostic, and contains the staged SOCKS5/HTTP
-TCP proxy with source-bound DNS/DoH plus the staged TUN multi-port TCP/UDP
-pool. Routing and TUN lifecycle ownership remain incremental.
+production source-bound ICMP diagnostic, the default SOCKS5/HTTP proxy with
+source-bound DNS/DoH, the TUN multi-port TCP/UDP pool, and managed
+sing-box/TUN/WFP/route lifecycle.
 
 See [MIGRATION.md](MIGRATION.md) for the staged migration plan and the mapping
 from current Qt signals to transport-independent engine events.
@@ -100,10 +100,8 @@ Reserved lifecycle states are `stopped`, `starting`, `running`, `degraded`,
 `tun_tcp_pool`. `engine.hello.mode_features` reports the exact transports
 available in each mode. The TUN pool owns literal-IPv4 SOCKS CONNECT and
 literal-IPv6 SOCKS CONNECT plus source-validated dual-stack UDP ASSOCIATE.
-Live TUN activation remains behind the development orchestration switch.
-With the complete Phase 11 feature set, Go owns the sing-box process and its
-TUN/WFP/route lifetime; sing-box still implements DNS, FakeIP, Wintun, and
-strict routing.
+Go owns the sing-box process and its TUN/WFP/route lifetime by default;
+sing-box still implements DNS, FakeIP, Wintun, and strict routing.
 
 Ordinary proxy domain targets are resolved by the Go engine before the
 adapter-bound TCP dial. A records remain preferred, with AAAA fallback only
@@ -190,3 +188,15 @@ equivalent to the default `auto` behavior and do not enable strict mode.
 
 The complete cutover and compatibility-removal rules are documented in
 [default network backend cutover](../docs/architecture/default-network-backend-cutover.md).
+
+Generate the non-destructive strict-Go packaging and residue report with:
+
+```powershell
+python -m engine_client.qualification `
+  --engine ..\hypomux-engine.exe `
+  --output ..\qualification\preflight.json
+```
+
+This command starts no proxy or TUN mode. Release qualification adds
+`--require-elevated --require-signed` and follows the physical matrix in
+[strict-Go Windows qualification](../docs/architecture/strict-go-windows-qualification.md).

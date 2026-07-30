@@ -7,7 +7,7 @@ sing-box 兼容 config.json。
 架构映射：
 - inbounds : 单一 tun 入站（interface_name=HypoMux-Tun，auto_route），
   全局吸入系统 TCP/UDP 流量。
-- outbounds: 三个 socks 出站，分别对接 Python 本地多端口出站池。
+- outbounds: 三个 socks 出站，分别对接 Go 默认或 Python 兼容多端口出站池。
   默认端口为 2001/2002/2003；端口受 HNS/Hyper-V 限制时使用运行时回退端口。
   另含 direct（保底直连）。
 - route.rules: 顶部按固定顺序强插后端自流量防环、DNS 劫持、ICMP 网络
@@ -25,6 +25,11 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from engine_client.tun_contract import (
+    PORT_AGGREGATION,
+    PORT_ETHERNET,
+    PORT_WIFI,
+)
 from utils.routing_rules import normalize_routing_rules, to_singbox_route_rule
 
 logger = logging.getLogger(__name__)
@@ -42,11 +47,6 @@ VALID_OUTBOUNDS = {
     OUTBOUND_AGGREGATION,
     OUTBOUND_DIRECT,
 }
-
-# Python 本地多端口出站池端口（任务1）
-PORT_ETHERNET = 2001
-PORT_WIFI = 2002
-PORT_AGGREGATION = 2003
 
 TUN_INTERFACE_NAME = "HypoMux-Tun"
 DNS_UPSTREAM_TAG = "dns-upstream"

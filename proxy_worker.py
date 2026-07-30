@@ -34,6 +34,16 @@ from urllib.parse import urlsplit
 import psutil
 from PySide6.QtCore import QThread, Signal
 
+from engine_client.tun_contract import (
+    DNS_HEALTH_FAILURE_LIMIT as TUN_DNS_HEALTH_FAILURE_LIMIT,
+    DNS_HEALTH_INTERVAL as TUN_DNS_HEALTH_INTERVAL,
+    DNS_MODE_DOH_STRICT as TUN_DNS_MODE_DOH_STRICT,
+    DNS_MODE_LEGACY_COMPAT as TUN_DNS_MODE_LEGACY_COMPAT,
+    PORT_AGGREGATION,
+    PORT_ETHERNET,
+    PORT_WIFI,
+    classify_nics,
+)
 from utils.network_utils import get_adapter_if_indices
 from utils.blocked_domain_tracker import get_tracker
 from utils.socket_binding import (
@@ -1292,40 +1302,6 @@ class ProxyWorker(QThread):
 # 默认优先使用 2001/2002/2003；若被 Hyper-V/HNS 排除或被其他程序占用，
 # 自动回退到 Windows 分配的可用端口，并把实际端口同步给 sing-box。
 # 供 sing-box TUN 的三个 socks 出站对接，实现进程/域名/IP 分流 + 物理多卡叠加。
-PORT_ETHERNET = 2001
-PORT_WIFI = 2002
-PORT_AGGREGATION = 2003
-
-# 网卡分组：有线 6 / PPP 拨号 23，其余（71 等）归为无线
-_IFTYPE_ETHERNET = 6
-_IFTYPE_PPP = 23
-
-
-def classify_nics(selected_nics: List[Dict]) -> Tuple[List[Dict], List[Dict]]:
-    """把选中网卡分成 (有线/PPP 组, 无线组)。
-
-    判定优先级：is_ppp / iftype==23 / iftype==6 归有线组；
-    iftype==71 或别名含 WLAN/Wi-Fi/Wireless 归无线组；
-    无法判定者默认进有线组（更安全的单卡分流出口）。
-    """
-    wired: List[Dict] = []
-    wifi: List[Dict] = []
-    for nic in selected_nics:
-        iftype = int(nic.get("iftype", -1) or -1)
-        alias = str(nic.get("name", nic.get("alias", "")))
-        is_ppp = bool(nic.get("is_ppp", False)) or iftype == _IFTYPE_PPP
-        is_wifi = (iftype == 71) or any(
-            kw.lower() in alias.lower() for kw in ("wlan", "wi-fi", "wifi", "wireless", "无线")
-        )
-        if is_ppp or iftype == _IFTYPE_ETHERNET:
-            wired.append(nic)
-        elif is_wifi:
-            wifi.append(nic)
-        else:
-            wired.append(nic)
-    return wired, wifi
-
-
 class _MergedBalancerView:
     """把多个 RoundRobinBalancer 的实时连接数合并成一个只读视图，
     供复用 ProxyWorker._traffic_monitor 时统计 active_connections()。"""
@@ -1517,8 +1493,8 @@ class MultiPortProxyWorker(QThread):
     TCP_CONNECT_TIMEOUT = 6.0
     UDP_FLOW_IDLE_TIMEOUT = 120.0
     UDP_FLOW_SWEEP_INTERVAL = 5.0
-    DNS_HEALTH_INTERVAL = 20.0
-    DNS_HEALTH_FAILURE_LIMIT = 3
+    DNS_HEALTH_INTERVAL = TUN_DNS_HEALTH_INTERVAL
+    DNS_HEALTH_FAILURE_LIMIT = TUN_DNS_HEALTH_FAILURE_LIMIT
     DOH_PRESETS = {
         "alidns": (("223.5.5.5", "dns.alidns.com", "/dns-query"),),
         "dnspod": (
@@ -1540,8 +1516,8 @@ class MultiPortProxyWorker(QThread):
     DNS_CACHE_TTL = 180.0
     DNS_PREFLIGHT_DOMAIN = "www.msftconnecttest.com"
     DNS_PREFLIGHT_DOH_LIMIT = 2
-    DNS_MODE_DOH_STRICT = "doh_strict"
-    DNS_MODE_LEGACY_COMPAT = "legacy_compat"
+    DNS_MODE_DOH_STRICT = TUN_DNS_MODE_DOH_STRICT
+    DNS_MODE_LEGACY_COMPAT = TUN_DNS_MODE_LEGACY_COMPAT
 
     def __init__(
         self,

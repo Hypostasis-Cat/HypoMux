@@ -5,6 +5,11 @@ from pathlib import Path
 import unittest
 
 from engine_client import EngineRemoteError
+from engine_client.capabilities import (
+    PROXY_MODE,
+    TUN_MODE,
+    missing_mode_requirements,
+)
 from engine_client.protocol import (
     MAX_MESSAGE_BYTES,
     PROTOCOL_VERSION,
@@ -116,6 +121,22 @@ class SharedProtocolContractTests(unittest.TestCase):
                 "log.record",
                 "host.exiting",
             },
+        )
+
+    def test_canonical_hello_satisfies_strict_mode_contracts(self):
+        hello_fixture = next(
+            item
+            for item in self.fixtures
+            if item["name"] == "engine_hello_response"
+        )
+        hello = hello_fixture["message"]["result"]
+        self.assertEqual(
+            missing_mode_requirements(hello, PROXY_MODE),
+            {"modes": [], "methods": [], "features": []},
+        )
+        self.assertEqual(
+            missing_mode_requirements(hello, TUN_MODE),
+            {"modes": [], "methods": [], "features": []},
         )
 
 
