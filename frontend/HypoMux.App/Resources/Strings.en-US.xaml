@@ -1,0 +1,47 @@
+<ResourceDictionary
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:system="clr-namespace:System;assembly=System.Runtime">
+    <system:String x:Key="EngineConnection">Engine</system:String>
+    <system:String x:Key="EngineVersion">Version</system:String>
+    <system:String x:Key="Reconnect">Reconnect</system:String>
+    <system:String x:Key="Refresh">Refresh</system:String>
+    <system:String x:Key="AccelerationControl">Acceleration</system:String>
+    <system:String x:Key="TunMode">Virtual adapter (TUN) mode</system:String>
+    <system:String x:Key="WeightedMode">Weighted scheduling</system:String>
+    <system:String x:Key="StrictRoute">Strict routing</system:String>
+    <system:String x:Key="StartAcceleration">Start</system:String>
+    <system:String x:Key="StopAcceleration">Stop</system:String>
+    <system:String x:Key="Selected">Use</system:String>
+    <system:String x:Key="AddRule">Add</system:String>
+    <system:String x:Key="RemoveRule">Remove</system:String>
+    <system:String x:Key="MatchType">Match type</system:String>
+    <system:String x:Key="MatchValue">Value</system:String>
+    <system:String x:Key="Outbound">Outbound</system:String>
+    <system:String x:Key="NavOverview">Overview</system:String>
+    <system:String x:Key="NavAdapters">Adapters</system:String>
+    <system:String x:Key="NavRouting">Routing</system:String>
+    <system:String x:Key="NavDiagnostics">Diagnostics</system:String>
+    <system:String x:Key="NavLogs">Logs</system:String>
+    <system:String x:Key="NavAppearance">Appearance</system:String>
+    <system:String x:Key="EngineState">Engine state</system:String>
+    <system:String x:Key="TunState">TUN state</system:String>
+    <system:String x:Key="Health">Health</system:String>
+    <system:String x:Key="Platform">Host</system:String>
+    <system:String x:Key="LastRefresh">Last refresh</system:String>
+    <system:String x:Key="AdapterName">Adapter</system:String>
+    <system:String x:Key="AdapterHealth">Health</system:String>
+    <system:String x:Key="Connections">Connections</system:String>
+    <system:String x:Key="DownloadBytes">Bytes down</system:String>
+    <system:String x:Key="UploadBytes">Bytes up</system:String>
+    <system:String x:Key="SourceIp">Source IP</system:String>
+    <system:String x:Key="TargetIp">Target IP</system:String>
+    <system:String x:Key="ProbeCount">Probe count</system:String>
+    <system:String x:Key="RunDiagnostic">Run diagnostic</system:String>
+    <system:String x:Key="ClearLogs">Clear logs</system:String>
+    <system:String x:Key="Theme">Theme</system:String>
+    <system:String x:Key="ThemeSystem">Use system</system:String>
+    <system:String x:Key="ThemeLight">Light</system:String>
+    <system:String x:Key="ThemeDark">Dark</system:String>
+    <system:String x:Key="CloseToTray">Keep running in tray when closed</system:String>
+</ResourceDictionary>

@@ -1,8 +1,7 @@
 // Package v1 defines the transport DTOs exposed by protocol version 1.
 //
 // These types are deliberately independent of any UI toolkit. Their JSON
-// representation is the public boundary consumed by Python today and by the
-// future WPF client.
+// representation is the public boundary consumed by the WPF client.
 package v1
 
 import (

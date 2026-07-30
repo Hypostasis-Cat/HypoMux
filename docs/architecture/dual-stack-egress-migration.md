@@ -1,5 +1,7 @@
 # Dual-stack physical egress migration
 
+> Historical migration record; the Go/WPF cutover is complete.
+
 Status: implemented behind the Phase 9 development capability gate
 
 ## Scope

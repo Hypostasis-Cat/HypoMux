@@ -484,9 +484,9 @@ func TestServerStartsAndReportsTUNTCPPoolMode(t *testing.T) {
 	if pool["mode"] != "tun_tcp_pool" {
 		t.Fatalf("status mode = %#v", pool["mode"])
 	}
-	dnsError, ok := messages[3]["error"].(map[string]any)
-	if !ok || dnsError["code"] != "invalid_state" {
-		t.Fatalf("TUN DNS status unexpectedly available: %#v", messages[3])
+	dnsStatus := resultObject(t, messages[3])
+	if dnsStatus["policy"] != "auto" {
+		t.Fatalf("TUN DNS status = %#v", dnsStatus)
 	}
 }
 

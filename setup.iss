@@ -66,18 +66,8 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Name: "autostart"; Description: "{cm:AutoStartTask}"; Flags: unchecked
 
 [Files]
-; 1. 全量打包 Nuitka standalone 模式输出的纯 C 二进制依赖矩阵文件夹
-Source: "dist\main.dist\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
-
-  ; 2. support 运行时资源已由 Nuitka 复制进 dist\main.dist（包含二维码与 SignPath 致谢图标）。
-
-  ; 3. Go 引擎与 bin 目录下网络接管运行时资产
-Source: "hypomux-engine.exe"; DestDir: "{app}\bin"; Flags: ignoreversion
-Source: "bin\sing-box.exe"; DestDir: "{app}\bin"; Flags: ignoreversion
-Source: "bin\wintun.dll"; DestDir: "{app}\bin"; Flags: ignoreversion
-Source: "bin\libcronet.dll"; DestDir: "{app}\bin"; Flags: ignoreversion
-
-; 4. 程序图标也在 support 中，由 Nuitka 一并复制到 {app}\support。
+; 自包含 WPF 前端、Go 引擎以及 TUN 运行时均由 CI 放入统一发布目录。
+Source: "dist\publish\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [InstallDelete]
 ; v2.2.0 以前的安装包把 Rust 诊断程序放在根目录；升级时主动清理。
@@ -88,7 +78,7 @@ Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{a
 Name: "{commondesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; AppUserModelID: "{#MyAppUserModelID}"; Tasks: desktopicon
 
 [Registry]
-; QSystemTrayIcon 的 Windows 通知会以进程 AppUserModelID 为来源。没有该映射
+; Windows 通知会以进程 AppUserModelID 为来源。没有该映射
 ; 时通知中心会把内部 ID 直接显示为标题，而不是应用名称。
 Root: HKLM; Subkey: "Software\Classes\AppUserModelId\{#MyAppUserModelID}"; ValueType: string; ValueName: "DisplayName"; ValueData: "{#MyAppName}"; Flags: uninsdeletekeyifempty
 Root: HKLM; Subkey: "Software\Classes\AppUserModelId\{#MyAppUserModelID}"; ValueType: string; ValueName: "IconUri"; ValueData: "{app}\support\icon.ico"; Flags: uninsdeletekeyifempty

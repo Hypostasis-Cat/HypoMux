@@ -1,5 +1,7 @@
 # Adaptive health scheduling migration
 
+> Historical migration record; adaptive scheduling is now Go-owned.
+
 Status: implemented behind the Phase 10 development capability gate
 
 ## Scope and ownership

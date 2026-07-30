@@ -1,5 +1,7 @@
 # TUN SOCKS5 UDP and QUIC migration
 
+> Historical migration record; the Go/WPF cutover is complete.
+
 Status: Phase 7 implementation plan
 
 ## Scope

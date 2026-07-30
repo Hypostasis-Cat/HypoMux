@@ -5,59 +5,17 @@ on:
     branches: [main]
     paths:
       - 'engine/**'
-      - 'engine_client/**'
-      - 'main.py'
+      - 'frontend/**'
+      - 'global.json'
       - 'protocol/**'
-      - 'ui/main_window.py'
-      - 'ui/engine_bridge.py'
-      - 'ui/go_proxy_worker.py'
-      - 'ui/go_tun_pool_worker.py'
-      - 'ui/go_tun_manager.py'
-      - 'utils/tun_dns_planner.py'
-      - 'utils/runtime_paths.py'
-      - 'utils/network_utils.py'
-      - 'utils/socket_binding.py'
-      - 'utils/singbox_config.py'
-      - 'tests/test_engine_client.py'
-      - 'tests/test_backend_cutover.py'
-      - 'tests/test_go_qualification.py'
-      - 'tests/test_qualification_session.py'
-      - 'tests/test_go_proxy_worker.py'
-      - 'tests/test_go_tun_pool_worker.py'
-      - 'tests/test_go_tun_manager.py'
-      - 'tests/test_dual_stack_metadata.py'
-      - 'tests/test_proxy_transport_regression.py'
-      - 'tests/test_tun_dns_regression.py'
-      - 'tests/test_protocol_contract.py'
       - '.github/workflows/go-engine.yml'
   pull_request:
     branches: [main]
     paths:
       - 'engine/**'
-      - 'engine_client/**'
-      - 'main.py'
+      - 'frontend/**'
+      - 'global.json'
       - 'protocol/**'
-      - 'ui/main_window.py'
-      - 'ui/engine_bridge.py'
-      - 'ui/go_proxy_worker.py'
-      - 'ui/go_tun_pool_worker.py'
-      - 'ui/go_tun_manager.py'
-      - 'utils/tun_dns_planner.py'
-      - 'utils/runtime_paths.py'
-      - 'utils/network_utils.py'
-      - 'utils/socket_binding.py'
-      - 'utils/singbox_config.py'
-      - 'tests/test_engine_client.py'
-      - 'tests/test_backend_cutover.py'
-      - 'tests/test_go_qualification.py'
-      - 'tests/test_qualification_session.py'
-      - 'tests/test_go_proxy_worker.py'
-      - 'tests/test_go_tun_pool_worker.py'
-      - 'tests/test_go_tun_manager.py'
-      - 'tests/test_dual_stack_metadata.py'
-      - 'tests/test_proxy_transport_regression.py'
-      - 'tests/test_tun_dns_regression.py'
-      - 'tests/test_protocol_contract.py'
       - '.github/workflows/go-engine.yml'
   workflow_dispatch:
 
@@ -107,30 +65,18 @@ jobs:
         run: |
           go build -trimpath -o "$env:RUNNER_TEMP\hypomux-engine.exe" .\cmd\hypomux-engine
 
-      - name: Set up Python 3.13.14
-        uses: actions/setup-python@v6
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
         with:
-          python-version: '3.13.14'
+          global-json-file: global.json
 
-      - name: Test the real child-process protocol
+      - name: Test the real child-process protocol through C#
         shell: pwsh
         working-directory: .
         env:
-          HYPOMUX_ENGINE_TEST_EXE: ${{ runner.temp }}\hypomux-engine.exe
+          HYPOMUX_ENGINE_PATH: ${{ runner.temp }}\hypomux-engine.exe
         run: |
-          python -m unittest discover -s tests -p "test_engine_client.py" -v
-          python -m unittest tests.test_backend_cutover -v
-          python -m unittest tests.test_go_qualification -v
-          python -m unittest tests.test_qualification_session -v
-          python -m unittest tests.test_protocol_contract -v
-          python -m compileall -q main.py engine_client ui\main_window.py ui\engine_bridge.py ui\go_proxy_worker.py ui\go_tun_pool_worker.py ui\go_tun_manager.py utils\runtime_paths.py utils\tun_dns_planner.py utils\network_utils.py utils\socket_binding.py utils\singbox_config.py
-          python -m engine_client.qualification --engine "$env:HYPOMUX_ENGINE_TEST_EXE" --output "$env:RUNNER_TEMP\strict-go-read-only.json"
-
-      - name: Upload strict-Go qualification report
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: strict-go-read-only-report
-          path: ${{ runner.temp }}\strict-go-read-only.json
-          if-no-files-found: warn
-          retention-days: 14
+          dotnet restore frontend\HypoMux.EngineClient.Smoke\HypoMux.EngineClient.Smoke.csproj
+          dotnet run `
+            --project frontend\HypoMux.EngineClient.Smoke\HypoMux.EngineClient.Smoke.csproj `
+            --configuration Release

@@ -402,14 +402,6 @@ func (s *Server) resolveDNS(ctx context.Context, request protocol.Request) proto
 	if s.proxy == nil || !s.proxy.Running() {
 		return protocol.Failure(request.ID, "invalid_state", "proxy engine is not running", nil)
 	}
-	if s.mode != "proxy" {
-		return protocol.Failure(
-			request.ID,
-			"invalid_state",
-			"DNS methods are unavailable in tun_tcp_pool mode",
-			nil,
-		)
-	}
 	var params api.DNSResolveParams
 	if err := json.Unmarshal(request.Params, &params); err != nil {
 		return protocol.Failure(request.ID, "invalid_params", "DNS params are not valid JSON", nil)
@@ -431,14 +423,6 @@ func (s *Server) dnsStatus(requestID string) protocol.Response {
 	defer s.lifecycleMu.Unlock()
 	if s.proxy == nil {
 		return protocol.Failure(requestID, "invalid_state", "proxy engine is not running", nil)
-	}
-	if s.mode != "proxy" {
-		return protocol.Failure(
-			requestID,
-			"invalid_state",
-			"DNS methods are unavailable in tun_tcp_pool mode",
-			nil,
-		)
 	}
 	status, ok := s.proxy.DNSStatus()
 	if !ok {

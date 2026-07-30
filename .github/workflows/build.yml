@@ -34,8 +34,6 @@ jobs:
     permissions:
       actions: read
       contents: read
-    env:
-      NUITKA_CACHE_DIR: ${{ github.workspace }}\.nuitka-cache
 
     steps:
       - name: Checkout code
@@ -64,40 +62,16 @@ jobs:
             throw "Test signing must not be started from a release tag."
           }
 
-      - name: Set up Python 3.13.14
-        uses: actions/setup-python@v6
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
         with:
-          python-version: '3.13.14'
-          cache: pip
-          cache-dependency-path: |
-            requirements.txt
-            requirements-build.txt
+          global-json-file: global.json
 
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
           go-version-file: engine/go.mod
           cache-dependency-path: engine/go.sum
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --disable-pip-version-check -r requirements.txt -r requirements-build.txt
-
-      - name: Run fast validation
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: |
-          python -m pytest -q
-          python -m compileall -q main.py proxy_worker.py engine_client ui utils
-          go -C engine test ./...
-
-      - name: Restore Nuitka compilation cache
-        uses: actions/cache@v4
-        with:
-          path: ${{ env.NUITKA_CACHE_DIR }}
-          key: nuitka-${{ runner.os }}-${{ runner.arch }}-py3.13.14-${{ hashFiles('requirements.txt', 'requirements-build.txt') }}-${{ github.sha }}
-          restore-keys: |
-            nuitka-${{ runner.os }}-${{ runner.arch }}-py3.13.14-${{ hashFiles('requirements.txt', 'requirements-build.txt') }}-
 
       - name: Get version string
         id: version
@@ -120,81 +94,58 @@ jobs:
             "INNO_VERSION=0.0.0" >> $env:GITHUB_OUTPUT
           }
 
-      # 优化点：添加 shell: pwsh，并直接使用 --output-filename 让 Nuitka 输出 HypoMux.exe
-      # 同时嵌入 Windows 版本资源，使 EXE 属性/任务管理器显示规范的产品名与版本号
-      - name: Build with Nuitka
+      - name: Restore .NET dependencies
         shell: pwsh
         run: |
-          # 让运行中的应用版本与 Git tag 一致，供 GitHub Release 更新检查比较。
-          Set-Content -Path "hypomux-version.txt" -Value "${{ steps.version.outputs.DISPLAY_VERSION }}" -NoNewline -Encoding ascii
-          # 仅打包运行时资源（含程序图标与 SignPath 图标），避免把 README 截图等 assets 素材带入安装包。
-          python -m nuitka `
-            --standalone `
-            --enable-plugin=pyside6 `
-            --windows-console-mode=disable `
-            --windows-icon-from-ico=support\icon.ico `
-            --windows-uac-admin `
-            --company-name=Hypostasis-Cat `
-            --product-name=HypoMux `
-            --file-description=HypoMux `
-            --file-version=${{ steps.version.outputs.INNO_VERSION }} `
-            --product-version=${{ steps.version.outputs.INNO_VERSION }} `
-            --include-data-file=hypomux-version.txt=hypomux-version.txt `
-            --copyright="Copyright (C) 2026 Hypostasis-Cat" `
-            --include-package-data=qfluentwidgets `
-            --include-data-dir=support=support `
-            --remove-output `
-            --output-dir=dist `
-            --output-filename=HypoMux `
-            --report=dist\nuitka-compilation-report.xml `
-            --assume-yes-for-downloads `
-            main.py
+          dotnet restore frontend\HypoMux.EngineClient.Smoke\HypoMux.EngineClient.Smoke.csproj
+          dotnet restore frontend\HypoMux.App\HypoMux.App.csproj --runtime win-x64
 
-          if (-not (Test-Path "dist\main.dist")) {
-            $distDir = Get-ChildItem -Path dist -Directory -Filter "*.dist" | Select-Object -First 1
-            if ($null -eq $distDir) {
-              Get-ChildItem -Path dist -Recurse -ErrorAction SilentlyContinue
-              throw "Nuitka did not produce a standalone .dist directory."
-            }
-            Move-Item -Path $distDir.FullName -Destination "dist\main.dist"
-          }
-
-          if (-not (Test-Path "dist\main.dist\HypoMux.exe")) {
-            Get-ChildItem -Path "dist\main.dist" -Recurse -Filter "*.exe" -ErrorAction SilentlyContinue
-            throw "Expected dist\main.dist\HypoMux.exe was not found."
-          }
-
-      - name: Upload Nuitka compilation report
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: Nuitka-Report-${{ steps.version.outputs.VERSION }}
-          path: dist/nuitka-compilation-report.xml
-          if-no-files-found: ignore
-          retention-days: 14
+      - name: Run fast validation
+        shell: pwsh
+        run: |
+          go -C engine test ./...
+          dotnet build frontend\HypoMux.EngineClient.Smoke\HypoMux.EngineClient.Smoke.csproj --configuration Release --no-restore
+          dotnet build frontend\HypoMux.App\HypoMux.App.csproj --configuration Release --runtime win-x64 --no-restore
 
       - name: Build Go engine
         shell: pwsh
         run: |
+          New-Item -ItemType Directory -Force -Path "dist\publish\bin" | Out-Null
           go -C engine build -trimpath `
             -ldflags "-X main.version=${{ steps.version.outputs.DISPLAY_VERSION }} -X main.commit=${{ github.sha }}" `
-            -o ..\hypomux-engine.exe .\cmd\hypomux-engine
+            -o ..\dist\publish\bin\hypomux-engine.exe .\cmd\hypomux-engine
 
-      - name: Qualify staged Go engine
+      - name: Qualify Go engine through the C# protocol client
         shell: pwsh
         run: |
-          python -m engine_client.qualification `
-            --engine ".\hypomux-engine.exe" `
-            --output "$env:RUNNER_TEMP\strict-go-installer-candidate.json"
+          $env:HYPOMUX_ENGINE_PATH = (Resolve-Path "dist\publish\bin\hypomux-engine.exe")
+          dotnet run `
+            --project frontend\HypoMux.EngineClient.Smoke\HypoMux.EngineClient.Smoke.csproj `
+            --configuration Release `
+            --no-build
 
-      - name: Upload staged Go qualification report
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: Strict-Go-Installer-Candidate-${{ steps.version.outputs.VERSION }}
-          path: ${{ runner.temp }}/strict-go-installer-candidate.json
-          if-no-files-found: warn
-          retention-days: 14
+      - name: Publish self-contained WPF application
+        shell: pwsh
+        run: |
+          dotnet publish frontend\HypoMux.App\HypoMux.App.csproj `
+            --configuration Release `
+            --runtime win-x64 `
+            --self-contained true `
+            --no-restore `
+            --output dist\publish `
+            -p:PublishSingleFile=true `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:VersionPrefix=${{ steps.version.outputs.INNO_VERSION }} `
+            -p:VersionSuffix= `
+            -p:InformationalVersion=${{ steps.version.outputs.DISPLAY_VERSION }}+${{ github.sha }}
+
+          Copy-Item -Path "bin\sing-box.exe" -Destination "dist\publish\bin\sing-box.exe"
+          Copy-Item -Path "bin\wintun.dll" -Destination "dist\publish\bin\wintun.dll"
+          Copy-Item -Path "bin\libcronet.dll" -Destination "dist\publish\bin\libcronet.dll"
+          Copy-Item -Path "support" -Destination "dist\publish\support" -Recurse
+          if (-not (Test-Path "dist\publish\HypoMux.exe")) {
+            throw "Expected self-contained WPF executable was not produced."
+          }
 
       # 从 main 手动测试生产签名，或从 v* tag 手动发布正式版本。
       # 两种情况均使用 SignPath 生产策略，并须在 UI 人工批准每个请求。
@@ -203,7 +154,7 @@ jobs:
         id: upload-hypomux-production-executable
         uses: actions/upload-artifact@v7
         with:
-          path: dist/main.dist/HypoMux.exe
+          path: dist/publish/HypoMux.exe
           archive: false
           if-no-files-found: error
 
@@ -228,7 +179,7 @@ jobs:
         id: upload-engine-production-executable
         uses: actions/upload-artifact@v7
         with:
-          path: hypomux-engine.exe
+          path: dist/publish/bin/hypomux-engine.exe
           archive: false
           if-no-files-found: error
 
@@ -250,8 +201,8 @@ jobs:
         if: github.event_name == 'workflow_dispatch' && ((inputs.sign_with_production_certificate && github.ref == 'refs/heads/main') || (inputs.publish_release && startsWith(github.ref, 'refs/tags/v')))
         shell: pwsh
         run: |
-          Copy-Item -Path "signed-hypomux-production\HypoMux.exe" -Destination "dist\main.dist\HypoMux.exe" -Force
-          Copy-Item -Path "signed-engine-production\hypomux-engine.exe" -Destination "hypomux-engine.exe" -Force
+          Copy-Item -Path "signed-hypomux-production\HypoMux.exe" -Destination "dist\publish\HypoMux.exe" -Force
+          Copy-Item -Path "signed-engine-production\hypomux-engine.exe" -Destination "dist\publish\bin\hypomux-engine.exe" -Force
 
       # SignPath 的默认 PE 构件配置一次只签一个 PE 文件。先签我们自己构建的程序，
       # 再将签名后的文件封装进 Inno Setup 安装包，避免安装后主程序仍是未签名状态。
@@ -260,7 +211,7 @@ jobs:
         id: upload-hypomux-executable
         uses: actions/upload-artifact@v7
         with:
-          path: dist/main.dist/HypoMux.exe
+          path: dist/publish/HypoMux.exe
           archive: false
           if-no-files-found: error
 
@@ -282,7 +233,7 @@ jobs:
         id: upload-engine-executable
         uses: actions/upload-artifact@v7
         with:
-          path: hypomux-engine.exe
+          path: dist/publish/bin/hypomux-engine.exe
           archive: false
           if-no-files-found: error
 
@@ -303,8 +254,8 @@ jobs:
         if: github.event_name == 'workflow_dispatch' && inputs.sign_with_test_certificate && !inputs.sign_with_production_certificate && !inputs.publish_release && !startsWith(github.ref, 'refs/tags/v')
         shell: pwsh
         run: |
-          Copy-Item -Path "signed-hypomux\HypoMux.exe" -Destination "dist\main.dist\HypoMux.exe" -Force
-          Copy-Item -Path "signed-engine\hypomux-engine.exe" -Destination "hypomux-engine.exe" -Force
+          Copy-Item -Path "signed-hypomux\HypoMux.exe" -Destination "dist\publish\HypoMux.exe" -Force
+          Copy-Item -Path "signed-engine\hypomux-engine.exe" -Destination "dist\publish\bin\hypomux-engine.exe" -Force
 
       # 呼叫 Windows 虚拟机自带的 Inno Setup 编译器打包安装包
       # 通过 /D 注入版本号：DISPLAY_VERSION 作显示/文件名，INNO_VERSION 作纯数字文件版本

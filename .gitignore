@@ -1,17 +1,18 @@
-venv/
-.venv/
+build/
 __pycache__/
 *.pyc
-.pytest_cache/
-.mypy_cache/
-build/
+frontend/**/bin/
+frontend/**/obj/
+.dotnet-home/
+.nuget-packages/
+.appdata/
+.go-cache/
+.go-mod-cache/
 dist/
 Output/
-*.egg-info
 *.log
 *.tmp
 NetBooster.exe
-nuitka-crash-report.xml
 
 # Local/generated runtime config. The app persists user config under ~/.hypomux.
 config.json

@@ -1,7 +1,7 @@
 # HypoMux engine protocol v1
 
-This directory is the language-neutral contract for the Go engine, the
-current Python client, and the future C# WPF client.
+This directory is the language-neutral contract shared by the Go engine and
+the production C# WPF client.
 
 - `manifest.json` records the advertised methods, events, lifecycle states,
   error codes, and operational semantics.
@@ -37,3 +37,8 @@ then call `tun.activate`. The host validates configuration before network
 mutation, owns the exact sing-box process tree, and guarantees that
 `engine.stop` deactivates TUN before stopping the pool. `tun.status` is
 read-only and `tun.deactivate` is safe to retry.
+
+`dns.resolve` and `dns.status` are available while either `proxy` or
+`tun_tcp_pool` is running. In TUN mode they are the authoritative
+selected-adapter DNS preflight used to build the sing-box upstream plan; the
+channel listeners still accept only already-resolved IP destinations.

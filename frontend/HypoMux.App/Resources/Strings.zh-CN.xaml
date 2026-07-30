@@ -1,0 +1,47 @@
+<ResourceDictionary
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:system="clr-namespace:System;assembly=System.Runtime">
+    <system:String x:Key="EngineConnection">引擎连接</system:String>
+    <system:String x:Key="EngineVersion">版本</system:String>
+    <system:String x:Key="Reconnect">重新连接</system:String>
+    <system:String x:Key="Refresh">刷新</system:String>
+    <system:String x:Key="AccelerationControl">加速控制</system:String>
+    <system:String x:Key="TunMode">虚拟网卡（TUN）模式</system:String>
+    <system:String x:Key="WeightedMode">加权调度</system:String>
+    <system:String x:Key="StrictRoute">严格路由</system:String>
+    <system:String x:Key="StartAcceleration">启动加速</system:String>
+    <system:String x:Key="StopAcceleration">停止加速</system:String>
+    <system:String x:Key="Selected">选择</system:String>
+    <system:String x:Key="AddRule">添加</system:String>
+    <system:String x:Key="RemoveRule">删除</system:String>
+    <system:String x:Key="MatchType">匹配类型</system:String>
+    <system:String x:Key="MatchValue">匹配值</system:String>
+    <system:String x:Key="Outbound">出站</system:String>
+    <system:String x:Key="NavOverview">概览</system:String>
+    <system:String x:Key="NavAdapters">网卡</system:String>
+    <system:String x:Key="NavRouting">分流规则</system:String>
+    <system:String x:Key="NavDiagnostics">诊断</system:String>
+    <system:String x:Key="NavLogs">日志</system:String>
+    <system:String x:Key="NavAppearance">外观</system:String>
+    <system:String x:Key="EngineState">引擎状态</system:String>
+    <system:String x:Key="TunState">TUN 状态</system:String>
+    <system:String x:Key="Health">健康检查</system:String>
+    <system:String x:Key="Platform">宿主信息</system:String>
+    <system:String x:Key="LastRefresh">最后刷新</system:String>
+    <system:String x:Key="AdapterName">网卡</system:String>
+    <system:String x:Key="AdapterHealth">健康状态</system:String>
+    <system:String x:Key="Connections">连接数</system:String>
+    <system:String x:Key="DownloadBytes">下载字节</system:String>
+    <system:String x:Key="UploadBytes">上传字节</system:String>
+    <system:String x:Key="SourceIp">源 IP</system:String>
+    <system:String x:Key="TargetIp">目标 IP</system:String>
+    <system:String x:Key="ProbeCount">探测次数</system:String>
+    <system:String x:Key="RunDiagnostic">开始诊断</system:String>
+    <system:String x:Key="ClearLogs">清空日志</system:String>
+    <system:String x:Key="Theme">主题</system:String>
+    <system:String x:Key="ThemeSystem">跟随系统</system:String>
+    <system:String x:Key="ThemeLight">浅色</system:String>
+    <system:String x:Key="ThemeDark">深色</system:String>
+    <system:String x:Key="CloseToTray">关闭窗口时驻留托盘</system:String>
+</ResourceDictionary>

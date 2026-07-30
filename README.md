@@ -10,9 +10,9 @@
 #  简体中文
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Python-3.10%2B-blue?style=flat-square&logo=python" alt="Python">
-  <img src="https://img.shields.io/badge/Framework-PySide6-green?style=flat-square&logo=qt" alt="PySide6">
-  <img src="https://img.shields.io/badge/UI--Library-QFluentWidgets-orange?style=flat-square" alt="QFluentWidgets">
+  <img src="https://img.shields.io/badge/.NET-10.0-blue?style=flat-square&logo=dotnet" alt=".NET">
+  <img src="https://img.shields.io/badge/Frontend-WPF-green?style=flat-square" alt="WPF">
+  <img src="https://img.shields.io/badge/Engine-Go-orange?style=flat-square&logo=go" alt="Go">
   <img src="https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011-brightgreen?style=flat-square&logo=windows" alt="Windows">
   <img src="https://img.shields.io/badge/Architecture-Dual--Protocol%20L3%20Binding-red?style=flat-square" alt="Architecture">
 </p>
@@ -126,7 +126,7 @@ HypoMux 核心分流机制建立在**四层应用层调度**、**三层物理层
    (http/https -> 10801 | socks -> 10800 | TUN)
                │
                ▼ 
-  ProxyWorker 核心引擎 (Asyncio inside QThread)
+       hypomux-engine.exe (Go)
                │
                ▼ Round-Robin 连接轮询分发机制
    L3 物理层双向套接字强行绑定
@@ -175,17 +175,15 @@ HypoMux 核心分流机制建立在**四层应用层调度**、**三层物理层
 
 ---
 
-## ️ 打包编译 (Nuitka)
+## ️ 构建
 
-本项目使用 `Nuitka` 将 Python 代码直接转译为 **C 语言机器码二进制文件**。
+桌面前端使用 .NET 10 WPF，网络引擎使用 Go。正式安装包发布自包含
+`win-x64` 前端，不要求用户预装 .NET Runtime。
 
 ```powershell
-# 1. 激活并安装打包依赖
-venv\Scripts\activate
-pip install nuitka zstandard PySide6-Fluent-Widgets
-
-# 2. 一键执行全程序深度链接优化编译
-nuitka --standalone --onefile --enable-plugin=pyside6 --windows-console-mode=disable --windows-uac-admin --windows-icon-from-ico=support/icon.ico --include-package-data=qfluentwidgets --include-data-dir=support=support --python-flag=-O --lto=yes main.py
+go -C engine build -trimpath -o ..\hypomux-engine.exe .\cmd\hypomux-engine
+$env:HYPOMUX_ENGINE_PATH = "$PWD\hypomux-engine.exe"
+dotnet run --project .\frontend\HypoMux.App\HypoMux.App.csproj
 ```
 
 ---

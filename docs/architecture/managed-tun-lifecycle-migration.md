@@ -1,5 +1,7 @@
 # Managed TUN lifecycle migration
 
+> Historical migration record; the managed Go lifecycle is now production.
+
 Status: implemented in Phase 11 and selected by default in Phase 12
 
 ## Scope

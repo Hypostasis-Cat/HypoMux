@@ -40,8 +40,8 @@ Standard output is reserved for protocol messages; diagnostics belong on
 standard error.
 
 The language-neutral method manifest and canonical wire examples live in
-[`protocol/v1`](../protocol/v1/README.md). Go and Python tests validate this
-same contract; the future C# client will consume it as well.
+[`protocol/v1`](../protocol/v1/README.md). Go contract tests and the C# real
+process smoke client validate the same contract.
 
 Request:
 
@@ -127,76 +127,22 @@ domain state.
 - UI clients must use `engine.hello` capabilities instead of assuming that a
   newly introduced method exists.
 
-## Migration boundary
+## Production boundary
 
-The UI may send commands and render events, but must not own engine cleanup,
-DNS fallback, routing rollback, or connection accounting. Those behaviors
-move behind this boundary in migration slices. Go is the default network
-backend; Python remains a bounded pre-acquisition compatibility rollback until
-the unified Windows qualification pass is complete.
+The WPF UI sends commands and renders events. Go exclusively owns proxy
+listeners, source-bound DNS, connection scheduling, telemetry, sing-box
+containment, and TUN cleanup. There is no alternate Python network backend.
 
-## Runtime backend selection
-
-Build the host:
+Installed builds discover the signed engine at
+`<runtime>\bin\hypomux-engine.exe`. Source builds can point the WPF client or
+the C# smoke client at a local executable:
 
 ```powershell
-cd engine
-go build -trimpath -o ..\dist\hypomux-engine.exe .\cmd\hypomux-engine
-cd ..
+go -C engine build -trimpath -o ..\hypomux-engine.exe .\cmd\hypomux-engine
+$env:HYPOMUX_ENGINE_PATH = "$PWD\hypomux-engine.exe"
+dotnet run --project .\frontend\HypoMux.App\HypoMux.App.csproj
 ```
 
-Installed builds discover the signed host at
-`<runtime>\bin\hypomux-engine.exe` and use it by default. Source builds can
-point at a local executable:
-
-```powershell
-$env:HYPOMUX_ENGINE_PATH = "$PWD\dist\hypomux-engine.exe"
-python main.py
-```
-
-The default `auto` policy starts the host, negotiates capabilities, and selects
-Go independently for ordinary proxy and TUN sessions. A missing or incomplete
-mode falls back to the complete Python implementation before listeners or TUN
-resources are acquired.
-
-Use strict Go mode during release qualification:
-
-```powershell
-$env:HYPOMUX_NETWORK_BACKEND = "go"
-python main.py
-```
-
-Strict mode reports a visible pre-acquisition error instead of hiding a
-missing packaged host or capability behind Python. To use the bounded
-compatibility rollback:
-
-```powershell
-$env:HYPOMUX_NETWORK_BACKEND = "python"
-python main.py
-```
-
-Unset the variables to return to the default `auto` policy:
-
-```powershell
-Remove-Item Env:HYPOMUX_NETWORK_BACKEND -ErrorAction SilentlyContinue
-Remove-Item Env:HYPOMUX_ENGINE_PATH -ErrorAction SilentlyContinue
-```
-
-The older `HYPOMUX_GO_ENGINE_DEV`, `HYPOMUX_GO_PROXY_DEV`, and
-`HYPOMUX_GO_TUN_DEV` flags remain accepted by compatibility helpers. They are
-equivalent to the default `auto` behavior and do not enable strict mode.
-
-The complete cutover and compatibility-removal rules are documented in
-[default network backend cutover](../docs/architecture/default-network-backend-cutover.md).
-
-Generate the non-destructive strict-Go packaging and residue report with:
-
-```powershell
-python -m engine_client.qualification `
-  --engine ..\hypomux-engine.exe `
-  --output ..\qualification\preflight.json
-```
-
-This command starts no proxy or TUN mode. Release qualification adds
-`--require-elevated --require-signed` and follows the physical matrix in
-[strict-Go Windows qualification](../docs/architecture/strict-go-windows-qualification.md).
+The historical migration decisions remain under `docs/architecture`; the
+current production layout is summarized in
+[`frontend/README.md`](../frontend/README.md).

@@ -97,15 +97,13 @@ func (s *Server) Start() (Endpoints, error) {
 	}
 
 	s.ctx, s.cancel = context.WithCancel(context.Background())
-	if len(s.config.Channels) == 0 {
-		resolver, err := dns.New(s.ctx, s.config.DNS, s.dialDNS)
-		if err != nil {
-			s.cancel()
-			return Endpoints{}, fmt.Errorf("create DNS resolver: %w", err)
-		}
-		resolver.SetFallbackHandler(s.dnsFallbackHandler)
-		s.resolver = resolver
+	resolver, err := dns.New(s.ctx, s.config.DNS, s.dialDNS)
+	if err != nil {
+		s.cancel()
+		return Endpoints{}, fmt.Errorf("create DNS resolver: %w", err)
 	}
+	resolver.SetFallbackHandler(s.dnsFallbackHandler)
+	s.resolver = resolver
 
 	if len(s.config.Channels) > 0 {
 		return s.startChannelListeners()

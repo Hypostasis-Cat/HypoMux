@@ -10,9 +10,9 @@
 #  English
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Python-3.10%2B-blue?style=flat-square&logo=python" alt="Python">
-  <img src="https://img.shields.io/badge/Framework-PySide6-green?style=flat-square&logo=qt" alt="PySide6">
-  <img src="https://img.shields.io/badge/UI--Library-QFluentWidgets-orange?style=flat-square" alt="QFluentWidgets">
+  <img src="https://img.shields.io/badge/.NET-10.0-blue?style=flat-square&logo=dotnet" alt=".NET">
+  <img src="https://img.shields.io/badge/Frontend-WPF-green?style=flat-square" alt="WPF">
+  <img src="https://img.shields.io/badge/Engine-Go-orange?style=flat-square&logo=go" alt="Go">
   <img src="https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011-brightgreen?style=flat-square&logo=windows" alt="Windows">
   <img src="https://img.shields.io/badge/Architecture-Dual--Protocol%20L3%20Binding-red?style=flat-square" alt="Architecture">
 </p>
@@ -124,7 +124,7 @@ HypoMux's core distribution mechanism combines **Layer-4 application-level sched
    (http/https -> 10801 | socks -> 10800 | TUN)
                │
                ▼
-  ProxyWorker Core Engine (Asyncio inside QThread)
+       hypomux-engine.exe (Go)
                │
                ▼ Round-Robin Connection Distribution
    L3 Physical Layer Bidirectional Socket Binding
@@ -171,12 +171,15 @@ HypoMux's core distribution mechanism combines **Layer-4 application-level sched
 
 ---
 
-##  Building the Executable (Nuitka)
+## Building
+
+The desktop frontend uses .NET 10 WPF and the network engine is written in
+Go. Release installers ship a self-contained `win-x64` frontend.
 
 ```powershell
-venv\Scripts\activate
-pip install nuitka zstandard PySide6-Fluent-Widgets
-nuitka --standalone --onefile --enable-plugin=pyside6 --windows-console-mode=disable --windows-uac-admin --windows-icon-from-ico=support/icon.ico --include-package-data=qfluentwidgets --include-data-dir=support=support --python-flag=-O --lto=yes main.py
+go -C engine build -trimpath -o ..\hypomux-engine.exe .\cmd\hypomux-engine
+$env:HYPOMUX_ENGINE_PATH = "$PWD\hypomux-engine.exe"
+dotnet run --project .\frontend\HypoMux.App\HypoMux.App.csproj
 ```
 
 ---

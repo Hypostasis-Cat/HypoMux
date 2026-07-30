@@ -1,5 +1,8 @@
 # Strict-Go Windows qualification
 
+> Historical qualification plan. Python removal and the WPF/Go cutover are
+> complete; current releases use the C# smoke client and GitHub Actions.
+
 Status: Phase 14 evidence session implemented; disruptive scenarios require an
 operator
 

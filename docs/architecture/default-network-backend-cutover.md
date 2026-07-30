@@ -1,5 +1,8 @@
 # Default network backend cutover
 
+> Historical design record. The compatibility window described below has
+> ended; Go is now the only network backend.
+
 Status: implemented in Phase 12 with an explicit Python rollback
 
 ## Decision

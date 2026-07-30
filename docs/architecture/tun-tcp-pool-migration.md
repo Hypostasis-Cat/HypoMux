@@ -1,5 +1,7 @@
 # TUN multi-port TCP pool migration
 
+> Historical migration record; the Go/WPF cutover is complete.
+
 Status: Phase 6 implemented; UDP ownership continues in Phase 7
 
 ## Scope

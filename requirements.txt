@@ -1,5 +1,0 @@
-psutil==7.2.2
-PySide6==6.11.1
-PySide6-Fluent-Widgets==1.11.2
-darkdetect==0.8.0
-PySideSix-Frameless-Window==0.8.1

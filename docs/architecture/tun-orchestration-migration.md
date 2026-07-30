@@ -1,5 +1,7 @@
 # TUN orchestration migration
 
+> Historical migration record; WPF now coordinates the Go-owned transaction.
+
 Status: implemented behind the Phase 8 development flag; selected by default
 since Phase 12
 

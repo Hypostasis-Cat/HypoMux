@@ -1,5 +1,7 @@
 # DNS/DoH engine migration
 
+> Historical migration record; selected-adapter DNS is now Go-owned.
+
 Status: implemented behind the existing Go proxy development flag
 
 ## Scope

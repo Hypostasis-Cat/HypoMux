@@ -1,5 +1,8 @@
 # WPF frontend migration
 
+> Historical design record. The WPF/Go production cutover is complete; there
+> is no PySide6 or Python runtime fallback.
+
 Status: accepted architecture decision
 
 ## Product intent
