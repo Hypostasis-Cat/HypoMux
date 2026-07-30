@@ -111,6 +111,8 @@ Deliverables:
 - Stable configuration and telemetry DTOs that do not expose Python types.
 - Additive adapter health DTOs (`healthy`, `cooldown`, `probing`) and
   ordinary-proxy domain quarantine DTOs with UTC expiry timestamps.
+- Managed TUN activation/status/deactivation DTOs with PID, exit reason, and
+  deterministic rollback state; the UI never owns the sidecar process handle.
 
 Exit criteria:
 

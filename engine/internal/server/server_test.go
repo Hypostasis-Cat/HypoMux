@@ -4,8 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
+	"sync"
 	"testing"
+	"time"
+
+	"github.com/Hypostasis-Cat/HypoMux/engine/internal/protocol"
+	engineRuntime "github.com/Hypostasis-Cat/HypoMux/engine/internal/runtime"
+	"github.com/Hypostasis-Cat/HypoMux/engine/internal/tun"
 )
 
 func TestServerHandshakeStatusAndShutdown(t *testing.T) {
@@ -53,9 +60,10 @@ func TestServerHandshakeStatusAndShutdown(t *testing.T) {
 		t.Fatalf("hello mode_features = %#v", helloResult["mode_features"])
 	}
 	tunFeatures, ok := features["tun_tcp_pool"].([]any)
-	if !ok || len(tunFeatures) != 4 ||
+	if !ok || len(tunFeatures) != 5 ||
 		tunFeatures[2] != "ipv6_egress" ||
-		tunFeatures[3] != "adaptive_health" {
+		tunFeatures[3] != "adaptive_health" ||
+		tunFeatures[4] != "managed_tun_lifecycle" {
 		t.Fatalf("TUN mode features = %#v", features["tun_tcp_pool"])
 	}
 
@@ -95,6 +103,233 @@ func TestServerHandshakeStatusAndShutdown(t *testing.T) {
 	}
 	if messages[6]["sequence"] != float64(1) {
 		t.Fatalf("shutdown event sequence = %#v", messages[6]["sequence"])
+	}
+}
+
+type fakeTunController struct {
+	mu           sync.Mutex
+	status       tun.Status
+	activateErr  error
+	stopErr      error
+	stopCalls    int
+	onStop       func()
+	onLog        func(string)
+	onUnexpected func(tun.Status)
+}
+
+func (f *fakeTunController) Activate(
+	context.Context,
+	tun.Config,
+) (tun.Status, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.activateErr != nil {
+		f.status = tun.Status{
+			State:     tun.StateFailed,
+			LastError: f.activateErr.Error(),
+		}
+		return f.status, f.activateErr
+	}
+	now := time.Now().UTC()
+	f.status = tun.Status{
+		State:     tun.StateRunning,
+		PID:       1234,
+		StartedAt: &now,
+	}
+	return f.status, nil
+}
+
+func (f *fakeTunController) Stop(context.Context) (tun.Status, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.stopCalls++
+	if f.onStop != nil {
+		f.onStop()
+	}
+	f.status = tun.Status{State: tun.StateStopped}
+	return f.status, f.stopErr
+}
+
+func (f *fakeTunController) Status() tun.Status {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.status.State == "" {
+		return tun.Status{State: tun.StateStopped}
+	}
+	return f.status
+}
+
+func (f *fakeTunController) SetHandlers(
+	onLog func(string),
+	onUnexpected func(tun.Status),
+) {
+	f.mu.Lock()
+	f.onLog = onLog
+	f.onUnexpected = onUnexpected
+	f.mu.Unlock()
+}
+
+func TestManagedTunLifecycleRequiresPreparedPoolAndStopsInOrder(t *testing.T) {
+	var output bytes.Buffer
+	engineServer := New(
+		strings.NewReader(""),
+		&output,
+		Metadata{Name: "test"},
+	)
+	controller := &fakeTunController{
+		status: tun.Status{State: tun.StateStopped},
+	}
+	engineServer.tun = controller
+	startTUNPoolForLifecycleTest(t, engineServer)
+
+	controller.onStop = func() {
+		if engineServer.proxy == nil || !engineServer.proxy.Running() {
+			t.Error("TUN sidecar was not stopped before the outbound pool")
+		}
+	}
+	response, _ := engineServer.handle(
+		context.Background(),
+		[]byte(`{
+			"protocol":1,
+			"id":"tun-activate",
+			"method":"tun.activate",
+			"params":{
+				"executable":"C:\\HypoMux\\bin\\sing-box.exe",
+				"config_path":"C:\\Users\\Example\\.hypomux\\singbox-config.json",
+				"startup_timeout_ms":1500
+			}
+		}`),
+	)
+	if response.Error != nil {
+		t.Fatalf("tun.activate failed: %#v", response.Error)
+	}
+	if controller.Status().State != tun.StateRunning {
+		t.Fatalf("TUN status = %#v", controller.Status())
+	}
+
+	stopResponse := engineServer.stopProxy("engine-stop")
+	if stopResponse.Error != nil {
+		t.Fatalf("engine.stop failed: %#v", stopResponse.Error)
+	}
+	if controller.stopCalls != 1 ||
+		engineServer.runtime.Snapshot().State != engineRuntime.StateStopped ||
+		engineServer.proxy != nil {
+		t.Fatalf(
+			"stop result: calls=%d state=%s proxy=%v",
+			controller.stopCalls,
+			engineServer.runtime.Snapshot().State,
+			engineServer.proxy,
+		)
+	}
+}
+
+func TestManagedTunActivationFailureRollsBackPreparedPool(t *testing.T) {
+	engineServer := New(
+		strings.NewReader(""),
+		&bytes.Buffer{},
+		Metadata{Name: "test"},
+	)
+	controller := &fakeTunController{
+		status:      tun.Status{State: tun.StateStopped},
+		activateErr: errors.New("synthetic activation failure"),
+	}
+	engineServer.tun = controller
+	startTUNPoolForLifecycleTest(t, engineServer)
+
+	response, _ := engineServer.handle(
+		context.Background(),
+		[]byte(`{
+			"protocol":1,
+			"id":"tun-activate",
+			"method":"tun.activate",
+			"params":{"executable":"x","config_path":"y"}
+		}`),
+	)
+	if response.Error == nil || response.Error.Code != "tun_failed" {
+		t.Fatalf("activation response = %#v", response)
+	}
+	if engineServer.proxy != nil ||
+		engineServer.runtime.Snapshot().State != engineRuntime.StateFailed ||
+		controller.stopCalls != 1 {
+		t.Fatalf(
+			"rollback: proxy=%v state=%s stopCalls=%d",
+			engineServer.proxy,
+			engineServer.runtime.Snapshot().State,
+			controller.stopCalls,
+		)
+	}
+	_ = engineServer.stopProxy("clear-failed")
+}
+
+func TestUnexpectedManagedTunExitStopsPoolAndFailsEngine(t *testing.T) {
+	engineServer := New(
+		strings.NewReader(""),
+		&bytes.Buffer{},
+		Metadata{Name: "test"},
+	)
+	controller := &fakeTunController{
+		status: tun.Status{State: tun.StateRunning, PID: 1234},
+	}
+	engineServer.tun = controller
+	startTUNPoolForLifecycleTest(t, engineServer)
+
+	engineServer.handleTunUnexpectedExit(tun.Status{
+		State:     tun.StateFailed,
+		LastError: "synthetic crash",
+	})
+	if engineServer.proxy != nil ||
+		engineServer.runtime.Snapshot().State != engineRuntime.StateFailed {
+		t.Fatalf(
+			"unexpected-exit rollback: proxy=%v state=%s",
+			engineServer.proxy,
+			engineServer.runtime.Snapshot().State,
+		)
+	}
+	_ = engineServer.stopProxy("clear-failed")
+}
+
+func TestTunActivateRejectsUnpreparedAndOrdinaryProxyModes(t *testing.T) {
+	engineServer := New(
+		strings.NewReader(""),
+		&bytes.Buffer{},
+		Metadata{Name: "test"},
+	)
+	response, _ := engineServer.handle(
+		context.Background(),
+		[]byte(`{
+			"protocol":1,
+			"id":"tun-activate",
+			"method":"tun.activate",
+			"params":{"executable":"x","config_path":"y"}
+		}`),
+	)
+	if response.Error == nil || response.Error.Code != "invalid_state" {
+		t.Fatalf("unprepared activation = %#v", response)
+	}
+}
+
+func startTUNPoolForLifecycleTest(t *testing.T, server *Server) {
+	t.Helper()
+	request := protocol.Request{
+		Protocol: protocol.Version,
+		ID:       "start-tun-pool",
+		Method:   "engine.start",
+		Params: json.RawMessage(`{
+			"mode":"tun_tcp_pool",
+			"listen_host":"127.0.0.1",
+			"adapters":[
+				{"name":"loopback","source_ip":"127.0.0.1","weight":1}
+			],
+			"channels":[
+				{"name":"nic_ethernet","adapter_names":["loopback"]},
+				{"name":"nic_wifi","adapter_names":["loopback"]},
+				{"name":"aggregation","adapter_names":["loopback"]}
+			]
+		}`),
+	}
+	response := server.startProxy(request)
+	if response.Error != nil {
+		t.Fatalf("prepare TUN pool: %#v", response.Error)
 	}
 }
 

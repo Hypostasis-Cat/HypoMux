@@ -24,6 +24,7 @@ REQUIRED_TUN_FEATURES = (
     "udp_associate",
     "ipv6_egress",
     "adaptive_health",
+    "managed_tun_lifecycle",
 )
 
 
@@ -35,7 +36,14 @@ def can_use_go_tun_pool(bridge: EngineBridge | None) -> bool:
         return False
     if not all(
         bridge.supports(method)
-        for method in ("engine.start", "engine.stop", "engine.telemetry")
+        for method in (
+            "engine.start",
+            "engine.stop",
+            "engine.telemetry",
+            "tun.activate",
+            "tun.status",
+            "tun.deactivate",
+        )
     ):
         return False
     return all(
@@ -154,7 +162,8 @@ class GoTunPoolWorker(QObject):
         try:
             if not can_use_go_tun_pool(self._bridge):
                 raise RuntimeError(
-                    "Go engine does not advertise the required TUN pool health features"
+                    "Go engine does not advertise the required TUN transport "
+                    "and lifecycle features"
                 )
             ready, details = self._planner.prepare()
             for detail in details:
@@ -196,7 +205,7 @@ class GoTunPoolWorker(QObject):
         finally:
             if start_attempted and self._bridge.is_running():
                 try:
-                    self._bridge.request("engine.stop", timeout=6.0)
+                    self._bridge.request("engine.stop", timeout=25.0)
                 except EngineClientError as exc:
                     self.log_signal.emit(
                         f"[GoEngine][TUN] engine stop warning: {exc}"

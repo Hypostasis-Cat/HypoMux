@@ -17,6 +17,7 @@ class _FakeBridge:
             "udp_associate",
             "ipv6_egress",
             "adaptive_health",
+            "managed_tun_lifecycle",
         ),
     ):
         self.features = set(features)
@@ -27,7 +28,14 @@ class _FakeBridge:
         return True
 
     def supports(self, method: str):
-        return method in {"engine.start", "engine.stop", "engine.telemetry"}
+        return method in {
+            "engine.start",
+            "engine.stop",
+            "engine.telemetry",
+            "tun.activate",
+            "tun.status",
+            "tun.deactivate",
+        }
 
     def supports_mode_feature(self, mode: str, feature: str):
         return mode == "tun_tcp_pool" and feature in self.features
@@ -215,7 +223,12 @@ def test_go_tun_pool_requires_adaptive_health_feature():
     assert can_use_go_tun_pool(_FakeBridge())
     assert not can_use_go_tun_pool(
         _FakeBridge(
-            features=("tcp_connect", "udp_associate", "ipv6_egress")
+            features=(
+                "tcp_connect",
+                "udp_associate",
+                "ipv6_egress",
+                "adaptive_health",
+            )
         )
     )
 

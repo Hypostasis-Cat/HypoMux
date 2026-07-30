@@ -298,6 +298,20 @@ class RealGoEngineIntegrationTests(unittest.TestCase):
                 "domain_quarantine",
                 hello["mode_features"]["proxy"],
             )
+            self.assertIn("tun.activate", hello["capabilities"])
+            self.assertIn("tun.status", hello["capabilities"])
+            self.assertIn("tun.deactivate", hello["capabilities"])
+            self.assertIn(
+                "managed_tun_lifecycle",
+                hello["mode_features"]["tun_tcp_pool"],
+            )
+            self.assertEqual(
+                client.request("tun.status")["state"],
+                "stopped",
+            )
+            self.assertFalse(
+                client.request("tun.deactivate")["accepted"],
+            )
             self.assertTrue(client.request("health.check")["ok"])
             diagnostic = client.request(
                 "diagnostic.run",
@@ -318,9 +332,14 @@ class RealGoEngineIntegrationTests(unittest.TestCase):
     def test_real_host_exits_when_parent_pipe_closes(self):
         executable = os.environ["HYPOMUX_ENGINE_TEST_EXE"]
         process = start_engine_process(executable)
-        self.assertIsNotNone(process.stdin)
-        process.stdin.close()
-        self.assertEqual(process.wait(timeout=2.0), 0)
+        try:
+            self.assertIsNotNone(process.stdin)
+            process.stdin.close()
+            self.assertEqual(process.wait(timeout=2.0), 0)
+        finally:
+            for stream in (process.stdout, process.stderr):
+                if stream is not None:
+                    stream.close()
 
     def test_real_go_proxy_relays_socks_and_reports_telemetry(self):
         executable = os.environ["HYPOMUX_ENGINE_TEST_EXE"]

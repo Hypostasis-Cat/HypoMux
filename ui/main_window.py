@@ -249,6 +249,7 @@ def create_main_window():
     from ui.engine_bridge import EngineBridge
     from ui.go_proxy_worker import GoProxyWorker, can_use_go_proxy
     from ui.go_tun_pool_worker import GoTunPoolWorker, can_use_go_tun_pool
+    from ui.go_tun_manager import GoTunManager
 
     class BlockedDomainsWindow(FluentWidget):
         """单网卡被墙域名的独立云母窗口。"""
@@ -2221,7 +2222,26 @@ def create_main_window():
 
             # 3) 拉起 sing-box TUN 内核侧车
             self.append_log(tr("tun_starting"))
-            self._tun_manager = TunManager(self._singbox_config_path(), parent=self)
+            use_go_lifecycle = isinstance(
+                self._pool_worker,
+                GoTunPoolWorker,
+            )
+            if use_go_lifecycle:
+                self._tun_manager = GoTunManager(
+                    self._go_engine_bridge,
+                    self._singbox_config_path(),
+                    parent=self,
+                )
+                self.append_log(
+                    "[GoEngine][TUN] Go host now owns the sing-box process, "
+                    "TUN/WFP lifetime, routes, and rollback.",
+                    force=True,
+                )
+            else:
+                self._tun_manager = TunManager(
+                    self._singbox_config_path(),
+                    parent=self,
+                )
             self._tun_manager.log_signal.connect(self.on_proxy_log)
             self._tun_manager.started_ok.connect(self._on_tun_started)
             self._tun_manager.error_signal.connect(self._on_tun_error)
@@ -2429,7 +2449,7 @@ def create_main_window():
 
         def _on_tun_started(self, info: str):
             sender = self.sender()
-            if isinstance(sender, TunManager) and sender is not self._tun_manager:
+            if sender is not None and sender is not self._tun_manager:
                 return
             self._tun_kernel_ready = True
             self._acceleration_log.record_event("tun_kernel", "stable", details=info)
@@ -2640,7 +2660,7 @@ def create_main_window():
 
         def _on_tun_error(self, message: str):
             sender = self.sender()
-            if isinstance(sender, TunManager) and sender is not self._tun_manager:
+            if sender is not None and sender is not self._tun_manager:
                 return
             if self._tun_manager is None and not self._tun_active:
                 return
@@ -2677,7 +2697,7 @@ def create_main_window():
             localized = localize_runtime_message(message) or tr("tun_stopped")
             # _stop_tun_mode() 会先撤销当前 manager 身份，再请求线程退出；
             # 因此该路径收到的是旧线程的正常停止通知，只记录即可。
-            if isinstance(sender, TunManager) and sender is not self._tun_manager:
+            if sender is not None and sender is not self._tun_manager:
                 self.append_log(localized)
                 return
 

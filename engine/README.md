@@ -79,6 +79,13 @@ Protocol-v1 methods:
 - `engine.telemetry`: read cumulative per-adapter bytes, active connection
   counts, optional connection details, DNS counters, adaptive health state,
   and ordinary-proxy domain quarantines.
+- `tun.activate`: validate and start sing-box under Go-owned process and
+  network-resource containment after a TUN pool has returned its endpoints.
+- `tun.status`: inspect the managed sidecar state, PID, timestamps, exit code,
+  and last error.
+- `tun.deactivate`: stop the exact sidecar process tree and clean only the
+  HypoMux TUN routes and adapter while leaving the prepared pool available for
+  the enclosing transaction.
 - `dns.resolve`: resolve an A or AAAA record through a running engine and a
   selected adapter for diagnostics.
 - `dns.status`: inspect DNS policy, upstreams, cache, in-flight work, and
@@ -93,8 +100,10 @@ Reserved lifecycle states are `stopped`, `starting`, `running`, `degraded`,
 `tun_tcp_pool`. `engine.hello.mode_features` reports the exact transports
 available in each mode. The TUN pool owns literal-IPv4 SOCKS CONNECT and
 literal-IPv6 SOCKS CONNECT plus source-validated dual-stack UDP ASSOCIATE.
-Live TUN activation remains behind the development orchestration switch;
-sing-box, WFP, and routing keep their current ownership.
+Live TUN activation remains behind the development orchestration switch.
+With the complete Phase 11 feature set, Go owns the sing-box process and its
+TUN/WFP/route lifetime; sing-box still implements DNS, FakeIP, Wintun, and
+strict routing.
 
 Ordinary proxy domain targets are resolved by the Go engine before the
 adapter-bound TCP dial. A records remain preferred, with AAAA fallback only
@@ -157,8 +166,9 @@ python main.py
 
 This flag also starts the persistent host. TUN mode continues to use the
 Python `MultiPortProxyWorker` and `TunManager` by default. To route the live
-TUN TCP/UDP outbound pool through Go while keeping sing-box DNS/TUN/WFP
-ownership and the pre-acquisition Python fallback:
+TUN TCP/UDP outbound pool through Go while also moving the sing-box
+process/TUN/WFP lifetime into the Go host and keeping the pre-acquisition
+Python fallback:
 
 ```powershell
 $env:HYPOMUX_GO_TUN_DEV = "1"
@@ -167,7 +177,8 @@ python main.py
 ```
 
 The TUN switch is accepted only when protocol negotiation reports
-`tun_tcp_pool` with both `tcp_connect` and `udp_associate`.
+`tun_tcp_pool` with TCP, UDP, IPv6, adaptive health, and
+`managed_tun_lifecycle`, together with all three `tun.*` methods.
 
 Unset the variables to return to the normal production path:
 

@@ -51,6 +51,8 @@ class SharedProtocolContractTests(unittest.TestCase):
             [
                 "engine.state_changed",
                 "dns.fallback_required",
+                "tun.state_changed",
+                "log.record",
                 "host.exiting",
             ],
         )
@@ -110,6 +112,8 @@ class SharedProtocolContractTests(unittest.TestCase):
             {
                 "engine.state_changed",
                 "dns.fallback_required",
+                "tun.state_changed",
+                "log.record",
                 "host.exiting",
             },
         )

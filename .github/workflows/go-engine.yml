@@ -10,6 +10,7 @@ on:
       - 'ui/engine_bridge.py'
       - 'ui/go_proxy_worker.py'
       - 'ui/go_tun_pool_worker.py'
+      - 'ui/go_tun_manager.py'
       - 'utils/tun_dns_planner.py'
       - 'utils/network_utils.py'
       - 'utils/socket_binding.py'
@@ -17,6 +18,7 @@ on:
       - 'tests/test_engine_client.py'
       - 'tests/test_go_proxy_worker.py'
       - 'tests/test_go_tun_pool_worker.py'
+      - 'tests/test_go_tun_manager.py'
       - 'tests/test_dual_stack_metadata.py'
       - 'tests/test_proxy_transport_regression.py'
       - 'tests/test_tun_dns_regression.py'
@@ -31,6 +33,7 @@ on:
       - 'ui/engine_bridge.py'
       - 'ui/go_proxy_worker.py'
       - 'ui/go_tun_pool_worker.py'
+      - 'ui/go_tun_manager.py'
       - 'utils/tun_dns_planner.py'
       - 'utils/network_utils.py'
       - 'utils/socket_binding.py'
@@ -38,6 +41,7 @@ on:
       - 'tests/test_engine_client.py'
       - 'tests/test_go_proxy_worker.py'
       - 'tests/test_go_tun_pool_worker.py'
+      - 'tests/test_go_tun_manager.py'
       - 'tests/test_dual_stack_metadata.py'
       - 'tests/test_proxy_transport_regression.py'
       - 'tests/test_tun_dns_regression.py'
@@ -104,4 +108,4 @@ jobs:
         run: |
           python -m unittest discover -s tests -p "test_engine_client.py" -v
           python -m unittest tests.test_protocol_contract -v
-          python -m compileall -q engine_client ui\engine_bridge.py ui\go_proxy_worker.py ui\go_tun_pool_worker.py utils\tun_dns_planner.py utils\network_utils.py utils\socket_binding.py utils\singbox_config.py
+          python -m compileall -q engine_client ui\engine_bridge.py ui\go_proxy_worker.py ui\go_tun_pool_worker.py ui\go_tun_manager.py utils\tun_dns_planner.py utils\network_utils.py utils\socket_binding.py utils\singbox_config.py

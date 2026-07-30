@@ -30,3 +30,10 @@ gated on development orchestration. Both modes report `adaptive_health` when
 their schedulers share continuous adapter health, and ordinary `proxy` also
 reports `domain_quarantine`. TUN does not claim domain awareness because
 sing-box resolves its destinations before forwarding literal IP targets.
+
+`managed_tun_lifecycle` indicates the two-phase TUN transaction. Clients first
+prepare `tun_tcp_pool`, generate configuration from the returned endpoints,
+then call `tun.activate`. The host validates configuration before network
+mutation, owns the exact sing-box process tree, and guarantees that
+`engine.stop` deactivates TUN before stopping the pool. `tun.status` is
+read-only and `tun.deactivate` is safe to retry.

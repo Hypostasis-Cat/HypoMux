@@ -28,6 +28,9 @@
           "engine.start",
           "engine.stop",
           "engine.telemetry",
+          "tun.activate",
+          "tun.status",
+          "tun.deactivate",
           "dns.resolve",
           "dns.status",
           "health.check",
@@ -51,7 +54,8 @@
             "tcp_connect",
             "udp_associate",
             "ipv6_egress",
-            "adaptive_health"
+            "adaptive_health",
+            "managed_tun_lifecycle"
           ]
         },
         "os": "windows",
@@ -287,6 +291,89 @@
             "nic_wifi": "127.0.0.1:2002",
             "aggregation": "127.0.0.1:2003"
           }
+        }
+      }
+    }
+  },
+  {
+    "name": "tun_activate_request",
+    "kind": "request",
+    "method": "tun.activate",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-tun-activate",
+      "method": "tun.activate",
+      "params": {
+        "executable": "C:\\Program Files\\HypoMux\\bin\\sing-box.exe",
+        "config_path": "C:\\Users\\Example\\.hypomux\\singbox-config.json",
+        "startup_timeout_ms": 1500
+      }
+    }
+  },
+  {
+    "name": "tun_activate_response",
+    "kind": "response",
+    "method": "tun.activate",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-tun-activate",
+      "result": {
+        "accepted": true,
+        "tun": {
+          "state": "running",
+          "pid": 5432,
+          "started_at": "2026-07-30T02:10:01Z",
+          "config_path": "C:\\Users\\Example\\.hypomux\\singbox-config.json"
+        }
+      }
+    }
+  },
+  {
+    "name": "tun_status_request",
+    "kind": "request",
+    "method": "tun.status",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-tun-status",
+      "method": "tun.status"
+    }
+  },
+  {
+    "name": "tun_status_response",
+    "kind": "response",
+    "method": "tun.status",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-tun-status",
+      "result": {
+        "state": "running",
+        "pid": 5432,
+        "started_at": "2026-07-30T02:10:01Z",
+        "config_path": "C:\\Users\\Example\\.hypomux\\singbox-config.json"
+      }
+    }
+  },
+  {
+    "name": "tun_deactivate_request",
+    "kind": "request",
+    "method": "tun.deactivate",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-tun-deactivate",
+      "method": "tun.deactivate"
+    }
+  },
+  {
+    "name": "tun_deactivate_response",
+    "kind": "response",
+    "method": "tun.deactivate",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-tun-deactivate",
+      "result": {
+        "accepted": true,
+        "tun": {
+          "state": "stopped"
         }
       }
     }
@@ -691,11 +778,39 @@
     }
   },
   {
-    "name": "host_exiting_event",
+    "name": "tun_state_changed_event",
     "kind": "event",
     "message": {
       "protocol": 1,
       "sequence": 3,
+      "event": "tun.state_changed",
+      "data": {
+        "state": "failed",
+        "exited_at": "2026-07-30T02:10:06Z",
+        "exit_code": 1,
+        "last_error": "sing-box exited unexpectedly (code=1)"
+      }
+    }
+  },
+  {
+    "name": "log_record_event",
+    "kind": "event",
+    "message": {
+      "protocol": 1,
+      "sequence": 4,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] FATAL startup failed"
+      }
+    }
+  },
+  {
+    "name": "host_exiting_event",
+    "kind": "event",
+    "message": {
+      "protocol": 1,
+      "sequence": 5,
       "event": "host.exiting",
       "data": {
         "reason": "requested"

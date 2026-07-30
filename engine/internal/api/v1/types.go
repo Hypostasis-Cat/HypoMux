@@ -14,6 +14,7 @@ import (
 	"github.com/Hypostasis-Cat/HypoMux/engine/internal/protocol"
 	"github.com/Hypostasis-Cat/HypoMux/engine/internal/proxy"
 	engineRuntime "github.com/Hypostasis-Cat/HypoMux/engine/internal/runtime"
+	"github.com/Hypostasis-Cat/HypoMux/engine/internal/tun"
 )
 
 const (
@@ -22,6 +23,9 @@ const (
 	MethodEngineStart     = "engine.start"
 	MethodEngineStop      = "engine.stop"
 	MethodEngineTelemetry = "engine.telemetry"
+	MethodTunActivate     = "tun.activate"
+	MethodTunStatus       = "tun.status"
+	MethodTunDeactivate   = "tun.deactivate"
 	MethodDNSResolve      = "dns.resolve"
 	MethodDNSStatus       = "dns.status"
 	MethodHealthCheck     = "health.check"
@@ -30,6 +34,8 @@ const (
 
 	EventEngineStateChanged  = "engine.state_changed"
 	EventDNSFallbackRequired = "dns.fallback_required"
+	EventTunStateChanged     = "tun.state_changed"
+	EventLogRecord           = "log.record"
 	EventHostExiting         = "host.exiting"
 )
 
@@ -39,6 +45,9 @@ var capabilities = []string{
 	MethodEngineStart,
 	MethodEngineStop,
 	MethodEngineTelemetry,
+	MethodTunActivate,
+	MethodTunStatus,
+	MethodTunDeactivate,
 	MethodDNSResolve,
 	MethodDNSStatus,
 	MethodHealthCheck,
@@ -98,6 +107,7 @@ func NewHelloResult(
 				"udp_associate",
 				"ipv6_egress",
 				"adaptive_health",
+				"managed_tun_lifecycle",
 			},
 		},
 		OS:        runtime.GOOS,
@@ -118,6 +128,7 @@ type StatusResult struct {
 	Engine       engineRuntime.Snapshot `json:"engine"`
 	HostUptimeMS int64                  `json:"host_uptime_ms"`
 	Proxy        *ProxyStatus           `json:"proxy,omitempty"`
+	Tun          *tun.Status            `json:"tun,omitempty"`
 }
 
 type ProxyStatus struct {
@@ -197,6 +208,30 @@ type EngineStopResult struct {
 
 type EngineTelemetryParams struct {
 	IncludeConnections bool `json:"include_connections"`
+}
+
+type TunActivateParams struct {
+	Executable       string `json:"executable"`
+	ConfigPath       string `json:"config_path"`
+	StartupTimeoutMS int    `json:"startup_timeout_ms"`
+}
+
+func (p TunActivateParams) Config() tun.Config {
+	return tun.Config{
+		Executable:     p.Executable,
+		ConfigPath:     p.ConfigPath,
+		StartupTimeout: time.Duration(p.StartupTimeoutMS) * time.Millisecond,
+	}
+}
+
+type TunLifecycleResult struct {
+	Accepted bool       `json:"accepted"`
+	Tun      tun.Status `json:"tun"`
+}
+
+type LogRecordData struct {
+	Component string `json:"component"`
+	Message   string `json:"message"`
 }
 
 type DNSResolveParams struct {

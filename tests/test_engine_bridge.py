@@ -40,6 +40,7 @@ for line in sys.stdin:
                         "tcp_connect",
                         "udp_associate",
                         "ipv6_egress",
+                        "managed_tun_lifecycle",
                     ],
                 },
             },
@@ -63,6 +64,15 @@ for line in sys.stdin:
         send({
             "protocol": 1,
             "sequence": 2,
+            "event": "tun.state_changed",
+            "data": {
+                "state": "failed",
+                "last_error": "test sidecar exit",
+            },
+        })
+        send({
+            "protocol": 1,
+            "sequence": 3,
             "event": "host.exiting",
             "data": {"reason": "requested"},
         })
@@ -85,6 +95,7 @@ def test_qt_bridge_connects_without_blocking_and_stops_the_host():
     errors: list[str] = []
     disconnected: list[str] = []
     dns_fallbacks: list[dict] = []
+    tun_states: list[dict] = []
     bridge = EngineBridge(
         [
             sys.executable,
@@ -97,6 +108,7 @@ def test_qt_bridge_connects_without_blocking_and_stops_the_host():
     bridge.engine_error.connect(errors.append)
     bridge.disconnected.connect(disconnected.append)
     bridge.dns_fallback_required.connect(dns_fallbacks.append)
+    bridge.tun_state_changed.connect(tun_states.append)
 
     started = time.monotonic()
     bridge.start()
@@ -116,6 +128,12 @@ def test_qt_bridge_connects_without_blocking_and_stops_the_host():
             "adapter": "Ethernet",
             "policy": "alidns",
             "reason": "test failure",
+        }
+    ]
+    assert tun_states == [
+        {
+            "state": "failed",
+            "last_error": "test sidecar exit",
         }
     ]
     assert not bridge.is_running()

@@ -43,6 +43,24 @@
       "cancellation": "not_applicable"
     },
     {
+      "name": "tun.activate",
+      "idempotency": "state_guarded",
+      "privilege": "administrator",
+      "cancellation": "caller_deadline_and_host_context"
+    },
+    {
+      "name": "tun.status",
+      "idempotency": "read_only",
+      "privilege": "none",
+      "cancellation": "not_applicable"
+    },
+    {
+      "name": "tun.deactivate",
+      "idempotency": "safe_retry",
+      "privilege": "administrator",
+      "cancellation": "caller_deadline_and_host_context"
+    },
+    {
       "name": "dns.resolve",
       "idempotency": "read_only_probe",
       "privilege": "none",
@@ -85,6 +103,16 @@
       "coalescible": false
     },
     {
+      "name": "tun.state_changed",
+      "delivery": "lossless_ordered",
+      "coalescible": false
+    },
+    {
+      "name": "log.record",
+      "delivery": "best_effort_ordered",
+      "coalescible": false
+    },
+    {
       "name": "host.exiting",
       "delivery": "lossless_ordered",
       "coalescible": false
@@ -100,6 +128,7 @@
     "unsupported_mode",
     "start_failed",
     "stop_failed",
-    "dns_failed"
+    "dns_failed",
+    "tun_failed"
   ]
 }

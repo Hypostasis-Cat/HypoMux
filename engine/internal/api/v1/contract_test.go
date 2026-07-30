@@ -13,6 +13,7 @@ import (
 	"github.com/Hypostasis-Cat/HypoMux/engine/internal/protocol"
 	"github.com/Hypostasis-Cat/HypoMux/engine/internal/proxy"
 	engineRuntime "github.com/Hypostasis-Cat/HypoMux/engine/internal/runtime"
+	"github.com/Hypostasis-Cat/HypoMux/engine/internal/tun"
 )
 
 type contractManifest struct {
@@ -85,6 +86,8 @@ func TestManifestMatchesCompiledProtocol(t *testing.T) {
 	wantEvents := []string{
 		EventEngineStateChanged,
 		EventDNSFallbackRequired,
+		EventTunStateChanged,
+		EventLogRecord,
 		EventHostExiting,
 	}
 	events := make([]string, 0, len(manifest.Events))
@@ -180,6 +183,8 @@ func TestCanonicalFixturesDecodeIntoTransportDTOs(t *testing.T) {
 	for _, event := range []string{
 		EventEngineStateChanged,
 		EventDNSFallbackRequired,
+		EventTunStateChanged,
+		EventLogRecord,
 		EventHostExiting,
 	} {
 		if !events[event] {
@@ -196,6 +201,8 @@ func decodeRequestParams(t *testing.T, request protocol.Request) {
 		target = &EngineStartParams{}
 	case MethodEngineTelemetry:
 		target = &EngineTelemetryParams{}
+	case MethodTunActivate:
+		target = &TunActivateParams{}
 	case MethodDNSResolve:
 		target = &DNSResolveParams{}
 	case MethodDiagnosticRun:
@@ -203,6 +210,8 @@ func decodeRequestParams(t *testing.T, request protocol.Request) {
 	case MethodEngineHello,
 		MethodEngineStatus,
 		MethodEngineStop,
+		MethodTunStatus,
+		MethodTunDeactivate,
 		MethodDNSStatus,
 		MethodHealthCheck,
 		MethodHostShutdown:
@@ -232,6 +241,10 @@ func decodeResult(t *testing.T, method string, payload json.RawMessage) {
 		target = &EngineStopResult{}
 	case MethodEngineTelemetry:
 		target = &proxy.TelemetrySnapshot{}
+	case MethodTunActivate, MethodTunDeactivate:
+		target = &TunLifecycleResult{}
+	case MethodTunStatus:
+		target = &tun.Status{}
 	case MethodDNSResolve:
 		target = &dns.Result{}
 	case MethodDNSStatus:
@@ -258,6 +271,10 @@ func decodeEventData(t *testing.T, event string, payload json.RawMessage) {
 		target = &engineRuntime.Snapshot{}
 	case EventDNSFallbackRequired:
 		target = &DNSFallbackRequiredData{}
+	case EventTunStateChanged:
+		target = &tun.Status{}
+	case EventLogRecord:
+		target = &LogRecordData{}
 	case EventHostExiting:
 		target = &HostExitingData{}
 	default:

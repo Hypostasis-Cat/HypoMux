@@ -333,11 +333,45 @@ Exit criteria:
 The ownership and learning rules are documented in
 [adaptive health scheduling migration](../docs/architecture/adapter-health-scheduling-migration.md).
 
+## Phase 11: managed sing-box/TUN/WFP lifecycle
+
+Goal: move the privileged sing-box process and its TUN, WFP, route, and
+adapter lifetime into the persistent Go host while preserving Qt preflight,
+DNS planning, configuration generation, and connectivity policy.
+
+Deliverables:
+
+- Two-phase `engine.start(tun_tcp_pool)` then `tun.activate` transaction using
+  the pool's actual collision-safe endpoints.
+- `tun.activate`, `tun.status`, and `tun.deactivate` protocol methods plus
+  structured sidecar state and log events.
+- Configuration validation before any network mutation.
+- Windows kill-on-close Job containment for the exact sing-box process tree.
+- IPv4/IPv6 default-route and Wintun-device cleanup scoped only to
+  `HypoMux-Tun`.
+- Activation-failure and unexpected-exit rollback that stops the sole Go
+  outbound pool inside the host.
+- Qt `GoTunManager` compatibility adapter and an all-or-nothing
+  `managed_tun_lifecycle` feature gate.
+
+Exit criteria:
+
+- Tests prove validation-before-cleanup, stable activation, early exit,
+  unexpected exit, concurrent stop, exact cleanup scope, stop order, and
+  activation rollback.
+- The managed path never kills unrelated sing-box processes by image name.
+- Host shutdown and lost stdin close the Job, clean TUN resources, and stop
+  the pool in bounded order.
+- Protocol fixtures, Qt DTO/lifecycle tests, Go test/vet/build, and Python
+  regression gates pass.
+- Without the development flag, the Python `TunManager` path is unchanged.
+
+The process, transaction, and cleanup rules are documented in
+[managed TUN lifecycle migration](../docs/architecture/managed-tun-lifecycle-migration.md).
+
 ## Later migration slices
 
-1. Move sing-box/WFP lifecycle ownership after development orchestration
-   shadow testing.
-2. Make the Go engine the default for all network behavior after shadow-mode
+1. Make the Go engine the default for all network behavior after shadow-mode
    and rollback testing.
 
 Each slice keeps a Python fallback until its unit, integration, and Windows
