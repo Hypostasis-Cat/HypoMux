@@ -4,6 +4,7 @@
     <TargetFramework>net10.0-windows10.0.22000.0</TargetFramework>
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <RootNamespace>HypoMux.App</RootNamespace>
     <AssemblyName>HypoMux</AssemblyName>
     <ApplicationIcon>..\..\support\icon.ico</ApplicationIcon>
