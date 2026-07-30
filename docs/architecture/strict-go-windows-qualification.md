@@ -1,6 +1,7 @@
 # Strict-Go Windows qualification
 
-Status: Phase 13 gate implemented; disruptive scenarios require an operator
+Status: Phase 14 evidence session implemented; disruptive scenarios require an
+operator
 
 ## Purpose
 
@@ -52,6 +53,50 @@ The command exits nonzero when a required check fails. Its report contains:
 
 The report intentionally does not collect adapter addresses, user
 configuration, routing rules, domains, or traffic payloads.
+
+## Unified physical qualification session
+
+Do not qualify an older production install. The session is bound to the exact
+engine candidate by SHA-256, engine version, and commit. By default, preparing
+a session requires both elevation and a valid Authenticode signature:
+
+```powershell
+python -m engine_client.qualification_session prepare `
+  --engine "C:\Program Files\HypoMux\bin\hypomux-engine.exe" `
+  --output-dir ".\qualification\phase14"
+```
+
+For a local unsigned build, `--development` may be used to rehearse the
+matrix. A development session is permanently ineligible to authorize Python
+removal, even if every row is marked passed.
+
+After completing and closing HypoMux for one row, capture the clean postflight
+and record its evidence in one command:
+
+```powershell
+python -m engine_client.qualification_session capture `
+  --session ".\qualification\phase14\session.json" `
+  --scenario proxy `
+  --result passed `
+  --evidence "SOCKS5 and HTTP CONNECT succeeded on Ethernet and Wi-Fi" `
+  --evidence "application log: C:\Users\me\.hypomux\logs\app.log"
+```
+
+Valid scenario IDs are `package`, `proxy`, `dns`, `scheduling`, `ipv6`,
+`tun_tcp`, `tun_udp`, `wfp`, `lifecycle`, `crash`, `adapter_churn`, `power`,
+`upgrade`, and `uninstall`. A passed row requires at least one evidence note
+and a clean read-only postflight from the exact candidate binary.
+
+The final machine-readable decision is:
+
+```powershell
+python -m engine_client.qualification_session summary `
+  --session ".\qualification\phase14\session.json"
+```
+
+It exits successfully only when the formal signed/elevated preflight and all
+14 physical rows pass. `verdict.python_removal_ready=true` is the sole Phase
+15 deletion gate.
 
 ## Physical scenario matrix
 
@@ -113,4 +158,6 @@ and all attached postflight reports contain:
 
 The remaining DNS preflight facade intentionally continues to reuse the
 Python compatibility worker until this gate passes. Rewriting that algorithm
-during qualification would invalidate the comparison baseline.
+during qualification would invalidate the comparison baseline. Phase 15 may
+start only when the Phase 14 session reports
+`verdict.python_removal_ready=true`.

@@ -217,6 +217,6 @@ The packaged Go host is selected by default without changing protocol v1, so
 the existing canonical fixtures remain the WPF client's source of truth.
 
 WPF implementation can proceed with the F2 read-only shell while the backend
-runs its unified strict-Go physical Windows gate. It must not become the
-production control path until the corresponding Go capability has passed that
-gate.
+runs its Phase 14 unified strict-Go physical Windows evidence session. It must
+not become the production control path until the corresponding Go capability
+has passed that machine-readable gate.

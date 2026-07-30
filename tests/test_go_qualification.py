@@ -83,6 +83,14 @@ def _clean_snapshot() -> dict:
 
 
 class QualificationContractTests(unittest.TestCase):
+    def setUp(self):
+        identity = mock.patch(
+            "engine_client.qualification.inspect_executable_identity",
+            return_value={"size": 1024, "sha256": "a" * 64},
+        )
+        identity.start()
+        self.addCleanup(identity.stop)
+
     def test_complete_contract_supports_both_modes(self):
         hello = _complete_hello()
         self.assertTrue(supports_mode_contract(hello, PROXY_MODE))

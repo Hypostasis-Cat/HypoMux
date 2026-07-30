@@ -180,6 +180,22 @@ jobs:
             -ldflags "-X main.version=${{ steps.version.outputs.DISPLAY_VERSION }} -X main.commit=${{ github.sha }}" `
             -o ..\hypomux-engine.exe .\cmd\hypomux-engine
 
+      - name: Qualify staged Go engine
+        shell: pwsh
+        run: |
+          python -m engine_client.qualification `
+            --engine ".\hypomux-engine.exe" `
+            --output "$env:RUNNER_TEMP\strict-go-installer-candidate.json"
+
+      - name: Upload staged Go qualification report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: Strict-Go-Installer-Candidate-${{ steps.version.outputs.VERSION }}
+          path: ${{ runner.temp }}/strict-go-installer-candidate.json
+          if-no-files-found: warn
+          retention-days: 14
+
       # 从 main 手动测试生产签名，或从 v* tag 手动发布正式版本。
       # 两种情况均使用 SignPath 生产策略，并须在 UI 人工批准每个请求。
       - name: Upload HypoMux executable for SignPath production signing

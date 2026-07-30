@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime, timezone
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -60,6 +61,20 @@ $signature = Get-AuthenticodeSignature -LiteralPath $env:HYPOMUX_QUALIFICATION_E
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def inspect_executable_identity(executable: str) -> dict[str, Any]:
+    """Return a stable identity used to bind reports to one exact candidate."""
+
+    path = Path(executable)
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return {
+        "size": path.stat().st_size,
+        "sha256": digest.hexdigest(),
+    }
 
 
 def _powershell_json(
@@ -218,6 +233,19 @@ def run_read_only_qualification(
         "snapshots": {},
     }
     checks = report["checks"]
+
+    try:
+        identity = inspect_executable_identity(executable)
+    except Exception as exc:
+        identity = {"error": f"{type(exc).__name__}: {exc}"}
+    report["engine"].update(identity)
+    _add_check(
+        checks,
+        "engine_executable_identified",
+        isinstance(identity.get("sha256"), str)
+        and len(identity["sha256"]) == 64,
+        identity,
+    )
 
     try:
         before = snapshotter()
