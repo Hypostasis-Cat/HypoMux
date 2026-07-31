@@ -1,3 +1,4 @@
+# -*- coding: UTF-8 -*-
 Unicode true
 
 ####
@@ -54,6 +55,16 @@ ManifestDPIAware true
 
 !include "MUI.nsh"
 
+!if "${WAILS_INSTALL_SCOPE}" == "user"
+    !define MUI_LANGDLL_REGISTRY_ROOT HKCU
+!else
+    !define MUI_LANGDLL_REGISTRY_ROOT HKLM
+!endif
+!define MUI_LANGDLL_REGISTRY_KEY "${UNINST_KEY}"
+!define MUI_LANGDLL_REGISTRY_VALUENAME "InstallerLanguage"
+!define MUI_LANGDLL_WINDOWTITLE "选择安装语言 / Select Setup Language"
+!define MUI_LANGDLL_INFO "请选择安装程序使用的语言。 / Please select the setup language."
+
 !define MUI_ICON "..\icon.ico"
 !define MUI_UNICON "..\icon.ico"
 # !define MUI_WELCOMEFINISHPAGE_BITMAP "resources\leftimage.bmp" #Include this to add a bitmap on the left side of the Welcome Page. Must be a size of 164x314
@@ -68,7 +79,32 @@ ManifestDPIAware true
 
 !insertmacro MUI_UNPAGE_INSTFILES # Uninstalling page
 
-!insertmacro MUI_LANGUAGE "English" # Set the Language of the installer
+!insertmacro MUI_LANGUAGE "English"
+!insertmacro MUI_LANGUAGE "SimpChinese"
+!insertmacro MUI_RESERVEFILE_LANGDLL
+
+LangString WailsWin10Required ${LANG_ENGLISH} "This product is only supported on Windows 10 (Server 2016) and later."
+LangString WailsWin10Required ${LANG_SIMPCHINESE} "本产品仅支持 Windows 10（Server 2016）及更高版本。"
+LangString WailsArchitectureNotSupported ${LANG_ENGLISH} "This product cannot be installed on the current Windows architecture. Supported architectures: ${ARCH}."
+LangString WailsArchitectureNotSupported ${LANG_SIMPCHINESE} "本产品无法安装到当前 Windows 架构。支持的架构：${ARCH}。"
+LangString WailsWebViewInstall ${LANG_ENGLISH} "Installing: Microsoft Edge WebView2 Runtime"
+LangString WailsWebViewInstall ${LANG_SIMPCHINESE} "正在安装：Microsoft Edge WebView2 运行时"
+LangString CoreServiceInstalling ${LANG_ENGLISH} "Installing and starting HypoMux Core Service..."
+LangString CoreServiceInstalling ${LANG_SIMPCHINESE} "正在安装并启动 HypoMux Core 服务……"
+LangString CoreServiceInstalled ${LANG_ENGLISH} "HypoMux Core Service installed and started."
+LangString CoreServiceInstalled ${LANG_SIMPCHINESE} "HypoMux Core 服务已安装并启动。"
+LangString CoreServiceInstallFailed ${LANG_ENGLISH} "Failed to install HypoMux Core Service. Exit code:"
+LangString CoreServiceInstallFailed ${LANG_SIMPCHINESE} "HypoMux Core 服务安装失败。退出代码："
+LangString CoreServiceRemoving ${LANG_ENGLISH} "Stopping and removing HypoMux Core Service..."
+LangString CoreServiceRemoving ${LANG_SIMPCHINESE} "正在停止并移除 HypoMux Core 服务……"
+LangString CoreServiceRemoved ${LANG_ENGLISH} "HypoMux Core Service removed."
+LangString CoreServiceRemoved ${LANG_SIMPCHINESE} "HypoMux Core 服务已移除。"
+LangString CoreServiceRemoveFailed ${LANG_ENGLISH} "Failed to remove HypoMux Core Service. Exit code:"
+LangString CoreServiceRemoveFailed ${LANG_SIMPCHINESE} "HypoMux Core 服务移除失败。退出代码："
+
+!define WAILS_WIN10_REQUIRED "$(WailsWin10Required)"
+!define WAILS_ARCHITECTURE_NOT_SUPPORTED "$(WailsArchitectureNotSupported)"
+!define WAILS_INSTALL_WEBVIEW_DETAILPRINT "$(WailsWebViewInstall)"
 
 ## The following two statements can be used to sign the installer and the uninstaller. The path to the binaries are provided in %1
 #!uninstfinalize 'signtool --file "%1"'
@@ -84,7 +120,12 @@ OutFile "..\..\..\bin\${INFO_PROJECTNAME}-${ARCH}-installer.exe" # Name of the i
 ShowInstDetails show # This will always show the installation details.
 
 Function .onInit
+   !insertmacro MUI_LANGDLL_DISPLAY
    !insertmacro wails.checkArchitecture
+FunctionEnd
+
+Function un.onInit
+   !insertmacro MUI_UNGETLANGUAGE
 FunctionEnd
 
 Section
@@ -123,11 +164,15 @@ Section
     ; Machine installation elevates once and installs the isolated privileged
     ; Core. The Wails/WebView2 executable remains asInvoker.
     !if "${WAILS_INSTALL_SCOPE}" != "user"
-        nsExec::ExecToLog '"$INSTDIR\bin\hypomux-engine.exe" install-service'
+        DetailPrint "$(CoreServiceInstalling)"
+        nsExec::ExecToStack '"$INSTDIR\bin\hypomux-engine.exe" install-service'
         Pop $0
+        Pop $1
         ${If} $0 != 0
-            Abort "Failed to install HypoMux Core Service (exit code $0)."
+            DetailPrint "$1"
+            Abort "$(CoreServiceInstallFailed) $0"
         ${EndIf}
+        DetailPrint "$(CoreServiceInstalled)"
     !endif
 
     CreateShortcut "$SMPROGRAMS\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}"
@@ -148,11 +193,15 @@ Section "uninstall"
     Pop $0
     !if "${WAILS_INSTALL_SCOPE}" != "user"
         IfFileExists "$INSTDIR\bin\hypomux-engine.exe" 0 serviceRemoved
-            nsExec::ExecToLog '"$INSTDIR\bin\hypomux-engine.exe" remove-service'
+            DetailPrint "$(CoreServiceRemoving)"
+            nsExec::ExecToStack '"$INSTDIR\bin\hypomux-engine.exe" remove-service'
             Pop $0
+            Pop $1
             ${If} $0 != 0
-                Abort "Failed to remove HypoMux Core Service (exit code $0)."
+                DetailPrint "$1"
+                Abort "$(CoreServiceRemoveFailed) $0"
             ${EndIf}
+            DetailPrint "$(CoreServiceRemoved)"
         serviceRemoved:
     !endif
     IfFileExists "$INSTDIR\bin\hypomux-engine.exe" 0 +2
