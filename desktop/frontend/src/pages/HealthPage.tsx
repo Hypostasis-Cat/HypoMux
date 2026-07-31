@@ -33,8 +33,9 @@ import {
   withServiceTimeout,
 } from "../platform/services";
 import { useI18n } from "../i18n/i18n";
+import { isDesktopRuntime } from "../platform/runtime";
 
-const isBrowserPreview = () => import.meta.env.DEV && !("__WAILS__" in window);
+const isBrowserPreview = () => import.meta.env.DEV && !isDesktopRuntime();
 
 const emptySnapshot = (): DiagnosticSnapshot => ({
   state: "idle",

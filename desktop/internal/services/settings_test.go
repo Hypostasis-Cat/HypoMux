@@ -2,6 +2,13 @@ package services
 
 import "testing"
 
+func TestFreshInstallDefaultsExitOnClose(t *testing.T) {
+	settings := DefaultSettings()
+	if settings.CloseToTray {
+		t.Fatal("fresh installs must exit directly when the main window closes")
+	}
+}
+
 func TestRoutingServicePersistsCanonicalRules(t *testing.T) {
 	t.Setenv("HYPOMUX_DATA_DIR", t.TempDir())
 	settings := NewSettingsService()

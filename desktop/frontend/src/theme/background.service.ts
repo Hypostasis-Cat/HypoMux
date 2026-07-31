@@ -1,5 +1,6 @@
 import type { AppearancePersistence, AppearanceSettings } from "./appearance.types";
 import { appServices } from "../platform/services";
+import { isDesktopRuntime } from "../platform/runtime";
 
 const STORAGE_KEY = "hypomux.appearance.v1";
 
@@ -34,7 +35,7 @@ const saveBrowserPreview = (settings: AppearanceSettings) => {
 export const appearancePersistence: AppearancePersistence = {
   async load() {
     const legacy = loadLegacyBrowserAppearance();
-    if (!("__WAILS__" in window)) return legacy;
+    if (!isDesktopRuntime()) return legacy;
     const payload = await appServices.appearance.load();
     if (payload) {
       removeLegacyBrowserAppearance();
@@ -51,7 +52,7 @@ export const appearancePersistence: AppearancePersistence = {
     return null;
   },
   async save(settings) {
-    if (!("__WAILS__" in window)) {
+    if (!isDesktopRuntime()) {
       saveBrowserPreview(settings);
       return;
     }

@@ -47,6 +47,7 @@ import {
 import { appServices, type RoutingRule, type RoutingSnapshot } from "../platform/services";
 import { GlassSurface } from "../components/material/GlassSurface";
 import { useI18n } from "../i18n/i18n";
+import { isDesktopRuntime } from "../platform/runtime";
 
 type MatchType = "process" | "domain" | "ip";
 type DraftRule = RoutingRule & {
@@ -62,7 +63,7 @@ const makeDrafts = (rules: RoutingRule[]): DraftRule[] =>
   rules.map((rule) => ({ ...rule, id: newID() }));
 
 const browserRoutingFixture = (): RoutingSnapshot | null => {
-  if (!import.meta.env.DEV || "__WAILS__" in window) return null;
+  if (!import.meta.env.DEV || isDesktopRuntime()) return null;
   const count = Math.max(0, Math.min(500, Number(new URLSearchParams(window.location.search).get("rules") ?? 60)));
   const types: MatchType[] = ["process", "domain", "ip"];
   return {

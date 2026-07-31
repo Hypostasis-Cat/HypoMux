@@ -131,3 +131,72 @@ func TestApplicationIdentityAndSingleInstanceAreStable(t *testing.T) {
 		t.Fatal("Windows manifest does not use the stable application identity")
 	}
 }
+
+func TestFrontendUsesWailsV3RuntimeDetection(t *testing.T) {
+	runtimeData, err := os.ReadFile("frontend/src/platform/runtime.ts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(runtimeData), `System.IsDesktop()`) {
+		t.Fatal("frontend runtime detection does not use the Wails v3 API")
+	}
+
+	paths := []string{
+		"frontend/src/theme/background.service.ts",
+		"frontend/src/state/useEngineState.ts",
+		"frontend/src/pages/HealthPage.tsx",
+		"frontend/src/pages/RoutingPage.tsx",
+	}
+	for _, path := range paths {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(data), "__WAILS__") {
+			t.Fatalf("%s still uses the obsolete Wails v2 runtime marker", path)
+		}
+	}
+
+	backgroundData, err := os.ReadFile("frontend/src/theme/background.service.ts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(backgroundData), "isDesktopRuntime()") < 2 {
+		t.Fatal("appearance persistence is not guarded by the Wails v3 desktop check")
+	}
+}
+
+func TestFrontendFreshInstallAppearanceDefaults(t *testing.T) {
+	presetData, err := os.ReadFile("frontend/src/theme/appearance.presets.ts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	preset := string(presetData)
+	for _, required := range []string{
+		`mode: "system"`,
+		`panelOpacity: 50`,
+		`panelBlur: 20`,
+	} {
+		if !strings.Contains(preset, required) {
+			t.Fatalf("appearance defaults are missing %q", required)
+		}
+	}
+
+	tokenData, err := os.ReadFile("frontend/src/theme/material.tokens.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tokens := string(tokenData)
+	if !strings.Contains(tokens, `--hm-panel-opacity: 0.5`) ||
+		!strings.Contains(tokens, `--hm-panel-blur: 20px`) {
+		t.Fatal("pre-hydration material tokens do not match the appearance defaults")
+	}
+
+	settingsPageData, err := os.ReadFile("frontend/src/pages/SettingsPage.tsx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(settingsPageData), `close_to_tray: false`) {
+		t.Fatal("settings page fallback does not exit directly on close")
+	}
+}

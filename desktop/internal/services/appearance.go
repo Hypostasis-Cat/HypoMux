@@ -16,7 +16,10 @@ import (
 	"sync"
 )
 
-const maxAppearancePayload = 20 << 20
+const (
+	maxBackgroundBytes   = 20 << 20
+	maxAppearancePayload = 28 << 20
+)
 
 type appearanceDocument struct {
 	Version          int            `json:"version"`
@@ -156,8 +159,8 @@ func decodeBackgroundDataURL(value string) ([]byte, string, string, error) {
 	if err != nil {
 		return nil, "", "", fmt.Errorf("背景图片编码无效：%w", err)
 	}
-	if len(content) == 0 || len(content) > maxAppearancePayload {
-		return nil, "", "", fmt.Errorf("背景图片为空或超过 %d MiB", maxAppearancePayload>>20)
+	if len(content) == 0 || len(content) > maxBackgroundBytes {
+		return nil, "", "", fmt.Errorf("背景图片为空或超过 %d MiB", maxBackgroundBytes>>20)
 	}
 	mimeType, extension, valid := detectBackgroundType(content)
 	if !valid || !strings.EqualFold(strings.TrimSuffix(strings.TrimPrefix(header, "data:"), ";base64"), mimeType) {

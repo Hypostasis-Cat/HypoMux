@@ -1,6 +1,6 @@
 :root {
-  --hm-panel-opacity: 0.68;
-  --hm-panel-blur: 22px;
+  --hm-panel-opacity: 0.5;
+  --hm-panel-blur: 20px;
   --hm-panel-saturation: 118%;
   --hm-border-brightness: 0.52;
   --hm-shadow-strength: 0.24;

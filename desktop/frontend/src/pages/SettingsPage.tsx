@@ -48,7 +48,7 @@ const emptySettings: CompleteAppSettings = {
   force_tun_connectivity_bypass: false,
   blocked_domain_bypass: false,
   blocked_domain_expiry: true,
-  close_to_tray: true,
+  close_to_tray: false,
   autostart: false,
   dns_server: "223.5.5.5",
   dns_policy: "auto",

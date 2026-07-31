@@ -8,6 +8,7 @@ import {
   withServiceTimeout,
 } from "../platform/services";
 import { desktopPlatform } from "../platform/desktop";
+import { isDesktopRuntime } from "../platform/runtime";
 
 export type EnginePhase = "stopped" | "starting" | "running" | "degraded" | "stopping" | "failed";
 export type EngineMode = "proxy" | "tun";
@@ -68,7 +69,7 @@ function browserFixtureCount() {
 
 const isBrowserPreview = () => {
   const explicitVisualQA = new URLSearchParams(window.location.search).get("fixture") === "visual-qa";
-  return !("__WAILS__" in window) && (import.meta.env.DEV || explicitVisualQA);
+  return !isDesktopRuntime() && (import.meta.env.DEV || explicitVisualQA);
 };
 
 const previewTunPreflight = (selected: AdapterView[]): TunPreflightSnapshot => {

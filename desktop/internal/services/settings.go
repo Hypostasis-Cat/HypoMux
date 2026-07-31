@@ -53,7 +53,7 @@ func DefaultSettings() AppSettings {
 		HTTPPort:            10801,
 		StrictRoute:         true,
 		BlockedDomainExpiry: true,
-		CloseToTray:         true,
+		CloseToTray:         false,
 		DNSServer:           "223.5.5.5",
 		DNSPolicy:           "auto",
 		AdapterWeights:      map[string]int{},

@@ -36,6 +36,14 @@ func TestAppearancePersistsBackgroundOutsideJSONAndReloadsIt(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(settingsDirectory(), "appearance", "background.png")); err != nil {
 		t.Fatal(err)
 	}
+	restartedService := NewAppearanceService()
+	reloaded, err := restartedService.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(reloaded, dataURL) {
+		t.Fatalf("background did not survive a service restart: %s", reloaded)
+	}
 }
 
 func TestAppearanceRejectsMismatchedBackgroundType(t *testing.T) {
