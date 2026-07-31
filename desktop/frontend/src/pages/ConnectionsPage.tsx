@@ -5,7 +5,6 @@ import {
   Spinner,
   Switch,
   Toast,
-  Toaster,
   ToastBody,
   ToastTitle,
   useId,
@@ -21,6 +20,7 @@ import {
 } from "@fluentui/react-icons";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { GlassSurface } from "../components/material/GlassSurface";
+import { AppToaster } from "../components/AppToaster";
 import { useI18n } from "../i18n/i18n";
 import {
   appServices,
@@ -148,7 +148,7 @@ export function ConnectionsPage() {
 
   return (
     <main className="connections-page">
-      <Toaster toasterId={toasterId} position="top-end" />
+      <AppToaster toasterId={toasterId} position="top-end" />
       <header className="connections-heading">
         <div>
           <span className="section-kicker">{text("当前加速会话的实时网络流", "Live network flows in this acceleration session")}</span>

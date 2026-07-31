@@ -15,7 +15,6 @@ import {
   Tab,
   TabList,
   Toast,
-  Toaster,
   ToastBody,
   ToastTitle,
   useId,
@@ -30,6 +29,7 @@ import {
 } from "@fluentui/react-icons";
 import { useEffect, useRef, useState } from "react";
 import { GlassSurface } from "../components/material/GlassSurface";
+import { AppToaster } from "../components/AppToaster";
 import { desktopPlatform } from "../platform/desktop";
 import { appServices, type CompleteAppSettings, type ConfigMigrationStatus } from "../platform/services";
 import { accentColours } from "../theme/appearance.presets";
@@ -262,7 +262,7 @@ export function SettingsPage({ onOpenBlockedDomains }: { onOpenBlockedDomains: (
 
   return (
     <main className="settings-page">
-      <Toaster toasterId={toasterId} position="top-end" />
+      <AppToaster toasterId={toasterId} position="top-end" />
       <header className="page-heading">
         <div>
           <span className="section-kicker">HypoMux preferences</span>

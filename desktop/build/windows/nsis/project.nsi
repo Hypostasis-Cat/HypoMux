@@ -101,6 +101,14 @@ LangString CoreServiceRemoved ${LANG_ENGLISH} "HypoMux Core Service removed."
 LangString CoreServiceRemoved ${LANG_SIMPCHINESE} "HypoMux Core 服务已移除。"
 LangString CoreServiceRemoveFailed ${LANG_ENGLISH} "Failed to remove HypoMux Core Service. Exit code:"
 LangString CoreServiceRemoveFailed ${LANG_SIMPCHINESE} "HypoMux Core 服务移除失败。退出代码："
+LangString RunningAppClosing ${LANG_ENGLISH} "Closing the running HypoMux application..."
+LangString RunningAppClosing ${LANG_SIMPCHINESE} "正在关闭运行中的 HypoMux…"
+LangString RunningAppCloseFailed ${LANG_ENGLISH} "HypoMux is still running. Close it and click Retry to continue installation."
+LangString RunningAppCloseFailed ${LANG_SIMPCHINESE} "HypoMux 仍在运行。请关闭软件后点击“重试”继续安装。"
+LangString CoreServiceStopping ${LANG_ENGLISH} "Stopping HypoMux Core Service before updating files..."
+LangString CoreServiceStopping ${LANG_SIMPCHINESE} "正在停止 HypoMux Core 服务以更新文件…"
+LangString CoreServiceStopFailed ${LANG_ENGLISH} "Could not stop HypoMux Core Service. Setup cannot safely replace the application files."
+LangString CoreServiceStopFailed ${LANG_SIMPCHINESE} "无法停止 HypoMux Core 服务，安装程序不能安全替换应用文件。"
 
 !define WAILS_WIN10_REQUIRED "$(WailsWin10Required)"
 !define WAILS_ARCHITECTURE_NOT_SUPPORTED "$(WailsArchitectureNotSupported)"
@@ -128,6 +136,31 @@ Function un.onInit
    !insertmacro MUI_UNGETLANGUAGE
 FunctionEnd
 
+Function CloseRunningHypoMux
+closeRetry:
+    DetailPrint "$(RunningAppClosing)"
+    nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "Get-Process -Name ${INFO_PROJECTNAME} -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue; Wait-Process -Name ${INFO_PROJECTNAME} -Timeout 15 -ErrorAction SilentlyContinue; if (Get-Process -Name ${INFO_PROJECTNAME} -ErrorAction SilentlyContinue) { exit 1 }"'
+    Pop $0
+    Pop $1
+    ${If} $0 == 0
+        Return
+    ${EndIf}
+    DetailPrint "$1"
+    MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "$(RunningAppCloseFailed)" IDRETRY closeRetry
+    Abort "$(RunningAppCloseFailed)"
+FunctionEnd
+
+Function StopCoreServiceForUpgrade
+    DetailPrint "$(CoreServiceStopping)"
+    nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "if (Get-Service -Name ${HYPOMUX_CORE_SERVICE} -ErrorAction SilentlyContinue) { Stop-Service -Name ${HYPOMUX_CORE_SERVICE} -Force -ErrorAction Stop; (Get-Service -Name ${HYPOMUX_CORE_SERVICE}).WaitForStatus([System.ServiceProcess.ServiceControllerStatus]::Stopped, [TimeSpan]::FromSeconds(20)) }"'
+    Pop $0
+    Pop $1
+    ${If} $0 != 0
+        DetailPrint "$1"
+        Abort "$(CoreServiceStopFailed)"
+    ${EndIf}
+FunctionEnd
+
 Section
     !insertmacro wails.setShellContext
 
@@ -136,13 +169,10 @@ Section
     ; Close the previous UI and stop Core before replacing binaries. If a prior
     ; session ended abruptly, invoke both narrow recovery entry points while
     ; the old executables are still present.
-    nsExec::Exec '"$SYSDIR\taskkill.exe" /IM "${PRODUCT_EXECUTABLE}" /T /F'
-    Pop $0
+    Call CloseRunningHypoMux
     !if "${WAILS_INSTALL_SCOPE}" != "user"
-        nsExec::Exec '"$SYSDIR\sc.exe" stop "${HYPOMUX_CORE_SERVICE}"'
-        Pop $0
+        Call StopCoreServiceForUpgrade
     !endif
-    Sleep 1200
     IfFileExists "$INSTDIR\bin\hypomux-engine.exe" 0 +2
         nsExec::ExecToLog '"$INSTDIR\bin\hypomux-engine.exe" recover'
     IfFileExists "$INSTDIR\${PRODUCT_EXECUTABLE}" 0 +2

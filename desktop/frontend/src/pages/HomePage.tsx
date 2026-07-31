@@ -10,7 +10,6 @@ import {
   DialogTitle,
   Spinner,
   Toast,
-  Toaster,
   ToastBody,
   ToastFooter,
   ToastTitle,
@@ -32,6 +31,7 @@ import { RuntimeStatusBar } from "../components/home/RuntimeStatusBar";
 import type { AppPage } from "../components/shell/CompactNavigation";
 import type { TunPreflightSnapshot } from "../platform/services";
 import { useI18n } from "../i18n/i18n";
+import { AppToaster } from "../components/AppToaster";
 
 const formatBytes = (value: number) => {
   if (value >= 1024 ** 3) return `${(value / 1024 ** 3).toFixed(2)} GB`;
@@ -87,7 +87,7 @@ export function HomePage({ onNavigate }: { onNavigate?: (page: AppPage) => void 
 
   return (
     <main className="home-page">
-      <Toaster toasterId={toasterId} position="top-end" />
+      <AppToaster toasterId={toasterId} position="top-end" />
       <EngineHero
         phase={engine.phase}
         mode={engine.mode}

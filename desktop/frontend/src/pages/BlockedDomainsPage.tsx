@@ -9,7 +9,6 @@ import {
   DialogTitle,
   DialogTrigger,
   Toast,
-  Toaster,
   ToastTitle,
   useId,
   useToastController,
@@ -22,6 +21,7 @@ import {
 } from "@fluentui/react-icons";
 import { useCallback, useEffect, useState } from "react";
 import { GlassSurface } from "../components/material/GlassSurface";
+import { AppToaster } from "../components/AppToaster";
 import { appServices, type BlockedDomainSnapshot } from "../platform/services";
 import { useI18n } from "../i18n/i18n";
 
@@ -80,7 +80,7 @@ export function BlockedDomainsPage({ onBack }: { onBack: () => void }) {
 
   return (
     <main className="blocked-domains-page">
-      <Toaster toasterId={toasterId} position="top-end" />
+      <AppToaster toasterId={toasterId} position="top-end" />
       <header className="page-heading">
         <div>
           <span className="section-kicker">Per-adapter isolation</span>

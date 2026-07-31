@@ -9,7 +9,6 @@ import {
   ProgressBar,
   Spinner,
   Toast,
-  Toaster,
   ToastBody,
   ToastTitle,
   Tooltip,
@@ -25,6 +24,7 @@ import {
 } from "@fluentui/react-icons";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { GlassSurface } from "../components/material/GlassSurface";
+import { AppToaster } from "../components/AppToaster";
 import {
   appServices,
   type AdapterView,
@@ -291,7 +291,7 @@ export function HealthPage() {
 
   return (
     <main className="health-page">
-      <Toaster toasterId={toasterId} position="top-end" />
+      <AppToaster toasterId={toasterId} position="top-end" />
       <header className="health-heading">
         <div>
           <span className="section-kicker">{text("逐接口真实出口验证", "Per-interface exit verification")}</span>

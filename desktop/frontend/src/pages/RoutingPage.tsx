@@ -25,7 +25,6 @@ import {
   Tab,
   TabList,
   Toast,
-  Toaster,
   ToastBody,
   ToastTitle,
   Toolbar,
@@ -35,6 +34,7 @@ import {
   type TableColumnDefinition,
   type TableRowId,
 } from "@fluentui/react-components";
+import { AppToaster } from "../components/AppToaster";
 import {
   Add20Regular,
   ArrowDownload20Regular,
@@ -390,7 +390,7 @@ export function RoutingPage() {
 
   return (
     <main className="routing-page">
-      <Toaster toasterId={toasterId} position="top-end" />
+      <AppToaster toasterId={toasterId} position="top-end" />
       <header className="routing-page-heading">
         <div>
           <span className="section-kicker">{t("routing_title")}</span>

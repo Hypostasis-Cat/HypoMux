@@ -8,6 +8,26 @@ const ignoreOutsideWails = (error: unknown) => {
   }
 };
 
+const windowCloseAnimationMS = 180;
+let windowCloseRequest: Promise<void> | undefined;
+
+const closeWithAnimation = () => {
+  if (windowCloseRequest) return windowCloseRequest;
+  const root = document.documentElement;
+  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  root.classList.add("window-closing");
+  windowCloseRequest = new Promise<void>((resolve) => {
+    window.setTimeout(resolve, reduceMotion ? 0 : windowCloseAnimationMS);
+  })
+    .then(() => Window.Close())
+    .catch(ignoreOutsideWails)
+    .finally(() => {
+      root.classList.remove("window-closing");
+      windowCloseRequest = undefined;
+    });
+  return windowCloseRequest;
+};
+
 const callAppearance = async (method: string, value: string): Promise<NativeAppearanceResult> => {
   try {
     if (method === "SetWindowMaterial") {
@@ -28,7 +48,7 @@ const callAppearance = async (method: string, value: string): Promise<NativeAppe
 export const desktopPlatform = {
   minimise: () => Window.Minimise().catch(ignoreOutsideWails),
   toggleMaximise: () => Window.ToggleMaximise().catch(ignoreOutsideWails),
-  close: () => Window.Close().catch(ignoreOutsideWails),
+  close: closeWithAnimation,
   hideToTray: () => Window.Hide().catch(ignoreOutsideWails),
   showStartup: () =>
     (Call.ByName(

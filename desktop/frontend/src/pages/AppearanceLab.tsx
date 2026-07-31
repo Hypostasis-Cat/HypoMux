@@ -6,7 +6,6 @@ import {
   Tab,
   TabList,
   Toast,
-  Toaster,
   ToastTitle,
   useId,
   useToastController,
@@ -14,6 +13,7 @@ import {
 import { ArrowReset20Regular, Image20Regular } from "@fluentui/react-icons";
 import { useRef } from "react";
 import { AppearancePreview } from "../components/appearance/AppearancePreview";
+import { AppToaster } from "../components/AppToaster";
 import { appearancePresets, accentColours } from "../theme/appearance.presets";
 import { useAppearance } from "../theme/appearance.store";
 import { backgroundService } from "../theme/background.service";
@@ -63,7 +63,7 @@ export function AppearanceLab() {
 
   return (
     <main className="appearance-lab">
-      <Toaster toasterId={toasterId} position="top-end" />
+      <AppToaster toasterId={toasterId} position="top-end" />
       <aside className="appearance-controls glass-surface" data-tone="secondary">
         <div className="lab-heading">
           <div>

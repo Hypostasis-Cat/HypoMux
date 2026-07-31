@@ -10,7 +10,6 @@ import {
   Link,
   Spinner,
   Toast,
-  Toaster,
   ToastBody,
   ToastTitle,
   useId,
@@ -23,6 +22,7 @@ import {
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { GlassSurface } from "../components/material/GlassSurface";
+import { AppToaster } from "../components/AppToaster";
 import { desktopPlatform } from "../platform/desktop";
 import { appServices, type UpdateCheckResult } from "../platform/services";
 import { productInfo } from "../product";
@@ -124,7 +124,7 @@ export function AboutPage() {
 
   return (
     <main className="about-page">
-      <Toaster toasterId={toasterId} position="top-end" />
+      <AppToaster toasterId={toasterId} position="top-end" />
       <header className="page-heading">
         <div>
           <span className="section-kicker">Open-source multi-link accelerator</span>
