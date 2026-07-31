@@ -81,7 +81,7 @@ tasks:
         platforms: [windows]
       - cmd: mkdir -p "{{.ROOT_DIR}}/{{.BIN_DIR}}"
         platforms: [linux, darwin]
-      - go build -trimpath -buildvcs=false -ldflags="-w -s" -o "{{.ROOT_DIR}}/{{.BIN_DIR}}/hypomux-engine.exe" ./cmd/hypomux-engine
+      - go build -trimpath -buildvcs=false -ldflags="-w -s -X main.version={{.APP_VERSION}}" -o "{{.ROOT_DIR}}/{{.BIN_DIR}}/hypomux-engine.exe" ./cmd/hypomux-engine
       - cmd: powershell -NoProfile -Command "Copy-Item -LiteralPath '{{.ROOT_DIR}}\..\bin\sing-box.exe' -Destination '{{.ROOT_DIR}}\{{.BIN_DIR}}\sing-box.exe' -Force"
         platforms: [windows]
       - cmd: powershell -NoProfile -Command "Copy-Item -LiteralPath '{{.ROOT_DIR}}\..\bin\wintun.dll' -Destination '{{.ROOT_DIR}}\{{.BIN_DIR}}\wintun.dll' -Force"

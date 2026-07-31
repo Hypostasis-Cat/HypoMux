@@ -1054,55 +1054,173 @@ svg {
 }
 
 .routing-grid-surface {
+  position: relative;
   min-height: 0;
   padding: 0;
   overflow: auto;
+  isolation: isolate;
   scrollbar-color: color-mix(in srgb, var(--hm-text-tertiary) 34%, transparent) transparent;
   scrollbar-width: thin;
 }
 
-.routing-grid-surface [role="grid"] {
-  min-width: 760px;
+.routing-grid-surface::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+
+.routing-grid-surface::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--hm-text-tertiary) 38%, transparent);
+  background-clip: padding-box;
+}
+
+.routing-grid-surface::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+.routing-grid {
+  min-width: 830px;
+  color: var(--hm-text-secondary);
 }
 
 .routing-grid-surface [role="rowgroup"]:first-child {
   position: sticky;
-  z-index: 2;
+  z-index: 3;
   top: 0;
-  background: color-mix(in srgb, rgb(var(--hm-surface-rgb)) 94%, transparent);
-  backdrop-filter: blur(18px);
-  box-shadow: 0 1px var(--hm-outer-border);
+  border-bottom: 1px solid color-mix(in srgb, var(--hm-outer-border) 86%, transparent);
+  background: color-mix(in srgb, rgb(var(--hm-surface-rgb)) 96%, transparent);
+  backdrop-filter: blur(22px) saturate(118%);
+  box-shadow: 0 8px 20px rgba(var(--hm-shadow-colour), 0.06);
 }
 
-.routing-grid-surface [role="row"] {
-  min-height: 43px;
+.routing-grid-header {
+  min-height: 42px !important;
+  color: var(--hm-text-tertiary) !important;
+  background: transparent !important;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.015em;
+}
+
+.routing-grid-header > [role="columnheader"],
+.routing-row > [role="gridcell"] {
+  min-width: 0;
+  padding: 6px 14px !important;
+  background: transparent !important;
+}
+
+.routing-grid-header > [role="columnheader"]:first-child,
+.routing-row > [role="gridcell"]:first-child {
+  padding-right: 4px !important;
+  padding-left: 14px !important;
 }
 
 .routing-row {
-  transition: background var(--hm-motion-instant) ease;
+  position: relative;
+  min-height: 50px !important;
+  border-bottom: 1px solid color-mix(in srgb, var(--hm-outer-border) 68%, transparent);
+  background: transparent !important;
+  transition:
+    background var(--hm-motion-instant) ease,
+    box-shadow var(--hm-motion-instant) ease;
+}
+
+.routing-row:last-child {
+  border-bottom: 0;
+}
+
+.routing-row:hover:not(.is-selected, .has-error) {
+  background: color-mix(in srgb, var(--hm-row-hover) 68%, transparent) !important;
+}
+
+.routing-row.is-selected {
+  background: color-mix(in srgb, var(--hm-accent-soft) 58%, transparent) !important;
+  box-shadow: inset 3px 0 color-mix(in srgb, var(--hm-accent) 72%, transparent);
 }
 
 .routing-row.has-error {
-  background: color-mix(in srgb, var(--colorPaletteRedBackground1, #fdf3f4) 72%, transparent);
-  box-shadow: inset 3px 0 var(--colorPaletteRedBorder2, #d13438);
+  background: color-mix(in srgb, var(--colorPaletteRedBackground1, #fdf3f4) 42%, transparent) !important;
+  box-shadow: inset 3px 0 color-mix(in srgb, var(--colorPaletteRedBorder2, #d13438) 74%, transparent);
 }
 
 .routing-cell-input {
   width: 100%;
+  min-width: 0;
 }
 
 .routing-cell-dropdown {
-  width: min(100%, 260px);
-  min-width: 170px;
+  width: 100%;
+  min-width: 190px;
+  max-width: 280px;
 }
 
-.rule-error-text {
-  display: -webkit-box;
+.routing-cell-input,
+.routing-cell-dropdown {
+  min-height: 32px;
+  border: 1px solid transparent !important;
+  border-radius: 8px !important;
+  background: color-mix(in srgb, var(--hm-row-hover) 42%, transparent) !important;
+  box-shadow: none !important;
+  transition:
+    border-color var(--hm-motion-instant) ease,
+    background var(--hm-motion-instant) ease;
+}
+
+.routing-row:hover .routing-cell-input,
+.routing-row:hover .routing-cell-dropdown {
+  border-color: color-mix(in srgb, var(--hm-outer-border) 82%, transparent) !important;
+  background: color-mix(in srgb, rgb(var(--hm-surface-secondary-rgb)) 54%, transparent) !important;
+}
+
+.routing-cell-input:focus-within,
+.routing-cell-dropdown:focus-within {
+  border-color: color-mix(in srgb, var(--hm-accent) 62%, var(--hm-outer-border)) !important;
+  background: color-mix(in srgb, rgb(var(--hm-surface-secondary-rgb)) 72%, transparent) !important;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--hm-accent-soft) 64%, transparent) !important;
+}
+
+.routing-rule-status {
+  display: inline-flex;
+  width: max-content;
+  max-width: 100%;
+  min-height: 26px;
+  padding: 0 9px;
+  align-items: center;
+  gap: 6px;
   overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--hm-outer-border) 76%, transparent);
+  border-radius: 999px;
+  color: var(--hm-text-secondary);
+  background: color-mix(in srgb, var(--hm-row-hover) 48%, transparent);
+  font-size: 10.5px;
+  font-weight: 620;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.routing-rule-status > svg {
+  flex: 0 0 auto;
+}
+
+.routing-rule-status > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.routing-rule-status.is-valid > svg {
+  color: var(--colorPaletteGreenForeground1, #107c10);
+}
+
+.routing-rule-status.is-validating {
+  color: var(--hm-accent-strong);
+  background: color-mix(in srgb, var(--hm-accent-soft) 48%, transparent);
+}
+
+.routing-rule-status.is-error {
+  border-color: color-mix(in srgb, var(--colorPaletteRedBorder2, #d13438) 30%, var(--hm-outer-border));
   color: var(--colorPaletteRedForeground1, #bc2f32);
-  font-size: 11px;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  background: color-mix(in srgb, var(--colorPaletteRedBackground1, #fdf3f4) 48%, transparent);
 }
 
 .routing-empty {

@@ -23,7 +23,7 @@ Unicode true
 ## !define INFO_PROJECTNAME    "my-project" # Default "HypoMux"
 ## !define INFO_COMPANYNAME    "My Company" # Default "HypoMux"
 ## !define INFO_PRODUCTNAME    "My Product Name" # Default "HypoMux"
-## !define INFO_PRODUCTVERSION "1.0.0"     # Default "2.1.0"
+## !define INFO_PRODUCTVERSION "1.0.0"     # Default "2.5.0"
 ## !define INFO_COPYRIGHT      "(c) Now, My Company" # Default "© 2026, My Company"
 ###
 ## !define PRODUCT_EXECUTABLE  "Application.exe"      # Default "${INFO_PROJECTNAME}.exe"
@@ -120,6 +120,12 @@ LangString LegacyInstallRemoving ${LANG_ENGLISH} "Removing the previous HypoMux 
 LangString LegacyInstallRemoving ${LANG_SIMPCHINESE} "正在移除旧版 HypoMux 并迁移安装目录…"
 LangString LegacyInstallRemoveFailed ${LANG_ENGLISH} "The previous HypoMux installation could not be removed safely."
 LangString LegacyInstallRemoveFailed ${LANG_SIMPCHINESE} "无法安全移除旧版 HypoMux，安装已停止。"
+LangString LegacyNetworkRecovering ${LANG_ENGLISH} "Recovering network state left by HypoMux v2.2.0..."
+LangString LegacyNetworkRecovering ${LANG_SIMPCHINESE} "正在恢复 HypoMux v2.2.0 的网络状态…"
+LangString LegacyNetworkRecoverFailed ${LANG_ENGLISH} "Could not safely recover the network state left by HypoMux v2.2.0."
+LangString LegacyNetworkRecoverFailed ${LANG_SIMPCHINESE} "无法安全恢复 HypoMux v2.2.0 的网络状态，安装已停止。"
+LangString WailsNetworkRecoverFailed ${LANG_ENGLISH} "Could not safely recover the network state left by the previous HypoMux release."
+LangString WailsNetworkRecoverFailed ${LANG_SIMPCHINESE} "无法安全恢复上一版 HypoMux 的网络状态，安装已停止。"
 
 !define WAILS_WIN10_REQUIRED "$(WailsWin10Required)"
 !define WAILS_ARCHITECTURE_NOT_SUPPORTED "$(WailsArchitectureNotSupported)"
@@ -200,6 +206,79 @@ Function StopCoreServiceForUpgrade
     ${EndIf}
 FunctionEnd
 
+Function RecoverLegacyV22Network
+    !if "${WAILS_INSTALL_SCOPE}" != "user"
+        SetRegView 64
+        ReadRegStr $0 HKLM "${HYPOMUX_LEGACY_INNO_KEY}" "UninstallString"
+        ${If} $0 == ""
+            IfFileExists "$PROGRAMFILES64\HypoMux\python313.dll" 0 legacyV22RecoveryDone
+        ${EndIf}
+
+        ; v2.2.0 has no --recover-network command. Launching the old executable
+        ; with that argument starts its full UI and makes nsExec wait forever.
+        ; Use a dedicated, bounded recovery script instead. It only terminates
+        ; backend processes owned by the old installation and only clears the
+        ; WinINet proxy when it exactly matches the ports in legacy config.json.
+        DetailPrint "$(LegacyNetworkRecovering)"
+        InitPluginsDir
+        SetOutPath "$PLUGINSDIR"
+        File /oname=legacy-v22-recover.ps1 "legacy-v22-recover.ps1"
+        nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\legacy-v22-recover.ps1" -InstallRoot "$PROGRAMFILES64\HypoMux" -DataRoot "$PROFILE\.hypomux"'
+        Pop $0
+        Pop $1
+        ${If} $0 != 0
+            DetailPrint "$1"
+            Abort "$(LegacyNetworkRecoverFailed)"
+        ${EndIf}
+        legacyV22RecoveryDone:
+    !endif
+FunctionEnd
+
+Function RecoverWailsInstallations
+    ; The independent Core executable is the layout marker for every Wails
+    ; release. Python v2.2.0 never shipped it, so the legacy UI can never be
+    ; accidentally relaunched with an unsupported recovery argument.
+    IfFileExists "$INSTDIR\bin\hypomux-engine.exe" 0 nestedWailsRecovery
+        nsExec::ExecToStack '"$INSTDIR\bin\hypomux-engine.exe" recover'
+        Pop $0
+        Pop $1
+        ${If} $0 != 0
+            DetailPrint "$1"
+            Abort "$(WailsNetworkRecoverFailed)"
+        ${EndIf}
+        IfFileExists "$INSTDIR\${PRODUCT_EXECUTABLE}" 0 nestedWailsRecovery
+            nsExec::ExecToStack '"$INSTDIR\${PRODUCT_EXECUTABLE}" --recover-network'
+            Pop $0
+            Pop $1
+            ${If} $0 != 0
+                DetailPrint "$1"
+                Abort "$(WailsNetworkRecoverFailed)"
+            ${EndIf}
+
+    nestedWailsRecovery:
+    !if "${WAILS_INSTALL_SCOPE}" != "user"
+        ; Recover the short-lived duplicated Company/Product layout shipped by
+        ; earlier migration builds before its uninstaller removes that tree.
+        IfFileExists "$PROGRAMFILES64\HypoMux\HypoMux\bin\hypomux-engine.exe" 0 wailsRecoveryDone
+            nsExec::ExecToStack '"$PROGRAMFILES64\HypoMux\HypoMux\bin\hypomux-engine.exe" recover'
+            Pop $0
+            Pop $1
+            ${If} $0 != 0
+                DetailPrint "$1"
+                Abort "$(WailsNetworkRecoverFailed)"
+            ${EndIf}
+            IfFileExists "$PROGRAMFILES64\HypoMux\HypoMux\${PRODUCT_EXECUTABLE}" 0 wailsRecoveryDone
+                nsExec::ExecToStack '"$PROGRAMFILES64\HypoMux\HypoMux\${PRODUCT_EXECUTABLE}" --recover-network'
+                Pop $0
+                Pop $1
+                ${If} $0 != 0
+                    DetailPrint "$1"
+                    Abort "$(WailsNetworkRecoverFailed)"
+                ${EndIf}
+        wailsRecoveryDone:
+    !endif
+FunctionEnd
+
 Function RemoveLegacyInstallations
     !if "${WAILS_INSTALL_SCOPE}" != "user"
         SetRegView 64
@@ -259,19 +338,15 @@ Section
 
     !insertmacro wails.webview2runtime
 
-    ; Close the previous UI and stop Core before replacing binaries. If a prior
-    ; session ended abruptly, invoke both narrow recovery entry points while
-    ; the old executables are still present.
+    ; Close the previous UI and stop Core before replacing binaries. Recovery
+    ; is layout-aware: v2.2.0 uses its dedicated cleanup script, while current
+    ; and future Wails builds use their supported recovery entry points.
     Call CloseRunningHypoMux
     !if "${WAILS_INSTALL_SCOPE}" != "user"
         Call StopCoreServiceForUpgrade
     !endif
-    IfFileExists "$INSTDIR\bin\hypomux-engine.exe" 0 +2
-        nsExec::ExecToLog '"$INSTDIR\bin\hypomux-engine.exe" recover'
-    IfFileExists "$INSTDIR\${PRODUCT_EXECUTABLE}" 0 +2
-        nsExec::ExecToLog '"$INSTDIR\${PRODUCT_EXECUTABLE}" --recover-network'
-    IfFileExists "$PROGRAMFILES64\HypoMux\HypoMux\bin\hypomux-engine.exe" 0 +2
-        nsExec::ExecToLog '"$PROGRAMFILES64\HypoMux\HypoMux\bin\hypomux-engine.exe" recover'
+    Call RecoverLegacyV22Network
+    Call RecoverWailsInstallations
 
     Call RemoveLegacyInstallations
 

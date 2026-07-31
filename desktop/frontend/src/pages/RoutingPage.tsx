@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Badge,
   Button,
   createTableColumn,
   DataGrid,
@@ -40,7 +39,9 @@ import {
   ArrowDownload20Regular,
   ArrowUpload20Regular,
   AppsList20Regular,
+  CheckmarkCircle16Regular,
   Delete20Regular,
+  ErrorCircle16Regular,
   Save20Regular,
 } from "@fluentui/react-icons";
 import { appServices, type RoutingRule, type RoutingSnapshot } from "../platform/services";
@@ -341,7 +342,7 @@ export function RoutingPage() {
         <Input
           className="routing-cell-input"
           value={item.value}
-          appearance="underline"
+          appearance="filled-darker"
           aria-invalid={Boolean(item.error)}
           onChange={(_, data) => updateRule(item.id, { value: data.value })}
         />
@@ -353,6 +354,7 @@ export function RoutingPage() {
       renderCell: (item) => (
         <Dropdown
           className="routing-cell-dropdown"
+          appearance="filled-darker"
           value={outboundLabel(item.outbound)}
           selectedOptions={[item.outbound]}
           onOptionSelect={(_, data) => data.optionValue && updateRule(item.id, { outbound: data.optionValue })}
@@ -370,10 +372,10 @@ export function RoutingPage() {
       columnId: "status",
       renderHeaderCell: () => text("状态", "Status"),
       renderCell: (item) => item.validating
-        ? <Spinner size="tiny" labelPosition="after" label={text("校验中", "Validating")} />
+        ? <span className="routing-rule-status is-validating"><Spinner size="tiny" />{text("校验中", "Validating")}</span>
         : item.error
-          ? <span className="rule-error-text">{item.error}</span>
-          : <Badge appearance="tint" color="success">{text("有效", "Valid")}</Badge>,
+          ? <span className="routing-rule-status is-error" title={item.error}><ErrorCircle16Regular /><span>{item.error}</span></span>
+          : <span className="routing-rule-status is-valid"><CheckmarkCircle16Regular />{text("有效", "Valid")}</span>,
     }),
   ], [outboundLabel, outbounds, t, text, updateRule]);
 
@@ -484,6 +486,7 @@ export function RoutingPage() {
           </div>
         ) : (
           <DataGrid
+            className="routing-grid"
             items={activeRules}
             columns={columns}
             getRowId={(item) => item.id}
@@ -494,12 +497,12 @@ export function RoutingPage() {
             resizableColumns
             columnSizingOptions={{
               value: { minWidth: 280, defaultWidth: 520 },
-              outbound: { minWidth: 180, defaultWidth: 260 },
-              status: { minWidth: 160, defaultWidth: 240 },
+              outbound: { minWidth: 210, defaultWidth: 280 },
+              status: { minWidth: 140, defaultWidth: 170 },
             }}
           >
             <DataGridHeader>
-              <DataGridRow selectionCell={{ checkboxIndicator: { "aria-label": text("全选当前规则", "Select all current rules") } }}>
+              <DataGridRow className="routing-grid-header" selectionCell={{ checkboxIndicator: { "aria-label": text("全选当前规则", "Select all current rules") } }}>
                 {({ renderHeaderCell }) => <DataGridHeaderCell>{renderHeaderCell()}</DataGridHeaderCell>}
               </DataGridRow>
             </DataGridHeader>
@@ -507,7 +510,7 @@ export function RoutingPage() {
               {({ item, rowId }) => (
                 <DataGridRow<DraftRule>
                   key={rowId}
-                  className={item.error ? "routing-row has-error" : "routing-row"}
+                  className={`routing-row${selected.has(rowId) ? " is-selected" : ""}${item.error ? " has-error" : ""}`}
                   selectionCell={{ checkboxIndicator: { "aria-label": text(`选择 ${item.value}`, `Select ${item.value}`) } }}
                 >
                   {({ renderCell }) => <DataGridCell>{renderCell(item)}</DataGridCell>}

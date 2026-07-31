@@ -268,10 +268,18 @@ jobs:
           name: HypoMux-Windows-${{ github.sha }}-${{ github.run_attempt }}
           path: artifacts
 
+      - name: Stage legacy-updater-compatible installer name
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          cp artifacts/HypoMux-amd64-installer.exe "artifacts/HypoMux_Setup_${version}.exe"
+
       - name: Upload installer to GitHub Release
         uses: softprops/action-gh-release@v3
         with:
-          files: artifacts/HypoMux-amd64-installer.exe
+          files: |
+            artifacts/HypoMux-amd64-installer.exe
+            artifacts/HypoMux_Setup_*.exe
           fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
