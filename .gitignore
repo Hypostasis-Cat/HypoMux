@@ -56,7 +56,6 @@ pnpm-debug.log*
 # Keep desktop/build: it contains source-controlled platform configs.
 /desktop/.task/
 /desktop/bin/
-/desktop/build/windows/nsis/wails_tools.nsh
 /desktop/build/windows/nsis/MicrosoftEdgeWebview2Setup.exe
 
 # Local dependency/tool sandboxes
