@@ -1,6 +1,8 @@
 package services
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -11,6 +13,11 @@ import (
 
 	"github.com/Hypostasis-Cat/HypoMux/desktop/internal/engineclient"
 )
+
+type clashAPIConfig struct {
+	Endpoint string
+	Secret   string
+}
 
 type dnsResolveResult struct {
 	Domain     string `json:"domain"`
@@ -28,26 +35,30 @@ func writeSingBoxConfig(
 	dnsResult dnsResolveResult,
 	rules []RoutingRule,
 	strictRoute bool,
-) (string, string, error) {
+) (string, string, clashAPIConfig, error) {
 	ethernetPort, err := loopbackPort(endpoints, "nic_ethernet")
 	if err != nil {
-		return "", "", err
+		return "", "", clashAPIConfig{}, err
 	}
 	wifiPort, err := loopbackPort(endpoints, "nic_wifi")
 	if err != nil {
-		return "", "", err
+		return "", "", clashAPIConfig{}, err
 	}
 	aggregationPort, err := loopbackPort(endpoints, "aggregation")
 	if err != nil {
-		return "", "", err
+		return "", "", clashAPIConfig{}, err
 	}
 	upstream, err := buildDNSUpstream(dnsAdapter, dnsResult)
 	if err != nil {
-		return "", "", err
+		return "", "", clashAPIConfig{}, err
 	}
 	singBox, err := resolveRuntimeAsset("sing-box.exe")
 	if err != nil {
-		return "", "", err
+		return "", "", clashAPIConfig{}, err
+	}
+	clashAPI, err := reserveClashAPI()
+	if err != nil {
+		return "", "", clashAPIConfig{}, err
 	}
 	processPaths := []string{}
 	for _, candidate := range []string{os.Args[0], engineExecutableOrEmpty(), singBox} {
@@ -104,7 +115,7 @@ func writeSingBoxConfig(
 		}
 		port, portErr := loopbackPort(endpoints, name)
 		if portErr != nil {
-			return "", "", portErr
+			return "", "", clashAPIConfig{}, portErr
 		}
 		_ = endpoint
 		outbounds = append(outbounds, socksOutbound(name, port))
@@ -130,26 +141,48 @@ func writeSingBoxConfig(
 		"outbounds": outbounds,
 		"route": map[string]any{
 			"auto_detect_interface": true, "default_domain_resolver": "dns-local",
-			"final": "aggregation", "rules": routeRules,
+			"find_process": true, "final": "aggregation", "rules": routeRules,
+		},
+		"experimental": map[string]any{
+			"clash_api": map[string]any{
+				"external_controller": clashAPI.Endpoint,
+				"secret":              clashAPI.Secret,
+			},
 		},
 	}
 	data, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {
-		return "", "", fmt.Errorf("生成 TUN 配置失败：%w", err)
+		return "", "", clashAPIConfig{}, fmt.Errorf("生成 TUN 配置失败：%w", err)
 	}
 	directory := filepath.Join(settingsDirectory(), "runtime")
 	if err := os.MkdirAll(directory, 0o755); err != nil {
-		return "", "", fmt.Errorf("创建 TUN 运行目录失败：%w", err)
+		return "", "", clashAPIConfig{}, fmt.Errorf("创建 TUN 运行目录失败：%w", err)
 	}
 	path := filepath.Join(directory, "sing-box.json")
 	temporary := path + ".tmp"
 	if err := os.WriteFile(temporary, data, 0o600); err != nil {
-		return "", "", fmt.Errorf("写入 TUN 配置失败：%w", err)
+		return "", "", clashAPIConfig{}, fmt.Errorf("写入 TUN 配置失败：%w", err)
 	}
 	if err := os.Rename(temporary, path); err != nil {
-		return "", "", fmt.Errorf("提交 TUN 配置失败：%w", err)
+		return "", "", clashAPIConfig{}, fmt.Errorf("提交 TUN 配置失败：%w", err)
 	}
-	return singBox, path, nil
+	return singBox, path, clashAPI, nil
+}
+
+func reserveClashAPI() (clashAPIConfig, error) {
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		return clashAPIConfig{}, fmt.Errorf("预留 sing-box 元数据端口失败：%w", err)
+	}
+	endpoint := listener.Addr().String()
+	if closeErr := listener.Close(); closeErr != nil {
+		return clashAPIConfig{}, fmt.Errorf("释放 sing-box 元数据端口失败：%w", closeErr)
+	}
+	token := make([]byte, 24)
+	if _, err := rand.Read(token); err != nil {
+		return clashAPIConfig{}, fmt.Errorf("生成 sing-box 元数据凭据失败：%w", err)
+	}
+	return clashAPIConfig{Endpoint: endpoint, Secret: hex.EncodeToString(token)}, nil
 }
 
 func engineExecutableOrEmpty() string {

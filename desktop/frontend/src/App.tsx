@@ -1,5 +1,5 @@
-import { FluentProvider } from "@fluentui/react-components";
-import { useEffect, useState } from "react";
+import { FluentProvider, Spinner } from "@fluentui/react-components";
+import { lazy, Suspense, useEffect, useState } from "react";
 import "./theme/material.tokens.css";
 import "./theme/semantic.tokens.css";
 import "./theme/typography.tokens.css";
@@ -8,17 +8,18 @@ import "./app.css";
 import { WallpaperLayer } from "./components/material/WallpaperLayer";
 import { AppShell } from "./components/shell/AppShell";
 import type { AppPage } from "./components/shell/CompactNavigation";
-import { AppearanceLab } from "./pages/AppearanceLab";
-import { AboutPage } from "./pages/AboutPage";
-import { BlockedDomainsPage } from "./pages/BlockedDomainsPage";
 import { HomePage } from "./pages/HomePage";
-import { HealthPage } from "./pages/HealthPage";
-import { ConnectionsPage } from "./pages/ConnectionsPage";
-import { RoutingPage } from "./pages/RoutingPage";
-import { SettingsPage } from "./pages/SettingsPage";
 import { AppearanceProvider, useAppearance } from "./theme/appearance.store";
 import { LanguageProvider } from "./i18n/i18n";
 import { desktopPlatform } from "./platform/desktop";
+
+const AppearanceLab = lazy(() => import("./pages/AppearanceLab").then((module) => ({ default: module.AppearanceLab })));
+const AboutPage = lazy(() => import("./pages/AboutPage").then((module) => ({ default: module.AboutPage })));
+const BlockedDomainsPage = lazy(() => import("./pages/BlockedDomainsPage").then((module) => ({ default: module.BlockedDomainsPage })));
+const HealthPage = lazy(() => import("./pages/HealthPage").then((module) => ({ default: module.HealthPage })));
+const ConnectionsPage = lazy(() => import("./pages/ConnectionsPage").then((module) => ({ default: module.ConnectionsPage })));
+const RoutingPage = lazy(() => import("./pages/RoutingPage").then((module) => ({ default: module.RoutingPage })));
+const SettingsPage = lazy(() => import("./pages/SettingsPage").then((module) => ({ default: module.SettingsPage })));
 
 function HypoMuxWindow() {
   const [page, setPage] = useState<AppPage>(() => {
@@ -80,21 +81,23 @@ function HypoMuxWindow() {
         pageDirection={pageDirection}
         animatePage={navigationRevision > 0}
       >
-        {page === "appearance" && import.meta.env.DEV
-          ? <AppearanceLab />
-          : page === "about"
-            ? <AboutPage />
-            : page === "settings"
-              ? <SettingsPage onOpenBlockedDomains={() => navigate("blocked-domains")} />
-              : page === "blocked-domains"
-                ? <BlockedDomainsPage onBack={() => navigate("settings")} />
-          : page === "health"
-            ? <HealthPage />
-            : page === "connections"
-              ? <ConnectionsPage />
-          : page === "routing"
-            ? <RoutingPage />
-            : <HomePage onNavigate={navigate} />}
+        <Suspense fallback={<div className="page-loading"><Spinner /></div>}>
+          {page === "appearance" && import.meta.env.DEV
+            ? <AppearanceLab />
+            : page === "about"
+              ? <AboutPage />
+              : page === "settings"
+                ? <SettingsPage onOpenBlockedDomains={() => navigate("blocked-domains")} />
+                : page === "blocked-domains"
+                  ? <BlockedDomainsPage onBack={() => navigate("settings")} />
+            : page === "health"
+              ? <HealthPage />
+              : page === "connections"
+                ? <ConnectionsPage />
+            : page === "routing"
+              ? <RoutingPage />
+              : <HomePage onNavigate={navigate} />}
+        </Suspense>
       </AppShell>
     </FluentProvider>
   );

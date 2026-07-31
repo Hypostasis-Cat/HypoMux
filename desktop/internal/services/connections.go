@@ -62,6 +62,12 @@ func (s *EngineService) Connections() (ConnectionListSnapshot, error) {
 	}
 	result.SampledAt = telemetry.SampledAt
 	processes := resolveConnectionProcesses(telemetry.Connections)
+	s.mu.Lock()
+	clashAPI := s.clashAPI
+	s.mu.Unlock()
+	for id, process := range fetchClashConnectionProcesses(ctx, clashAPI, telemetry.Connections) {
+		processes[id] = process
+	}
 	result.Connections = make([]ConnectionView, 0, len(telemetry.Connections))
 	for _, item := range telemetry.Connections {
 		// SOCKS UDP uses a long-lived TCP control association in addition to
@@ -86,6 +92,9 @@ func (s *EngineService) Connections() (ConnectionListSnapshot, error) {
 		process := processes[item.ID]
 		if process != "" {
 			process = filepath.Base(process)
+		}
+		if strings.EqualFold(process, "sing-box.exe") || strings.EqualFold(process, "hypomux-engine.exe") {
+			process = ""
 		}
 		result.Connections = append(result.Connections, ConnectionView{
 			ID: item.ID, Process: process, Protocol: item.Protocol, Client: item.Client,

@@ -45,6 +45,13 @@ html.window-closing #root > .hypomux-provider {
   opacity: 0;
 }
 
+.page-loading {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  place-items: center;
+}
+
 @media (prefers-reduced-motion: reduce) {
   #root > .hypomux-provider,
   .startup-reveal {
@@ -237,23 +244,32 @@ svg {
 }
 
 .window-button {
-  display: grid;
-  width: 46px;
+  width: 44px;
+  min-width: 44px !important;
   padding: 0;
-  place-items: center;
-  border: 0;
+  border: 0 !important;
+  border-radius: 0 !important;
   color: var(--hm-text-primary);
-  background: transparent;
+  background: transparent !important;
   transition: background var(--hm-motion-instant) ease, color var(--hm-motion-instant) ease;
 }
 
 .window-button:hover {
-  background: var(--hm-row-hover);
+  background: var(--hm-row-hover) !important;
+}
+
+.window-button:active {
+  background: color-mix(in srgb, var(--hm-accent) 16%, transparent) !important;
 }
 
 .window-close:hover {
-  color: #fff;
-  background: #c42b1c;
+  color: #fff !important;
+  background: #c42b1c !important;
+}
+
+.window-close:active {
+  color: #fff !important;
+  background: #a4262c !important;
 }
 
 .product-mark {

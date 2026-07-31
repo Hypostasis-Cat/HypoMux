@@ -52,7 +52,21 @@ type SupportLogStore struct {
 }
 
 func NewSupportLogStore() *SupportLogStore {
-	return newSupportLogStore(filepath.Join(settingsDirectory(), "logs", "app.log"))
+	store := &SupportLogStore{
+		path:  filepath.Join(settingsDirectory(), "logs", "app.log"),
+		rates: map[string]rateLimitState{},
+		now:   time.Now,
+	}
+	time.AfterFunc(2*time.Second, func() {
+		store.mu.Lock()
+		defer store.mu.Unlock()
+		if store.active {
+			return
+		}
+		store.removeLegacyRotationsLocked()
+		store.enforceLimitLocked()
+	})
+	return store
 }
 
 func newSupportLogStore(path string) *SupportLogStore {

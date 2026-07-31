@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -81,16 +82,18 @@ type Supervisor struct {
 	configure    func(*exec.Cmd)
 	onLog        func(string)
 	onUnexpected func(Status)
+	startupReady func() bool
 	lastStderr   string
 }
 
 func NewSupervisor() *Supervisor {
 	return &Supervisor{
-		status:    Status{State: StateStopped},
-		command:   exec.CommandContext,
-		cleanup:   cleanupPlatform,
-		contain:   containProcess,
-		configure: configureProcess,
+		status:       Status{State: StateStopped},
+		command:      exec.CommandContext,
+		cleanup:      cleanupPlatform,
+		contain:      containProcess,
+		configure:    configureProcess,
+		startupReady: tunInterfaceReady,
 	}
 }
 
@@ -196,32 +199,49 @@ func (s *Supervisor) Activate(ctx context.Context, config Config) (Status, error
 
 	timer := time.NewTimer(normalized.StartupTimeout)
 	defer timer.Stop()
-	select {
-	case <-timer.C:
-		s.mu.Lock()
-		if s.run != run || s.status.State != StateStarting {
-			status := s.status
-			s.mu.Unlock()
-			return status, errors.New("sing-box exited during startup")
+	readyTicker := time.NewTicker(40 * time.Millisecond)
+	defer readyTicker.Stop()
+	for {
+		select {
+		case <-timer.C:
+			return s.markRunning(run)
+		case <-readyTicker.C:
+			if s.startupReady != nil && s.startupReady() {
+				return s.markRunning(run)
+			}
+		case <-run.done:
+			status := s.Status()
+			if status.LastError == "" {
+				status.LastError = "sing-box exited during startup"
+			}
+			return status, errors.New(status.LastError)
+		case <-ctx.Done():
+			run.intentional.Store(true)
+			_ = s.terminateRun(run, context.Background())
+			err := fmt.Errorf("activate TUN sidecar: %w", ctx.Err())
+			s.failStart(err)
+			return s.Status(), err
 		}
-		s.status.State = StateRunning
+	}
+}
+
+func (s *Supervisor) markRunning(run *sidecarRun) (Status, error) {
+	s.mu.Lock()
+	if s.run != run || s.status.State != StateStarting {
 		status := s.status
 		s.mu.Unlock()
-		s.emitLog("[TUN] sing-box is stable and owns TUN/WFP/routes")
-		return status, nil
-	case <-run.done:
-		status := s.Status()
-		if status.LastError == "" {
-			status.LastError = "sing-box exited during startup"
-		}
-		return status, errors.New(status.LastError)
-	case <-ctx.Done():
-		run.intentional.Store(true)
-		_ = s.terminateRun(run, context.Background())
-		err := fmt.Errorf("activate TUN sidecar: %w", ctx.Err())
-		s.failStart(err)
-		return s.Status(), err
+		return status, errors.New("sing-box exited during startup")
 	}
+	s.status.State = StateRunning
+	status := s.status
+	s.mu.Unlock()
+	s.emitLog("[TUN] sing-box is stable and owns TUN/WFP/routes")
+	return status, nil
+}
+
+func tunInterfaceReady() bool {
+	device, err := net.InterfaceByName("HypoMux-Tun")
+	return err == nil && device.Flags&net.FlagUp != 0
 }
 
 func (s *Supervisor) Stop(ctx context.Context) (Status, error) {

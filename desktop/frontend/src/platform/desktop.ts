@@ -48,6 +48,7 @@ const callAppearance = async (method: string, value: string): Promise<NativeAppe
 export const desktopPlatform = {
   minimise: () => Window.Minimise().catch(ignoreOutsideWails),
   toggleMaximise: () => Window.ToggleMaximise().catch(ignoreOutsideWails),
+  isMaximised: () => Window.IsMaximised().catch(() => false),
   close: closeWithAnimation,
   hideToTray: () => Window.Hide().catch(ignoreOutsideWails),
   showStartup: () =>

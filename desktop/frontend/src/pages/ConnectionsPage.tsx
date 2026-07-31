@@ -219,13 +219,21 @@ export function ConnectionsPage() {
             </div>
           ) : filtered.map((connection) => {
             const outbound = policy(connection);
+            const identity = connection.process || connection.domain || connection.remote_ip || connection.target;
+            const identitySource = connection.process
+              ? `${connection.protocol.toUpperCase()} · ${connection.client || "—"}`
+              : connection.domain
+                ? text("按目标域名显示", "Shown by destination domain")
+                : connection.remote_ip || connection.target
+                  ? text("按远端 IP 显示", "Shown by remote IP")
+                  : text("未识别连接", "Unidentified connection");
             return (
               <article className="connection-row" key={connection.id}>
                 <div className="connection-process">
                   <span className="connection-process-icon"><AppsListDetail24Regular /></span>
                   <span>
-                    <strong>{connection.process || text("未识别进程", "Unidentified process")}</strong>
-                    <small>{connection.protocol.toUpperCase()} · {connection.client || "—"}</small>
+                    <strong>{identity || text("未识别连接", "Unidentified connection")}</strong>
+                    <small>{identitySource}</small>
                   </span>
                 </div>
                 <div className="connection-destination">

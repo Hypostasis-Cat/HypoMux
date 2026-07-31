@@ -147,6 +147,7 @@ type EngineService struct {
 	wfpFallbackApplied  bool
 	compatRestarting    bool
 	compatibilityNotice string
+	clashAPI            clashAPIConfig
 	closing             bool
 }
 
@@ -523,6 +524,7 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 	dnsFallbackApplied := s.dnsFallbackApplied
 	wfpFallbackApplied := s.wfpFallbackApplied
 	s.transitionPhase = "starting"
+	s.clashAPI = clashAPIConfig{}
 	s.mu.Unlock()
 	defer s.clearTransition("starting")
 	available, err := s.adapters.List()
@@ -666,6 +668,9 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 		_ = s.client.Request(ctx, "tun.deactivate", nil, &tunIgnored)
 		_ = s.client.Request(ctx, "engine.stop", nil, &ignored)
 		_ = restoreSystemProxy()
+		s.mu.Lock()
+		s.clashAPI = clashAPIConfig{}
+		s.mu.Unlock()
 		return EngineSnapshot{}, cause
 	}
 	if mode == "proxy" {
@@ -685,7 +690,7 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 		if normalizeErr != nil {
 			return rollback(normalizeErr)
 		}
-		singBox, configPath, configErr := writeSingBoxConfig(started.Endpoints.Channels, selected[0], dnsResult, rules, effectiveStrictRoute)
+		singBox, configPath, clashAPI, configErr := writeSingBoxConfig(started.Endpoints.Channels, selected[0], dnsResult, rules, effectiveStrictRoute)
 		if configErr != nil {
 			return rollback(configErr)
 		}
@@ -704,6 +709,9 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 		if activated.Tun.State != "running" {
 			return rollback(fmt.Errorf("TUN 未进入稳定运行状态：%s", activated.Tun.LastError))
 		}
+		s.mu.Lock()
+		s.clashAPI = clashAPI
+		s.mu.Unlock()
 		if effectiveStrictRoute {
 			_ = s.settings.ClearWFPCompatibilityFailure()
 		}
@@ -815,6 +823,7 @@ func (s *EngineService) Stop() (EngineSnapshot, error) {
 	}
 	s.mu.Lock()
 	s.last = telemetrySample{}
+	s.clashAPI = clashAPIConfig{}
 	if !s.compatRestarting {
 		s.dnsFallbackApplied = false
 		s.wfpFallbackApplied = false

@@ -63,6 +63,23 @@ func TestSupervisorActivatesStopsAndCleansExactRun(t *testing.T) {
 	}
 }
 
+func TestSupervisorReturnsWhenTunInterfaceIsReady(t *testing.T) {
+	supervisor, _, _ := testSupervisor(t, "stable")
+	supervisor.startupReady = func() bool { return true }
+	config := testConfig(t)
+	config.StartupTimeout = 900 * time.Millisecond
+	started := time.Now()
+	if _, err := supervisor.Activate(context.Background(), config); err != nil {
+		t.Fatalf("Activate() failed: %v", err)
+	}
+	if elapsed := time.Since(started); elapsed >= 500*time.Millisecond {
+		t.Fatalf("ready activation took %v", elapsed)
+	}
+	if _, err := supervisor.Stop(context.Background()); err != nil {
+		t.Fatalf("Stop() failed: %v", err)
+	}
+}
+
 func TestSupervisorRejectsConfigBeforeNetworkCleanup(t *testing.T) {
 	supervisor, cleanupCalls, _ := testSupervisor(t, "check-fails")
 	status, err := supervisor.Activate(

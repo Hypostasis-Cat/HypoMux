@@ -47,7 +47,7 @@ func (s *AdapterService) List() ([]AdapterView, error) {
 	}
 	result := make([]AdapterView, 0, len(interfaces))
 	for _, item := range interfaces {
-		if item.Flags&net.FlagUp == 0 || item.Flags&net.FlagLoopback != 0 {
+		if item.Flags&net.FlagUp == 0 || item.Flags&net.FlagLoopback != 0 || isHypoMuxManagedAdapter(item.Name) {
 			continue
 		}
 		addresses, addressErr := item.Addrs()
@@ -124,6 +124,10 @@ func (s *AdapterService) List() ([]AdapterView, error) {
 		return strings.ToLower(result[i].Name) < strings.ToLower(result[j].Name)
 	})
 	return result, nil
+}
+
+func isHypoMuxManagedAdapter(name string) bool {
+	return strings.EqualFold(strings.TrimSpace(name), "HypoMux-Tun")
 }
 
 func (s *AdapterService) Refresh() ([]AdapterView, error) {
