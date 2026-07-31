@@ -139,12 +139,20 @@ jobs:
         shell: pwsh
         run: wails3 task windows:package
 
+      - name: Stage unsigned executables for SignPath
+        if: github.event_name == 'workflow_dispatch' && inputs.signing_mode != 'none'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path signing-input | Out-Null
+          Copy-Item desktop\bin\hypomux.exe signing-input\hypomux-unsigned.exe -Force
+          Copy-Item desktop\bin\hypomux-engine.exe signing-input\hypomux-engine-unsigned.exe -Force
+
       - name: Upload desktop executable for SignPath
         if: github.event_name == 'workflow_dispatch' && inputs.signing_mode != 'none'
         id: upload-desktop
         uses: actions/upload-artifact@v7
         with:
-          path: desktop/bin/hypomux.exe
+          path: signing-input/hypomux-unsigned.exe
           archive: false
           if-no-files-found: error
 
@@ -168,7 +176,7 @@ jobs:
         id: upload-core
         uses: actions/upload-artifact@v7
         with:
-          path: desktop/bin/hypomux-engine.exe
+          path: signing-input/hypomux-engine-unsigned.exe
           archive: false
           if-no-files-found: error
 
@@ -191,8 +199,8 @@ jobs:
         if: github.event_name == 'workflow_dispatch' && inputs.signing_mode != 'none'
         shell: pwsh
         run: |
-          Copy-Item signed-desktop\hypomux.exe desktop\bin\hypomux.exe -Force
-          Copy-Item signed-core\hypomux-engine.exe desktop\bin\hypomux-engine.exe -Force
+          Copy-Item signed-desktop\hypomux-unsigned.exe desktop\bin\hypomux.exe -Force
+          Copy-Item signed-core\hypomux-engine-unsigned.exe desktop\bin\hypomux-engine.exe -Force
           Push-Location desktop\build\windows\nsis
           & $env:MAKENSIS "-DARG_WAILS_AMD64_BINARY=..\..\..\bin\hypomux.exe" project.nsi
           if ($LASTEXITCODE -ne 0) {
@@ -200,12 +208,17 @@ jobs:
           }
           Pop-Location
 
+      - name: Stage unsigned installer for SignPath
+        if: github.event_name == 'workflow_dispatch' && inputs.signing_mode != 'none'
+        shell: pwsh
+        run: Copy-Item "${{ env.INSTALLER_PATH }}" signing-input\HypoMux-amd64-installer-unsigned.exe -Force
+
       - name: Upload installer for SignPath
         if: github.event_name == 'workflow_dispatch' && inputs.signing_mode != 'none'
         id: upload-installer
         uses: actions/upload-artifact@v7
         with:
-          path: ${{ env.INSTALLER_PATH }}
+          path: signing-input/HypoMux-amd64-installer-unsigned.exe
           archive: false
           if-no-files-found: error
 
@@ -227,7 +240,7 @@ jobs:
       - name: Use signed installer
         if: github.event_name == 'workflow_dispatch' && inputs.signing_mode != 'none'
         shell: pwsh
-        run: Copy-Item signed-installer\HypoMux-amd64-installer.exe "${{ env.INSTALLER_PATH }}" -Force
+        run: Copy-Item signed-installer\HypoMux-amd64-installer-unsigned.exe "${{ env.INSTALLER_PATH }}" -Force
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v7

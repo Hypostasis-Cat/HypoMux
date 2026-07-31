@@ -8,21 +8,143 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sync"
+	"syscall"
+	"time"
 	"unsafe"
 
 	"github.com/Hypostasis-Cat/HypoMux/engine/internal/server"
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc"
+	"golang.org/x/sys/windows/svc/mgr"
 )
 
 const (
 	coreServiceName     = "HypoMuxCore"
 	coreServicePipeName = `\\.\pipe\HypoMux-Core-Service`
 	servicePipeBuffer   = 64 * 1024
+	serviceDisplayName  = "HypoMux Core Service"
+	serviceDescription  = "Privileged TUN, WFP, route, DNS and network recovery host for HypoMux."
 )
 
 var errServiceClientRejected = errors.New("Core Service client rejected")
+
+func installWindowsService() error {
+	executable, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("resolve executable: %w", err)
+	}
+	executable, err = filepath.Abs(executable)
+	if err != nil {
+		return fmt.Errorf("resolve absolute executable path: %w", err)
+	}
+
+	manager, err := mgr.Connect()
+	if err != nil {
+		return fmt.Errorf("connect to Service Control Manager: %w", err)
+	}
+	defer manager.Disconnect()
+
+	service, err := manager.OpenService(coreServiceName)
+	if errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
+		service, err = manager.CreateService(coreServiceName, executable, mgr.Config{
+			StartType:    mgr.StartAutomatic,
+			ErrorControl: mgr.ErrorNormal,
+			DisplayName:  serviceDisplayName,
+			Description:  serviceDescription,
+		}, "service")
+		if err != nil {
+			return fmt.Errorf("create service: %w", err)
+		}
+	} else if err != nil {
+		return fmt.Errorf("open service: %w", err)
+	} else {
+		config, configErr := service.Config()
+		if configErr != nil {
+			service.Close()
+			return fmt.Errorf("read service configuration: %w", configErr)
+		}
+		config.BinaryPathName = syscall.EscapeArg(executable) + " " + syscall.EscapeArg("service")
+		config.StartType = mgr.StartAutomatic
+		config.ErrorControl = mgr.ErrorNormal
+		config.DisplayName = serviceDisplayName
+		config.Description = serviceDescription
+		if configErr = service.UpdateConfig(config); configErr != nil {
+			service.Close()
+			return fmt.Errorf("update service configuration: %w", configErr)
+		}
+	}
+	defer service.Close()
+
+	if err := service.SetRecoveryActions([]mgr.RecoveryAction{
+		{Type: mgr.ServiceRestart, Delay: 3 * time.Second},
+		{Type: mgr.ServiceRestart, Delay: 10 * time.Second},
+		{Type: mgr.NoAction},
+	}, 24*60*60); err != nil {
+		return fmt.Errorf("set service recovery actions: %w", err)
+	}
+	if err := service.Start(); err != nil && !errors.Is(err, windows.ERROR_SERVICE_ALREADY_RUNNING) {
+		return fmt.Errorf("start service: %w", err)
+	}
+	return nil
+}
+
+func removeWindowsService() error {
+	manager, err := mgr.Connect()
+	if err != nil {
+		return fmt.Errorf("connect to Service Control Manager: %w", err)
+	}
+	defer manager.Disconnect()
+
+	service, err := manager.OpenService(coreServiceName)
+	if errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("open service: %w", err)
+	}
+	defer service.Close()
+
+	if err := stopWindowsService(service, 20*time.Second); err != nil {
+		return err
+	}
+	if err := service.Delete(); err != nil && !errors.Is(err, windows.ERROR_SERVICE_MARKED_FOR_DELETE) {
+		return fmt.Errorf("delete service: %w", err)
+	}
+	return nil
+}
+
+func stopWindowsService(service *mgr.Service, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	stopRequested := false
+	for {
+		status, err := service.Query()
+		if errors.Is(err, windows.ERROR_SERVICE_NOT_ACTIVE) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("query service status: %w", err)
+		}
+		if status.State == svc.Stopped {
+			return nil
+		}
+		if !stopRequested && status.State != svc.StopPending {
+			_, err = service.Control(svc.Stop)
+			if errors.Is(err, windows.ERROR_SERVICE_NOT_ACTIVE) {
+				return nil
+			}
+			if err != nil && !errors.Is(err, windows.ERROR_SERVICE_CANNOT_ACCEPT_CTRL) {
+				return fmt.Errorf("stop service: %w", err)
+			}
+			stopRequested = err == nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("stop service: timed out after %s", timeout)
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+}
 
 type coreWindowsService struct {
 	metadata server.Metadata

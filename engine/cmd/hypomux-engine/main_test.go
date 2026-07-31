@@ -72,3 +72,31 @@ func TestRecoverCommandReportsCleanupFailure(t *testing.T) {
 		t.Fatalf("missing cleanup failure: %s", stderr.String())
 	}
 }
+
+func TestServiceManagementCommandsReportResults(t *testing.T) {
+	originalInstallService := installServiceCommand
+	originalRemoveService := removeServiceCommand
+	installServiceCommand = func() error { return nil }
+	removeServiceCommand = func() error { return errors.New("remove failed") }
+	t.Cleanup(func() {
+		installServiceCommand = originalInstallService
+		removeServiceCommand = originalRemoveService
+	})
+
+	var stdout, stderr bytes.Buffer
+	if exitCode := run([]string{"install-service"}, strings.NewReader(""), &stdout, &stderr); exitCode != 0 {
+		t.Fatalf("install exit code = %d, stderr = %s", exitCode, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "installed and started") {
+		t.Fatalf("install output = %q", stdout.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if exitCode := run([]string{"remove-service"}, strings.NewReader(""), &stdout, &stderr); exitCode != 1 {
+		t.Fatalf("remove exit code = %d, stderr = %s", exitCode, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "remove failed") {
+		t.Fatalf("remove error = %q", stderr.String())
+	}
+}

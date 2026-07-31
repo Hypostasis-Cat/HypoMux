@@ -95,9 +95,11 @@ Section
     ; Close the previous UI and stop Core before replacing binaries. If a prior
     ; session ended abruptly, invoke both narrow recovery entry points while
     ; the old executables are still present.
-    nsExec::ExecToLog '"$SYSDIR\taskkill.exe" /IM "${PRODUCT_EXECUTABLE}" /T /F'
+    nsExec::Exec '"$SYSDIR\taskkill.exe" /IM "${PRODUCT_EXECUTABLE}" /T /F'
+    Pop $0
     !if "${WAILS_INSTALL_SCOPE}" != "user"
-        nsExec::ExecToLog '"$SYSDIR\sc.exe" stop "${HYPOMUX_CORE_SERVICE}"'
+        nsExec::Exec '"$SYSDIR\sc.exe" stop "${HYPOMUX_CORE_SERVICE}"'
+        Pop $0
     !endif
     Sleep 1200
     IfFileExists "$INSTDIR\bin\hypomux-engine.exe" 0 +2
@@ -121,15 +123,11 @@ Section
     ; Machine installation elevates once and installs the isolated privileged
     ; Core. The Wails/WebView2 executable remains asInvoker.
     !if "${WAILS_INSTALL_SCOPE}" != "user"
-        nsExec::ExecToLog '"$SYSDIR\sc.exe" create "${HYPOMUX_CORE_SERVICE}" binPath= "$\"$INSTDIR\bin\hypomux-engine.exe$\" service" start= auto DisplayName= "HypoMux Core Service"'
+        nsExec::ExecToLog '"$INSTDIR\bin\hypomux-engine.exe" install-service'
         Pop $0
         ${If} $0 != 0
-            ; Existing installations are updated in place.
-            nsExec::ExecToLog '"$SYSDIR\sc.exe" config "${HYPOMUX_CORE_SERVICE}" binPath= "$\"$INSTDIR\bin\hypomux-engine.exe$\" service" start= auto DisplayName= "HypoMux Core Service"'
+            Abort "Failed to install HypoMux Core Service (exit code $0)."
         ${EndIf}
-        nsExec::ExecToLog '"$SYSDIR\sc.exe" description "${HYPOMUX_CORE_SERVICE}" "Privileged TUN, WFP, route, DNS and network recovery host for HypoMux."'
-        nsExec::ExecToLog '"$SYSDIR\sc.exe" failure "${HYPOMUX_CORE_SERVICE}" reset= 86400 actions= restart/3000/restart/10000/""/0'
-        nsExec::ExecToLog '"$SYSDIR\sc.exe" start "${HYPOMUX_CORE_SERVICE}"'
     !endif
 
     CreateShortcut "$SMPROGRAMS\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}"
@@ -146,18 +144,21 @@ Section "uninstall"
 
     ; Stop the ordinary-permission UI first, then recover the current user's
     ; proxy snapshot and the machine-owned TUN state before files disappear.
-    nsExec::ExecToLog '"$SYSDIR\taskkill.exe" /IM "${PRODUCT_EXECUTABLE}" /T /F'
+    nsExec::Exec '"$SYSDIR\taskkill.exe" /IM "${PRODUCT_EXECUTABLE}" /T /F'
+    Pop $0
     !if "${WAILS_INSTALL_SCOPE}" != "user"
-        nsExec::ExecToLog '"$SYSDIR\sc.exe" stop "${HYPOMUX_CORE_SERVICE}"'
+        IfFileExists "$INSTDIR\bin\hypomux-engine.exe" 0 serviceRemoved
+            nsExec::ExecToLog '"$INSTDIR\bin\hypomux-engine.exe" remove-service'
+            Pop $0
+            ${If} $0 != 0
+                Abort "Failed to remove HypoMux Core Service (exit code $0)."
+            ${EndIf}
+        serviceRemoved:
     !endif
-    Sleep 1200
     IfFileExists "$INSTDIR\bin\hypomux-engine.exe" 0 +2
         nsExec::ExecToLog '"$INSTDIR\bin\hypomux-engine.exe" recover'
     IfFileExists "$INSTDIR\${PRODUCT_EXECUTABLE}" 0 +2
         nsExec::ExecToLog '"$INSTDIR\${PRODUCT_EXECUTABLE}" --recover-network'
-    !if "${WAILS_INSTALL_SCOPE}" != "user"
-        nsExec::ExecToLog '"$SYSDIR\sc.exe" delete "${HYPOMUX_CORE_SERVICE}"'
-    !endif
 
     ; Device-local settings under %AppData%\HypoMux are deliberately retained
     ; for reinstall/rollback. Autostart, WebView data and installed files are

@@ -19,6 +19,9 @@ var (
 	commit  = "unknown"
 
 	recoverTUN = tun.Recover
+
+	installServiceCommand = installWindowsService
+	removeServiceCommand  = removeWindowsService
 )
 
 func main() {
@@ -40,6 +43,20 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			Version: version,
 			Commit:  commit,
 		})
+	case "install-service":
+		if err := installServiceCommand(); err != nil {
+			fmt.Fprintf(stderr, "install HypoMux Core Service: %v\n", err)
+			return 1
+		}
+		fmt.Fprintln(stdout, "HypoMux Core Service installed and started")
+		return 0
+	case "remove-service":
+		if err := removeServiceCommand(); err != nil {
+			fmt.Fprintf(stderr, "remove HypoMux Core Service: %v\n", err)
+			return 1
+		}
+		fmt.Fprintln(stdout, "HypoMux Core Service removed")
+		return 0
 	case "serve-pipe":
 		flags := flag.NewFlagSet("serve-pipe", flag.ContinueOnError)
 		flags.SetOutput(stderr)
@@ -97,7 +114,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return 0
 	default:
 		fmt.Fprintf(stderr, "unknown command %q\n", command)
-		fmt.Fprintln(stderr, "usage: hypomux-engine [serve|serve-pipe|service|version|recover|diagnose]")
+		fmt.Fprintln(stderr, "usage: hypomux-engine [serve|serve-pipe|service|install-service|remove-service|version|recover|diagnose]")
 		return 2
 	}
 }
