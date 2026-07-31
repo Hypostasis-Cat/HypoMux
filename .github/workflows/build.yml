@@ -85,6 +85,11 @@ jobs:
         shell: pwsh
         run: pnpm --dir desktop/frontend install --frozen-lockfile
 
+      - name: Generate Wails frontend bindings
+        working-directory: desktop
+        shell: pwsh
+        run: wails3 generate bindings -clean=true -ts -i
+
       - name: Build frontend assets for Go validation
         shell: pwsh
         run: pnpm --dir desktop/frontend build
