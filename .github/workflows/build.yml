@@ -8,22 +8,18 @@ on:
   workflow_dispatch:
     inputs:
       signing_mode:
-        description: SignPath policy used for the executable, Core, and installer
+        description: Build/signing mode (publish requires selecting a v* tag)
         required: true
         type: choice
-        options: [none, test, production]
+        options: [none, test, production, publish]
         default: none
-      publish_release:
-        description: Publish the production-signed installer to the selected v* tag
-        required: true
-        type: boolean
-        default: false
 
 concurrency:
   group: desktop-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
+  actions: read
   contents: read
 
 env:
@@ -44,14 +40,16 @@ jobs:
         shell: pwsh
         run: |
           if ("${{ inputs.signing_mode }}" -eq "production" -and
-              "${{ github.ref }}" -ne "refs/heads/main" -and
-              "${{ github.ref }}" -notlike "refs/tags/v*") {
-            throw "Production signing is limited to main or a v* tag."
+              "${{ github.ref }}" -ne "refs/heads/main") {
+            throw "Production-signing tests must be started from main."
           }
-          if ("${{ inputs.publish_release }}" -eq "true" -and
-              ("${{ inputs.signing_mode }}" -ne "production" -or
-               "${{ github.ref }}" -notlike "refs/tags/v*")) {
-            throw "Publishing requires production signing from a v* tag."
+          if ("${{ inputs.signing_mode }}" -eq "publish" -and
+              "${{ github.ref }}" -notlike "refs/tags/v*") {
+            throw "Publishing must be started from a v* tag."
+          }
+          if ("${{ inputs.signing_mode }}" -eq "test" -and
+              "${{ github.ref }}" -like "refs/tags/*") {
+            throw "Test signing must not be started from a release tag."
           }
 
       - name: Set up Go
@@ -140,8 +138,9 @@ jobs:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
           organization-id: 4463263d-e740-4262-ae16-7eac788453ea
           project-slug: HypoMux
-          signing-policy-slug: ${{ inputs.signing_mode == 'production' && 'release-signing' || 'test-signing' }}
+          signing-policy-slug: ${{ inputs.signing_mode == 'test' && 'test-signing' || 'release-signing' }}
           github-artifact-id: ${{ steps.upload-desktop.outputs.artifact-id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           wait-for-completion: true
           wait-for-completion-timeout-in-seconds: 3600
           output-artifact-directory: signed-desktop
@@ -163,8 +162,9 @@ jobs:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
           organization-id: 4463263d-e740-4262-ae16-7eac788453ea
           project-slug: HypoMux
-          signing-policy-slug: ${{ inputs.signing_mode == 'production' && 'release-signing' || 'test-signing' }}
+          signing-policy-slug: ${{ inputs.signing_mode == 'test' && 'test-signing' || 'release-signing' }}
           github-artifact-id: ${{ steps.upload-core.outputs.artifact-id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           wait-for-completion: true
           wait-for-completion-timeout-in-seconds: 3600
           output-artifact-directory: signed-core
@@ -196,8 +196,9 @@ jobs:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
           organization-id: 4463263d-e740-4262-ae16-7eac788453ea
           project-slug: HypoMux
-          signing-policy-slug: ${{ inputs.signing_mode == 'production' && 'release-signing' || 'test-signing' }}
+          signing-policy-slug: ${{ inputs.signing_mode == 'test' && 'test-signing' || 'release-signing' }}
           github-artifact-id: ${{ steps.upload-installer.outputs.artifact-id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           wait-for-completion: true
           wait-for-completion-timeout-in-seconds: 3600
           output-artifact-directory: signed-installer
@@ -221,9 +222,10 @@ jobs:
   release:
     name: Publish release installer
     needs: build
-    if: github.event_name == 'workflow_dispatch' && inputs.publish_release && inputs.signing_mode == 'production' && startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name == 'workflow_dispatch' && inputs.signing_mode == 'publish' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
+      actions: read
       contents: write
 
     steps:
