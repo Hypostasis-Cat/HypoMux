@@ -109,7 +109,7 @@ func connectCoreServicePipe(ctx context.Context, expectedPID int) (*os.File, err
 			0,
 			nil,
 			windows.OPEN_EXISTING,
-			0,
+			windows.FILE_FLAG_OVERLAPPED,
 			0,
 		)
 		if err == nil {

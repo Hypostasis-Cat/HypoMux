@@ -141,11 +141,20 @@ export function useEngineState(
   const modeRef = useRef<EngineMode>(mode);
   const lastRuntimeFailure = useRef("");
   const operationActive = useRef(false);
+  const snapshotEpoch = useRef(0);
   const transition = phase === "starting" || phase === "stopping";
   modeRef.current = mode;
 
-  const applySnapshot = useCallback((next: EngineSnapshot) => {
-    if (!mounted.current) return;
+  const applySnapshot = useCallback((
+    next: EngineSnapshot,
+    acceptDuringOperation = false,
+    requestEpoch = snapshotEpoch.current,
+  ) => {
+    if (
+      !mounted.current ||
+      requestEpoch !== snapshotEpoch.current ||
+      (operationActive.current && !acceptDuringOperation)
+    ) return;
     const nextPhase = (["stopped", "starting", "running", "stopping", "failed"].includes(next.phase)
       ? next.phase
       : "failed") as EnginePhase;
@@ -180,13 +189,14 @@ export function useEngineState(
     // Adapter/settings data is enough to paint the usable home page. Core
     // negotiation and diagnostics continue independently so a cold Core
     // process cannot hold the entire adapter list behind one spinner.
+    const requestEpoch = snapshotEpoch.current;
     const runtimeTask = Promise.all([
       appServices.engine.snapshot(),
       appServices.diagnostics.latest(),
     ]).then(([nextSnapshot, latestDiagnostics]) => {
-      if (!mounted.current) return;
+      if (!mounted.current || requestEpoch !== snapshotEpoch.current) return;
       setDiagnostics(latestDiagnostics.results ?? []);
-      applySnapshot(nextSnapshot);
+      applySnapshot(nextSnapshot, false, requestEpoch);
     }).catch((error) => {
       if (showError) {
         onError(error instanceof Error ? error.message : String(error), () => void load());
@@ -218,7 +228,10 @@ export function useEngineState(
     void load();
     const timer = window.setInterval(() => {
       if (!transition && !preview) {
-        void appServices.engine.snapshot().then(applySnapshot).catch(() => undefined);
+        const requestEpoch = snapshotEpoch.current;
+        void appServices.engine.snapshot()
+          .then((next) => applySnapshot(next, false, requestEpoch))
+          .catch(() => undefined);
       }
     }, 1500);
     return () => {
@@ -297,6 +310,7 @@ export function useEngineState(
   const toggleEngine = useCallback(async () => {
     if (transition || operationActive.current) return;
     operationActive.current = true;
+    const operationEpoch = ++snapshotEpoch.current;
     const stopping = phase === "running";
     setPhase(stopping ? "stopping" : "starting");
     try {
@@ -334,7 +348,7 @@ export function useEngineState(
         stopping ? 40_000 : 55_000,
         stopping ? "Stopping aggregation" : "Starting aggregation",
       );
-      applySnapshot(next);
+      applySnapshot(next, true, operationEpoch);
       await load(false);
     } catch (error) {
       setPhase(stopping ? "running" : "stopped");

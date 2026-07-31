@@ -613,7 +613,10 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 		}
 	}
 	var status engineStatusResult
-	if err := s.client.Request(ctx, "engine.status", nil, &status); err == nil && status.Engine.State == "failed" {
+	if err := s.client.Request(ctx, "engine.status", nil, &status); err != nil {
+		return EngineSnapshot{}, fmt.Errorf("读取聚合核心启动状态失败：%w", err)
+	}
+	if status.Engine.State == "failed" {
 		var ignored any
 		_ = s.client.Request(ctx, "engine.stop", nil, &ignored)
 	}
