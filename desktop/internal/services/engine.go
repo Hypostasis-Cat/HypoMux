@@ -131,6 +131,8 @@ type telemetrySample struct {
 
 type EngineService struct {
 	mu                  sync.Mutex
+	lifecycleGate       chan struct{}
+	transitionPhase     string
 	client              *engineclient.Client
 	settings            *SettingsService
 	adapters            *AdapterService
@@ -152,6 +154,11 @@ type dnsFallbackEvent struct {
 	Adapter string `json:"adapter"`
 	Policy  string `json:"policy"`
 	Reason  string `json:"reason"`
+}
+
+type coreLogEvent struct {
+	Component string `json:"component"`
+	Message   string `json:"message"`
 }
 
 func NewEngineService(settings *SettingsService, adapters *AdapterService, logs ...*SupportLogStore) *EngineService {
@@ -181,7 +188,7 @@ func newEngineService(
 	service := &EngineService{
 		client: engineclient.New(), settings: settings, adapters: adapters,
 		logs: supportLogs, tun: NewTunService(settings, adapters),
-		blockedDomains: blockedDomains,
+		blockedDomains: blockedDomains, lifecycleGate: make(chan struct{}, 1),
 	}
 	go service.consumeCoreEvents()
 	return service
@@ -200,6 +207,11 @@ func (s *EngineService) consumeCoreEvents() {
 			if json.Unmarshal(event.Data, &status) == nil &&
 				status.State == "failed" && isWFPCompatibilityError(status.LastError) {
 				s.handleWFPCompatibility(status)
+			}
+		case "log.record":
+			var record coreLogEvent
+			if s.logs != nil && json.Unmarshal(event.Data, &record) == nil {
+				s.logs.Record("[Core/"+record.Component+"] "+record.Message, false)
 			}
 		}
 	}
@@ -300,8 +312,13 @@ func isWFPCompatibilityError(message string) bool {
 }
 
 func (s *EngineService) Snapshot() (EngineSnapshot, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	if phase := s.currentTransition(); phase != "" {
+		settings := s.settings.Get()
+		return EngineSnapshot{
+			Phase: phase, Mode: settings.Mode, Weighted: settings.Weighted,
+			CoreConnected: s.client.Hello().ProtocolVersion != 0, SampledAt: time.Now(),
+		}, nil
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
 	hello, err := s.client.Ensure(ctx)
@@ -318,13 +335,16 @@ func (s *EngineService) Snapshot() (EngineSnapshot, error) {
 		CoreConnected: true, CoreVersion: hello.EngineVersion, CoreElevated: hello.Elevated,
 		SampledAt: time.Now(),
 	}
+	s.mu.Lock()
 	if s.compatibilityNotice != "" {
 		snapshot.Reason = s.compatibilityNotice
 	}
 	if status.Engine.State != "running" {
 		s.last = telemetrySample{}
+		s.mu.Unlock()
 		return snapshot, nil
 	}
+	s.mu.Unlock()
 	var telemetry telemetryResult
 	if err := s.client.Request(ctx, "engine.telemetry", map[string]any{"include_connections": true}, &telemetry); err != nil {
 		return EngineSnapshot{}, fmt.Errorf("读取聚合遥测失败：%w", err)
@@ -332,6 +352,7 @@ func (s *EngineService) Snapshot() (EngineSnapshot, error) {
 	snapshot.SampledAt = telemetry.SampledAt
 	snapshot.Connections = telemetry.Total.Connections
 	snapshot.SessionBytes = telemetry.Total.BytesDown + telemetry.Total.BytesUp
+	s.mu.Lock()
 	elapsed := telemetry.SampledAt.Sub(s.last.at).Seconds()
 	if elapsed > 0 && elapsed < 30 {
 		snapshot.DownloadBPS = float64(max64(0, telemetry.Total.BytesDown-s.last.down)) / elapsed
@@ -354,6 +375,7 @@ func (s *EngineService) Snapshot() (EngineSnapshot, error) {
 		snapshot.Adapters = append(snapshot.Adapters, runtime)
 	}
 	s.last = current
+	s.mu.Unlock()
 	if s.blockedDomains != nil && settings.BlockedDomainBypass {
 		runtimeEntries := make([]BlockedDomainEntry, 0, len(telemetry.DomainQuarantines))
 		for _, entry := range telemetry.DomainQuarantines {
@@ -363,16 +385,19 @@ func (s *EngineService) Snapshot() (EngineSnapshot, error) {
 		}
 		_ = s.blockedDomains.ReplaceRuntime(runtimeEntries)
 	}
-	if settings.Mode == "tun" && !settings.ForceTUNBypass &&
-		time.Since(s.lastTUNHealthCheck) >= 30*time.Second {
+	shouldCheckTUN := false
+	s.mu.Lock()
+	if settings.Mode == "tun" && !settings.ForceTUNBypass && time.Since(s.lastTUNHealthCheck) >= 30*time.Second {
 		s.lastTUNHealthCheck = time.Now()
+		shouldCheckTUN = true
+	}
+	s.mu.Unlock()
+	if shouldCheckTUN {
 		probeContext, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 		_, tunErr := probeTUNConnectivity(probeContext)
 		cancel()
-		if tunErr == nil {
-			s.tunHealthFailures = 0
-		} else {
-			physicalOK := false
+		physicalOK := false
+		if tunErr != nil {
 			available, listErr := s.adapters.List()
 			if listErr == nil {
 				probe := newDiagnosticProbe()
@@ -388,6 +413,12 @@ func (s *EngineService) Snapshot() (EngineSnapshot, error) {
 				}
 				physicalCancel()
 			}
+		}
+		shouldStop := false
+		s.mu.Lock()
+		if tunErr == nil {
+			s.tunHealthFailures = 0
+		} else {
 			if physicalOK {
 				s.tunHealthFailures++
 			} else {
@@ -396,6 +427,7 @@ func (s *EngineService) Snapshot() (EngineSnapshot, error) {
 			if s.tunHealthFailures >= 3 && !s.watchdogStopping {
 				s.tunHealthFailures = 0
 				s.watchdogStopping = true
+				shouldStop = true
 				snapshot.Phase = "failed"
 				snapshot.Reason = "检测到物理网络正常但虚拟网卡连续无法联网，正在自动停止并恢复网络设置"
 				if s.logs != nil {
@@ -403,13 +435,16 @@ func (s *EngineService) Snapshot() (EngineSnapshot, error) {
 						"message": tunErr.Error(),
 					})
 				}
-				go func() {
-					_, _ = s.Stop()
-					s.mu.Lock()
-					s.watchdogStopping = false
-					s.mu.Unlock()
-				}()
 			}
+		}
+		s.mu.Unlock()
+		if shouldStop {
+			go func() {
+				_, _ = s.Stop()
+				s.mu.Lock()
+				s.watchdogStopping = false
+				s.mu.Unlock()
+			}()
 		}
 	}
 	return snapshot, nil
@@ -419,11 +454,18 @@ func (s *EngineService) Snapshot() (EngineSnapshot, error) {
 // host: the installed service is preferred, with the authenticated runas Core
 // retained as the development fallback.
 func (s *EngineService) RepairWFP() (WFPRepairResult, error) {
+	lifecycleCtx, lifecycleCancel := context.WithTimeout(context.Background(), 25*time.Second)
+	defer lifecycleCancel()
+	if err := s.acquireLifecycle(lifecycleCtx); err != nil {
+		return WFPRepairResult{}, err
+	}
+	defer s.releaseLifecycle()
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.closing {
+		s.mu.Unlock()
 		return WFPRepairResult{}, errors.New("HypoMux 正在退出")
 	}
+	s.mu.Unlock()
 	if hello := s.client.Hello(); hello.ProtocolVersion != 0 {
 		var status engineStatusResult
 		statusCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -459,13 +501,30 @@ func (s *EngineService) RepairWFP() (WFPRepairResult, error) {
 }
 
 func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	if mode != "proxy" && mode != "tun" {
 		return EngineSnapshot{}, fmt.Errorf("不支持的运行模式：%s", mode)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Second)
 	defer cancel()
+	if err := s.acquireLifecycle(ctx); err != nil {
+		return EngineSnapshot{}, err
+	}
+	defer s.releaseLifecycle()
+	s.mu.Lock()
+	if s.closing {
+		s.mu.Unlock()
+		return EngineSnapshot{}, errors.New("HypoMux 正在退出")
+	}
+	if !s.compatRestarting {
+		s.dnsFallbackApplied = false
+		s.wfpFallbackApplied = false
+		s.compatibilityNotice = ""
+	}
+	dnsFallbackApplied := s.dnsFallbackApplied
+	wfpFallbackApplied := s.wfpFallbackApplied
+	s.transitionPhase = "starting"
+	s.mu.Unlock()
+	defer s.clearTransition("starting")
 	available, err := s.adapters.List()
 	if err != nil {
 		return EngineSnapshot{}, err
@@ -480,14 +539,9 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 		return EngineSnapshot{}, errors.New("请至少选择一张活动网卡")
 	}
 	settings := s.settings.Get()
-	if !s.compatRestarting {
-		s.dnsFallbackApplied = false
-		s.wfpFallbackApplied = false
-		s.compatibilityNotice = ""
-	}
-	effectiveStrictRoute := settings.StrictRoute && !s.wfpFallbackApplied
+	effectiveStrictRoute := settings.StrictRoute && !wfpFallbackApplied
 	effectiveDNSPolicy := settings.DNSPolicy
-	if mode == "tun" && s.dnsFallbackApplied {
+	if mode == "tun" && dnsFallbackApplied {
 		effectiveDNSPolicy = "off"
 	}
 	logOwned := false
@@ -520,7 +574,7 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 			return EngineSnapshot{}, errors.New("TUN 启动前检查服务未注册；系统网络未修改")
 		}
 		preflight := s.tun.checkSelected(selected)
-		effectiveStrictRoute = preflight.EffectiveStrictRoute && !s.wfpFallbackApplied
+		effectiveStrictRoute = preflight.EffectiveStrictRoute && !wfpFallbackApplied
 		if s.logs != nil {
 			s.logs.RecordEvent("tun_preflight", "completed", map[string]any{
 				"ready":                      preflight.Ready,
@@ -539,6 +593,7 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 		}
 	}
 	var hello engineclient.Hello
+	s.recordStartStage("core_connecting", map[string]any{"elevated": mode == "tun"})
 	if mode == "tun" {
 		hello, err = s.client.EnsureElevated(ctx)
 	} else {
@@ -547,6 +602,9 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 	if err != nil {
 		return EngineSnapshot{}, err
 	}
+	s.recordStartStage("core_connected", map[string]any{
+		"version": hello.EngineVersion, "elevated": hello.Elevated,
+	})
 	if settings.Mode != mode {
 		settings.Mode = mode
 		_, err = s.settings.UpdateHome(mode, settings.Weighted, settings.SelectedAdapterIDs, settings.AdapterWeights)
@@ -594,9 +652,11 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 		startPayload["channels"] = engineChannels(selected)
 	}
 	var started engineStartResult
+	s.recordStartStage("engine_starting", nil)
 	if err := s.client.Request(ctx, "engine.start", startPayload, &started); err != nil {
 		return EngineSnapshot{}, fmt.Errorf("启动聚合核心失败：%w", err)
 	}
+	s.recordStartStage("engine_started", nil)
 	rollback := func(cause error) (EngineSnapshot, error) {
 		var ignored any
 		var tunIgnored tunLifecycleResult
@@ -611,11 +671,13 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 		}
 	} else {
 		var dnsResult dnsResolveResult
+		s.recordStartStage("dns_validating", nil)
 		if err := s.client.Request(ctx, "dns.resolve", map[string]any{
 			"domain": "www.msftconnecttest.com", "adapter": selected[0].Name, "record_type": "A",
 		}, &dnsResult); err != nil {
 			return rollback(fmt.Errorf("TUN 启动前 DNS 验证失败：%w", err))
 		}
+		s.recordStartStage("dns_validated", nil)
 		rules, normalizeErr := normalizeRulesStrict(settings.RoutingRules)
 		if normalizeErr != nil {
 			return rollback(normalizeErr)
@@ -625,6 +687,7 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 			return rollback(configErr)
 		}
 		var activated tunLifecycleResult
+		s.recordStartStage("tun_activating", nil)
 		if err := s.client.Request(ctx, "tun.activate", map[string]any{
 			"executable": singBox, "config_path": configPath, "startup_timeout_ms": 1500,
 			"strict_route": effectiveStrictRoute,
@@ -634,6 +697,7 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 			}
 			return rollback(fmt.Errorf("启动 TUN 侧车失败：%w", err))
 		}
+		s.recordStartStage("tun_activated", nil)
 		if activated.Tun.State != "running" {
 			return rollback(fmt.Errorf("TUN 未进入稳定运行状态：%s", activated.Tun.LastError))
 		}
@@ -641,6 +705,7 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 			_ = s.settings.ClearWFPCompatibilityFailure()
 		}
 		if !settings.ForceTUNBypass {
+			s.recordStartStage("connectivity_validating", nil)
 			detail, validationErr := probeTUNConnectivity(ctx)
 			if validationErr != nil {
 				return rollback(fmt.Errorf(
@@ -653,13 +718,16 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 					"detail": detail,
 				})
 			}
+			s.recordStartStage("connectivity_validated", nil)
 		} else if s.logs != nil {
 			s.logs.RecordEvent("tun_connectivity", "startup_bypassed", nil)
 		}
 	}
+	s.mu.Lock()
 	s.last = telemetrySample{}
 	s.lastTUNHealthCheck = time.Now()
 	s.tunHealthFailures = 0
+	s.mu.Unlock()
 	if s.logs != nil {
 		s.logs.RecordEvent("engine", "started", map[string]any{
 			"mode": mode, "core_version": hello.EngineVersion, "elevated": hello.Elevated,
@@ -672,14 +740,53 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 	}, nil
 }
 
-func (s *EngineService) Stop() (EngineSnapshot, error) {
+func (s *EngineService) recordStartStage(stage string, fields map[string]any) {
+	if s.logs != nil {
+		s.logs.RecordEvent("engine_start", stage, fields)
+	}
+}
+
+func (s *EngineService) acquireLifecycle(ctx context.Context) error {
+	select {
+	case s.lifecycleGate <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("等待 Core 生命周期操作超时：%w", ctx.Err())
+	}
+}
+
+func (s *EngineService) releaseLifecycle() {
+	<-s.lifecycleGate
+}
+
+func (s *EngineService) currentTransition() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.transitionPhase
+}
+
+func (s *EngineService) clearTransition(expected string) {
+	s.mu.Lock()
+	if s.transitionPhase == expected {
+		s.transitionPhase = ""
+	}
+	s.mu.Unlock()
+}
+
+func (s *EngineService) Stop() (EngineSnapshot, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 35*time.Second)
+	defer cancel()
+	if err := s.acquireLifecycle(ctx); err != nil {
+		return EngineSnapshot{}, err
+	}
+	defer s.releaseLifecycle()
+	s.mu.Lock()
+	s.transitionPhase = "stopping"
+	s.mu.Unlock()
+	defer s.clearTransition("stopping")
 	if s.logs != nil {
 		s.logs.RecordEvent("engine", "stop_requested", nil)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 35*time.Second)
-	defer cancel()
 	hello, ensureErr := s.client.Ensure(ctx)
 	var firstError error
 	if ensureErr == nil {
@@ -703,12 +810,14 @@ func (s *EngineService) Stop() (EngineSnapshot, error) {
 	if err := restoreSystemProxy(); err != nil && firstError == nil {
 		firstError = err
 	}
+	s.mu.Lock()
 	s.last = telemetrySample{}
 	if !s.compatRestarting {
 		s.dnsFallbackApplied = false
 		s.wfpFallbackApplied = false
 		s.compatibilityNotice = ""
 	}
+	s.mu.Unlock()
 	if ensureErr != nil && firstError == nil {
 		firstError = ensureErr
 	}

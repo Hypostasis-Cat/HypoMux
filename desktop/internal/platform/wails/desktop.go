@@ -17,18 +17,20 @@ var _ platform.DesktopHost = (*DesktopHost)(nil)
 // DesktopHost contains every direct Wails desktop dependency used by HypoMux.
 // Future services should depend on platform.DesktopHost instead of Wails types.
 type DesktopHost struct {
-	app         *application.App
-	window      application.Window
-	tray        *application.SystemTray
-	trayStatus  *application.MenuItem
-	onQuit      func()
-	closeToTray func() bool
-	quitting    atomic.Bool
-	cleanupOnce sync.Once
+	app          *application.App
+	window       application.Window
+	tray         *application.SystemTray
+	trayStatus   *application.MenuItem
+	onQuit       func()
+	closeToTray  func() bool
+	startSilent  bool
+	startupShown atomic.Bool
+	quitting     atomic.Bool
+	cleanupOnce  sync.Once
 }
 
-func NewDesktopHost(app *application.App, window application.Window, onQuit func(), closeToTray func() bool) *DesktopHost {
-	return &DesktopHost{app: app, window: window, onQuit: onQuit, closeToTray: closeToTray}
+func NewDesktopHost(app *application.App, window application.Window, startSilent bool, onQuit func(), closeToTray func() bool) *DesktopHost {
+	return &DesktopHost{app: app, window: window, startSilent: startSilent, onQuit: onQuit, closeToTray: closeToTray}
 }
 
 func (d *DesktopHost) ConfigureTray(icon []byte) {
@@ -114,6 +116,14 @@ func (d *DesktopHost) HideToTray() {
 }
 
 func (d *DesktopHost) Show() {
+	d.startupShown.Store(true)
+	d.window.Show().Focus()
+}
+
+func (d *DesktopHost) ShowStartup() {
+	if d.startSilent || !d.startupShown.CompareAndSwap(false, true) {
+		return
+	}
 	d.window.Show().Focus()
 }
 

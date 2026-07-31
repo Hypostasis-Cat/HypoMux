@@ -30,6 +30,7 @@ import {
   type AdapterView,
   type DiagnosticResult,
   type DiagnosticSnapshot,
+  withServiceTimeout,
 } from "../platform/services";
 import { useI18n } from "../i18n/i18n";
 
@@ -128,17 +129,30 @@ export function HealthPage() {
   }, [dispatchToast]);
 
   const load = useCallback(async () => {
+    const runtimeTask = withServiceTimeout(
+      appServices.engine.snapshot(),
+      10_000,
+      text("读取 Core 状态", "Loading Core status"),
+    ).then((engine) => {
+      setEngineRunning(engine.phase === "running" || engine.phase === "starting");
+    }).catch((error) => {
+      if (!isBrowserPreview()) {
+        notify(
+          text("Core 状态暂不可用", "Core status is temporarily unavailable"),
+          error instanceof Error ? error.message : String(error),
+          "warning",
+        );
+      }
+    });
     try {
-      const [nextAdapters, latest, settings, engine] = await Promise.all([
+      const [nextAdapters, latest, settings] = await withServiceTimeout(Promise.all([
         appServices.adapters.list(),
         appServices.diagnostics.latest(),
         appServices.settings.get(),
-        appServices.engine.snapshot(),
-      ]);
+      ]), 10_000, text("读取网络体检数据", "Loading network diagnostics"));
       setAdapters(nextAdapters ?? []);
       setSnapshot(latest);
       setHomeSettings({ mode: settings.mode, weighted: settings.weighted });
-      setEngineRunning(engine.phase === "running" || engine.phase === "starting");
       setPreview(false);
     } catch (error) {
       if (isBrowserPreview()) {
@@ -162,6 +176,7 @@ export function HealthPage() {
     } finally {
       setLoading(false);
     }
+    void runtimeTask;
   }, [notify, text]);
 
   useEffect(() => {

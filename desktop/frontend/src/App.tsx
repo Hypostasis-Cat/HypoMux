@@ -1,5 +1,5 @@
 import { FluentProvider } from "@fluentui/react-components";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import "./theme/material.tokens.css";
 import "./theme/semantic.tokens.css";
 import "./theme/typography.tokens.css";
@@ -18,6 +18,7 @@ import { RoutingPage } from "./pages/RoutingPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { AppearanceProvider, useAppearance } from "./theme/appearance.store";
 import { LanguageProvider } from "./i18n/i18n";
+import { desktopPlatform } from "./platform/desktop";
 
 function HypoMuxWindow() {
   const [page, setPage] = useState<AppPage>(() => {
@@ -33,6 +34,7 @@ function HypoMuxWindow() {
   });
   const [pageDirection, setPageDirection] = useState<"forward" | "backward">("forward");
   const [navigationRevision, setNavigationRevision] = useState(0);
+  const [startupRevealed, setStartupRevealed] = useState(false);
   const { fluentTheme } = useAppearance();
   const pageOrder: AppPage[] = [
     "home",
@@ -54,8 +56,23 @@ function HypoMuxWindow() {
     setPage(nextPage);
   };
 
+  useEffect(() => {
+    let firstFrame = 0;
+    let secondFrame = 0;
+    void desktopPlatform.showStartup().finally(() => {
+      firstFrame = window.requestAnimationFrame(() => {
+        secondFrame = window.requestAnimationFrame(() => setStartupRevealed(true));
+      });
+    });
+    return () => {
+      window.cancelAnimationFrame(firstFrame);
+      window.cancelAnimationFrame(secondFrame);
+    };
+  }, []);
+
   return (
     <FluentProvider theme={fluentTheme} className="hypomux-provider">
+      <div className={`startup-reveal${startupRevealed ? " is-ready" : ""}`} aria-hidden="true" />
       <WallpaperLayer />
       <AppShell
         page={page}

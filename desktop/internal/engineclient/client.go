@@ -50,8 +50,8 @@ type Event struct {
 
 type Client struct {
 	mu               sync.Mutex
-	startMu          sync.Mutex
-	writeMu          sync.Mutex
+	startGate        chan struct{}
+	writeGate        chan struct{}
 	session          *coreSession
 	pending          map[string]chan response
 	sequence         atomic.Uint64
@@ -81,6 +81,8 @@ func New() *Client {
 func newClient(normal, elevated coreLauncher) *Client {
 	return &Client{
 		pending:          map[string]chan response{},
+		startGate:        make(chan struct{}, 1),
+		writeGate:        make(chan struct{}, 1),
 		normalLauncher:   normal,
 		elevatedLauncher: elevated,
 		events:           make(chan Event, 64),
@@ -114,8 +116,12 @@ func (c *Client) EnsureElevated(ctx context.Context) (Hello, error) {
 }
 
 func (c *Client) ensure(ctx context.Context, requireElevated bool) (Hello, error) {
-	c.startMu.Lock()
-	defer c.startMu.Unlock()
+	select {
+	case c.startGate <- struct{}{}:
+		defer func() { <-c.startGate }()
+	case <-ctx.Done():
+		return Hello{}, fmt.Errorf("等待聚合核心启动事务超时：%w", ctx.Err())
+	}
 
 	c.mu.Lock()
 	active := c.session != nil
@@ -213,9 +219,31 @@ func (c *Client) Request(ctx context.Context, method string, params any, target 
 	c.pending[id] = reply
 	c.mu.Unlock()
 
-	c.writeMu.Lock()
-	_, writeErr := writer.Write(append(data, '\n'))
-	c.writeMu.Unlock()
+	select {
+	case c.writeGate <- struct{}{}:
+	case <-ctx.Done():
+		c.removePending(id)
+		return fmt.Errorf("等待发送核心请求超时：%w", ctx.Err())
+	}
+	writeResult := make(chan error, 1)
+	go func() {
+		_, writeErr := writer.Write(append(data, '\n'))
+		writeResult <- writeErr
+	}()
+	var writeErr error
+	select {
+	case writeErr = <-writeResult:
+		<-c.writeGate
+	case <-ctx.Done():
+		// Closing the transport interrupts a blocked named-pipe/stdio write and
+		// prevents one wedged Core session from freezing every future request.
+		c.killCurrent(fmt.Errorf("发送核心请求超时：%w", ctx.Err()))
+		// The old writer belongs to the killed session. Releasing the gate lets
+		// a newly negotiated session recover even if a broken OS transport never
+		// wakes the abandoned write goroutine.
+		<-c.writeGate
+		return fmt.Errorf("发送核心请求超时：%w", ctx.Err())
+	}
 	if writeErr != nil {
 		c.removePending(id)
 		return fmt.Errorf("发送核心请求失败：%w", writeErr)

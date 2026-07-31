@@ -114,6 +114,7 @@ export function SettingsPage({ onOpenBlockedDomains }: { onOpenBlockedDomains: (
   const [wfpStatus, setWfpStatus] = useState("");
   const [migration, setMigration] = useState<ConfigMigrationStatus | null>(null);
   const [migrationDialog, setMigrationDialog] = useState<"migrate" | "rollback" | null>(null);
+  const [migrationDialogOpen, setMigrationDialogOpen] = useState(false);
   const { settings: appearance, update: updateAppearance } = useAppearance();
   const { locale, setLocale, t } = useI18n();
   const text = (zh: string, en: string) => locale === "en" ? en : zh;
@@ -251,7 +252,7 @@ export function SettingsPage({ onOpenBlockedDomains }: { onOpenBlockedDomains: (
           "The original legacy configuration remains intact and was not deleted.",
         ),
       );
-      setMigrationDialog(null);
+      setMigrationDialogOpen(false);
     } catch (error) {
       notify(text("配置迁移操作失败", "Configuration migration failed"), String(error), "error");
     } finally {
@@ -557,14 +558,20 @@ export function SettingsPage({ onOpenBlockedDomains }: { onOpenBlockedDomains: (
             <div className="migration-actions">
               <Button
                 disabled={!migration?.legacy_found || saving}
-                onClick={() => setMigrationDialog("migrate")}
+                onClick={() => {
+                  setMigrationDialog("migrate");
+                  setMigrationDialogOpen(true);
+                }}
               >
                 {text("迁移旧版配置", "Migrate legacy settings")}
               </Button>
               <Button
                 appearance="subtle"
                 disabled={!migration?.applied || saving}
-                onClick={() => setMigrationDialog("rollback")}
+                onClick={() => {
+                  setMigrationDialog("rollback");
+                  setMigrationDialogOpen(true);
+                }}
               >
                 {text("回滚", "Rollback")}
               </Button>
@@ -573,7 +580,7 @@ export function SettingsPage({ onOpenBlockedDomains }: { onOpenBlockedDomains: (
         </GlassSurface>
       </div>
 
-      <Dialog open={migrationDialog !== null} onOpenChange={(_, data) => !data.open && setMigrationDialog(null)}>
+      <Dialog open={migrationDialogOpen} onOpenChange={(_, data) => !data.open && setMigrationDialogOpen(false)}>
         <DialogSurface>
           <DialogBody>
             <DialogTitle>{migrationDialog === "migrate"

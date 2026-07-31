@@ -17,6 +17,28 @@ body,
   overflow: hidden;
 }
 
+.startup-reveal {
+  position: fixed;
+  z-index: 10000;
+  inset: 0;
+  opacity: 1;
+  background:
+    radial-gradient(circle at 50% 46%, color-mix(in srgb, var(--hm-accent) 10%, transparent), transparent 42%),
+    var(--hm-window-base);
+  pointer-events: none;
+  transition: opacity var(--hm-motion-background) var(--hm-motion-ease);
+}
+
+.startup-reveal.is-ready {
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .startup-reveal {
+    transition-duration: 0ms;
+  }
+}
+
 body {
   min-width: 960px;
   min-height: 680px;

@@ -26,6 +26,7 @@ import {
   appServices,
   type ConnectionListSnapshot,
   type ConnectionView,
+  withServiceTimeout,
 } from "../platform/services";
 
 const emptySnapshot: ConnectionListSnapshot = {
@@ -71,7 +72,11 @@ export function ConnectionsPage() {
     requestActive.current = true;
     if (manual) setRefreshing(true);
     try {
-      const next = await appServices.engine.connections();
+      const next = await withServiceTimeout(
+        appServices.engine.connections(),
+        8_000,
+        text("读取活动连接", "Loading active connections"),
+      );
       setSnapshot({ ...next, connections: next.connections ?? [] });
     } catch (error) {
       dispatchToast(

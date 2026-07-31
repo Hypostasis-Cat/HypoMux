@@ -33,9 +33,11 @@ type ConnectionListSnapshot struct {
 }
 
 func (s *EngineService) Connections() (ConnectionListSnapshot, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
+	if phase := s.currentTransition(); phase != "" {
+		return ConnectionListSnapshot{
+			Phase: phase, SampledAt: time.Now(), Connections: []ConnectionView{},
+		}, nil
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if _, err := s.client.Ensure(ctx); err != nil {

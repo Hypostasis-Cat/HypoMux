@@ -5,6 +5,7 @@ import {
   type DiagnosticResult,
   type EngineSnapshot,
   type TunPreflightSnapshot,
+  withServiceTimeout,
 } from "../platform/services";
 import { desktopPlatform } from "../platform/desktop";
 
@@ -139,6 +140,7 @@ export function useEngineState(
   const mounted = useRef(true);
   const modeRef = useRef<EngineMode>(mode);
   const lastRuntimeFailure = useRef("");
+  const operationActive = useRef(false);
   const transition = phase === "starting" || phase === "stopping";
   modeRef.current = mode;
 
@@ -293,7 +295,8 @@ export function useEngineState(
   }, [onError, preview]);
 
   const toggleEngine = useCallback(async () => {
-    if (transition) return;
+    if (transition || operationActive.current) return;
+    operationActive.current = true;
     const stopping = phase === "running";
     setPhase(stopping ? "stopping" : "starting");
     try {
@@ -326,7 +329,11 @@ export function useEngineState(
           onError("检测到 Steam 正在运行，请重启 Steam 客户端以使多链路加速完全生效。");
         }
       }
-      const next = stopping ? await appServices.engine.stop() : await appServices.engine.start(mode);
+      const next = await withServiceTimeout(
+        stopping ? appServices.engine.stop() : appServices.engine.start(mode),
+        stopping ? 40_000 : 55_000,
+        stopping ? "Stopping aggregation" : "Starting aggregation",
+      );
       applySnapshot(next);
       await load(false);
     } catch (error) {
@@ -341,6 +348,8 @@ export function useEngineState(
       } else {
         onError(message, () => void toggleEngine());
       }
+    } finally {
+      operationActive.current = false;
     }
   }, [adapters, applySnapshot, load, mode, onError, onTunPreflight, phase, transition]);
 

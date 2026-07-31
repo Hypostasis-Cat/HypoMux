@@ -4,6 +4,7 @@ import (
 	"embed"
 	"log"
 	"os"
+	"time"
 
 	desktopplatform "github.com/Hypostasis-Cat/HypoMux/desktop/internal/platform"
 	"github.com/Hypostasis-Cat/HypoMux/desktop/internal/platform/wails"
@@ -30,6 +31,7 @@ func main() {
 		return
 	}
 	var mainWindow application.Window
+	startSilent := hasArgument(os.Args[1:], "--silent")
 	app := application.New(application.Options{
 		Name:        "HypoMux",
 		Description: "Multi-link network aggregation desktop client",
@@ -63,6 +65,7 @@ func main() {
 		MinWidth:        960,
 		MinHeight:       680,
 		Frameless:       true,
+		Hidden:          true,
 		InitialPosition: application.WindowCentered,
 		// Creating WebView2 as translucent can fail on some preview Windows /
 		// WebView2 combinations. Start transparent, then apply DWM material only
@@ -87,7 +90,7 @@ func main() {
 		settingsService, adapterService, blockedDomainService, supportLogs,
 	)
 	var diagnosticsService *services.DiagnosticsService
-	desktop := wails.NewDesktopHost(app, mainWindow, func() {
+	desktop := wails.NewDesktopHost(app, mainWindow, startSilent, func() {
 		if diagnosticsService != nil {
 			diagnosticsService.Shutdown()
 		}
@@ -110,12 +113,13 @@ func main() {
 	app.RegisterService(application.NewService(updaterService))
 	app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(_ *application.ApplicationEvent) {
 		desktop.SetWindowMaterial("mica")
-		for _, argument := range os.Args[1:] {
-			if argument == "--silent" {
-				desktop.HideToTray()
-				break
-			}
+		if startSilent {
+			desktop.HideToTray()
+			return
 		}
+		// The frontend normally reveals the fully rendered window. Keep a
+		// fallback so a JavaScript startup failure never leaves the app invisible.
+		time.AfterFunc(4*time.Second, desktop.ShowStartup)
 	})
 	desktop.ConfigureTray(trayIcon)
 	desktop.ConfigureCloseToTray()

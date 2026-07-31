@@ -129,6 +129,24 @@ const updaterMethod = (method: string) =>
 const engineMethod = (method: string) =>
   `github.com/Hypostasis-Cat/HypoMux/desktop/internal/services.EngineService.${method}`;
 
+export async function withServiceTimeout<T>(
+  request: Promise<T>,
+  timeoutMs: number,
+  operation: string,
+): Promise<T> {
+  let timer: number | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = window.setTimeout(() => {
+      reject(new Error(`${operation} (${Math.ceil(timeoutMs / 1000)}s)`));
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([request, timeout]);
+  } finally {
+    if (timer !== undefined) window.clearTimeout(timer);
+  }
+}
+
 // Pages never import generated Wails bindings directly. This facade keeps the
 // desktop transport replaceable and gives browser-only visual QA an explicit,
 // visibly disconnected fixture rather than pretending a real core is running.

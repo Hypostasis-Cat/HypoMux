@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"testing"
+	"time"
 )
 
 type failingLauncher struct {
@@ -19,6 +20,20 @@ type countingLauncher struct {
 	calls   *int
 	session *coreSession
 	err     error
+}
+
+type blockingLauncher struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (launcher blockingLauncher) Launch(context.Context, string) (*coreSession, error) {
+	select {
+	case launcher.started <- struct{}{}:
+	default:
+	}
+	<-launcher.release
+	return nil, errors.New("released blocking launcher")
 }
 
 func (launcher countingLauncher) Launch(context.Context, string) (*coreSession, error) {
@@ -39,6 +54,39 @@ func TestEnsureElevatedReturnsCancellationWithoutStartingCore(t *testing.T) {
 	}
 	if client.Hello().ProtocolVersion != 0 {
 		t.Fatal("a cancelled elevation must not leave a negotiated Core")
+	}
+}
+
+func TestEnsureWaitForConcurrentStartupHonoursContext(t *testing.T) {
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HYPOMUX_ENGINE_PATH", executable)
+	launcher := blockingLauncher{started: make(chan struct{}, 1), release: make(chan struct{})}
+	client := newClient(launcher, launcher)
+	firstDone := make(chan error, 1)
+	go func() {
+		_, firstErr := client.Ensure(context.Background())
+		firstDone <- firstErr
+	}()
+	select {
+	case <-launcher.started:
+	case <-time.After(time.Second):
+		t.Fatal("first startup did not reach the launcher")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
+	defer cancel()
+	_, err = client.EnsureElevated(ctx)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("concurrent startup wait did not honour its deadline: %v", err)
+	}
+	close(launcher.release)
+	select {
+	case <-firstDone:
+	case <-time.After(time.Second):
+		t.Fatal("first startup did not release the gate")
 	}
 }
 

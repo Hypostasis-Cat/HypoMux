@@ -44,6 +44,7 @@ export function HomePage({ onNavigate }: { onNavigate?: (page: AppPage) => void 
   const { locale, t } = useI18n();
   const text = (zh: string, en: string) => locale === "en" ? en : zh;
   const [preflightDialog, setPreflightDialog] = useState<TunPreflightSnapshot | null>(null);
+  const [preflightDialogOpen, setPreflightDialogOpen] = useState(false);
   const [showPreflightDetails, setShowPreflightDetails] = useState(false);
   const preflightResolver = useRef<((confirmed: boolean) => void) | null>(null);
   const toasterId = useId("hypomux-toaster");
@@ -69,12 +70,13 @@ export function HomePage({ onNavigate }: { onNavigate?: (page: AppPage) => void 
       preflightResolver.current = resolve;
       setShowPreflightDetails(false);
       setPreflightDialog(snapshot);
+      setPreflightDialogOpen(true);
     });
   }, []);
   const closeTunPreflight = useCallback((confirmed: boolean) => {
     const resolve = preflightResolver.current;
     preflightResolver.current = null;
-    setPreflightDialog(null);
+    setPreflightDialogOpen(false);
     resolve?.(confirmed);
   }, []);
   useEffect(() => () => preflightResolver.current?.(false), []);
@@ -178,7 +180,7 @@ export function HomePage({ onNavigate }: { onNavigate?: (page: AppPage) => void 
       />
 
       <Dialog
-        open={Boolean(preflightDialog)}
+        open={preflightDialogOpen}
         onOpenChange={(_, data) => !data.open && closeTunPreflight(false)}
       >
         <DialogSurface className="tun-preflight-dialog">

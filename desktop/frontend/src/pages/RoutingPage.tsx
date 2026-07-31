@@ -117,6 +117,7 @@ export function RoutingPage() {
   const [processSearch, setProcessSearch] = useState("");
   const [processLoading, setProcessLoading] = useState(false);
   const [importPreview, setImportPreview] = useState<RoutingSnapshot | null>(null);
+  const [importPreviewOpen, setImportPreviewOpen] = useState(false);
   const loaded = useRef(false);
   const validationSequence = useRef(new Map<string, number>());
   const toasterId = useId("routing-toaster");
@@ -291,6 +292,7 @@ export function RoutingPage() {
     try {
       const preview = await appServices.routing.importRules();
       setImportPreview(preview);
+      setImportPreviewOpen(true);
     } catch (error) {
       notify(text("导入失败", "Import failed"), error instanceof Error ? error.message : String(error), "error");
     }
@@ -302,7 +304,7 @@ export function RoutingPage() {
       const saved = await appServices.routing.save(importPreview.rules ?? []);
       setRules(makeDrafts(saved.rules ?? []));
       setOutbounds(saved.outbounds ?? []);
-      setImportPreview(null);
+      setImportPreviewOpen(false);
       setSelected(new Set());
       setPendingSave(false);
       notify(
@@ -569,7 +571,7 @@ export function RoutingPage() {
         </DialogSurface>
       </Dialog>
 
-      <Dialog open={Boolean(importPreview)} onOpenChange={(_, data) => !data.open && setImportPreview(null)}>
+      <Dialog open={importPreviewOpen} onOpenChange={(_, data) => !data.open && setImportPreviewOpen(false)}>
         <DialogSurface>
           <DialogBody>
             <DialogTitle>{text("替换当前分流规则？", "Replace current routing rules?")}</DialogTitle>
@@ -580,7 +582,7 @@ export function RoutingPage() {
               )}
             </DialogContent>
             <DialogActions>
-              <Button onClick={() => setImportPreview(null)}>{t("routing_dialog_cancel")}</Button>
+              <Button onClick={() => setImportPreviewOpen(false)}>{t("routing_dialog_cancel")}</Button>
               <Button appearance="primary" onClick={() => void confirmImport()}>{text("确认导入", "Import and replace")}</Button>
             </DialogActions>
           </DialogBody>
