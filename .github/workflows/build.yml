@@ -1,4 +1,4 @@
-name: Build Installer
+name: Build Desktop
 
 on:
   push:
@@ -7,389 +7,279 @@ on:
     branches: [main]
   workflow_dispatch:
     inputs:
-      sign_with_test_certificate:
-        description: 'Submit the generated installer to SignPath test-signing'
+      signing_mode:
+        description: Build/signing mode (publish requires selecting a v* tag)
         required: true
-        type: boolean
-        default: false
-      sign_with_production_certificate:
-        description: 'Test production signing from main without publishing a GitHub Release'
-        required: true
-        type: boolean
-        default: false
-      publish_release:
-        description: 'Production-sign the selected v* tag and publish or update its GitHub Release'
-        required: true
-        type: boolean
-        default: false
+        type: choice
+        options: [none, test, production, publish]
+        default: none
 
 concurrency:
-  group: build-installer-${{ github.event.pull_request.number || github.ref }}
+  group: desktop-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  actions: read
+  contents: read
+
+env:
+  WAILS_VERSION: v3.0.0-alpha2.119
+  INSTALLER_PATH: desktop/bin/HypoMux-amd64-installer.exe
 
 jobs:
   build:
-    name: Build HypoMux
+    name: Validate and package Wails desktop
     runs-on: windows-2025
-    permissions:
-      actions: read
-      contents: read
-    env:
-      NUITKA_CACHE_DIR: ${{ github.workspace }}\.nuitka-cache
 
     steps:
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Validate manual signing mode
+      - name: Validate release options
         if: github.event_name == 'workflow_dispatch'
         shell: pwsh
         run: |
-          $useTestCertificate = "${{ inputs.sign_with_test_certificate }}" -eq "true"
-          $useProductionCertificate = "${{ inputs.sign_with_production_certificate }}" -eq "true"
-          $publishRelease = "${{ inputs.publish_release }}" -eq "true"
-
-          if (($useTestCertificate -and $useProductionCertificate) -or
-              ($useTestCertificate -and $publishRelease) -or
-              ($useProductionCertificate -and $publishRelease)) {
-            throw "Choose only one signing mode: test signing, production-signing test, or publish release."
+          if ("${{ inputs.signing_mode }}" -eq "production" -and
+              "${{ github.ref }}" -ne "refs/heads/main") {
+            throw "Production-signing tests must be started from main."
           }
-          if ($useProductionCertificate -and "${{ github.ref }}" -ne "refs/heads/main") {
-            throw "Production-signing tests must be started from the main branch."
+          if ("${{ inputs.signing_mode }}" -eq "publish" -and
+              "${{ github.ref }}" -notlike "refs/tags/v*") {
+            throw "Publishing must be started from a v* tag."
           }
-          if ($publishRelease -and "${{ github.ref }}" -notlike "refs/tags/v*") {
-            throw "Release publishing must be started from a v* tag."
-          }
-          if ($useTestCertificate -and "${{ github.ref }}" -like "refs/tags/*") {
+          if ("${{ inputs.signing_mode }}" -eq "test" -and
+              "${{ github.ref }}" -like "refs/tags/*") {
             throw "Test signing must not be started from a release tag."
           }
 
-      - name: Set up Python 3.13.14
-        uses: actions/setup-python@v6
+      - name: Set up Go
+        uses: actions/setup-go@v7
         with:
-          python-version: '3.13.14'
-          cache: pip
+          go-version-file: engine/go.mod
           cache-dependency-path: |
-            requirements.txt
-            requirements-build.txt
+            engine/go.sum
+            desktop/go.sum
 
-      - name: Install dependencies
-        run: |
-          python -m pip install --disable-pip-version-check -r requirements.txt -r requirements-build.txt
-
-      - name: Run fast validation
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: |
-          python -m pytest -q
-          python -m compileall -q main.py proxy_worker.py ui utils
-
-      - name: Restore Nuitka compilation cache
-        uses: actions/cache@v4
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
         with:
-          path: ${{ env.NUITKA_CACHE_DIR }}
-          key: nuitka-${{ runner.os }}-${{ runner.arch }}-py3.13.14-${{ hashFiles('requirements.txt', 'requirements-build.txt') }}-${{ github.sha }}
-          restore-keys: |
-            nuitka-${{ runner.os }}-${{ runner.arch }}-py3.13.14-${{ hashFiles('requirements.txt', 'requirements-build.txt') }}-
+          version: 10
+          run_install: false
 
-      - name: Restore Rust compilation cache
-        uses: actions/cache@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
         with:
-          path: hypomux-diagnostic/target
-          key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('hypomux-diagnostic/Cargo.toml', 'hypomux-diagnostic/Cargo.lock', 'hypomux-diagnostic/src/**') }}
-          restore-keys: |
-            cargo-${{ runner.os }}-${{ runner.arch }}-
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: desktop/frontend/pnpm-lock.yaml
 
-      - name: Get version string
-        id: version
+      - name: Install Wails and NSIS
         shell: pwsh
         run: |
-          if ("${{ github.ref_type }}" -eq "tag") {
-            $tag = "${{ github.ref_name }}"
-            $display = $tag -replace '^v', ''
-            if ($display -notmatch '^(?<numeric>\d+\.\d+\.\d+)(?:[-.+][0-9A-Za-z.-]+)?$') {
-              throw "Release tag must use vMAJOR.MINOR.PATCH format, optionally followed by a prerelease/build suffix."
-            }
-            $numeric = $Matches.numeric
-            "VERSION=$tag" >> $env:GITHUB_OUTPUT
-            "DISPLAY_VERSION=$display" >> $env:GITHUB_OUTPUT
-            "INNO_VERSION=$numeric" >> $env:GITHUB_OUTPUT
-          } else {
-            $shortSha = git rev-parse --short HEAD
-            "VERSION=dev-$shortSha" >> $env:GITHUB_OUTPUT
-            "DISPLAY_VERSION=dev-$shortSha" >> $env:GITHUB_OUTPUT
-            "INNO_VERSION=0.0.0" >> $env:GITHUB_OUTPUT
+          go install "github.com/wailsapp/wails/v3/cmd/wails3@${env:WAILS_VERSION}"
+          choco install nsis --yes --no-progress
+
+          $nsisDirectory = Join-Path ${env:ProgramFiles(x86)} 'NSIS'
+          $makensis = Join-Path $nsisDirectory 'makensis.exe'
+          if (-not (Test-Path -LiteralPath $makensis -PathType Leaf)) {
+            throw "NSIS compiler was not found at $makensis."
+          }
+          & $makensis /VERSION
+          if ($LASTEXITCODE -ne 0) {
+            throw "makensis version check failed with exit code $LASTEXITCODE."
+          }
+          Add-Content -LiteralPath $env:GITHUB_PATH -Value $nsisDirectory -Encoding utf8
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value "MAKENSIS=$makensis" -Encoding utf8
+
+      - name: Install frontend dependencies
+        shell: pwsh
+        run: pnpm --dir desktop/frontend install --frozen-lockfile
+
+      - name: Generate Wails frontend bindings
+        working-directory: desktop
+        shell: pwsh
+        run: wails3 generate bindings -clean=true -ts -i
+
+      - name: Build frontend assets for Go validation
+        shell: pwsh
+        run: pnpm --dir desktop/frontend build
+
+      - name: Validate Go modules
+        shell: pwsh
+        run: |
+          go -C engine mod verify
+          go -C desktop mod verify
+          go -C engine test ./...
+          go -C desktop test ./...
+          go -C engine vet ./...
+          go -C desktop vet ./...
+
+      - name: Verify Go formatting
+        shell: pwsh
+        run: |
+          $goFiles = @(
+            git ls-files -- '*.go' |
+              Where-Object { $_ -like 'engine/*' -or $_ -like 'desktop/*' }
+          )
+          if ($goFiles.Count -eq 0) {
+            throw "No tracked Go source files were found."
           }
 
-      # 优化点：添加 shell: pwsh，并直接使用 --output-filename 让 Nuitka 输出 HypoMux.exe
-      # 同时嵌入 Windows 版本资源，使 EXE 属性/任务管理器显示规范的产品名与版本号
-      - name: Build with Nuitka
-        shell: pwsh
-        run: |
-          # 让运行中的应用版本与 Git tag 一致，供 GitHub Release 更新检查比较。
-          Set-Content -Path "hypomux-version.txt" -Value "${{ steps.version.outputs.DISPLAY_VERSION }}" -NoNewline -Encoding ascii
-          # 仅打包运行时资源（含程序图标与 SignPath 图标），避免把 README 截图等 assets 素材带入安装包。
-          python -m nuitka `
-            --standalone `
-            --enable-plugin=pyside6 `
-            --windows-console-mode=disable `
-            --windows-icon-from-ico=support\icon.ico `
-            --windows-uac-admin `
-            --company-name=Hypostasis-Cat `
-            --product-name=HypoMux `
-            --file-description=HypoMux `
-            --file-version=${{ steps.version.outputs.INNO_VERSION }} `
-            --product-version=${{ steps.version.outputs.INNO_VERSION }} `
-            --include-data-file=hypomux-version.txt=hypomux-version.txt `
-            --copyright="Copyright (C) 2026 Hypostasis-Cat" `
-            --include-package-data=qfluentwidgets `
-            --include-data-dir=support=support `
-            --remove-output `
-            --output-dir=dist `
-            --output-filename=HypoMux `
-            --report=dist\nuitka-compilation-report.xml `
-            --assume-yes-for-downloads `
-            main.py
-
-          if (-not (Test-Path "dist\main.dist")) {
-            $distDir = Get-ChildItem -Path dist -Directory -Filter "*.dist" | Select-Object -First 1
-            if ($null -eq $distDir) {
-              Get-ChildItem -Path dist -Recurse -ErrorAction SilentlyContinue
-              throw "Nuitka did not produce a standalone .dist directory."
-            }
-            Move-Item -Path $distDir.FullName -Destination "dist\main.dist"
+          $unformatted = @(gofmt -l @goFiles)
+          if ($LASTEXITCODE -ne 0) {
+            throw "gofmt failed with exit code $LASTEXITCODE."
+          }
+          if ($unformatted.Count -gt 0) {
+            $unformatted | ForEach-Object { Write-Error "Not gofmt-formatted: $_" }
+            exit 1
           }
 
-          if (-not (Test-Path "dist\main.dist\HypoMux.exe")) {
-            Get-ChildItem -Path "dist\main.dist" -Recurse -Filter "*.exe" -ErrorAction SilentlyContinue
-            throw "Expected dist\main.dist\HypoMux.exe was not found."
+      - name: Build and package Wails desktop
+        working-directory: desktop
+        shell: pwsh
+        run: wails3 task windows:package
+
+      - name: Stage unsigned executables for SignPath
+        if: github.event_name == 'workflow_dispatch' && inputs.signing_mode != 'none'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path signing-input | Out-Null
+          Copy-Item desktop\bin\hypomux.exe signing-input\hypomux-unsigned.exe -Force
+          Copy-Item desktop\bin\hypomux-engine.exe signing-input\hypomux-engine-unsigned.exe -Force
+
+      - name: Upload desktop executable for SignPath
+        if: github.event_name == 'workflow_dispatch' && inputs.signing_mode != 'none'
+        id: upload-desktop
+        uses: actions/upload-artifact@v7
+        with:
+          path: signing-input/hypomux-unsigned.exe
+          archive: false
+          if-no-files-found: error
+
+      - name: Sign desktop executable
+        if: github.event_name == 'workflow_dispatch' && inputs.signing_mode != 'none'
+        uses: signpath/github-action-submit-signing-request@v2
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: 4463263d-e740-4262-ae16-7eac788453ea
+          project-slug: HypoMux
+          signing-policy-slug: ${{ inputs.signing_mode == 'test' && 'test-signing' || 'release-signing' }}
+          github-artifact-id: ${{ steps.upload-desktop.outputs.artifact-id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: signed-desktop
+          skip-decompress: true
+
+      - name: Upload Core executable for SignPath
+        if: github.event_name == 'workflow_dispatch' && inputs.signing_mode != 'none'
+        id: upload-core
+        uses: actions/upload-artifact@v7
+        with:
+          path: signing-input/hypomux-engine-unsigned.exe
+          archive: false
+          if-no-files-found: error
+
+      - name: Sign Core executable
+        if: github.event_name == 'workflow_dispatch' && inputs.signing_mode != 'none'
+        uses: signpath/github-action-submit-signing-request@v2
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: 4463263d-e740-4262-ae16-7eac788453ea
+          project-slug: HypoMux
+          signing-policy-slug: ${{ inputs.signing_mode == 'test' && 'test-signing' || 'release-signing' }}
+          github-artifact-id: ${{ steps.upload-core.outputs.artifact-id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: signed-core
+          skip-decompress: true
+
+      - name: Repackage signed executables
+        if: github.event_name == 'workflow_dispatch' && inputs.signing_mode != 'none'
+        shell: pwsh
+        run: |
+          Copy-Item signed-desktop\hypomux-unsigned.exe desktop\bin\hypomux.exe -Force
+          Copy-Item signed-core\hypomux-engine-unsigned.exe desktop\bin\hypomux-engine.exe -Force
+          Push-Location desktop\build\windows\nsis
+          & $env:MAKENSIS "-DARG_WAILS_AMD64_BINARY=..\..\..\bin\hypomux.exe" project.nsi
+          if ($LASTEXITCODE -ne 0) {
+            throw "Signed installer repackaging failed with exit code $LASTEXITCODE."
           }
+          Pop-Location
 
-      - name: Upload Nuitka compilation report
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: Nuitka-Report-${{ steps.version.outputs.VERSION }}
-          path: dist/nuitka-compilation-report.xml
-          if-no-files-found: ignore
-          retention-days: 14
-
-      # diagnostic.exe 由仓库内的 Rust 源码构建；不能复用仓库中已有的旧二进制。
-      - name: Build diagnostic core
+      - name: Stage unsigned installer for SignPath
+        if: github.event_name == 'workflow_dispatch' && inputs.signing_mode != 'none'
         shell: pwsh
-        run: |
-          cargo build --manifest-path hypomux-diagnostic\Cargo.toml --release
-          Copy-Item -Path "hypomux-diagnostic\target\release\diagnostic.exe" -Destination "diagnostic.exe" -Force
+        run: Copy-Item "${{ env.INSTALLER_PATH }}" signing-input\HypoMux-amd64-installer-unsigned.exe -Force
 
-      # 从 main 手动测试生产签名，或从 v* tag 手动发布正式版本。
-      # 两种情况均使用 SignPath 生产策略，并须在 UI 人工批准每个请求。
-      - name: Upload HypoMux executable for SignPath production signing
-        if: github.event_name == 'workflow_dispatch' && ((inputs.sign_with_production_certificate && github.ref == 'refs/heads/main') || (inputs.publish_release && startsWith(github.ref, 'refs/tags/v')))
-        id: upload-hypomux-production-executable
+      - name: Upload installer for SignPath
+        if: github.event_name == 'workflow_dispatch' && inputs.signing_mode != 'none'
+        id: upload-installer
         uses: actions/upload-artifact@v7
         with:
-          path: dist/main.dist/HypoMux.exe
+          path: signing-input/HypoMux-amd64-installer-unsigned.exe
           archive: false
           if-no-files-found: error
 
-      - name: Sign HypoMux executable with SignPath production certificate
-        if: github.event_name == 'workflow_dispatch' && ((inputs.sign_with_production_certificate && github.ref == 'refs/heads/main') || (inputs.publish_release && startsWith(github.ref, 'refs/tags/v')))
+      - name: Sign installer
+        if: github.event_name == 'workflow_dispatch' && inputs.signing_mode != 'none'
         uses: signpath/github-action-submit-signing-request@v2
         with:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
           organization-id: 4463263d-e740-4262-ae16-7eac788453ea
           project-slug: HypoMux
-          signing-policy-slug: release-signing
-          github-artifact-id: ${{ steps.upload-hypomux-production-executable.outputs.artifact-id }}
+          signing-policy-slug: ${{ inputs.signing_mode == 'test' && 'test-signing' || 'release-signing' }}
+          github-artifact-id: ${{ steps.upload-installer.outputs.artifact-id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           wait-for-completion: true
           wait-for-completion-timeout-in-seconds: 3600
-          output-artifact-directory: signed-hypomux-production
-          skip-decompress: true
-
-      # diagnostic.exe is built from hypomux-diagnostic/src in this repository;
-      # it is a HypoMux-owned artifact, unlike bundled upstream binaries.
-      - name: Upload diagnostic executable for SignPath production signing
-        if: github.event_name == 'workflow_dispatch' && ((inputs.sign_with_production_certificate && github.ref == 'refs/heads/main') || (inputs.publish_release && startsWith(github.ref, 'refs/tags/v')))
-        id: upload-diagnostic-production-executable
-        uses: actions/upload-artifact@v7
-        with:
-          path: diagnostic.exe
-          archive: false
-          if-no-files-found: error
-
-      - name: Sign diagnostic executable with SignPath production certificate
-        if: github.event_name == 'workflow_dispatch' && ((inputs.sign_with_production_certificate && github.ref == 'refs/heads/main') || (inputs.publish_release && startsWith(github.ref, 'refs/tags/v')))
-        uses: signpath/github-action-submit-signing-request@v2
-        with:
-          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
-          organization-id: 4463263d-e740-4262-ae16-7eac788453ea
-          project-slug: HypoMux
-          signing-policy-slug: release-signing
-          github-artifact-id: ${{ steps.upload-diagnostic-production-executable.outputs.artifact-id }}
-          wait-for-completion: true
-          wait-for-completion-timeout-in-seconds: 3600
-          output-artifact-directory: signed-diagnostic-production
-          skip-decompress: true
-
-      - name: Use production-signed HypoMux executables
-        if: github.event_name == 'workflow_dispatch' && ((inputs.sign_with_production_certificate && github.ref == 'refs/heads/main') || (inputs.publish_release && startsWith(github.ref, 'refs/tags/v')))
-        shell: pwsh
-        run: |
-          Copy-Item -Path "signed-hypomux-production\HypoMux.exe" -Destination "dist\main.dist\HypoMux.exe" -Force
-          Copy-Item -Path "signed-diagnostic-production\diagnostic.exe" -Destination "diagnostic.exe" -Force
-
-      # SignPath 的默认 PE 构件配置一次只签一个 PE 文件。先签我们自己构建的程序，
-      # 再将签名后的文件封装进 Inno Setup 安装包，避免安装后主程序仍是未签名状态。
-      - name: Upload HypoMux executable for SignPath test signing
-        if: github.event_name == 'workflow_dispatch' && inputs.sign_with_test_certificate && !inputs.sign_with_production_certificate && !inputs.publish_release && !startsWith(github.ref, 'refs/tags/v')
-        id: upload-hypomux-executable
-        uses: actions/upload-artifact@v7
-        with:
-          path: dist/main.dist/HypoMux.exe
-          archive: false
-          if-no-files-found: error
-
-      - name: Sign HypoMux executable with SignPath test certificate
-        if: github.event_name == 'workflow_dispatch' && inputs.sign_with_test_certificate && !inputs.sign_with_production_certificate && !inputs.publish_release && !startsWith(github.ref, 'refs/tags/v')
-        uses: signpath/github-action-submit-signing-request@v2
-        with:
-          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
-          organization-id: 4463263d-e740-4262-ae16-7eac788453ea
-          project-slug: HypoMux
-          signing-policy-slug: test-signing
-          github-artifact-id: ${{ steps.upload-hypomux-executable.outputs.artifact-id }}
-          wait-for-completion: true
-          output-artifact-directory: signed-hypomux
-          skip-decompress: true
-
-      - name: Upload diagnostic executable for SignPath test signing
-        if: github.event_name == 'workflow_dispatch' && inputs.sign_with_test_certificate && !inputs.sign_with_production_certificate && !inputs.publish_release && !startsWith(github.ref, 'refs/tags/v')
-        id: upload-diagnostic-executable
-        uses: actions/upload-artifact@v7
-        with:
-          path: diagnostic.exe
-          archive: false
-          if-no-files-found: error
-
-      - name: Sign diagnostic executable with SignPath test certificate
-        if: github.event_name == 'workflow_dispatch' && inputs.sign_with_test_certificate && !inputs.sign_with_production_certificate && !inputs.publish_release && !startsWith(github.ref, 'refs/tags/v')
-        uses: signpath/github-action-submit-signing-request@v2
-        with:
-          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
-          organization-id: 4463263d-e740-4262-ae16-7eac788453ea
-          project-slug: HypoMux
-          signing-policy-slug: test-signing
-          github-artifact-id: ${{ steps.upload-diagnostic-executable.outputs.artifact-id }}
-          wait-for-completion: true
-          output-artifact-directory: signed-diagnostic
-          skip-decompress: true
-
-      - name: Use test-signed HypoMux executables
-        if: github.event_name == 'workflow_dispatch' && inputs.sign_with_test_certificate && !inputs.sign_with_production_certificate && !inputs.publish_release && !startsWith(github.ref, 'refs/tags/v')
-        shell: pwsh
-        run: |
-          Copy-Item -Path "signed-hypomux\HypoMux.exe" -Destination "dist\main.dist\HypoMux.exe" -Force
-          Copy-Item -Path "signed-diagnostic\diagnostic.exe" -Destination "diagnostic.exe" -Force
-
-      # 呼叫 Windows 虚拟机自带的 Inno Setup 编译器打包安装包
-      # 通过 /D 注入版本号：DISPLAY_VERSION 作显示/文件名，INNO_VERSION 作纯数字文件版本
-      - name: Compile Installer with Inno Setup
-        shell: pwsh
-        run: |
-          iscc /DMyAppVersion="${{ steps.version.outputs.DISPLAY_VERSION }}" /DMyAppVersionInfo="${{ steps.version.outputs.INNO_VERSION }}" setup.iss
-
-      - name: Upload installer for SignPath production signing
-        if: github.event_name == 'workflow_dispatch' && ((inputs.sign_with_production_certificate && github.ref == 'refs/heads/main') || (inputs.publish_release && startsWith(github.ref, 'refs/tags/v')))
-        id: upload-production-installer
-        uses: actions/upload-artifact@v7
-        with:
-          path: Output/HypoMux_Setup_${{ steps.version.outputs.DISPLAY_VERSION }}.exe
-          archive: false
-          if-no-files-found: error
-
-      - name: Sign installer with SignPath production certificate
-        if: github.event_name == 'workflow_dispatch' && ((inputs.sign_with_production_certificate && github.ref == 'refs/heads/main') || (inputs.publish_release && startsWith(github.ref, 'refs/tags/v')))
-        uses: signpath/github-action-submit-signing-request@v2
-        with:
-          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
-          organization-id: 4463263d-e740-4262-ae16-7eac788453ea
-          project-slug: HypoMux
-          signing-policy-slug: release-signing
-          github-artifact-id: ${{ steps.upload-production-installer.outputs.artifact-id }}
-          wait-for-completion: true
-          wait-for-completion-timeout-in-seconds: 3600
-          output-artifact-directory: signed-installer-production
-          skip-decompress: true
-
-      - name: Use production-signed installer
-        if: github.event_name == 'workflow_dispatch' && ((inputs.sign_with_production_certificate && github.ref == 'refs/heads/main') || (inputs.publish_release && startsWith(github.ref, 'refs/tags/v')))
-        shell: pwsh
-        run: |
-          Copy-Item -Path "signed-installer-production\HypoMux_Setup_${{ steps.version.outputs.DISPLAY_VERSION }}.exe" -Destination "Output\HypoMux_Setup_${{ steps.version.outputs.DISPLAY_VERSION }}.exe" -Force
-
-      # 收集打包出来的安装包 (.exe)，作为 Actions 临时工件上传
-      - name: Upload artifact
-        if: github.event_name != 'workflow_dispatch' || !inputs.sign_with_test_certificate || inputs.sign_with_production_certificate || inputs.publish_release || startsWith(github.ref, 'refs/tags/v')
-        uses: actions/upload-artifact@v5
-        with:
-          name: HypoMux-Installer-${{ steps.version.outputs.VERSION }}
-          path: Output/*.exe 
-          if-no-files-found: error
-
-      # 最后签外层安装包。测试签名只能从手动触发的工作流提交，防止测试证书产物进入正式 Release。
-      # archive: false 让 SignPath 的 PE 构件配置直接接收安装包，而不是 GitHub 包装的 ZIP。
-      - name: Upload installer for SignPath test signing
-        if: github.event_name == 'workflow_dispatch' && inputs.sign_with_test_certificate && !inputs.sign_with_production_certificate && !inputs.publish_release && !startsWith(github.ref, 'refs/tags/v')
-        id: upload-unsigned-installer
-        uses: actions/upload-artifact@v7
-        with:
-          path: Output/HypoMux_Setup_${{ steps.version.outputs.DISPLAY_VERSION }}.exe
-          archive: false
-          if-no-files-found: error
-
-      - name: Sign installer with SignPath test certificate
-        if: github.event_name == 'workflow_dispatch' && inputs.sign_with_test_certificate && !inputs.sign_with_production_certificate && !inputs.publish_release && !startsWith(github.ref, 'refs/tags/v')
-        id: signpath-test
-        uses: signpath/github-action-submit-signing-request@v2
-        with:
-          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
-          organization-id: 4463263d-e740-4262-ae16-7eac788453ea
-          project-slug: HypoMux
-          signing-policy-slug: test-signing
-          github-artifact-id: ${{ steps.upload-unsigned-installer.outputs.artifact-id }}
-          wait-for-completion: true
           output-artifact-directory: signed-installer
           skip-decompress: true
 
-      - name: Upload SignPath test-signed installer
-        if: github.event_name == 'workflow_dispatch' && inputs.sign_with_test_certificate && !inputs.sign_with_production_certificate && !inputs.publish_release && !startsWith(github.ref, 'refs/tags/v')
+      - name: Use signed installer
+        if: github.event_name == 'workflow_dispatch' && inputs.signing_mode != 'none'
+        shell: pwsh
+        run: Copy-Item signed-installer\HypoMux-amd64-installer-unsigned.exe "${{ env.INSTALLER_PATH }}" -Force
+
+      - name: Upload build artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: HypoMux-Test-Signed-${{ steps.version.outputs.VERSION }}
-          path: signed-installer/*.exe
+          name: HypoMux-Windows-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            desktop/bin/hypomux.exe
+            desktop/bin/hypomux-engine.exe
+            ${{ env.INSTALLER_PATH }}
           if-no-files-found: error
 
   release:
-    name: Upload Installer to Release
+    name: Publish release installer
     needs: build
-    if: github.event_name == 'workflow_dispatch' && inputs.publish_release && startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name == 'workflow_dispatch' && inputs.signing_mode == 'publish' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
+      actions: read
       contents: write
 
     steps:
-      - name: Download installer
-        uses: actions/download-artifact@v5
+      - name: Download build artifacts
+        uses: actions/download-artifact@v8
         with:
-          name: HypoMux-Installer-${{ github.ref_name }}
-          path: ./output_dir
+          name: HypoMux-Windows-${{ github.sha }}-${{ github.run_attempt }}
+          path: artifacts
 
-      # 若用户已在网页手动发布同标签 Release，action 只补充安装包，
-      # 不传 name/body/generate_release_notes，以保留用户填写的标题和更新日志。
+      - name: Stage legacy-updater-compatible installer name
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          cp artifacts/HypoMux-amd64-installer.exe "artifacts/HypoMux_Setup_${version}.exe"
+
       - name: Upload installer to GitHub Release
         uses: softprops/action-gh-release@v3
         with:
-          files: ./output_dir/*.exe
+          files: |
+            artifacts/HypoMux-amd64-installer.exe
+            artifacts/HypoMux_Setup_*.exe
           fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

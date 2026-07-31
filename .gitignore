@@ -1,21 +1,66 @@
-venv/
-.venv/
-__pycache__/
-*.pyc
-.pytest_cache/
-.mypy_cache/
-build/
-dist/
-Output/
-*.egg-info
+# Operating system and IDE metadata
+.DS_Store
+Thumbs.db
+Desktop.ini
+.vs/
+**/.vs/
+.vscode/
+.idea/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Logs, temporary files and local environment overrides
 *.log
 *.tmp
-NetBooster.exe
-nuitka-crash-report.xml
+*.bak
+*.swp
+.env
+.env.*
+!.env.example
 
-# Local/generated runtime config. The app persists user config under ~/.hypomux.
-config.json
+# Python tooling caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
 
-# Rust 诊断内核：忽略编译中间产物，但保留根目录待打包的 diagnostic.exe
-hypomux-diagnostic/target/
+# Go caches and generated test artifacts
+/.cache/
+/.go-cache/
+/.go-cache-*/
+/.go-mod-cache/
+/.go-mod-cache-*/
+*.test
+*.prof
+*.syso
+coverage.out
 
+# Node, Vite and package-manager output
+node_modules/
+**/node_modules/
+/.pnpm-store/
+/.npm/
+/.vite/
+/dist/
+**/frontend/dist/
+*.tsbuildinfo
+.eslintcache
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Wails generated output.
+# Keep desktop/build: it contains source-controlled platform configs.
+/desktop/.task/
+/desktop/bin/
+/desktop/build/windows/nsis/MicrosoftEdgeWebview2Setup.exe
+
+# Local dependency/tool sandboxes
+/.appdata/
+/.tools/
+
+# Runtime configuration is stored in the user's profile.
+/config.json

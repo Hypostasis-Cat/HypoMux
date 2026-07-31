@@ -1,0 +1,97 @@
+:root {
+  --hm-panel-opacity: 0.68;
+  --hm-panel-blur: 22px;
+  --hm-panel-saturation: 118%;
+  --hm-border-brightness: 0.52;
+  --hm-shadow-strength: 0.24;
+  --hm-radius: 10px;
+  --hm-bg-overlay: 0.26;
+  --hm-bg-blur: 0px;
+  --hm-bg-brightness: 100%;
+  --hm-bg-saturation: 94%;
+  --hm-bg-contrast: 100%;
+  --hm-bg-scale: cover;
+  --hm-bg-position: center;
+  --hm-gradient-background: linear-gradient(135deg, #cbd8e2 0%, #e9e3da 52%, #c7d9e4 100%);
+  --hm-solid-background: #dce4ea;
+}
+
+[data-appearance="light"] {
+  --hm-window-base: #dce4e8;
+  --hm-system-background:
+    radial-gradient(circle at 78% 5%, rgba(122, 167, 194, 0.32), transparent 34%),
+    radial-gradient(circle at 14% 92%, rgba(196, 165, 137, 0.22), transparent 38%),
+    linear-gradient(135deg, #d6e0e5 0%, #e8e7e2 51%, #cedde5 100%);
+  --hm-window-tint: rgba(239, 243, 244, 0.46);
+  --hm-shell: rgba(231, 237, 240, 0.48);
+  --hm-surface-rgb: 241, 245, 246;
+  --hm-surface-secondary-rgb: 232, 238, 241;
+  --hm-inner-highlight: rgba(255, 255, 255, calc(0.48 * var(--hm-border-brightness)));
+  --hm-outer-border: rgba(47, 64, 75, 0.075);
+  --hm-shadow-colour: 39, 55, 65;
+}
+
+[data-appearance="light"][data-background-source="local"] {
+  --hm-window-tint: rgba(231, 237, 241, 0.2);
+  --hm-shell: rgba(226, 233, 238, 0.3);
+  --hm-surface-rgb: 247, 249, 250;
+  --hm-surface-secondary-rgb: 239, 243, 246;
+  --hm-inner-highlight: rgba(255, 255, 255, calc(0.72 * var(--hm-border-brightness)));
+  --hm-outer-border: rgba(32, 48, 59, 0.13);
+  --hm-shadow-colour: 25, 40, 51;
+}
+
+[data-appearance="dark"] {
+  --hm-window-base: #0e1820;
+  --hm-system-background:
+    radial-gradient(circle at 82% 4%, rgba(39, 91, 121, 0.34), transparent 34%),
+    radial-gradient(circle at 12% 92%, rgba(89, 66, 107, 0.2), transparent 36%),
+    linear-gradient(140deg, #101b23 0%, #16242d 52%, #0d1921 100%);
+  --hm-window-tint: rgba(17, 29, 38, 0.5);
+  --hm-shell: rgba(15, 27, 35, 0.52);
+  --hm-surface-rgb: 28, 42, 52;
+  --hm-surface-secondary-rgb: 20, 33, 42;
+  --hm-inner-highlight: rgba(255, 255, 255, calc(0.14 * var(--hm-border-brightness)));
+  --hm-outer-border: rgba(229, 239, 246, 0.085);
+  --hm-shadow-colour: 2, 8, 12;
+}
+
+.glass-surface {
+  position: relative;
+  border: 1px solid var(--hm-outer-border);
+  border-radius: var(--hm-radius);
+  background: rgba(var(--hm-surface-rgb), var(--hm-panel-opacity));
+  box-shadow:
+    inset 0 1px 0 var(--hm-inner-highlight),
+    0 14px 38px rgba(var(--hm-shadow-colour), calc(0.18 * var(--hm-shadow-strength)));
+  backdrop-filter: blur(var(--hm-panel-blur)) saturate(var(--hm-panel-saturation));
+}
+
+.network-adapter {
+  backdrop-filter: blur(var(--hm-panel-blur)) saturate(var(--hm-panel-saturation));
+}
+
+.glass-surface[data-tone="secondary"] {
+  background: rgba(var(--hm-surface-secondary-rgb), calc(var(--hm-panel-opacity) * 0.9));
+  box-shadow:
+    inset 0 1px 0 var(--hm-inner-highlight),
+    0 8px 24px rgba(var(--hm-shadow-colour), calc(0.12 * var(--hm-shadow-strength)));
+}
+
+[data-panel-material="solid"] .glass-surface,
+[data-panel-material="solid"] .network-adapter {
+  backdrop-filter: none;
+}
+
+[data-panel-material="solid"] .glass-surface,
+[data-panel-material="solid"] .network-adapter {
+  box-shadow: none;
+}
+
+[data-appearance="light"][data-background-source="local"][data-panel-material="blur"] .glass-surface,
+[data-appearance="light"][data-background-source="local"][data-panel-material="blur"] .network-adapter {
+  backdrop-filter:
+    blur(calc(var(--hm-panel-blur) + 3px))
+    saturate(88%)
+    brightness(1.035);
+}

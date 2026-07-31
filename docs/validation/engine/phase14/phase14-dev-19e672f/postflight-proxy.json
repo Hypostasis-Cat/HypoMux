@@ -1,0 +1,253 @@
+{
+  "schema_version": 1,
+  "kind": "hypomux.strict_go.read_only",
+  "started_at": "2026-07-30T09:04:48.289221Z",
+  "host": {
+    "os": "windows",
+    "release": "11",
+    "machine": "amd64"
+  },
+  "engine": {
+    "executable": "C:\\Program Files\\HypoMux\\bin\\hypomux-engine.exe",
+    "size": 9425712,
+    "sha256": "e107ed422f6fde84fe93fdaf0261795ae493e0637352826f0ffc2888bf6cd613",
+    "authenticode": {
+      "status": "UnknownError",
+      "status_message": "A certificate chain processed, but terminated in a root certificate which is not trusted by the trust provider",
+      "signature_type": "Authenticode",
+      "signer_subject": "CN=Test certificate for 'HypoMux [OSS]'",
+      "signer_issuer": "CN=Test certificate for 'HypoMux [OSS]'",
+      "signer_thumbprint": "F7408E1AF9B519E5D9D97D1862775020861B673A"
+    },
+    "signature_acceptance": "pinned-test",
+    "hello": {
+      "engine": "hypomux-engine",
+      "engine_version": "dev-19e672f",
+      "commit": "19e672fc77599a04e1f33ed60f148dfc71b24797",
+      "protocol_version": 1,
+      "transport": "stdio-jsonl",
+      "capabilities": [
+        "engine.hello",
+        "engine.status",
+        "engine.start",
+        "engine.stop",
+        "engine.telemetry",
+        "tun.activate",
+        "tun.status",
+        "tun.deactivate",
+        "dns.resolve",
+        "dns.status",
+        "health.check",
+        "diagnostic.run",
+        "host.shutdown"
+      ],
+      "modes": [
+        "proxy",
+        "tun_tcp_pool"
+      ],
+      "mode_features": {
+        "proxy": [
+          "socks5_connect",
+          "http_connect",
+          "source_bound_dns",
+          "ipv6_egress",
+          "adaptive_health",
+          "domain_quarantine"
+        ],
+        "tun_tcp_pool": [
+          "tcp_connect",
+          "udp_associate",
+          "ipv6_egress",
+          "adaptive_health",
+          "managed_tun_lifecycle"
+        ]
+      },
+      "os": "windows",
+      "arch": "amd64",
+      "pid": 11456,
+      "elevated": true,
+      "started_at": "2026-07-30T09:04:49.5137936Z"
+    },
+    "status": {
+      "engine": {
+        "state": "stopped",
+        "sequence": 0,
+        "state_changed_at": "2026-07-30T09:04:49.5137936Z"
+      },
+      "host_uptime_ms": 1
+    },
+    "health": {
+      "ok": true,
+      "state": "stopped",
+      "host_uptime_ms": 1
+    },
+    "tun_status": {
+      "state": "stopped"
+    },
+    "stop_action": "exited"
+  },
+  "network_modes_started": false,
+  "checks": [
+    {
+      "name": "engine_executable_identified",
+      "passed": true,
+      "required": true,
+      "detail": {
+        "size": 9425712,
+        "sha256": "e107ed422f6fde84fe93fdaf0261795ae493e0637352826f0ffc2888bf6cd613"
+      }
+    },
+    {
+      "name": "windows_residue_audit_available",
+      "passed": true,
+      "required": true,
+      "detail": "available"
+    },
+    {
+      "name": "no_preexisting_hypomux_tun_residue",
+      "passed": true,
+      "required": true,
+      "detail": {
+        "routes": 0,
+        "devices": 0
+      }
+    },
+    {
+      "name": "no_preexisting_hypomux_owned_processes",
+      "passed": true,
+      "required": true,
+      "detail": []
+    },
+    {
+      "name": "engine_authenticode_valid",
+      "passed": false,
+      "required": false,
+      "detail": {
+        "status": "UnknownError",
+        "status_message": "A certificate chain processed, but terminated in a root certificate which is not trusted by the trust provider",
+        "signature_type": "Authenticode",
+        "signer_subject": "CN=Test certificate for 'HypoMux [OSS]'",
+        "signer_issuer": "CN=Test certificate for 'HypoMux [OSS]'",
+        "signer_thumbprint": "F7408E1AF9B519E5D9D97D1862775020861B673A"
+      }
+    },
+    {
+      "name": "engine_signature_policy",
+      "passed": true,
+      "required": true,
+      "detail": {
+        "acceptance": "pinned-test",
+        "signer_thumbprint": "F7408E1AF9B519E5D9D97D1862775020861B673A",
+        "allowed_test_signer_thumbprints": [
+          "F7408E1AF9B519E5D9D97D1862775020861B673A"
+        ]
+      }
+    },
+    {
+      "name": "protocol_v1",
+      "passed": true,
+      "required": true,
+      "detail": 1
+    },
+    {
+      "name": "engine_elevated",
+      "passed": true,
+      "required": true,
+      "detail": true
+    },
+    {
+      "name": "proxy_strict_contract",
+      "passed": true,
+      "required": true,
+      "detail": {
+        "modes": [],
+        "methods": [],
+        "features": []
+      }
+    },
+    {
+      "name": "tun_tcp_pool_strict_contract",
+      "passed": true,
+      "required": true,
+      "detail": {
+        "modes": [],
+        "methods": [],
+        "features": []
+      }
+    },
+    {
+      "name": "engine_initially_stopped",
+      "passed": true,
+      "required": true,
+      "detail": "stopped"
+    },
+    {
+      "name": "tun_initially_stopped",
+      "passed": true,
+      "required": true,
+      "detail": "stopped"
+    },
+    {
+      "name": "health_check",
+      "passed": true,
+      "required": true,
+      "detail": {
+        "ok": true,
+        "state": "stopped",
+        "host_uptime_ms": 1
+      }
+    },
+    {
+      "name": "engine_graceful_stop",
+      "passed": true,
+      "required": true,
+      "detail": "exited"
+    },
+    {
+      "name": "windows_postflight_audit_available",
+      "passed": true,
+      "required": true,
+      "detail": "available"
+    },
+    {
+      "name": "no_postflight_hypomux_tun_residue",
+      "passed": true,
+      "required": true,
+      "detail": {
+        "routes": 0,
+        "devices": 0
+      }
+    },
+    {
+      "name": "no_postflight_hypomux_owned_processes",
+      "passed": true,
+      "required": true,
+      "detail": []
+    },
+    {
+      "name": "qualification_engine_process_reaped",
+      "passed": true,
+      "required": true,
+      "detail": {
+        "pid": 11456,
+        "lingering": false
+      }
+    }
+  ],
+  "snapshots": {
+    "before": {
+      "supported": true,
+      "routes": [],
+      "devices": [],
+      "processes": []
+    },
+    "after": {
+      "supported": true,
+      "routes": [],
+      "devices": [],
+      "processes": []
+    }
+  },
+  "finished_at": "2026-07-30T09:04:50.399491Z",
+  "passed": true
+}

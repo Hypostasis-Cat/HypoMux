@@ -1,0 +1,142 @@
+{
+  "protocol": 1,
+  "transport": "stdio-jsonl",
+  "max_message_bytes": 1048576,
+  "compatibility": "additive",
+  "states": [
+    "stopped",
+    "starting",
+    "running",
+    "degraded",
+    "stopping",
+    "failed"
+  ],
+  "methods": [
+    {
+      "name": "engine.hello",
+      "idempotency": "read_only",
+      "privilege": "none",
+      "cancellation": "not_applicable"
+    },
+    {
+      "name": "engine.status",
+      "idempotency": "read_only",
+      "privilege": "none",
+      "cancellation": "not_applicable"
+    },
+    {
+      "name": "engine.start",
+      "idempotency": "state_guarded",
+      "privilege": "mode_dependent",
+      "cancellation": "not_supported_in_v1"
+    },
+    {
+      "name": "engine.stop",
+      "idempotency": "safe_retry",
+      "privilege": "mode_dependent",
+      "cancellation": "host_shutdown"
+    },
+    {
+      "name": "engine.telemetry",
+      "idempotency": "read_only",
+      "privilege": "none",
+      "cancellation": "not_applicable"
+    },
+    {
+      "name": "tun.activate",
+      "idempotency": "state_guarded",
+      "privilege": "administrator",
+      "cancellation": "caller_deadline_and_host_context"
+    },
+    {
+      "name": "tun.status",
+      "idempotency": "read_only",
+      "privilege": "none",
+      "cancellation": "not_applicable"
+    },
+    {
+      "name": "tun.deactivate",
+      "idempotency": "safe_retry",
+      "privilege": "administrator",
+      "cancellation": "caller_deadline_and_host_context"
+    },
+    {
+      "name": "dns.resolve",
+      "idempotency": "read_only_probe",
+      "privilege": "none",
+      "cancellation": "caller_deadline_and_host_context"
+    },
+    {
+      "name": "dns.status",
+      "idempotency": "read_only",
+      "privilege": "none",
+      "cancellation": "not_applicable"
+    },
+    {
+      "name": "health.check",
+      "idempotency": "read_only",
+      "privilege": "none",
+      "cancellation": "not_applicable"
+    },
+    {
+      "name": "diagnostic.run",
+      "idempotency": "read_only_probe",
+      "privilege": "none",
+      "cancellation": "host_context_only"
+    },
+    {
+      "name": "wfp.inspect",
+      "idempotency": "safe_retry",
+      "privilege": "administrator_for_repair",
+      "cancellation": "caller_deadline_and_host_context"
+    },
+    {
+      "name": "host.shutdown",
+      "idempotency": "process_terminal",
+      "privilege": "none",
+      "cancellation": "not_applicable"
+    }
+  ],
+  "events": [
+    {
+      "name": "engine.state_changed",
+      "delivery": "lossless_ordered",
+      "coalescible": false
+    },
+    {
+      "name": "dns.fallback_required",
+      "delivery": "lossless_ordered_once_per_adapter",
+      "coalescible": false
+    },
+    {
+      "name": "tun.state_changed",
+      "delivery": "lossless_ordered",
+      "coalescible": false
+    },
+    {
+      "name": "log.record",
+      "delivery": "best_effort_ordered",
+      "coalescible": false
+    },
+    {
+      "name": "host.exiting",
+      "delivery": "lossless_ordered",
+      "coalescible": false
+    }
+  ],
+  "error_codes": [
+    "invalid_json",
+    "unsupported_protocol",
+    "invalid_request",
+    "method_not_found",
+    "invalid_params",
+    "invalid_state",
+    "unsupported_mode",
+    "start_failed",
+    "stop_failed",
+    "dns_failed",
+    "tun_failed",
+    "wfp_unavailable",
+    "elevation_required"
+  ]
+}

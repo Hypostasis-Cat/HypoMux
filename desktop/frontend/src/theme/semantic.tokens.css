@@ -1,0 +1,32 @@
+:root {
+  --hm-accent: #1677d2;
+  --hm-accent-soft: color-mix(in srgb, var(--hm-accent) 14%, transparent);
+  --hm-accent-muted: color-mix(in srgb, var(--hm-accent) 28%, transparent);
+  --hm-accent-strong: color-mix(in srgb, var(--hm-accent) 86%, white);
+  --hm-success: #4f8c70;
+  --hm-warning: #a66c28;
+  --hm-danger: #b84d4d;
+  --hm-focus-ring: color-mix(in srgb, var(--hm-accent) 68%, transparent);
+}
+
+[data-appearance="light"] {
+  --hm-text-primary: #0f1d26;
+  --hm-text-secondary: #293c47;
+  --hm-text-tertiary: #506671;
+  --hm-text-on-accent: #ffffff;
+  --hm-row-hover: rgba(255, 255, 255, 0.3);
+}
+
+[data-appearance="light"][data-background-source="local"] {
+  --hm-text-primary: #06131b;
+  --hm-text-secondary: #102630;
+  --hm-text-tertiary: #203844;
+}
+
+[data-appearance="dark"] {
+  --hm-text-primary: #e7eef3;
+  --hm-text-secondary: #c1ced6;
+  --hm-text-tertiary: #94a6b1;
+  --hm-text-on-accent: #ffffff;
+  --hm-row-hover: rgba(255, 255, 255, 0.045);
+}

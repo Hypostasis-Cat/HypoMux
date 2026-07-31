@@ -1,0 +1,62 @@
+name: Validate Go Engine
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'engine/**'
+      - 'protocol/**'
+      - '.github/workflows/go-engine.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'engine/**'
+      - 'protocol/**'
+      - '.github/workflows/go-engine.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: windows-2025
+    defaults:
+      run:
+        working-directory: engine
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: engine/go.mod
+          cache-dependency-path: engine/go.sum
+
+      - name: Verify formatting
+        shell: pwsh
+        run: |
+          $unformatted = @(gofmt -l .)
+          if ($unformatted.Count -gt 0) {
+            $unformatted | ForEach-Object { Write-Error "gofmt required: $_" }
+            exit 1
+          }
+
+      - name: Test and vet
+        shell: pwsh
+        run: |
+          go mod verify
+          go test ./...
+          go vet ./...
+
+      - name: Scan known vulnerabilities
+        shell: pwsh
+        run: |
+          go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...
+
+      - name: Verify release build
+        shell: pwsh
+        run: |
+          go build -trimpath -o "$env:RUNNER_TEMP\hypomux-engine.exe" .\cmd\hypomux-engine

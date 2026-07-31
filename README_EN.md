@@ -1,31 +1,32 @@
 # HypoMux
 
 <p align="center">
-  <img src="support/icon.ico" alt="HypoMux Icon" width="128" height="128"><br><br>
+  <img src="support/icon.ico" alt="HypoMux icon" width="128" height="128"><br><br>
   <a href="README.md">简体中文</a> | <a href="README_EN.md">English</a>
 </p>
 
----
-
-#  English
-
 <p align="center">
-  <img src="https://img.shields.io/badge/Python-3.10%2B-blue?style=flat-square&logo=python" alt="Python">
-  <img src="https://img.shields.io/badge/Framework-PySide6-green?style=flat-square&logo=qt" alt="PySide6">
-  <img src="https://img.shields.io/badge/UI--Library-QFluentWidgets-orange?style=flat-square" alt="QFluentWidgets">
-  <img src="https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011-brightgreen?style=flat-square&logo=windows" alt="Windows">
-  <img src="https://img.shields.io/badge/Architecture-Dual--Protocol%20L3%20Binding-red?style=flat-square" alt="Architecture">
+  <img src="https://img.shields.io/badge/Version-2.5.0-0078d4?style=flat-square" alt="Version 2.5.0">
+  <img src="https://img.shields.io/badge/Core-Go-00ADD8?style=flat-square&logo=go&logoColor=white" alt="Go">
+  <img src="https://img.shields.io/badge/Desktop-Wails%20v3-CB3837?style=flat-square" alt="Wails v3">
+  <img src="https://img.shields.io/badge/UI-React%20%2B%20Fluent%20UI-61DAFB?style=flat-square&logo=react&logoColor=black" alt="React and Fluent UI">
+  <img src="https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011-0078D4?style=flat-square&logo=windows" alt="Windows 10 and 11">
 </p>
 
-HypoMux v2.0 is a multi-network-adapter bandwidth aggregation and download acceleration tool built for Windows. It is designed for multi-connection download workloads where traffic can be distributed across several active network interfaces.
+HypoMux is an open-source multi-adapter aggregation and split-routing utility for Windows. It distributes multi-connection download workloads across active network adapters, allowing Ethernet, Wi-Fi, mobile hotspots, and USB tethering to carry traffic at the same time.
 
-Version 2.0 adds a **Virtual NIC mode** alongside the original system proxy mode, giving HypoMux a more stable way to capture and split traffic across a wider range of applications. It also introduces **split tunneling rules**, so selected processes can be sent through the multi-NIC aggregation path or kept on a direct/bypass route for low-latency use cases.
+HypoMux balances independent connections; it does not split one TCP connection across multiple paths. It works best with highly concurrent workloads such as Steam updates, IDM downloads, game launchers, and large browser downloads. A single-connection transfer remains limited by that connection.
 
-In system proxy mode, HypoMux uses L3 socket binding (IP_UNICAST_IF) with a dual-protocol local proxy engine. In Virtual NIC mode, HypoMux temporarily adjusts Windows proxy and routing-related settings, sends accelerated traffic into the local core, and lets non-accelerated traffic pass directly through advanced split tunneling rules. This makes it useful for high-concurrency scenarios such as Steam updates, IDM large-file downloads, WeGame downloads, and browser-based transfers.
+## What's new in 2.5.0
 
-In simpler terms, as long as your computer is connected to multiple networks at the same time (for example, **being plugged into a school or home Ethernet cable while also connected to Wi-Fi, or using USB tethering from a phone**), HypoMux can distribute multi-threaded download connections across those networks. Single-connection downloads are still limited by the behavior of the download source.
+Version 2.5.0 completes the desktop migration from the former Python/Qt and transitional WPF implementations to **Go + Wails v3 + React + Fluent UI**. The desktop runs as a standard user, while an independent Go Core/Windows service owns privileged TUN, WFP, routing, DNS, and network-recovery operations.
 
----
+- **All-Go backend**: Desktop services and the network engine now use Go, with no Python, Qt, asyncio, or .NET/WPF runtime dependency.
+- **Safer TUN lifecycle**: Adapters, DNS, the privileged service, Wintun, sing-box, WFP, and foreign TUNs are checked before startup. Failures are blocked before network changes or rolled back automatically.
+- **Complete split routing**: Route by process, domain and subdomain, destination IP/CIDR, aggregation, direct connection, or a specific adapter. Multi-value legacy rules are expanded and preserved.
+- **Third-party proxy compatibility**: Common local proxies and game accelerators are bypassed by executable path or listener PID to reduce loops and proxy-on-proxy failures.
+- **Reliable recovery**: Windows system-proxy state is snapshotted and restored atomically. Recovery is retried after failed startup, abnormal exit, or the next launch.
+- **New personalization and diagnostics**: Fluent UI, light/dark themes, Mica/material effects, custom backgrounds, adapter health checks, live connections, support logs, and update checks.
 
 ## Sponsors
 
@@ -51,32 +52,34 @@ HypoMux does not collect, sell, or upload personal data or telemetry. The progra
 
 ---
 
-## ⬇️ Download
+## Download
 
-> **Windows installer:** [Download the latest release](https://github.com/Hypostasis-Cat/HypoMux/releases/latest)
+> **Windows installer:** [Download the latest release from GitHub](https://github.com/Hypostasis-Cat/HypoMux/releases/latest)
 >
-> On the latest release page, download `HypoMux_Setup_*.exe` from the **Assets** section.
+> Download `HypoMux_Setup_*.exe` from the latest release's **Assets** section. Official releases are built by GitHub Actions and signed through SignPath.
 
----
-
-##  UI Preview
+## UI preview
 
 <p align="center">
-  <img src="assets/ui_idle_2.0.png" alt="HypoMux 2.0 UI Canvas" width="850" style="border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
+  <img src="assets/ui_idle_2.0.png" alt="HypoMux desktop UI" width="850" style="border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
 </p>
 
----
+## Core features
 
-##  Key Technical Features
+- **System Proxy mode**: Starts local HTTP/HTTPS and SOCKS5 services and takes ownership of the Windows system proxy. It is lightweight and works with proxy-aware downloaders, launchers, and browsers.
+- **Virtual NIC mode**: Uses Wintun and sing-box to capture a broader range of system traffic, with WFP, DNS, and routing rules for precise split tunneling.
+- **Per-connection adapter scheduling**: Selects an outbound adapter for each new connection, combining source-address binding with `IP_UNICAST_IF` to pin sockets to physical links.
+- **Advanced routing rules**: Route by process, domain, IP/CIDR, aggregation, direct connection, Ethernet, Wi-Fi, or one specific adapter.
+- **Per-adapter blocked-domain handling**: Remembers domains unavailable through a particular link so later connections are not assigned to it again.
+- **Live telemetry and diagnostics**: Shows adapter throughput, connection counts, and combined speed, with packet-loss, latency, jitter, DNS, gateway, and source-binding checks.
+- **Least-privilege architecture**: The UI does not stay elevated. After a normal installation, only the independent Core service has the network-management permissions it needs.
 
-* **Virtual NIC Mode**: New in v2.0, TUN-based traffic capture improves acceleration stability across more application types.
-* **Advanced Split Tunneling**: Route by process, domain (including subdomains), or destination IP/CIDR through direct, single-NIC, or multi-NIC aggregation paths.
-*  **Seamless Dual-Protocol Interception**: Starts asynchronous SOCKS5 and local HTTP forwarding services, then applies WinINet system proxy settings when acceleration begins.
-*  **Fail-Safe Proxy Restore**: Manual stop, startup failure, and window close paths all attempt to restore the system proxy cleanly.
-*  **5-Column Telemetry Matrix Grid**: Dynamically displays precise multi-path load distribution: [ Select | Adapter Alias | IPv4 Address | Real-time Speed (MB/s) | Active Connections ].
-* ️ **Pure Async Groundwork**: All PowerShell network querying, background thread interface telemetry, and async DNS processing run entirely inside a detached event loop away from the main Qt UI thread.
+### Choosing a mode
 
----
+| Mode | Coverage | Privileges and compatibility | Recommended use |
+| --- | --- | --- | --- |
+| System Proxy | Applications that honor the Windows system proxy | Lightweight; no virtual adapter | IDM, browsers, Steam, and other proxy-aware downloads |
+| Virtual NIC | Broader TCP/UDP and non-proxy-aware traffic | Requires the Core service and Wintun/WFP; cannot share the default route with another TUN | Game-launcher downloads, WeGame, advanced split routing, and broader capture |
 
 ## 📢 Important Notice & Compliance Disclaimer
 
@@ -87,107 +90,107 @@ Before using HypoMux, please be aware of the following behavior:
 1. **System Changes**: While active, HypoMux may dynamically adjust Windows system proxy and/or routing-related settings so traffic can enter the acceleration core.
 2. **Local Proxying**: Accelerated traffic is processed locally through the secure core for splitting, proxying, and multiplexing.
 3. **Automatic Restoration**: Modified system proxy and network settings are restored automatically when the tool is stopped or uninstalled.
-4. **Gaming & Split Tunneling**: HypoMux v2.0 introduces advanced split tunneling. For latency-sensitive applications such as competitive online games, users are strongly advised to add them to the **Direct/Bypass routing list** to preserve raw network latency, or suspend HypoMux during gameplay.
+4. **Gaming & Split Tunneling**: HypoMux provides advanced split tunneling. For latency-sensitive applications such as competitive online games, users are strongly advised to add them to the **Direct/Bypass routing list** to preserve raw network latency, or suspend HypoMux during gameplay.
 
 ---
 
-##  How to Use
+## Quick start
 
-1. **Hardware Setup**: Hook up your PC to multiple unique lines (e.g., **Broadband Lan Wire + Mobile Phone 5G Tethering Hotspot**).
-2. **Choose a Mode**: Use system proxy mode for lightweight proxy-aware acceleration, or Virtual NIC mode when you want broader and more stable traffic capture.
-3. **Select Interfaces**: Start HypoMux, wait for the background scan worker to finish, and **check the adapters you wish to use**.
-4. **Configure Split Rules**: For games, voice chat, meetings, or other latency-sensitive apps, add their processes to the direct/bypass rules.
-5. **Engage Acceleration**: Click **Boost**. Once the status switches to running, start your downloads or game updates.
-6. **Graceful Teardown**: Click **Stop** or close HypoMux when done; modified network settings are restored automatically.
+1. Connect the PC to at least two working networks, such as Ethernet + Wi-Fi or broadband + USB/mobile tethering.
+2. Start HypoMux, refresh the Home page, and select the active adapters to include in the pool.
+3. Run Network Health first and verify that every link has a valid IPv4 address, gateway, DNS, and working source binding.
+4. Choose System Proxy or Virtual NIC mode. Add games, voice chat, and meeting applications to direct rules when latency matters.
+5. Enable the aggregation engine, then start the download. If Steam was already running, restart it when prompted so the proxy change takes full effect.
+6. Stop aggregation or exit normally when finished. HypoMux restores the system network settings it owned.
 
----
+## Compatibility with third-party proxies and game accelerators
 
-##  Supported Applications
+Version 2.5.0 adds dedicated bypass handling for common local proxies and game accelerators, including process families used by UU, Xunyou, Leigod, Qiyou, Clash/Mihomo, v2rayN, Hiddify, Shadowsocks, and Proxifier. Active products are detected by full executable path where possible, while local system-proxy listeners are resolved back to their owning PID instead of relying only on mutable process names.
 
-Any multi-connection/multi-threaded client acknowledging standard Windows WinINet internet proxy server layouts will immediately benefit from concurrent aggregation:
+The following boundaries still apply:
 
-* **Download Software**: **IDM (Internet Download Manager)**, Thunder (迅雷), Baidu NetDisk Client, etc.
-* **Gaming Platforms**: **Steam Client Download Core**, Epic Games Launcher, EA App, Xbox Application.
-* **Browsers**: Large file downloads via Chrome, Edge, Firefox, etc.
+- If a third-party product only exposes a local HTTP/SOCKS proxy, HypoMux Virtual NIC mode attempts to bypass that product's process and listener to avoid a proxy loop.
+- Two applications should not compete for the Windows system-proxy switch. Disable the other application's system-proxy takeover before enabling HypoMux System Proxy mode.
+- If another product creates a TUN/VPN adapter and owns the default route, close it before starting HypoMux Virtual NIC mode. HypoMux detects this conflict and blocks startup before changing the system network.
+- A proxy or accelerator update may change its process layout. Check HypoMux's compatibility notice and local support log before choosing another mode or closing the conflicting product.
 
----
-
-##  Technical Architecture
-
-HypoMux's core distribution mechanism combines **Layer-4 application-level scheduling**, **Layer-3 physical socket binding**, and the v2.0 **Virtual NIC split-tunneling capture path**. System proxy mode covers applications that honor WinINet/system proxy settings, while Virtual NIC mode extends coverage through a local network sidecar and advanced routing rules.
+## How it works
 
 ```text
-[Multi-threaded Application Traffic (Steam / IDM)]
-               │
-               ▼ WinINet Auto-Interception
-    Windows System Proxy / Virtual NIC Ingress
-   (http/https -> 10801 | socks -> 10800 | TUN)
-               │
-               ▼
-  ProxyWorker Core Engine (Asyncio inside QThread)
-               │
-               ▼ Round-Robin Connection Distribution
-   L3 Physical Layer Bidirectional Socket Binding
-   ├── socket.bind((nic1_ip, 0)) + IP_UNICAST_IF ──► Physical NIC 1 ──┐
-   ├── socket.bind((nic2_ip, 0)) + IP_UNICAST_IF ──► Physical NIC 2 ─┼─► Aggregated Throughput
-   └── socket.bind((nic3_ip, 0)) + IP_UNICAST_IF ──► Physical NIC 3 ──┘
+Application connections
+   │
+   ├─ System Proxy: HTTP/HTTPS 10801 · SOCKS5 10800
+   └─ Virtual NIC: Wintun + sing-box + WFP/DNS/routing rules
+                              │
+                       hypomux-engine.exe
+                              │
+                 Aggregation / direct / adapter route
+                    ┌─────────┼─────────┐
+                  NIC 1     NIC 2     NIC 3
+                    └─────────┴─────────┘
+                       Combined throughput
 ```
 
-1. **Dual Ingress Modes**: System proxy mode writes the local proxy chain to `HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings`: `http=127.0.0.1:10801;https=127.0.0.1:10801;socks=127.0.0.1:10800`; Virtual NIC mode uses TUN capture and advanced split rules to cover more application traffic.
-2. **Low-Level Dual Binding**: When the distribution engine receives a TCP connection from a download client, the scheduler pins the local NIC IPv4 address via `socket.bind()` and sends `setsockopt(socket.IPPROTO_IP, 31, ...)` to the system kernel to force-lock the physical interface index, stripping traffic away from the default gateway to achieve true physical multi-channel concurrency.
-3. **Advanced Split Tunneling**: v2.0 can route processes through either the aggregation path or a direct path. Download workloads can use stacked bandwidth, while latency-sensitive apps can stay direct.
+System Proxy mode writes the local proxy chain to the current user's Windows Internet Settings. Virtual NIC mode asks the independent privileged service to create and manage TUN, WFP, DNS, and route resources. For every new connection, the Go engine chooses an outbound path and combines local source-address binding with the Windows interface index to keep different connections on their selected physical adapters.
 
----
+## Supported scenarios and technical boundaries
 
-##  Real-World Multi-NIC Benchmarks
+- Suitable for multi-connection download workloads from IDM, Steam, Epic Games Launcher, EA App, Xbox, WeGame, Chrome, Edge, Firefox, and similar applications.
+- Multi-adapter aggregation is **connection-level load distribution**. It cannot make one TCP connection exceed its original path speed, nor does it turn several providers into one bonded link with a single public IP.
+- Aggregation targets throughput, not lower latency. Use direct rules or stop aggregation for competitive games, voice chat, and video meetings.
+- HypoMux does not read game memory, inject DLLs, or modify private game-protocol packets. Platform and anti-cheat policies vary, so users must still follow the applicable terms of service.
+- Use HypoMux only on devices and network connections you own or are authorized to manage. It is not intended to bypass unauthorized access controls, security measures, or platform restrictions.
 
-### Case A: IDM Multi-threaded Large File Aggregation (Ubuntu ISO Mirror)
-> 190 active data channels handled simultaneously. Each adapter absorbs around **35~39 MB/s** evenly, pushing combined network throughput past **110.93 MB/s**!
+## Real-world results
 
-<p align="center">
-  <img src="assets/screenshot_2.0_idm.png" alt="IDM Bandwidth Stacking" width="850" style="border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
-</p>
+The following images are real multi-adapter, multi-connection tests captured with earlier builds. They demonstrate connection-level aggregation; actual results depend on each link, the download source, concurrency, storage, and CPU, and are not a performance guarantee.
 
-### Case B: Steam High-Throughput Game Installation (*Hogwarts Legacy*)
-> Flawlessly matching SteamService's multi-connection architecture, running lines concurrently to max out at **98.26 MB/s** combined downloading speed.
+### IDM multi-threaded download
 
 <p align="center">
-  <img src="assets/screenshot_steam.png" alt="Steam Gigabit Acceleration" width="850" style="border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
+  <img src="assets/screenshot_2.0_idm.png" alt="IDM multi-adapter download" width="850" style="border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
 </p>
 
-### Case C: WeGame Download Speed Showcase
-> With v2.0 Virtual NIC mode and split tunneling, HypoMux can cover more game launcher download scenarios, allowing WeGame to benefit from higher aggregate throughput in multi-network environments.
+### Steam game update
 
 <p align="center">
-  <img src="assets/screenshot_2.0_wegame.png" alt="WeGame Download Speed Showcase" width="850" style="border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
+  <img src="assets/screenshot_steam.png" alt="Steam multi-adapter update" width="850" style="border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
 </p>
 
-### Windows Task Manager Throughput Panels
-> Three unique hardware interfaces (Ethernet, Ethernet 2, Wi-Fi) pushing data at **~300 Mbps** apiece at the exact same second.
+### WeGame game download
 
 <p align="center">
-  <img src="assets/screenshot_taskmgr.png" alt="Task Manager Throughput Matrix" width="400" style="border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
+  <img src="assets/screenshot_2.0_wegame.png" alt="WeGame multi-adapter download" width="850" style="border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
 </p>
 
----
+### Multiple adapters in Windows Task Manager
 
-##  Building the Executable (Nuitka)
+<p align="center">
+  <img src="assets/screenshot_taskmgr.png" alt="Multi-adapter throughput in Task Manager" width="400" style="border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
+</p>
+
+## Development and building
+
+Recommended environment: Windows 10/11, Go 1.26, Node.js 22, pnpm 10, and Wails v3 CLI `v3.0.0-alpha2.119`. NSIS is also required to package the installer. The repository's `bin/` directory must contain the official runtime files `sing-box.exe`, `wintun.dll`, and `libcronet.dll`.
 
 ```powershell
-venv\Scripts\activate
-pip install nuitka zstandard PySide6-Fluent-Widgets
-nuitka --standalone --onefile --enable-plugin=pyside6 --windows-console-mode=disable --windows-uac-admin --windows-icon-from-ico=support/icon.ico --include-package-data=qfluentwidgets --include-data-dir=support=support --python-flag=-O --lto=yes main.py
+go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-alpha2.119
+pnpm --dir desktop/frontend install --frozen-lockfile
+Push-Location desktop
+wails3 generate bindings -clean=true -ts -i
+Pop-Location
+
+go -C engine test ./...
+go -C desktop test ./...
+pnpm --dir desktop/frontend build
+
+Set-Location desktop
+wails3 dev
+# Or build the NSIS installer
+wails3 task windows:package
 ```
 
----
-
-## ️ Security & Technical Boundaries
-
-1. **Anti-Cheat Notice**: This tool operates at the standard application-layer proxy and network socket binding level. **It does not touch game memory, intercept or modify any game private network packets, or inject any DLL drivers**.
-2. **Single-Thread Connection Limitation**: Multi-NIC concurrent aggregation is fundamentally **multi-connection load balancing**. If your download task is the extremely rare single-thread TCP connection, no multi-NIC aggregation tool can accelerate it.
-3. **Low-Latency Gaming Advisory**: Multi-NIC distribution is optimized for download throughput. Before playing latency-sensitive competitive online games (e.g. *CS2*, *Valorant*, *GTA Online*), add the related process to the **Direct/Bypass routing list**, or click **Stop** so the PC returns to its normal network path.
-
----
+See [`.github/workflows/build.yml`](.github/workflows/build.yml) for the complete release pipeline.
 
 ##  Acknowledgments & Contributors
 

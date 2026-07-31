@@ -1,0 +1,187 @@
+{
+  "log": {
+    "level": "warn",
+    "timestamp": true
+  },
+  "dns": {
+    "servers": [
+      {
+        "type": "udp",
+        "tag": "dns-upstream",
+        "server": "223.5.5.5",
+        "server_port": 53,
+        "bind_interface": "��̫��",
+        "inet4_bind_address": "192.168.1.146",
+        "connect_timeout": "5s"
+      },
+      {
+        "type": "fakeip",
+        "tag": "dns-fakeip",
+        "inet4_range": "198.18.0.0/15",
+        "inet6_range": "fc00::/18"
+      }
+    ],
+    "rules": [
+      {
+        "query_type": [
+          "A",
+          "AAAA"
+        ],
+        "server": "dns-fakeip"
+      }
+    ],
+    "final": "dns-upstream",
+    "reverse_mapping": true
+  },
+  "inbounds": [
+    {
+      "type": "tun",
+      "tag": "tun-in",
+      "interface_name": "HypoMux-Tun",
+      "address": [
+        "172.19.0.1/30",
+        "fdfe:dcba:9876::1/126"
+      ],
+      "mtu": 1492,
+      "auto_route": true,
+      "strict_route": true,
+      "stack": "system"
+    }
+  ],
+  "outbounds": [
+    {
+      "type": "socks",
+      "tag": "nic_ethernet",
+      "server": "127.0.0.1",
+      "server_port": 60525,
+      "version": "5"
+    },
+    {
+      "type": "socks",
+      "tag": "nic_wifi",
+      "server": "127.0.0.1",
+      "server_port": 60526,
+      "version": "5"
+    },
+    {
+      "type": "socks",
+      "tag": "aggregation",
+      "server": "127.0.0.1",
+      "server_port": 60527,
+      "version": "5"
+    },
+    {
+      "type": "direct",
+      "tag": "direct"
+    }
+  ],
+  "route": {
+    "auto_detect_interface": true,
+    "default_domain_resolver": "dns-upstream",
+    "final": "aggregation",
+    "rules": [
+      {
+        "action": "sniff",
+        "timeout": "300ms"
+      },
+      {
+        "process_path": [
+          "C:\\Program Files\\HypoMux\\bin\\hypomux-engine.exe",
+          "C:\\Program Files\\HypoMux\\bin\\sing-box.exe",
+          "C:\\Program Files\\Python313\\python.exe"
+        ],
+        "outbound": "direct"
+      },
+      {
+        "process_name": [
+          "HypoMux.exe",
+          "main.exe",
+          "python.exe",
+          "pythonw.exe",
+          "hypomux-engine.exe"
+        ],
+        "outbound": "direct"
+      },
+      {
+        "process_name": [
+          "sing-box.exe"
+        ],
+        "outbound": "direct"
+      },
+      {
+        "process_name": [
+          "qiyou.exe",
+          "networkdaemon.exe",
+          "qeetm.exe",
+          "injhelper.exe",
+          "injhelper64.exe",
+          "lsphelper64.exe",
+          "uu.exe",
+          "uu_agent.exe",
+          "uu_launcher.exe",
+          "uu_ball.exe",
+          "uu_neths_helper.exe",
+          "uu_neth_helper.exe",
+          "xunyou.exe",
+          "xylauncher.exe",
+          "xyprotectservice.exe",
+          "xyservicelink.exe",
+          "leigod.exe",
+          "leigod_launcher.exe",
+          "leishensdk.exe",
+          "leigod-tool.exe"
+        ],
+        "outbound": "direct"
+      },
+      {
+        "process_name": [
+          "clash.exe",
+          "clash-meta.exe",
+          "clash-win64.exe",
+          "mihomo.exe",
+          "mihomo-core.exe",
+          "clash-verge.exe",
+          "clash verge.exe",
+          "clash-verge-rev.exe",
+          "clash-verge-service.exe",
+          "clash for windows.exe",
+          "cfw.exe",
+          "clashnyanpasu.exe",
+          "flclash.exe",
+          "v2rayn.exe",
+          "v2ray.exe",
+          "xray.exe",
+          "nekoray.exe",
+          "qv2ray.exe",
+          "hiddify.exe",
+          "hiddify-cli.exe",
+          "shadowsocks.exe",
+          "shadowsocksr.exe",
+          "ss-local.exe",
+          "surge.exe",
+          "proxifier.exe",
+          "sstap.exe",
+          "tun2socks.exe"
+        ],
+        "outbound": "direct"
+      },
+      {
+        "port": [
+          53
+        ],
+        "action": "hijack-dns"
+      },
+      {
+        "protocol": [
+          "dns"
+        ],
+        "action": "hijack-dns"
+      },
+      {
+        "action": "resolve",
+        "server": "dns-upstream",
+        "strategy": "prefer_ipv4"
+      }
+    ]
+  }
+}

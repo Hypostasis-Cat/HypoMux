@@ -1,0 +1,10 @@
+{
+  "kind": "hypomux.phase14.tun_wfp_failure",
+  "captured_at": "2026-07-30T10:00:48.439076Z",
+  "passed": false,
+  "error": "RuntimeError: curl failed (56): curl: (56) Recv failure: Connection was reset",
+  "postflight_residue": {
+    "routes": [],
+    "devices": []
+  }
+}

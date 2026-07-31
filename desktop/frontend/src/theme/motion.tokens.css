@@ -1,0 +1,21 @@
+:root {
+  --hm-motion-instant: 120ms;
+  --hm-motion-normal: 180ms;
+  --hm-motion-page: 220ms;
+  --hm-motion-background: 300ms;
+  --hm-motion-ease: cubic-bezier(0.2, 0, 0, 1);
+}
+
+[data-motion="reduced"] {
+  --hm-motion-normal: 80ms;
+  --hm-motion-page: 100ms;
+  --hm-motion-background: 120ms;
+}
+
+[data-motion="off"] *,
+[data-motion="off"] *::before,
+[data-motion="off"] *::after {
+  scroll-behavior: auto !important;
+  transition-duration: 0ms !important;
+  animation-duration: 0ms !important;
+}

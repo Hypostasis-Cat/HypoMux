@@ -1,0 +1,19 @@
+:root {
+  font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  --hm-font-caption: 11px;
+  --hm-font-body: 13px;
+  --hm-font-control: 14px;
+  --hm-font-title: 18px;
+  --hm-font-speed: clamp(36px, 4.4vw, 54px);
+  --hm-density-space: 1;
+}
+
+[data-density="compact"] {
+  --hm-density-space: 0.84;
+}
+
+[data-density="comfortable"] {
+  --hm-density-space: 1.18;
+}

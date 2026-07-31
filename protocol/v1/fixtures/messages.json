@@ -1,0 +1,853 @@
+[
+  {
+    "name": "engine_hello_request",
+    "kind": "request",
+    "method": "engine.hello",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-hello",
+      "method": "engine.hello"
+    }
+  },
+  {
+    "name": "engine_hello_response",
+    "kind": "response",
+    "method": "engine.hello",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-hello",
+      "result": {
+        "engine": "hypomux-engine",
+        "engine_version": "2.1.0",
+        "commit": "0123456789abcdef",
+        "protocol_version": 1,
+        "transport": "stdio-jsonl",
+        "capabilities": [
+          "engine.hello",
+          "engine.status",
+          "engine.start",
+          "engine.stop",
+          "engine.telemetry",
+          "tun.activate",
+          "tun.status",
+          "tun.deactivate",
+          "dns.resolve",
+          "dns.status",
+          "health.check",
+          "diagnostic.run",
+          "wfp.inspect",
+          "host.shutdown"
+        ],
+        "modes": [
+          "proxy",
+          "tun_tcp_pool"
+        ],
+        "mode_features": {
+          "proxy": [
+            "socks5_connect",
+            "http_connect",
+            "source_bound_dns",
+            "ipv6_egress",
+            "adaptive_health",
+            "domain_quarantine"
+          ],
+          "tun_tcp_pool": [
+            "tcp_connect",
+            "udp_associate",
+            "ipv6_egress",
+            "adaptive_health",
+            "managed_tun_lifecycle",
+            "dynamic_nic_channels"
+          ]
+        },
+        "os": "windows",
+        "arch": "amd64",
+        "pid": 4321,
+        "elevated": false,
+        "started_at": "2026-07-30T02:00:00Z"
+      }
+    }
+  },
+  {
+    "name": "engine_status_request",
+    "kind": "request",
+    "method": "engine.status",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-status",
+      "method": "engine.status"
+    }
+  },
+  {
+    "name": "engine_status_response",
+    "kind": "response",
+    "method": "engine.status",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-status",
+      "result": {
+        "engine": {
+          "state": "stopped",
+          "sequence": 0,
+          "state_changed_at": "2026-07-30T02:00:00Z"
+        },
+        "host_uptime_ms": 125
+      }
+    }
+  },
+  {
+    "name": "health_check_request",
+    "kind": "request",
+    "method": "health.check",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-health",
+      "method": "health.check"
+    }
+  },
+  {
+    "name": "health_check_response",
+    "kind": "response",
+    "method": "health.check",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-health",
+      "result": {
+        "ok": true,
+        "state": "stopped",
+        "host_uptime_ms": 126
+      }
+    }
+  },
+  {
+    "name": "diagnostic_run_request",
+    "kind": "request",
+    "method": "diagnostic.run",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-diagnostic",
+      "method": "diagnostic.run",
+      "params": {
+        "src_ip": "192.0.2.10",
+        "target_ip": "223.5.5.5",
+        "count": 10,
+        "timeout_ms": 1000
+      }
+    }
+  },
+  {
+    "name": "diagnostic_run_response",
+    "kind": "response",
+    "method": "diagnostic.run",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-diagnostic",
+      "result": {
+        "status": "available",
+        "loss_rate": 0,
+        "avg_latency_ms": 18,
+        "jitter_ms": 3,
+        "sent": 10,
+        "received": 10,
+        "src_ip": "192.0.2.10",
+        "target_ip": "223.5.5.5",
+        "note": ""
+      }
+    }
+  },
+  {
+    "name": "engine_start_request",
+    "kind": "request",
+    "method": "engine.start",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-start",
+      "method": "engine.start",
+      "params": {
+        "mode": "proxy",
+        "listen_host": "127.0.0.1",
+        "socks_port": 10800,
+        "http_port": 10801,
+        "weighted": true,
+        "connect_timeout_ms": 6000,
+        "dns": {
+          "policy": "auto",
+          "legacy_servers": [
+            "223.5.5.5"
+          ],
+          "cache_ttl_ms": 180000,
+          "query_timeout_ms": 4000
+        },
+        "adapters": [
+          {
+            "name": "Ethernet",
+            "source_ip": "192.0.2.10",
+            "if_index": 11,
+            "weight": 2,
+            "dns_servers": [
+              "192.0.2.53"
+            ]
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "engine_start_response",
+    "kind": "response",
+    "method": "engine.start",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-start",
+      "result": {
+        "state": {
+          "state": "running",
+          "sequence": 2,
+          "state_changed_at": "2026-07-30T02:00:01Z",
+          "reason": "proxy listeners ready"
+        },
+        "mode": "proxy",
+        "endpoints": {
+          "socks": "127.0.0.1:10800",
+          "http": "127.0.0.1:10801"
+        }
+      }
+    }
+  },
+  {
+    "name": "tun_tcp_pool_start_request",
+    "kind": "request",
+    "method": "engine.start",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-tun-pool-start",
+      "method": "engine.start",
+      "params": {
+        "mode": "tun_tcp_pool",
+        "listen_host": "127.0.0.1",
+        "weighted": true,
+        "connect_timeout_ms": 6000,
+        "adapters": [
+          {
+            "name": "Ethernet",
+            "source_ip": "192.0.2.10",
+            "if_index": 11,
+            "source_ipv6": "2001:db8:1::10",
+            "ipv6_if_index": 11,
+            "weight": 2
+          },
+          {
+            "name": "Wi-Fi",
+            "source_ip": "192.0.2.20",
+            "if_index": 12,
+            "source_ipv6": "2001:db8:2::20",
+            "ipv6_if_index": 12,
+            "weight": 1
+          }
+        ],
+        "channels": [
+          {
+            "name": "nic_ethernet",
+            "port": 2001,
+            "adapter_names": [
+              "Ethernet"
+            ]
+          },
+          {
+            "name": "nic_wifi",
+            "port": 2002,
+            "adapter_names": [
+              "Wi-Fi"
+            ]
+          },
+          {
+            "name": "aggregation",
+            "port": 2003,
+            "adapter_names": [
+              "Ethernet",
+              "Wi-Fi"
+            ]
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "tun_tcp_pool_start_response",
+    "kind": "response",
+    "method": "engine.start",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-tun-pool-start",
+      "result": {
+        "state": {
+          "state": "running",
+          "sequence": 2,
+          "state_changed_at": "2026-07-30T02:00:01Z",
+          "reason": "tun_tcp_pool listeners ready"
+        },
+        "mode": "tun_tcp_pool",
+        "endpoints": {
+          "channels": {
+            "nic_ethernet": "127.0.0.1:2001",
+            "nic_wifi": "127.0.0.1:2002",
+            "aggregation": "127.0.0.1:2003"
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "tun_activate_request",
+    "kind": "request",
+    "method": "tun.activate",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-tun-activate",
+      "method": "tun.activate",
+      "params": {
+        "executable": "C:\\Program Files\\HypoMux\\bin\\sing-box.exe",
+        "config_path": "C:\\Users\\Example\\.hypomux\\singbox-config.json",
+        "startup_timeout_ms": 1500,
+        "strict_route": true
+      }
+    }
+  },
+  {
+    "name": "tun_activate_response",
+    "kind": "response",
+    "method": "tun.activate",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-tun-activate",
+      "result": {
+        "accepted": true,
+        "tun": {
+          "state": "running",
+          "pid": 5432,
+          "started_at": "2026-07-30T02:10:01Z",
+          "config_path": "C:\\Users\\Example\\.hypomux\\singbox-config.json"
+        }
+      }
+    }
+  },
+  {
+    "name": "tun_status_request",
+    "kind": "request",
+    "method": "tun.status",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-tun-status",
+      "method": "tun.status"
+    }
+  },
+  {
+    "name": "tun_status_response",
+    "kind": "response",
+    "method": "tun.status",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-tun-status",
+      "result": {
+        "state": "running",
+        "pid": 5432,
+        "started_at": "2026-07-30T02:10:01Z",
+        "config_path": "C:\\Users\\Example\\.hypomux\\singbox-config.json"
+      }
+    }
+  },
+  {
+    "name": "tun_deactivate_request",
+    "kind": "request",
+    "method": "tun.deactivate",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-tun-deactivate",
+      "method": "tun.deactivate"
+    }
+  },
+  {
+    "name": "tun_deactivate_response",
+    "kind": "response",
+    "method": "tun.deactivate",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-tun-deactivate",
+      "result": {
+        "accepted": true,
+        "tun": {
+          "state": "stopped"
+        }
+      }
+    }
+  },
+  {
+    "name": "engine_telemetry_request",
+    "kind": "request",
+    "method": "engine.telemetry",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-telemetry",
+      "method": "engine.telemetry",
+      "params": {
+        "include_connections": true
+      }
+    }
+  },
+  {
+    "name": "engine_telemetry_response",
+    "kind": "response",
+    "method": "engine.telemetry",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-telemetry",
+      "result": {
+        "started_at": "2026-07-30T02:00:01Z",
+        "sampled_at": "2026-07-30T02:00:05Z",
+        "adapters": [
+          {
+            "name": "Ethernet",
+            "source_ip": "192.0.2.10",
+            "if_index": 11,
+            "source_ipv6": "2001:db8:1::10",
+            "ipv6_if_index": 11,
+            "connections": 1,
+            "bytes_up": 4096,
+            "bytes_down": 8192,
+            "health_state": "cooldown",
+            "consecutive_failures": 2,
+            "health_successes": 18,
+            "health_failures": 2,
+            "last_success_at": "2026-07-30T02:00:02Z",
+            "last_failure_at": "2026-07-30T02:00:04Z",
+            "cooldown_until": "2026-07-30T02:00:09Z",
+            "domain_quarantines": 1
+          }
+        ],
+        "domain_quarantines": [
+          {
+            "adapter": "Ethernet",
+            "domain": "example.com",
+            "evidence": 2,
+            "expires_at": "2026-07-30T02:30:04Z"
+          }
+        ],
+        "active_connections": [
+          {
+            "id": 1,
+            "protocol": "socks5",
+            "client": "127.0.0.1:52000",
+            "target": "198.51.100.25:443",
+            "adapter": "Ethernet",
+            "started_at": "2026-07-30T02:00:02Z",
+            "bytes_up": 4096,
+            "bytes_down": 8192
+          }
+        ],
+        "dns": {
+          "policy": "auto",
+          "legacy_servers": [
+            "223.5.5.5",
+            "119.29.29.29"
+          ],
+          "doh_endpoints": [
+            {
+              "ip": "223.5.5.5",
+              "host": "dns.alidns.com",
+              "path": "/dns-query"
+            },
+            {
+              "ip": "1.12.12.12",
+              "host": "doh.pub",
+              "path": "/dns-query"
+            },
+            {
+              "ip": "120.53.53.53",
+              "host": "doh.pub",
+              "path": "/dns-query"
+            },
+            {
+              "ip": "8.8.8.8",
+              "host": "dns.google",
+              "path": "/dns-query"
+            },
+            {
+              "ip": "8.8.4.4",
+              "host": "dns.google",
+              "path": "/dns-query"
+            }
+          ],
+          "cache_entries": 1,
+          "inflight": 0,
+          "queries": 2,
+          "cache_hits": 1,
+          "doh_successes": 1,
+          "doh_failures": 0,
+          "legacy_successes": 0,
+          "legacy_failures": 0,
+          "automatic_fallbacks": 0
+        },
+        "total": {
+          "connections": 1,
+          "bytes_up": 4096,
+          "bytes_down": 8192
+        }
+      }
+    }
+  },
+  {
+    "name": "dns_resolve_request",
+    "kind": "request",
+    "method": "dns.resolve",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-dns-resolve",
+      "method": "dns.resolve",
+      "params": {
+        "domain": "example.com",
+        "adapter": "Ethernet",
+        "record_type": "A"
+      }
+    }
+  },
+  {
+    "name": "tun_udp_telemetry_response",
+    "kind": "response",
+    "method": "engine.telemetry",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-tun-udp-telemetry",
+      "result": {
+        "started_at": "2026-07-30T02:10:01Z",
+        "sampled_at": "2026-07-30T02:10:05Z",
+        "adapters": [
+          {
+            "name": "Wi-Fi",
+            "source_ip": "192.0.2.20",
+            "if_index": 12,
+            "connections": 1,
+            "bytes_up": 1200,
+            "bytes_down": 2400,
+            "health_state": "healthy",
+            "consecutive_failures": 0,
+            "health_successes": 7,
+            "health_failures": 0,
+            "domain_quarantines": 0
+          }
+        ],
+        "active_connections": [
+          {
+            "id": 7,
+            "protocol": "socks5_udp",
+            "channel": "nic_wifi",
+            "client": "127.0.0.1:53000",
+            "target": "203.0.113.53:443",
+            "adapter": "Wi-Fi",
+            "started_at": "2026-07-30T02:10:02Z",
+            "bytes_up": 1200,
+            "bytes_down": 2400
+          }
+        ],
+        "total": {
+          "connections": 1,
+          "bytes_up": 1200,
+          "bytes_down": 2400
+        }
+      }
+    }
+  },
+  {
+    "name": "dns_resolve_response",
+    "kind": "response",
+    "method": "dns.resolve",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-dns-resolve",
+      "result": {
+        "domain": "example.com",
+        "address": "93.184.216.34",
+        "record_type": "A",
+        "adapter": "Ethernet",
+        "transport": "doh",
+        "server": "dns.alidns.com@223.5.5.5:443",
+        "cached": false,
+        "expires_at": "2026-07-30T02:03:05Z"
+      }
+    }
+  },
+  {
+    "name": "dns_status_request",
+    "kind": "request",
+    "method": "dns.status",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-dns-status",
+      "method": "dns.status"
+    }
+  },
+  {
+    "name": "dns_status_response",
+    "kind": "response",
+    "method": "dns.status",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-dns-status",
+      "result": {
+        "policy": "auto",
+        "legacy_servers": [
+          "223.5.5.5",
+          "119.29.29.29"
+        ],
+        "doh_endpoints": [
+          {
+            "ip": "223.5.5.5",
+            "host": "dns.alidns.com",
+            "path": "/dns-query"
+          },
+          {
+            "ip": "1.12.12.12",
+            "host": "doh.pub",
+            "path": "/dns-query"
+          },
+          {
+            "ip": "120.53.53.53",
+            "host": "doh.pub",
+            "path": "/dns-query"
+          },
+          {
+            "ip": "8.8.8.8",
+            "host": "dns.google",
+            "path": "/dns-query"
+          },
+          {
+            "ip": "8.8.4.4",
+            "host": "dns.google",
+            "path": "/dns-query"
+          }
+        ],
+        "cache_entries": 1,
+        "inflight": 0,
+        "queries": 2,
+        "cache_hits": 1,
+        "doh_successes": 1,
+        "doh_failures": 0,
+        "legacy_successes": 0,
+        "legacy_failures": 0,
+        "automatic_fallbacks": 0
+      }
+    }
+  },
+  {
+    "name": "engine_stop_request",
+    "kind": "request",
+    "method": "engine.stop",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-stop",
+      "method": "engine.stop"
+    }
+  },
+  {
+    "name": "engine_stop_response",
+    "kind": "response",
+    "method": "engine.stop",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-stop",
+      "result": {
+        "accepted": true,
+        "state": {
+          "state": "stopped",
+          "sequence": 4,
+          "state_changed_at": "2026-07-30T02:00:06Z",
+          "reason": "proxy stopped"
+        }
+      }
+    }
+  },
+  {
+    "name": "wfp_inspect_request",
+    "kind": "request",
+    "method": "wfp.inspect",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-wfp",
+      "method": "wfp.inspect",
+      "params": {
+        "repair": true
+      }
+    }
+  },
+  {
+    "name": "wfp_inspect_response",
+    "kind": "response",
+    "method": "wfp.inspect",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-wfp",
+      "result": {
+        "elevated": true,
+        "bfe_running": true,
+        "engine_ready": true,
+        "repair_attempted": true,
+        "repaired": false,
+        "detail": "Base Filtering Engine is running and FwpmEngineOpen0 succeeded"
+      }
+    }
+  },
+  {
+    "name": "host_shutdown_request",
+    "kind": "request",
+    "method": "host.shutdown",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-shutdown",
+      "method": "host.shutdown"
+    }
+  },
+  {
+    "name": "host_shutdown_response",
+    "kind": "response",
+    "method": "host.shutdown",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-shutdown",
+      "result": {
+        "accepted": true
+      }
+    }
+  },
+  {
+    "name": "unsupported_protocol_error",
+    "kind": "error",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-version",
+      "error": {
+        "code": "unsupported_protocol",
+        "message": "unsupported protocol version",
+        "details": {
+          "supported": [
+            1
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "method_not_found_error",
+    "kind": "error",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-missing",
+      "error": {
+        "code": "method_not_found",
+        "message": "unknown method",
+        "details": {
+          "method": "missing.method"
+        }
+      }
+    }
+  },
+  {
+    "name": "invalid_state_error",
+    "kind": "error",
+    "method": "engine.start",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-invalid-state",
+      "error": {
+        "code": "invalid_state",
+        "message": "engine must be stopped before it can start",
+        "details": {
+          "state": "running"
+        }
+      }
+    }
+  },
+  {
+    "name": "dns_failed_error",
+    "kind": "error",
+    "method": "dns.resolve",
+    "message": {
+      "protocol": 1,
+      "id": "fixture-dns-failed",
+      "error": {
+        "code": "dns_failed",
+        "message": "DNS resolution failed",
+        "details": {
+          "message": "DoH resolution failed: context deadline exceeded"
+        }
+      }
+    }
+  },
+  {
+    "name": "engine_state_changed_event",
+    "kind": "event",
+    "message": {
+      "protocol": 1,
+      "sequence": 1,
+      "event": "engine.state_changed",
+      "data": {
+        "state": "running",
+        "sequence": 2,
+        "state_changed_at": "2026-07-30T02:00:01Z",
+        "reason": "proxy listeners ready"
+      }
+    }
+  },
+  {
+    "name": "dns_fallback_required_event",
+    "kind": "event",
+    "message": {
+      "protocol": 1,
+      "sequence": 2,
+      "event": "dns.fallback_required",
+      "data": {
+        "adapter": "Ethernet",
+        "policy": "alidns",
+        "reason": "DoH provider failed three consecutive lookups"
+      }
+    }
+  },
+  {
+    "name": "tun_state_changed_event",
+    "kind": "event",
+    "message": {
+      "protocol": 1,
+      "sequence": 3,
+      "event": "tun.state_changed",
+      "data": {
+        "state": "failed",
+        "exited_at": "2026-07-30T02:10:06Z",
+        "exit_code": 1,
+        "last_error": "sing-box exited unexpectedly (code=1)"
+      }
+    }
+  },
+  {
+    "name": "log_record_event",
+    "kind": "event",
+    "message": {
+      "protocol": 1,
+      "sequence": 4,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] FATAL startup failed"
+      }
+    }
+  },
+  {
+    "name": "host_exiting_event",
+    "kind": "event",
+    "message": {
+      "protocol": 1,
+      "sequence": 5,
+      "event": "host.exiting",
+      "data": {
+        "reason": "requested"
+      }
+    }
+  }
+]
