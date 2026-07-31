@@ -79,6 +79,18 @@ jobs:
           go install "github.com/wailsapp/wails/v3/cmd/wails3@${env:WAILS_VERSION}"
           choco install nsis --yes --no-progress
 
+          $nsisDirectory = Join-Path ${env:ProgramFiles(x86)} 'NSIS'
+          $makensis = Join-Path $nsisDirectory 'makensis.exe'
+          if (-not (Test-Path -LiteralPath $makensis -PathType Leaf)) {
+            throw "NSIS compiler was not found at $makensis."
+          }
+          & $makensis /VERSION
+          if ($LASTEXITCODE -ne 0) {
+            throw "makensis version check failed with exit code $LASTEXITCODE."
+          }
+          Add-Content -LiteralPath $env:GITHUB_PATH -Value $nsisDirectory -Encoding utf8
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value "MAKENSIS=$makensis" -Encoding utf8
+
       - name: Install frontend dependencies
         shell: pwsh
         run: pnpm --dir desktop/frontend install --frozen-lockfile
@@ -182,7 +194,10 @@ jobs:
           Copy-Item signed-desktop\hypomux.exe desktop\bin\hypomux.exe -Force
           Copy-Item signed-core\hypomux-engine.exe desktop\bin\hypomux-engine.exe -Force
           Push-Location desktop\build\windows\nsis
-          makensis "-DARG_WAILS_AMD64_BINARY=..\..\..\bin\hypomux.exe" project.nsi
+          & $env:MAKENSIS "-DARG_WAILS_AMD64_BINARY=..\..\..\bin\hypomux.exe" project.nsi
+          if ($LASTEXITCODE -ne 0) {
+            throw "Signed installer repackaging failed with exit code $LASTEXITCODE."
+          }
           Pop-Location
 
       - name: Upload installer for SignPath
