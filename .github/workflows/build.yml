@@ -105,16 +105,21 @@ jobs:
       - name: Verify Go formatting
         shell: pwsh
         run: |
-          $files = @(
-            go -C engine fmt ./...
-            go -C desktop fmt ./...
+          $goFiles = @(
+            git ls-files -- '*.go' |
+              Where-Object { $_ -like 'engine/*' -or $_ -like 'desktop/*' }
           )
-          if ($files.Count -gt 0) {
-            $files | ForEach-Object { Write-Error "gofmt changed: $_" }
-            exit 1
+          if ($goFiles.Count -eq 0) {
+            throw "No tracked Go source files were found."
           }
-          if (-not (git diff --quiet -- engine desktop)) {
-            throw "Go sources are not formatted."
+
+          $unformatted = @(gofmt -l @goFiles)
+          if ($LASTEXITCODE -ne 0) {
+            throw "gofmt failed with exit code $LASTEXITCODE."
+          }
+          if ($unformatted.Count -gt 0) {
+            $unformatted | ForEach-Object { Write-Error "Not gofmt-formatted: $_" }
+            exit 1
           }
 
       - name: Build and package Wails desktop
