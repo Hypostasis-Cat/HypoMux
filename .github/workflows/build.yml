@@ -63,13 +63,13 @@ jobs:
             desktop/go.sum
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
         with:
           version: 10
           run_install: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: pnpm
@@ -84,6 +84,10 @@ jobs:
       - name: Install frontend dependencies
         shell: pwsh
         run: pnpm --dir desktop/frontend install --frozen-lockfile
+
+      - name: Build frontend assets for Go validation
+        shell: pwsh
+        run: pnpm --dir desktop/frontend build
 
       - name: Validate Go modules
         shell: pwsh
