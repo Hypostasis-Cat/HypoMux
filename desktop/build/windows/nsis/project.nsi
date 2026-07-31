@@ -140,7 +140,9 @@ FunctionEnd
 
 Function CloseRunningHypoMux
 closeRetry:
+    SetDetailsPrint textonly
     DetailPrint "$(RunningAppClosing)"
+    SetDetailsPrint both
     nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "Get-Process -Name ${INFO_PROJECTNAME} -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue; Wait-Process -Name ${INFO_PROJECTNAME} -Timeout 15 -ErrorAction SilentlyContinue; if (Get-Process -Name ${INFO_PROJECTNAME} -ErrorAction SilentlyContinue) { exit 1 }"'
     Pop $0
     Pop $1
@@ -153,18 +155,19 @@ closeRetry:
 FunctionEnd
 
 Function StopCoreServiceForUpgrade
+    SetDetailsPrint textonly
     DetailPrint "$(CoreServiceStopping)"
+    SetDetailsPrint both
     ; sc.exe only submits the stop request. Waiting is kept in a separate
     ; bounded process so a deadlocked legacy service cannot freeze Setup.
     nsExec::Exec '"$SYSDIR\sc.exe" stop "${HYPOMUX_CORE_SERVICE}"'
     Pop $0
-    nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "if (Get-Service -Name ${HYPOMUX_CORE_SERVICE} -ErrorAction SilentlyContinue) { (Get-Service -Name ${HYPOMUX_CORE_SERVICE}).WaitForStatus([System.ServiceProcess.ServiceControllerStatus]::Stopped, [TimeSpan]::FromSeconds(20)) }"'
+    nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "try { if (Get-Service -Name ${HYPOMUX_CORE_SERVICE} -ErrorAction SilentlyContinue) { (Get-Service -Name ${HYPOMUX_CORE_SERVICE}).WaitForStatus([System.ServiceProcess.ServiceControllerStatus]::Stopped, [TimeSpan]::FromSeconds(20)) }; exit 0 } catch { exit 2 }"'
     Pop $0
     Pop $1
     ${If} $0 == 0
         Return
     ${EndIf}
-    DetailPrint "$1"
     DetailPrint "$(CoreServiceForceStopping)"
     ; Old releases could deadlock in synchronous ConnectNamedPipe. Disable
     ; automatic restart, terminate only the process hosting HypoMuxCore, then
