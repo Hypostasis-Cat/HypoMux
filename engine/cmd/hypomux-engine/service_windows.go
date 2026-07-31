@@ -9,7 +9,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sync"
 	"syscall"
 	"time"
 	"unsafe"
@@ -259,47 +258,71 @@ func acceptServicePipe(ctx context.Context) (*os.File, error) {
 	if err != nil {
 		return nil, err
 	}
-	var closeOnce sync.Once
-	closeHandle := func() {
-		closeOnce.Do(func() {
-			_ = windows.CloseHandle(handle)
-		})
-	}
-	connected := make(chan error, 1)
-	go func() {
-		connectErr := windows.ConnectNamedPipe(handle, nil)
-		if errors.Is(connectErr, windows.ERROR_PIPE_CONNECTED) {
-			connectErr = nil
-		}
-		connected <- connectErr
-	}()
-	select {
-	case err := <-connected:
-		if err != nil {
-			closeHandle()
-			return nil, err
-		}
-	case <-ctx.Done():
-		closeHandle()
-		<-connected
-		return nil, ctx.Err()
+	if err := connectServicePipe(ctx, handle); err != nil {
+		_ = windows.CloseHandle(handle)
+		return nil, err
 	}
 	if err := validateServicePipeClient(handle); err != nil {
 		_ = windows.DisconnectNamedPipe(handle)
-		closeHandle()
+		_ = windows.CloseHandle(handle)
 		return nil, fmt.Errorf("%w: %v", errServiceClientRejected, err)
 	}
 	connection := os.NewFile(uintptr(handle), coreServicePipeName)
 	if connection == nil {
-		closeHandle()
+		_ = windows.CloseHandle(handle)
 		return nil, errors.New("create Core Service pipe file")
 	}
-	// os.File now owns the handle.
-	closeOnce.Do(func() {})
 	return connection, nil
 }
 
+func connectServicePipe(ctx context.Context, handle windows.Handle) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	event, err := windows.CreateEvent(nil, 1, 0, nil)
+	if err != nil {
+		return fmt.Errorf("create Core Service pipe event: %w", err)
+	}
+	defer windows.CloseHandle(event)
+	overlapped := windows.Overlapped{HEvent: event}
+	err = windows.ConnectNamedPipe(handle, &overlapped)
+	if err == nil || errors.Is(err, windows.ERROR_PIPE_CONNECTED) {
+		return nil
+	}
+	if !errors.Is(err, windows.ERROR_IO_PENDING) {
+		return fmt.Errorf("connect Core Service pipe: %w", err)
+	}
+	for {
+		result, waitErr := windows.WaitForSingleObject(event, 50)
+		if waitErr != nil {
+			return fmt.Errorf("wait for Core Service pipe client: %w", waitErr)
+		}
+		switch result {
+		case windows.WAIT_OBJECT_0:
+			var transferred uint32
+			if err := windows.GetOverlappedResult(handle, &overlapped, &transferred, false); err != nil {
+				return fmt.Errorf("complete Core Service pipe connection: %w", err)
+			}
+			return nil
+		case uint32(windows.WAIT_TIMEOUT):
+			if ctx.Err() == nil {
+				continue
+			}
+			_ = windows.CancelIoEx(handle, &overlapped)
+			var transferred uint32
+			_ = windows.GetOverlappedResult(handle, &overlapped, &transferred, true)
+			return ctx.Err()
+		default:
+			return fmt.Errorf("wait for Core Service pipe client returned 0x%X", result)
+		}
+	}
+}
+
 func createServicePipe() (windows.Handle, error) {
+	return createServicePipeNamed(coreServicePipeName)
+}
+
+func createServicePipeNamed(pipeName string) (windows.Handle, error) {
 	descriptor, err := windows.SecurityDescriptorFromString(
 		"D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;AU)",
 	)
@@ -310,13 +333,13 @@ func createServicePipe() (windows.Handle, error) {
 		Length:             uint32(unsafe.Sizeof(windows.SecurityAttributes{})),
 		SecurityDescriptor: descriptor,
 	}
-	name, err := windows.UTF16PtrFromString(coreServicePipeName)
+	name, err := windows.UTF16PtrFromString(pipeName)
 	if err != nil {
 		return 0, err
 	}
 	handle, err := windows.CreateNamedPipe(
 		name,
-		windows.PIPE_ACCESS_DUPLEX|windows.FILE_FLAG_FIRST_PIPE_INSTANCE,
+		windows.PIPE_ACCESS_DUPLEX|windows.FILE_FLAG_FIRST_PIPE_INSTANCE|windows.FILE_FLAG_OVERLAPPED,
 		windows.PIPE_TYPE_BYTE|windows.PIPE_READMODE_BYTE|windows.PIPE_WAIT|windows.PIPE_REJECT_REMOTE_CLIENTS,
 		1,
 		servicePipeBuffer,

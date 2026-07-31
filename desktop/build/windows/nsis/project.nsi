@@ -107,6 +107,8 @@ LangString RunningAppCloseFailed ${LANG_ENGLISH} "HypoMux is still running. Clos
 LangString RunningAppCloseFailed ${LANG_SIMPCHINESE} "HypoMux 仍在运行。请关闭软件后点击“重试”继续安装。"
 LangString CoreServiceStopping ${LANG_ENGLISH} "Stopping HypoMux Core Service before updating files..."
 LangString CoreServiceStopping ${LANG_SIMPCHINESE} "正在停止 HypoMux Core 服务以更新文件…"
+LangString CoreServiceForceStopping ${LANG_ENGLISH} "The previous Core Service did not stop in time; terminating its service process..."
+LangString CoreServiceForceStopping ${LANG_SIMPCHINESE} "旧版 Core 服务未能及时停止，正在结束其服务进程…"
 LangString CoreServiceStopFailed ${LANG_ENGLISH} "Could not stop HypoMux Core Service. Setup cannot safely replace the application files."
 LangString CoreServiceStopFailed ${LANG_SIMPCHINESE} "无法停止 HypoMux Core 服务，安装程序不能安全替换应用文件。"
 
@@ -152,7 +154,30 @@ FunctionEnd
 
 Function StopCoreServiceForUpgrade
     DetailPrint "$(CoreServiceStopping)"
-    nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "if (Get-Service -Name ${HYPOMUX_CORE_SERVICE} -ErrorAction SilentlyContinue) { Stop-Service -Name ${HYPOMUX_CORE_SERVICE} -Force -ErrorAction Stop; (Get-Service -Name ${HYPOMUX_CORE_SERVICE}).WaitForStatus([System.ServiceProcess.ServiceControllerStatus]::Stopped, [TimeSpan]::FromSeconds(20)) }"'
+    ; sc.exe only submits the stop request. Waiting is kept in a separate
+    ; bounded process so a deadlocked legacy service cannot freeze Setup.
+    nsExec::Exec '"$SYSDIR\sc.exe" stop "${HYPOMUX_CORE_SERVICE}"'
+    Pop $0
+    nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "if (Get-Service -Name ${HYPOMUX_CORE_SERVICE} -ErrorAction SilentlyContinue) { (Get-Service -Name ${HYPOMUX_CORE_SERVICE}).WaitForStatus([System.ServiceProcess.ServiceControllerStatus]::Stopped, [TimeSpan]::FromSeconds(20)) }"'
+    Pop $0
+    Pop $1
+    ${If} $0 == 0
+        Return
+    ${EndIf}
+    DetailPrint "$1"
+    DetailPrint "$(CoreServiceForceStopping)"
+    ; Old releases could deadlock in synchronous ConnectNamedPipe. Disable
+    ; automatic restart, terminate only the process hosting HypoMuxCore, then
+    ; let install-service restore Automatic start and recovery actions below.
+    nsExec::Exec '"$SYSDIR\sc.exe" config "${HYPOMUX_CORE_SERVICE}" start= disabled'
+    Pop $0
+    ${If} $0 != 0
+        Abort "$(CoreServiceStopFailed)"
+    ${EndIf}
+    nsExec::Exec '"$SYSDIR\taskkill.exe" /F /FI "SERVICES eq ${HYPOMUX_CORE_SERVICE}"'
+    Pop $0
+    Sleep 1000
+    nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "if ((Get-CimInstance Win32_Service | Where-Object Name -EQ ${HYPOMUX_CORE_SERVICE}).ProcessId -ne 0) { exit 1 }"'
     Pop $0
     Pop $1
     ${If} $0 != 0
