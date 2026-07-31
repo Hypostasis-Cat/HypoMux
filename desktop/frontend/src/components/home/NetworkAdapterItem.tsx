@@ -55,7 +55,7 @@ export function NetworkAdapterItem({
         </span>
         <div className="adapter-name">
           <strong>{adapter.name}</strong>
-          <span>{adapter.description} · {adapter.address}</span>
+          <span>{adapter.address}</span>
         </div>
       </div>
 
