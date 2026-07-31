@@ -542,6 +542,16 @@ svg {
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--hm-warning) 13%, transparent);
 }
 
+.phase-degraded .state-dot {
+  background: var(--hm-warning);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--hm-warning) 18%, transparent);
+}
+
+.phase-failed .state-dot {
+  background: var(--hm-danger, #c42b1c);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--hm-danger, #c42b1c) 15%, transparent);
+}
+
 .engine-summary {
   display: flex;
   margin: 13px 0 10px;

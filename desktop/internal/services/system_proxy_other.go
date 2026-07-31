@@ -9,3 +9,5 @@ func enableSystemProxy(_ int, _ int) error {
 }
 
 func restoreSystemProxy() error { return nil }
+
+func restoreSystemProxyDetailed() (string, error) { return "", nil }

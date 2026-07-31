@@ -1,31 +1,71 @@
 import type { AppearancePersistence, AppearanceSettings } from "./appearance.types";
+import { appServices } from "../platform/services";
 
 const STORAGE_KEY = "hypomux.appearance.v1";
 
-export const browserAppearancePersistence: AppearancePersistence = {
-  load() {
-    try {
-      const value = localStorage.getItem(STORAGE_KEY);
-      return value ? (JSON.parse(value) as AppearanceSettings) : null;
-    } catch {
-      return null;
+const removeLegacyBrowserAppearance = () => {
+  try {
+    localStorage.removeItem(STORAGE_KEY);
+  } catch {
+    // Go persistence is authoritative even when WebView storage is unavailable.
+  }
+};
+
+export const loadLegacyBrowserAppearance = (): AppearanceSettings | null => {
+  try {
+    const value = localStorage.getItem(STORAGE_KEY);
+    return value ? (JSON.parse(value) as AppearanceSettings) : null;
+  } catch {
+    return null;
+  }
+};
+
+const saveBrowserPreview = (settings: AppearanceSettings) => {
+  try {
+    const safeSettings = settings.localBackgroundUrl?.startsWith("data:") || settings.localBackgroundUrl?.startsWith("blob:")
+      ? { ...settings, localBackgroundUrl: undefined, backgroundSource: "builtin" as const }
+      : settings;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(safeSettings));
+  } catch {
+    // Browser-only visual QA has no durable Go configuration service.
+  }
+};
+
+export const appearancePersistence: AppearancePersistence = {
+  async load() {
+    const legacy = loadLegacyBrowserAppearance();
+    if (!("__WAILS__" in window)) return legacy;
+    const payload = await appServices.appearance.load();
+    if (payload) {
+      removeLegacyBrowserAppearance();
+      return JSON.parse(payload) as AppearanceSettings;
     }
+    if (legacy) {
+      const migrated = await appServices.appearance.save(JSON.stringify(legacy));
+      if (migrated) {
+        removeLegacyBrowserAppearance();
+        return JSON.parse(migrated) as AppearanceSettings;
+      }
+      return legacy;
+    }
+    return null;
   },
-  save(settings) {
-    try {
-      const safeSettings = settings.localBackgroundUrl?.startsWith("blob:")
-        ? { ...settings, localBackgroundUrl: undefined, backgroundSource: "builtin" as const }
-        : settings;
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(safeSettings));
-    } catch {
-      // Appearance persistence is best effort until the Go configuration adapter is connected.
+  async save(settings) {
+    if (!("__WAILS__" in window)) {
+      saveBrowserPreview(settings);
+      return;
     }
+    await appServices.appearance.save(JSON.stringify(settings));
   },
 };
 
 export const backgroundService = {
   fromFile(file: File): Promise<string> {
     return new Promise((resolve, reject) => {
+      if (file.size < 1 || file.size > 20 * 1024 * 1024) {
+        reject(new Error("背景图片为空或超过 20 MiB"));
+        return;
+      }
       const reader = new FileReader();
       reader.onload = () => resolve(String(reader.result));
       reader.onerror = () => reject(new Error("无法读取该图片"));

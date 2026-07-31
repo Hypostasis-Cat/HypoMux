@@ -21,6 +21,9 @@ func TestMigrateLegacySettingsPreservesSemantics(t *testing.T) {
 		"dns_server":                    "1.1.1.1",
 		"doh_provider":                  "google",
 		"nic_bandwidth_limits":          map[string]int{"WLAN": 3},
+		"routing_rules": []map[string]any{
+			{"process_name": []string{"a.exe", "b.exe"}, "outbound": "aggregation"},
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -39,6 +42,9 @@ func TestMigrateLegacySettingsPreservesSemantics(t *testing.T) {
 	if settings.DNSServer != "1.1.1.1" || settings.DNSPolicy != "google" ||
 		settings.AdapterWeights["WLAN"] != 3 {
 		t.Fatalf("network settings not migrated: %#v", settings)
+	}
+	if len(settings.RoutingRules) != 2 || settings.RoutingRules[0].Value != "a.exe" || settings.RoutingRules[1].Value != "b.exe" {
+		t.Fatalf("multi-value routing rules were not preserved: %#v", settings.RoutingRules)
 	}
 }
 

@@ -34,6 +34,7 @@ func writeSingBoxConfig(
 	dnsAdapter AdapterView,
 	dnsResult dnsResolveResult,
 	rules []RoutingRule,
+	compatibility compatibilityPlan,
 	strictRoute bool,
 ) (string, string, clashAPIConfig, error) {
 	ethernetPort, err := loopbackPort(endpoints, "nic_ethernet")
@@ -69,6 +70,7 @@ func writeSingBoxConfig(
 			processPaths = append(processPaths, absolute)
 		}
 	}
+	compatibilityPaths := append([]string(nil), compatibility.ProcessPaths...)
 	routeRules := []any{
 		map[string]any{"action": "sniff", "timeout": "300ms"},
 		map[string]any{"process_path": processPaths, "outbound": "system-direct"},
@@ -76,9 +78,22 @@ func writeSingBoxConfig(
 			"process_name": []string{"HypoMux.exe", "hypomux-engine.exe", "sing-box.exe"},
 			"outbound":     "system-direct",
 		},
+	}
+	if len(compatibilityPaths) > 0 {
+		routeRules = append(routeRules, map[string]any{
+			"process_path": compatibilityPaths, "outbound": "system-direct",
+		})
+	}
+	if len(compatibility.ProcessNames) > 0 {
+		routeRules = append(routeRules, map[string]any{
+			"process_name": compatibility.ProcessNames, "outbound": "system-direct",
+		})
+	}
+	routeRules = append(routeRules,
 		map[string]any{"port": []int{53}, "action": "hijack-dns"},
 		map[string]any{"protocol": []string{"dns"}, "action": "hijack-dns"},
-	}
+		map[string]any{"action": "resolve", "server": "dns-local", "strategy": "prefer_ipv4"},
+	)
 	for _, rule := range rules {
 		entry := map[string]any{"outbound": rule.Outbound}
 		switch rule.MatchType {
@@ -94,9 +109,6 @@ func writeSingBoxConfig(
 		}
 		routeRules = append(routeRules, entry)
 	}
-	routeRules = append(routeRules, map[string]any{
-		"action": "resolve", "server": "dns-local", "strategy": "prefer_ipv4",
-	})
 	directOutbound := map[string]any{"type": "direct", "tag": "direct"}
 	if directPort, directErr := loopbackPort(endpoints, "direct"); directErr == nil {
 		directOutbound = socksOutbound("direct", directPort)

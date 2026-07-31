@@ -143,7 +143,16 @@ export function RoutingPage() {
       .catch(() => undefined);
     try {
       const snapshot = await appServices.routing.snapshot();
-      setRules(makeDrafts(snapshot.rules ?? []));
+      const available = new Set((snapshot.outbounds ?? []).map((outbound) => outbound.id));
+      setRules(makeDrafts(snapshot.rules ?? []).map((rule) => available.has(rule.outbound)
+        ? rule
+        : {
+            ...rule,
+            error: text(
+              `出口 ${rule.outbound.replace(/^nic_/, "")} 未启用或当前不可用`,
+              `Outbound ${rule.outbound.replace(/^nic_/, "")} is disabled or unavailable`,
+            ),
+          }));
       setOutbounds(snapshot.outbounds ?? []);
       setPendingSave(false);
       setSavedAt(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));

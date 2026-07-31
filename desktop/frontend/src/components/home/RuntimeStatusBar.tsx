@@ -49,6 +49,8 @@ export function RuntimeStatusBar({
   const text = (zh: string, en: string) => locale === "en" ? en : zh;
   const phaseLabel = phase === "running"
     ? text("运行中", "Running")
+    : phase === "degraded"
+      ? text("降级运行", "Degraded")
     : phase === "starting"
       ? text("正在启动", "Starting")
       : phase === "stopping"

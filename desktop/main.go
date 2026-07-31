@@ -86,6 +86,7 @@ func main() {
 	tunService := services.NewTunService(settingsService, adapterService)
 	blockedDomainService := services.NewBlockedDomainService(settingsService)
 	updaterService := services.NewUpdaterService()
+	appearanceService := services.NewAppearanceService()
 	engineService := services.NewEngineServiceWithDomains(
 		settingsService, adapterService, blockedDomainService, supportLogs,
 	)
@@ -111,6 +112,7 @@ func main() {
 	app.RegisterService(application.NewService(tunService))
 	app.RegisterService(application.NewService(blockedDomainService))
 	app.RegisterService(application.NewService(updaterService))
+	app.RegisterService(application.NewService(appearanceService))
 	app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(_ *application.ApplicationEvent) {
 		desktop.SetWindowMaterial("mica")
 		if startSilent {

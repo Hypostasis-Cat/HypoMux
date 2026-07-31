@@ -27,7 +27,7 @@ import {
   Image20Regular,
   Save20Regular,
 } from "@fluentui/react-icons";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { GlassSurface } from "../components/material/GlassSurface";
 import { AppToaster } from "../components/AppToaster";
 import { desktopPlatform } from "../platform/desktop";
@@ -115,14 +115,15 @@ export function SettingsPage({ onOpenBlockedDomains }: { onOpenBlockedDomains: (
   const [migration, setMigration] = useState<ConfigMigrationStatus | null>(null);
   const [migrationDialog, setMigrationDialog] = useState<"migrate" | "rollback" | null>(null);
   const [migrationDialogOpen, setMigrationDialogOpen] = useState(false);
-  const { settings: appearance, update: updateAppearance } = useAppearance();
+  const { settings: appearance, update: updateAppearance, persistenceError: appearancePersistenceError } = useAppearance();
   const { locale, setLocale, t } = useI18n();
   const text = (zh: string, en: string) => locale === "en" ? en : zh;
   const backgroundInput = useRef<HTMLInputElement>(null);
+
   const toasterId = useId("settings-toaster");
   const { dispatchToast } = useToastController(toasterId);
 
-  const notify = (title: string, body: string, intent: "success" | "error" | "info" | "warning" = "success") => {
+  const notify = useCallback((title: string, body: string, intent: "success" | "error" | "info" | "warning" = "success") => {
     dispatchToast(
       <Toast>
         <ToastTitle>{title}</ToastTitle>
@@ -130,7 +131,13 @@ export function SettingsPage({ onOpenBlockedDomains }: { onOpenBlockedDomains: (
       </Toast>,
       { intent, timeout: 2800 },
     );
-  };
+  }, [dispatchToast]);
+
+  useEffect(() => {
+    if (appearancePersistenceError) {
+      notify(t("settings_background_image_save_failed"), appearancePersistenceError, "error");
+    }
+  }, [appearancePersistenceError, notify, t]);
 
   useEffect(() => {
     Promise.all([

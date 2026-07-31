@@ -128,6 +128,8 @@ const updaterMethod = (method: string) =>
   `github.com/Hypostasis-Cat/HypoMux/desktop/internal/services.UpdaterService.${method}`;
 const engineMethod = (method: string) =>
   `github.com/Hypostasis-Cat/HypoMux/desktop/internal/services.EngineService.${method}`;
+const appearanceMethod = (method: string) =>
+  `github.com/Hypostasis-Cat/HypoMux/desktop/internal/services.AppearanceService.${method}`;
 
 export async function withServiceTimeout<T>(
   request: Promise<T>,
@@ -202,6 +204,10 @@ export const appServices = {
       Call.ByName(settingsMethod("MigrateLegacy")) as Promise<CompleteAppSettings>,
     rollbackLegacy: () =>
       Call.ByName(settingsMethod("RollbackLegacyMigration")) as Promise<CompleteAppSettings>,
+  },
+  appearance: {
+    load: () => Call.ByName(appearanceMethod("Load")) as Promise<string>,
+    save: (payload: string) => Call.ByName(appearanceMethod("Save"), payload) as Promise<string>,
   },
   blockedDomains: {
     list: () => Call.ByName(blockedDomainMethod("List")) as Promise<BlockedDomainSnapshot>,

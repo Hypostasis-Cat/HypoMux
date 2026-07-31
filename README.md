@@ -1,31 +1,32 @@
 # HypoMux
 
 <p align="center">
-  <img src="support/icon.ico" alt="HypoMux Icon" width="128" height="128"><br><br>
+  <img src="support/icon.ico" alt="HypoMux 图标" width="128" height="128"><br><br>
   <a href="README.md">简体中文</a> | <a href="README_EN.md">English</a>
 </p>
 
----
-
-#  简体中文
-
 <p align="center">
-  <img src="https://img.shields.io/badge/.NET-10.0-blue?style=flat-square&logo=dotnet" alt=".NET">
-  <img src="https://img.shields.io/badge/Frontend-WPF-green?style=flat-square" alt="WPF">
-  <img src="https://img.shields.io/badge/Engine-Go-orange?style=flat-square&logo=go" alt="Go">
-  <img src="https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011-brightgreen?style=flat-square&logo=windows" alt="Windows">
-  <img src="https://img.shields.io/badge/Architecture-Dual--Protocol%20L3%20Binding-red?style=flat-square" alt="Architecture">
+  <img src="https://img.shields.io/badge/Version-2.5.0-0078d4?style=flat-square" alt="Version 2.5.0">
+  <img src="https://img.shields.io/badge/Core-Go-00ADD8?style=flat-square&logo=go&logoColor=white" alt="Go">
+  <img src="https://img.shields.io/badge/Desktop-Wails%20v3-CB3837?style=flat-square" alt="Wails v3">
+  <img src="https://img.shields.io/badge/UI-React%20%2B%20Fluent%20UI-61DAFB?style=flat-square&logo=react&logoColor=black" alt="React and Fluent UI">
+  <img src="https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011-0078D4?style=flat-square&logo=windows" alt="Windows 10 and 11">
 </p>
 
-HypoMux v2.0 是一款专为 Windows 平台打造的**多网卡带宽并发聚合下载加速工具**，用于在多连接下载场景中实现更稳定的带宽叠加体验。
+HypoMux 是一款面向 Windows 的开源多网卡聚合与分流工具。它把多连接下载任务分配到多张活动网卡，让有线网络、Wi-Fi、手机热点或 USB 网络共享能够同时承担流量。
 
-2.0 版本在原有系统代理模式之外加入了**虚拟网卡模式**，通过更完整的流量接管与本地安全分流，让多网络加速在更多应用里保持稳定；同时新增**分流规则**，可以把指定进程放入直连/绕过列表，或继续交给多网卡聚合通道处理，解锁下载、游戏平台、浏览器等更多组合玩法。
+HypoMux 聚合的是多个独立连接，而不是把单条 TCP 连接拆成多路。因此，它尤其适合 Steam、IDM、游戏平台更新器、浏览器大文件下载等高并发场景；单连接任务的速度仍受该连接本身限制。
 
-在系统代理模式下，HypoMux 通过 L3 物理层套接字绑定（IP_UNICAST_IF）与双协议代理引擎进行连接级调度；在虚拟网卡模式下，HypoMux 会临时调整 Windows 代理与路由相关设置，将需要加速的流量导入本地核心处理，并让非加速流量按高级分流规则直接放行。对于 Steam 游戏更新、IDM 大文件下载、WeGame 下载等多连接场景，HypoMux 可以把不同连接分配到不同网卡上，获得更稳定的多线路吞吐表现。
+## 2.5.0 新版本
 
-简单来说，只要你的电脑同时连上了多个网络（比如：**插着学校/家里网线的同时，又连上了 Wi-Fi，或者插上了手机的 USB 网络共享**），HypoMux 就能在多线程下载时把连接分散到这些线路上。它适合 Steam、IDM、浏览器大文件下载等多连接任务；对于单连接下载，效果会受任务本身限制。
+2.5.0 完成了桌面端从 Python/Qt 与过渡期 WPF 实现到 **Go + Wails v3 + React + Fluent UI** 的正式迁移。桌面界面以普通用户权限运行，TUN、WFP、路由、DNS 与网络恢复等高权限操作交给独立的 Go Core/Windows 服务处理。
 
----
+- **全 Go 后端**：桌面服务与网络引擎统一使用 Go，移除旧版 Python、Qt、asyncio 与 .NET/WPF 运行时依赖。
+- **更安全的 TUN 生命周期**：启动前验证网卡、DNS、权限服务、Wintun、sing-box、WFP 与第三方 TUN；失败时在修改系统网络前阻止启动或自动回滚。
+- **完整分流规则**：支持按进程、域名及子域名、目标 IP/CIDR 选择聚合、直连或指定网卡；旧配置中的多值规则会逐项迁移并保留。
+- **第三方代理兼容**：识别常见本地代理与游戏加速器进程，并按进程路径或监听端口 PID 建立直连旁路，降低回环与相互代理风险。
+- **可靠恢复**：系统代理状态采用原子化快照与恢复；异常退出、启动失败或重启后会继续尝试恢复原有设置。
+- **新版个性化与诊断**：提供 Fluent UI 界面、明暗主题、Mica/材质、自定义背景、网卡体检、连接查看、日志与更新检查。
 
 ## 赞助方
 
@@ -51,34 +52,34 @@ HypoMux 不收集、出售或上传个人数据及遥测信息。程序仅会在
 
 ---
 
-## ⬇️ 下载
+## 下载
 
-> **Windows 安装包：**[点击前往 Releases 下载最新版本](https://github.com/Hypostasis-Cat/HypoMux/releases/latest)
+> **Windows 安装包：**[前往 GitHub Releases 下载最新版](https://github.com/Hypostasis-Cat/HypoMux/releases/latest)
 >
-> 打开后，在最新版本页面的 **Assets** 区域下载 `HypoMux_Setup_*.exe` 即可安装。
+> 在最新版本的 **Assets** 中下载 `HypoMux_Setup_*.exe`。正式发布包通过 GitHub Actions 构建并由 SignPath 签名。
 
----
-
-##  界面预览
-
->  **视觉说明**：Windows 11 风格的轻量化主视窗，移除了高干扰的半透明叠层，采用微光蓝（`#0078d4`）与浅灰监控控制台风格。
+## 界面预览
 
 <p align="center">
-  <img src="assets/ui_idle_2.0.png" alt="HypoMux 2.0 现代化主界面" width="850" style="border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
+  <img src="assets/ui_idle_2.0.png" alt="HypoMux 桌面界面" width="850" style="border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
 </p>
 
----
+## 核心功能
 
-##  核心功能
+- **系统代理模式**：启动本地 HTTP/HTTPS 与 SOCKS5 服务，并接管 Windows 系统代理。资源占用较低，适合遵循系统代理的下载器、游戏平台和浏览器。
+- **虚拟网卡模式**：通过 Wintun 与 sing-box 接管更广泛的系统流量，并结合 WFP、DNS 和路由规则完成精细分流。
+- **多网卡连接调度**：为每个新连接选择出站网卡，并使用源地址绑定与 `IP_UNICAST_IF` 将套接字固定到真实物理链路。
+- **高级路由规则**：按进程、域名、IP/CIDR 指定聚合、直连、以太网、Wi-Fi 或某张具体网卡。
+- **单网卡受限域名处理**：记录特定链路不可访问的域名，避免后续连接继续分配到该链路。
+- **实时状态与诊断**：展示每张网卡的速率、连接数和聚合吞吐，并提供丢包、延迟、抖动、DNS、网关及源地址绑定检查。
+- **最小权限架构**：界面不以管理员身份常驻；正式安装后，仅独立 Core 服务持有必要的网络管理权限。
 
-*  **虚拟网卡模式**：v2.0 新增 TUN 虚拟网卡接管能力，可在更多应用场景下获得更稳定的加速效果。
-*  **高级分流规则**：支持按进程、域名（含子域名）或目标 IP/CIDR 指定直连、单网卡或多网卡聚合通道，适合下载、游戏平台、浏览器与低延迟应用混合使用。
-*  **双协议无感接管**：后台同时运行 SOCKS5 与 HTTP 转发服务，启动后自动接管 Windows WinINet 系统代理，兼容 Steam、IDM、浏览器等常见客户端。
-*  **全生命周期代理保护**：主动停止、启动失败、窗口关闭等路径都会强制还原系统代理，降低代理残留导致断网的风险。
-*  **五列实时遥测大屏**：实时展示【选择 | 网卡别名 | IPv4 地址 | 实时速度 (MB/s) | 实时连接数】，方便观察每张网卡的吞吐与连接分配情况。
-* ️ **异步网络内核**：网卡扫描、异步 DNS 解析、连接调度与流量监测均放在后台线程与 asyncio 事件循环中处理，避免高并发连接拖慢主界面。
+### 两种运行模式如何选择
 
----
+| 模式 | 覆盖范围 | 权限与兼容性 | 推荐场景 |
+| --- | --- | --- | --- |
+| 系统代理 | 遵循 Windows 系统代理的应用 | 更轻量；不创建虚拟网卡 | IDM、浏览器、Steam 等代理感知型下载 |
+| 虚拟网卡 | 更广泛的 TCP/UDP 与非代理感知流量 | 需要 Core 服务、Wintun/WFP；不能与其他 TUN 同时接管默认路由 | 游戏平台下载、WeGame、复杂分流和全局接管 |
 
 ## 📢 重要提示与合规免责声明
 
@@ -89,112 +90,107 @@ HypoMux 是一个透明、开源的网络工具，仅用于用户本人拥有授
 1. **系统设置调整**：HypoMux 运行时可能会动态调整 Windows 系统代理和/或路由相关设置，以便将流量导入加速核心。
 2. **本地安全代理**：启用加速后，需要加速的网络流量会经过本机安全核心进行分流、代理与多路复用。
 3. **自动恢复机制**：停止工具或卸载软件时，HypoMux 会自动恢复被修改的系统代理与网络设置。
-4. **游戏与分流规则**：HypoMux v2.0 引入高级分流能力。对于竞技类网游等对延迟极度敏感的应用，建议将其加入**直连/绕过规则列表**，以保持原始网络延迟；也可以在游戏时暂停本工具。
+4. **游戏与分流规则**：HypoMux 提供高级分流能力。对于竞技类网游等对延迟极度敏感的应用，建议将其加入**直连/绕过规则列表**，以保持原始网络延迟；也可以在游戏时暂停本工具。
 
 ---
 
-##  软件使用方法
+## 快速开始
 
-1. **环境就绪**：确保您的电脑同时接上了多条独立的网络线路。例如：**网卡1连接校园网/家用有线宽带 + 网卡2连接手机无线热点（5G）**。
-2. **选择模式**：根据场景选择系统代理模式或虚拟网卡模式。虚拟网卡模式适合希望更稳定接管流量的场景。
-3. **勾选网卡**：双击运行本工具，等待后台自动扫描完成。在网卡表格中，**勾选你想参与带宽聚合的所有活动网卡**。
-4. **配置分流**：如需保证游戏、语音、会议等低延迟应用体验，可在路由规则页把对应进程加入直连/绕过规则。
-5. **一键加速**：点击 **【一键加速】** 按钮。状态提示切换为运行中后，即可开始下载或更新。
-6. **干净停止**：下载完成后，随时点击 **【停止加速】** 或直接关闭软件，系统网络设置会自动还原。
+1. 让电脑同时连接至少两条可用网络，例如有线宽带 + Wi-Fi，或宽带 + 手机 USB/热点共享。
+2. 启动 HypoMux，在首页刷新并勾选要加入聚合池的活动网卡。
+3. 先运行“网络体检”，确认各链路具有有效 IPv4、网关、DNS 和源地址绑定能力。
+4. 选择系统代理或虚拟网卡模式。低延迟游戏、语音和会议程序可先加入直连规则。
+5. 开启聚合引擎，再启动下载任务。若 Steam 已经运行，按界面提示重启 Steam 以完整应用代理设置。
+6. 使用完毕后停止聚合或正常退出，HypoMux 会恢复其接管的系统网络设置。
 
----
+## 第三方代理与游戏加速器兼容
 
-##  支持加速的软件与应用场景
+2.5.0 对常见本地代理与游戏加速器增加了专门的兼容旁路，包括 UU、迅游、雷神、奇游，以及 Clash/Mihomo、v2rayN、Hiddify、Shadowsocks、Proxifier 等常见进程族。运行中的程序会优先按完整可执行文件路径识别；本地系统代理监听器还会按端口反查 PID，避免只依赖容易变化的进程名。
 
-只要目标应用遵循 Windows 系统代理规范，且其下载机制为**"多线程/多并发"**，即可接入 HypoMux 的连接分流：
+仍需注意以下边界：
 
-*  **专业下载管理器**：**IDM (Internet Download Manager)**（默认开启从 IE 获取代理）、迅雷、百度网盘客户端等。
-*  **主流游戏客户端**：**Steam**（其下载引擎 SteamService 原生读取系统标准代理）、Epic Games Launcher、EA App、Xbox 客户端。
-*  **全系列现代浏览器**：Chrome、Edge、Firefox、Safari for Windows 等大文件直接下载。
+- 如果第三方程序只提供本地 HTTP/SOCKS 代理，HypoMux 的 TUN 模式会尽量让其自身进程与监听器直连，避免代理回环。
+- 两个程序不应同时争用 Windows“系统代理”开关。使用 HypoMux 系统代理模式时，请关闭另一个程序的系统代理接管。
+- 如果第三方程序创建了自己的 TUN/VPN 虚拟网卡并接管默认路由，请先关闭它，再启动 HypoMux 虚拟网卡模式。HypoMux 会在修改系统网络前检测并阻止此类冲突。
+- 代理或加速器版本更新后若更换了进程结构，建议先查看 HypoMux 的兼容提示与支持日志，再决定使用系统代理模式或关闭冲突程序。
 
----
-
-##  技术工作原理
-
-HypoMux 核心分流机制建立在**四层应用层调度**、**三层物理层精准绑定**与 v2.0 的**虚拟网卡分流接管**之上。系统代理模式负责轻量接入支持 WinINet/系统代理的应用；虚拟网卡模式则通过本地内核侧车与高级分流规则覆盖更多流量场景。
+## 工作原理
 
 ```text
-[多线程应用流量 (Steam / IDM)] 
-               │
-               ▼ WinINet 自动拦截劫持
-    Windows 系统代理 / 虚拟网卡模式接入
-   (http/https -> 10801 | socks -> 10800 | TUN)
-               │
-               ▼ 
-       hypomux-engine.exe (Go)
-               │
-               ▼ Round-Robin 连接轮询分发机制
-   L3 物理层双向套接字强行绑定
-   ├── socket.bind((nic1_ip, 0)) + IP_UNICAST_IF ──► 真实物理网卡 1 ──┐
-   ├── socket.bind((nic2_ip, 0)) + IP_UNICAST_IF ──► 真实物理网卡 2 ─┼─► 物理带宽叠加吞吐
-   └── socket.bind((nic3_ip, 0)) + IP_UNICAST_IF ──► 真实物理网卡 3 ──┘
+应用连接
+   │
+   ├─ 系统代理：HTTP/HTTPS 10801 · SOCKS5 10800
+   └─ 虚拟网卡：Wintun + sing-box + WFP/DNS/路由规则
+                         │
+                  hypomux-engine.exe
+                         │
+              按连接选择聚合/直连/指定网卡
+               ┌─────────┼─────────┐
+             网卡 1     网卡 2     网卡 3
+               └─────────┴─────────┘
+                     合并吞吐
 ```
 
-1. **双模式接入**：系统代理模式会向 `HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings` 写入本地代理链条：`http=127.0.0.1:10801;https=127.0.0.1:10801;socks=127.0.0.1:10800`；虚拟网卡模式则通过 TUN 接管与高级分流规则处理更多应用流量。
-2. **底层双绑**：当分流引擎收到下载客户端的 TCP 连接时，调度器通过 `socket.bind()` 钉死本地网卡 IPv4，并向系统内核发送 `setsockopt(socket.IPPROTO_IP, 31, ...)` 强制锁定网卡物理索引（Interface Index），强制流量剥离默认网关，实现物理多通道并进。
-3. **高级分流**：v2.0 支持按进程配置聚合或直连策略。下载任务可以进入多网卡聚合通道，对延迟敏感的程序则可保持直连。
+系统代理模式将本地代理链写入当前用户的 Windows Internet Settings；虚拟网卡模式则通过独立权限服务创建和管理 TUN、WFP、DNS 与路由资源。Go 引擎对每个新连接选择出口，把本地源地址绑定和 Windows 接口索引绑定组合使用，从而让不同连接稳定地走不同物理网卡。
 
----
+## 支持场景与技术边界
 
-##  实战并发加速效果
+- 适合 IDM、Steam、Epic Games Launcher、EA App、Xbox、WeGame、Chrome、Edge、Firefox 等会产生多个并发连接的下载场景。
+- 多网卡聚合是**连接级负载分配**，不会让单条 TCP 连接突破其原有链路速度，也不会把多条线路变成一个具有单一公网 IP 的链路聚合协议。
+- 聚合侧重吞吐量，不保证降低延迟。竞技游戏、语音和视频会议建议使用直连规则或暂时停止聚合。
+- HypoMux 不读取游戏内存、不注入 DLL，也不修改游戏私有协议数据包；但第三方平台和反作弊规则各不相同，用户仍应遵守相应服务条款。
+- 仅可在本人拥有或已获授权的设备与网络上使用，不得用于绕过未经授权的访问控制、安全措施或平台限制。
 
-在多网卡高并发下载测试中，HypoMux 可以将连接分配到【以太网2】、【以太网】与【WLAN】等多路通道，各线路同时承担下载流量。
+## 实测效果
 
-### 实战案例 A：IDM 极限拉取多线程大文件 (Ubuntu ISO 镜像下载)
-> 后台引擎并发接管 190 个有效活跃连接，三路通道各自平摊约 **35~39 MB/s** 的下行吞吐，主大屏合并显示突破 **110.93 MB/s**。
+下列截图来自早期版本的真实多网卡、多连接测试，用于说明连接级聚合能力；实际速度取决于每条线路、下载源、并发数、磁盘和 CPU，不能视为性能保证。
 
-<p align="center">
-  <img src="assets/screenshot_2.0_idm.png" alt="IDM 实战满速分流" width="850" style="border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
-</p>
-
-### 实战案例 B：Steam 千兆级大体量游戏更新 (*Hogwarts Legacy*)
-> 承接 Steam 下载引擎的高频多线程并发，双线/三线同时工作，持续稳定维持在 **98.26 MB/s** 以上。
+### IDM 多线程大文件下载
 
 <p align="center">
-  <img src="assets/screenshot_steam.png" alt="Steam 游戏大作满速更新" width="850" style="border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
+  <img src="assets/screenshot_2.0_idm.png" alt="IDM 多网卡并发下载" width="850" style="border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
 </p>
 
-### 实战案例 C：WeGame 游戏下载速度展示
-> v2.0 虚拟网卡模式与分流规则可覆盖更多游戏平台下载场景，让 WeGame 等客户端也能在多网络环境下获得更高吞吐。
+### Steam 游戏更新
 
 <p align="center">
-  <img src="assets/screenshot_2.0_wegame.png" alt="WeGame 下载速度展示" width="850" style="border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
+  <img src="assets/screenshot_steam.png" alt="Steam 多网卡并发更新" width="850" style="border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
 </p>
 
-### Windows 任务管理器网卡性能面板遥测
-> 任务管理器物理监控实况：三张网卡（以太网、以太网2、WLAN）在同一秒内各自出现约 **~300 Mbps** 的接收速率。
+### WeGame 游戏下载
 
 <p align="center">
-  <img src="assets/screenshot_taskmgr.png" alt="任务管理器多网卡并发接收物理铁证" width="400" style="border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
+  <img src="assets/screenshot_2.0_wegame.png" alt="WeGame 多网卡并发下载" width="850" style="border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
 </p>
 
----
+### Windows 任务管理器多网卡吞吐
 
-## ️ 构建
+<p align="center">
+  <img src="assets/screenshot_taskmgr.png" alt="任务管理器多网卡吞吐" width="400" style="border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
+</p>
 
-桌面前端使用 .NET 10 WPF，网络引擎使用 Go。正式安装包发布自包含
-`win-x64` 前端，不要求用户预装 .NET Runtime。
+## 开发与构建
+
+推荐环境：Windows 10/11、Go 1.26、Node.js 22、pnpm 10、Wails v3 CLI `v3.0.0-alpha2.119`。构建安装包还需要 NSIS；仓库根目录 `bin/` 必须包含官方运行时文件 `sing-box.exe`、`wintun.dll` 和 `libcronet.dll`。
 
 ```powershell
-go -C engine build -trimpath -o ..\hypomux-engine.exe .\cmd\hypomux-engine
-$env:HYPOMUX_ENGINE_PATH = "$PWD\hypomux-engine.exe"
-dotnet run --project .\frontend\HypoMux.App\HypoMux.App.csproj
+go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-alpha2.119
+pnpm --dir desktop/frontend install --frozen-lockfile
+Push-Location desktop
+wails3 generate bindings -clean=true -ts -i
+Pop-Location
+
+go -C engine test ./...
+go -C desktop test ./...
+pnpm --dir desktop/frontend build
+
+Set-Location desktop
+wails3 dev
+# 或构建 NSIS 安装包
+wails3 task windows:package
 ```
 
----
-
-## ️ 安全提示与技术边界说明
-
-1. **反作弊风险说明**：本工具工作在标准应用层代理和网络套接字绑定层。**不触碰游戏内存、不拦截或修改任何游戏私有网络封包、不注入任何 DLL 驱动**。
-2. **单线程连接限制**：多网卡并发聚合本质上是**多连接负载均衡**。如果您的下载任务是极为罕见的单线程 TCP 连接（例如某网盘的非会员单线程死速限制），任何多网卡聚合工具均无法对其加速。
-3. **电竞低延迟恢复提示**：多网卡分流模式面向下载吞吐量。在游玩对延迟（Ping 值）要求较高的即时电竞网游（如 *CS2*、*Valorant*、*GTA 5* 联机）前，请将相关进程加入**直连/绕过规则列表**，或点击【停止加速】让电脑网络回归正常链路。
-
----
+完整发布流程以 [`.github/workflows/build.yml`](.github/workflows/build.yml) 为准。
 
 ##  特别鸣谢 / Acknowledgments
 

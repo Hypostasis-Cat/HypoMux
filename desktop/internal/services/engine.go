@@ -147,6 +147,8 @@ type EngineService struct {
 	wfpFallbackApplied  bool
 	compatRestarting    bool
 	compatibilityNotice string
+	proxyRecoveryNotice string
+	proxyRecoveryError  string
 	clashAPI            clashAPIConfig
 	closing             bool
 }
@@ -181,7 +183,7 @@ func newEngineService(
 	blockedDomains *BlockedDomainService,
 	logs ...*SupportLogStore,
 ) *EngineService {
-	_ = restoreSystemProxy()
+	recoveryNotice, recoveryErr := restoreSystemProxyDetailed()
 	var supportLogs *SupportLogStore
 	if len(logs) > 0 {
 		supportLogs = logs[0]
@@ -190,6 +192,17 @@ func newEngineService(
 		client: engineclient.New(), settings: settings, adapters: adapters,
 		logs: supportLogs, tun: NewTunService(settings, adapters),
 		blockedDomains: blockedDomains, lifecycleGate: make(chan struct{}, 1),
+		proxyRecoveryNotice: recoveryNotice,
+	}
+	if recoveryErr != nil {
+		service.proxyRecoveryError = recoveryErr.Error()
+	}
+	if supportLogs != nil {
+		if service.proxyRecoveryError != "" {
+			supportLogs.RecordEvent("system_proxy", "startup_recovery_failed", map[string]any{"message": service.proxyRecoveryError})
+		} else if service.proxyRecoveryNotice != "" {
+			supportLogs.RecordEvent("system_proxy", "startup_recovery_notice", map[string]any{"message": service.proxyRecoveryNotice})
+		}
 	}
 	go service.consumeCoreEvents()
 	return service
@@ -339,6 +352,10 @@ func (s *EngineService) Snapshot() (EngineSnapshot, error) {
 	s.mu.Lock()
 	if s.compatibilityNotice != "" {
 		snapshot.Reason = s.compatibilityNotice
+	} else if s.proxyRecoveryError != "" {
+		snapshot.Reason = "提示：系统代理恢复失败：" + s.proxyRecoveryError
+	} else if s.proxyRecoveryNotice != "" && snapshot.Reason == "" {
+		snapshot.Reason = "提示：" + s.proxyRecoveryNotice
 	}
 	if status.Engine.State != "running" {
 		s.last = telemetrySample{}
@@ -516,6 +533,11 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 		s.mu.Unlock()
 		return EngineSnapshot{}, errors.New("HypoMux 正在退出")
 	}
+	if s.proxyRecoveryError != "" {
+		recoveryError := s.proxyRecoveryError
+		s.mu.Unlock()
+		return EngineSnapshot{}, fmt.Errorf("系统代理状态尚未安全恢复：%s", recoveryError)
+	}
 	if !s.compatRestarting {
 		s.dnsFallbackApplied = false
 		s.wfpFallbackApplied = false
@@ -541,6 +563,18 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 		return EngineSnapshot{}, errors.New("请至少选择一张活动网卡")
 	}
 	settings := s.settings.Get()
+	routingRules := []RoutingRule{}
+	compatibility := compatibilityPlan{}
+	if mode == "tun" {
+		routingRules, err = normalizeRulesStrict(settings.RoutingRules)
+		if err != nil {
+			return EngineSnapshot{}, err
+		}
+		if err = validateRoutingOutbounds(routingRules, selected); err != nil {
+			return EngineSnapshot{}, err
+		}
+		compatibility = detectCompatibilityPlan()
+	}
 	effectiveStrictRoute := settings.StrictRoute && !wfpFallbackApplied
 	effectiveDNSPolicy := settings.DNSPolicy
 	if mode == "tun" && dnsFallbackApplied {
@@ -588,6 +622,11 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 				"foreign_tun":                preflight.ForeignTUN,
 				"shared_gateway_risks":       preflight.SharedGatewayRisks,
 				"issues":                     preflight.Issues,
+			})
+			s.logs.RecordEvent("tun_compatibility", "resolved", map[string]any{
+				"process_names": compatibility.ProcessNames,
+				"process_paths": compatibility.ProcessPaths,
+				"detected":      compatibility.Detected,
 			})
 		}
 		if blocker := firstTunBlocker(preflight); blocker != nil {
@@ -667,7 +706,9 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 		var tunIgnored tunLifecycleResult
 		_ = s.client.Request(ctx, "tun.deactivate", nil, &tunIgnored)
 		_ = s.client.Request(ctx, "engine.stop", nil, &ignored)
-		_ = restoreSystemProxy()
+		if restoreErr := restoreSystemProxy(); restoreErr != nil {
+			cause = fmt.Errorf("%w；同时恢复系统代理失败：%v", cause, restoreErr)
+		}
 		s.mu.Lock()
 		s.clashAPI = clashAPIConfig{}
 		s.mu.Unlock()
@@ -686,11 +727,9 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 			return rollback(fmt.Errorf("TUN 启动前 DNS 验证失败：%w", err))
 		}
 		s.recordStartStage("dns_validated", nil)
-		rules, normalizeErr := normalizeRulesStrict(settings.RoutingRules)
-		if normalizeErr != nil {
-			return rollback(normalizeErr)
-		}
-		singBox, configPath, clashAPI, configErr := writeSingBoxConfig(started.Endpoints.Channels, selected[0], dnsResult, rules, effectiveStrictRoute)
+		singBox, configPath, clashAPI, configErr := writeSingBoxConfig(
+			started.Endpoints.Channels, selected[0], dnsResult, routingRules, compatibility, effectiveStrictRoute,
+		)
 		if configErr != nil {
 			return rollback(configErr)
 		}

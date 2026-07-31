@@ -50,42 +50,9 @@ func resolveConnectionProcesses(connections []connectionTelemetry) map[uint64]st
 		return map[uint64]string{}
 	}
 
-	size := uint32(0)
-	status, _, _ := getExtendedTCPTable.Call(
-		0,
-		uintptr(unsafe.Pointer(&size)),
-		0,
-		uintptr(windows.AF_INET),
-		uintptr(tcpTableOwnerPIDAll),
-		0,
-	)
-	if status != uintptr(windows.ERROR_INSUFFICIENT_BUFFER) || size < 4 {
-		return map[uint64]string{}
-	}
-	buffer := make([]byte, size)
-	status, _, _ = getExtendedTCPTable.Call(
-		uintptr(unsafe.Pointer(&buffer[0])),
-		uintptr(unsafe.Pointer(&size)),
-		0,
-		uintptr(windows.AF_INET),
-		uintptr(tcpTableOwnerPIDAll),
-		0,
-	)
-	if status != 0 {
-		return map[uint64]string{}
-	}
-
-	count := *(*uint32)(unsafe.Pointer(&buffer[0]))
-	rowSize := unsafe.Sizeof(tcpRowOwnerPID{})
-	required := uintptr(4) + uintptr(count)*rowSize
-	if required > uintptr(len(buffer)) {
-		return map[uint64]string{}
-	}
 	result := make(map[uint64]string)
 	processCache := make(map[uint32]string)
-	for index := uint32(0); index < count; index++ {
-		rowOffset := 4 + int(index)*int(rowSize)
-		row := (*tcpRowOwnerPID)(unsafe.Pointer(&buffer[rowOffset]))
+	for _, row := range tcpOwnerRows() {
 		key := tcpEndpointPair{
 			local:  networkPort(row.LocalPort),
 			remote: networkPort(row.RemotePort),
@@ -104,6 +71,35 @@ func resolveConnectionProcesses(connections []connectionTelemetry) map[uint64]st
 		}
 	}
 	return result
+}
+
+func tcpOwnerRows() []tcpRowOwnerPID {
+	size := uint32(0)
+	status, _, _ := getExtendedTCPTable.Call(
+		0, uintptr(unsafe.Pointer(&size)), 0, uintptr(windows.AF_INET), uintptr(tcpTableOwnerPIDAll), 0,
+	)
+	if status != uintptr(windows.ERROR_INSUFFICIENT_BUFFER) || size < 4 {
+		return nil
+	}
+	buffer := make([]byte, size)
+	status, _, _ = getExtendedTCPTable.Call(
+		uintptr(unsafe.Pointer(&buffer[0])), uintptr(unsafe.Pointer(&size)), 0,
+		uintptr(windows.AF_INET), uintptr(tcpTableOwnerPIDAll), 0,
+	)
+	if status != 0 {
+		return nil
+	}
+	count := *(*uint32)(unsafe.Pointer(&buffer[0]))
+	rowSize := unsafe.Sizeof(tcpRowOwnerPID{})
+	if uintptr(4)+uintptr(count)*rowSize > uintptr(len(buffer)) {
+		return nil
+	}
+	rows := make([]tcpRowOwnerPID, 0, count)
+	for index := uint32(0); index < count; index++ {
+		rowOffset := 4 + int(index)*int(rowSize)
+		rows = append(rows, *(*tcpRowOwnerPID)(unsafe.Pointer(&buffer[rowOffset])))
+	}
+	return rows
 }
 
 func networkPort(value uint32) uint16 {

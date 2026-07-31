@@ -48,8 +48,8 @@ export type AppearancePreset = {
 };
 
 export interface AppearancePersistence {
-  load(): AppearanceSettings | null | Promise<AppearanceSettings | null>;
-  save(settings: AppearanceSettings): void | Promise<void>;
+  load(): Promise<AppearanceSettings | null>;
+  save(settings: AppearanceSettings): Promise<void>;
 }
 
 export type NativeAppearanceResult = {

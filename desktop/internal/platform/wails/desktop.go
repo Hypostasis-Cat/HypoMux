@@ -64,6 +64,8 @@ func (d *DesktopHost) SetEngineTrayStatus(phase string, mode string) {
 	switch phase {
 	case "running":
 		state = "运行中"
+	case "degraded":
+		state = "降级运行"
 	case "starting":
 		state = "正在启动"
 	case "stopping":

@@ -9,7 +9,7 @@ import {
 } from "../platform/services";
 import { desktopPlatform } from "../platform/desktop";
 
-export type EnginePhase = "stopped" | "starting" | "running" | "stopping" | "failed";
+export type EnginePhase = "stopped" | "starting" | "running" | "degraded" | "stopping" | "failed";
 export type EngineMode = "proxy" | "tun";
 export type AdapterHealth = "idle" | "healthy" | "unstable" | "cooldown" | "probing" | "failed";
 
@@ -108,6 +108,7 @@ export const phaseText: Record<EnginePhase, string> = {
   stopped: "核心待命",
   starting: "正在建立聚合通道",
   running: "聚合引擎运行中",
+  degraded: "聚合引擎降级运行",
   stopping: "正在安全停止",
   failed: "聚合核心异常",
 };
@@ -155,7 +156,7 @@ export function useEngineState(
       requestEpoch !== snapshotEpoch.current ||
       (operationActive.current && !acceptDuringOperation)
     ) return;
-    const nextPhase = (["stopped", "starting", "running", "stopping", "failed"].includes(next.phase)
+    const nextPhase = (["stopped", "starting", "running", "degraded", "stopping", "failed"].includes(next.phase)
       ? next.phase
       : "failed") as EnginePhase;
     setSnapshot(next);
@@ -167,7 +168,7 @@ export function useEngineState(
     setWeightedState(next.weighted);
     setHistory((current) => [...current.slice(-17), next.download_bps / (1024 * 1024)]);
     const compatibilityNotice = next.reason?.startsWith("提示：") === true;
-    if ((nextPhase === "failed" || compatibilityNotice) && next.reason && next.reason !== lastRuntimeFailure.current) {
+    if ((nextPhase === "failed" || nextPhase === "degraded" || compatibilityNotice) && next.reason && next.reason !== lastRuntimeFailure.current) {
       lastRuntimeFailure.current = next.reason;
       onError(next.reason);
     } else if (nextPhase === "running" && !compatibilityNotice) {
@@ -311,7 +312,7 @@ export function useEngineState(
     if (transition || operationActive.current) return;
     operationActive.current = true;
     const operationEpoch = ++snapshotEpoch.current;
-    const stopping = phase === "running";
+    const stopping = phase === "running" || phase === "degraded";
     setPhase(stopping ? "stopping" : "starting");
     try {
       if (!stopping && mode === "tun") {

@@ -43,16 +43,18 @@ export function EngineHero({
 }) {
   const { locale, t } = useI18n();
   const text = (zh: string, en: string) => locale === "en" ? en : zh;
-  const active = phase === "running" || phase === "starting";
+  const active = phase === "running" || phase === "degraded" || phase === "starting";
   const actionLabel = phase === "starting"
     ? text("正在启动", "Starting")
     : phase === "stopping"
       ? text("正在停止", "Stopping")
-      : phase === "running"
+      : phase === "running" || phase === "degraded"
         ? text("停止聚合", "Stop aggregation")
         : text("启动聚合", "Start aggregation");
   const phaseLabel = phase === "running"
     ? text("运行中", "Running")
+    : phase === "degraded"
+      ? text("降级运行", "Degraded")
     : phase === "starting"
       ? text("正在启动", "Starting")
       : phase === "stopping"
@@ -82,7 +84,7 @@ export function EngineHero({
           selectedValue={mode}
           onTabSelect={(_, data) => onModeChange(data.value as EngineMode)}
           size="small"
-          disabled={transitioning || phase === "running"}
+          disabled={transitioning || phase === "running" || phase === "degraded"}
         >
           <Tab value="proxy" icon={<PlugConnected20Regular />}>{t("mode_proxy")}</Tab>
           <Tab value="tun" icon={<Navigation20Regular />}>{t("mode_tun")} TUN</Tab>
@@ -111,7 +113,7 @@ export function EngineHero({
           <Switch
             className="weighted-switch"
             checked={weighted}
-            disabled={transitioning || phase === "running"}
+            disabled={transitioning || phase === "running" || phase === "degraded"}
             onChange={(_, data) => onWeightedChange(data.checked)}
             label={weighted ? text("权重调度", "Weighted") : text("轮询调度", "Round-robin")}
           />

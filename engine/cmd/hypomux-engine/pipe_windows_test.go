@@ -63,7 +63,9 @@ func TestCorePipeClientRejectsUnexpectedDesktopHostPID(t *testing.T) {
 	connected := make(chan error, 1)
 	go func() {
 		err := windows.ConnectNamedPipe(server, nil)
-		if err == windows.ERROR_PIPE_CONNECTED {
+		// The rejected client may disconnect before ConnectNamedPipe returns.
+		// ERROR_NO_DATA confirms that the client reached the pipe and closed it.
+		if err == windows.ERROR_PIPE_CONNECTED || err == windows.ERROR_NO_DATA {
 			err = nil
 		}
 		connected <- err

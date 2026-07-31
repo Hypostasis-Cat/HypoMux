@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState, type PropsWithChildren } from "react";
 import { desktopPlatform } from "../platform/desktop";
-import { browserAppearancePersistence } from "./background.service";
+import { appearancePersistence, loadLegacyBrowserAppearance } from "./background.service";
 import { appearancePresets, defaultAppearance, getAppearancePreset, resolveAccent } from "./appearance.presets";
 import { createHypoMuxTheme } from "./createFluentTheme";
 import type {
@@ -16,6 +16,7 @@ type AppearanceContextValue = {
   accent: string;
   fluentTheme: ReturnType<typeof createHypoMuxTheme>;
   nativeResult: NativeAppearanceResult;
+  persistenceError?: string;
   update: (patch: Partial<AppearanceSettings>) => void;
   applyPreset: (id: AppearancePresetId) => void;
   reset: () => void;
@@ -40,8 +41,8 @@ const normaliseAppearance = (value: AppearanceSettings): AppearanceSettings => (
 });
 
 const getInitialAppearance = (): AppearanceSettings => {
-  const saved = browserAppearancePersistence.load();
-  let initial = saved && !(saved instanceof Promise) ? { ...defaultAppearance, ...saved } : { ...defaultAppearance };
+  const saved = loadLegacyBrowserAppearance();
+  let initial = saved ? { ...defaultAppearance, ...saved } : { ...defaultAppearance };
 
   if (import.meta.env.DEV) {
     const query = new URLSearchParams(window.location.search);
@@ -85,10 +86,27 @@ const applyDocumentTokens = (settings: AppearanceSettings, resolvedMode: Resolve
 
 export function AppearanceProvider({ children }: PropsWithChildren) {
   const [settings, setSettings] = useState<AppearanceSettings>(getInitialAppearance);
+  const [hydrated, setHydrated] = useState(false);
   const [systemMode, setSystemMode] = useState<ResolvedAppearance>(getSystemMode);
   const [nativeResult, setNativeResult] = useState<NativeAppearanceResult>({ applied: false, fallback: true });
+  const [persistenceError, setPersistenceError] = useState<string>();
   const resolvedMode = settings.mode === "system" ? systemMode : settings.mode;
   const accent = resolveAccent(settings);
+
+  useEffect(() => {
+    let active = true;
+    appearancePersistence.load()
+      .then((saved) => {
+        if (active && saved) setSettings(normaliseAppearance({ ...defaultAppearance, ...saved }));
+      })
+      .catch((error) => console.error("Unable to load appearance settings", error))
+      .finally(() => {
+        if (active) setHydrated(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     const query = window.matchMedia("(prefers-color-scheme: dark)");
@@ -99,11 +117,19 @@ export function AppearanceProvider({ children }: PropsWithChildren) {
 
   useEffect(() => {
     applyDocumentTokens(settings, resolvedMode, accent);
-    browserAppearancePersistence.save(settings);
+    if (hydrated) {
+      void appearancePersistence.save(settings)
+        .then(() => setPersistenceError(undefined))
+        .catch((error) => {
+          const message = error instanceof Error ? error.message : String(error);
+          setPersistenceError(message);
+          console.error("Unable to save appearance settings", error);
+        });
+    }
     desktopPlatform
       .setWindowAppearance({ material: settings.material, mode: resolvedMode, accent })
       .then(setNativeResult);
-  }, [settings, resolvedMode, accent]);
+  }, [settings, resolvedMode, accent, hydrated]);
 
   const value = useMemo<AppearanceContextValue>(
     () => ({
@@ -112,11 +138,12 @@ export function AppearanceProvider({ children }: PropsWithChildren) {
       accent,
       fluentTheme: createHypoMuxTheme(resolvedMode, accent),
       nativeResult,
+      persistenceError,
       update: (patch) => setSettings((current) => normaliseAppearance({ ...current, ...patch })),
       applyPreset: (id) => setSettings({ ...getAppearancePreset(id).settings, mode: settings.mode }),
       reset: () => setSettings({ ...appearancePresets[0].settings }),
     }),
-    [accent, nativeResult, resolvedMode, settings],
+    [accent, nativeResult, persistenceError, resolvedMode, settings],
   );
 
   return <AppearanceContext.Provider value={value}>{children}</AppearanceContext.Provider>;

@@ -150,7 +150,7 @@ func (s *SettingsService) MigrateLegacy() (AppSettings, error) {
 	s.migration.LegacyFound = true
 	s.migration.Applied = true
 	s.migration.LegacyPath = legacyPath
-	s.migration.Message = "旧版配置已迁移；原文件保持不变"
+	s.migration.Message = "旧版网络配置与分流规则已迁移；界面偏好按设计恢复默认，原文件保持不变"
 	return cloneSettings(s.settings), nil
 }
 
@@ -281,7 +281,7 @@ func (s *SettingsService) reload() error {
 		s.settings = migrated
 		s.migration = ConfigMigrationStatus{
 			LegacyFound: true, Applied: true, LegacyPath: legacyPath,
-			Message: "首次启动已迁移旧版配置；原文件保持不变",
+			Message: "首次启动已迁移旧版网络配置与分流规则；界面偏好按设计恢复默认，原文件保持不变",
 		}
 		return s.saveLocked()
 	}
@@ -387,7 +387,13 @@ func migrateLegacySettings(data []byte) (AppSettings, error) {
 	decode("dns_server", &result.DNSServer)
 	decode("doh_provider", &result.DNSPolicy)
 	decode("nic_bandwidth_limits", &result.AdapterWeights)
-	decode("routing_rules", &result.RoutingRules)
+	if payload := raw["routing_rules"]; payload != nil {
+		rules, err := parseRoutingRulesJSON(payload)
+		if err != nil {
+			return AppSettings{}, fmt.Errorf("旧版分流规则迁移失败：%w", err)
+		}
+		result.RoutingRules = rules
+	}
 	if err := validateSettings(result); err != nil {
 		return AppSettings{}, fmt.Errorf("旧版配置校验失败：%w", err)
 	}

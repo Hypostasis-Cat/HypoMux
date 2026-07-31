@@ -31,49 +31,84 @@ type RoutingRule struct {
 }
 
 func (r *RoutingRule) UnmarshalJSON(data []byte) error {
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(data, &raw); err != nil {
+	rules, err := expandRoutingRule(data)
+	if err != nil {
 		return err
 	}
-	var matchType, outbound, value string
+	if len(rules) != 1 {
+		return fmt.Errorf("一条 JSON 规则包含 %d 个匹配值；请通过旧版规则迁移器展开", len(rules))
+	}
+	*r = rules[0]
+	return nil
+}
+
+func expandRoutingRule(data []byte) ([]RoutingRule, error) {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, err
+	}
+	var matchType, outbound string
 	_ = json.Unmarshal(raw["match_type"], &matchType)
 	_ = json.Unmarshal(raw["outbound"], &outbound)
-	_ = json.Unmarshal(raw["value"], &value)
 	if matchType == "" {
-		switch {
-		case raw["process_name"] != nil:
-			matchType = MatchProcess
-		case raw["domain"] != nil || raw["domain_suffix"] != nil:
-			matchType = MatchDomain
-		case raw["ip_cidr"] != nil || raw["ip"] != nil:
-			matchType = MatchIP
+		present := []string{}
+		if raw["process_name"] != nil {
+			present = append(present, MatchProcess)
 		}
+		if raw["domain"] != nil || raw["domain_suffix"] != nil {
+			present = append(present, MatchDomain)
+		}
+		if raw["ip_cidr"] != nil || raw["ip"] != nil {
+			present = append(present, MatchIP)
+		}
+		if len(present) != 1 {
+			return nil, fmt.Errorf("旧版规则必须且只能包含一种匹配类型")
+		}
+		matchType = present[0]
 	}
-	if value == "" {
+	matchType = canonicalMatchType(matchType)
+	values := []string{}
+	if payload := raw["value"]; payload != nil {
+		var value string
+		if err := json.Unmarshal(payload, &value); err != nil {
+			return nil, fmt.Errorf("规则 value 必须是字符串")
+		}
+		values = append(values, value)
+	} else {
 		fields := map[string][]string{
 			MatchProcess: {"process_name"},
 			MatchDomain:  {"domain", "domain_suffix"},
 			MatchIP:      {"ip_cidr", "ip"},
-		}[canonicalMatchType(matchType)]
+		}[matchType]
 		for _, field := range fields {
-			if raw[field] == nil {
+			payload := raw[field]
+			if payload == nil {
 				continue
 			}
-			var values []string
-			if json.Unmarshal(raw[field], &values) == nil && len(values) > 0 {
-				value = values[0]
-				break
+			var many []string
+			if err := json.Unmarshal(payload, &many); err == nil {
+				values = append(values, many...)
+				continue
 			}
-			_ = json.Unmarshal(raw[field], &value)
-			if value != "" {
-				break
+			var one string
+			if err := json.Unmarshal(payload, &one); err != nil {
+				return nil, fmt.Errorf("规则字段 %s 必须是字符串或字符串数组", field)
 			}
+			values = append(values, one)
 		}
 	}
-	r.MatchType = canonicalMatchType(matchType)
-	r.Value = value
-	r.Outbound = strings.TrimSpace(outbound)
-	return nil
+	if len(values) == 0 {
+		return nil, fmt.Errorf("规则没有匹配值")
+	}
+	rules := make([]RoutingRule, 0, len(values))
+	for _, value := range values {
+		rules = append(rules, RoutingRule{
+			MatchType: matchType,
+			Value:     value,
+			Outbound:  strings.TrimSpace(outbound),
+		})
+	}
+	return rules, nil
 }
 
 type RoutingValidation struct {
@@ -119,6 +154,9 @@ func (s *RoutingRuleService) availableOutbounds() []Outbound {
 	adapters, listErr := s.adapters.List()
 	if listErr == nil {
 		for _, adapter := range adapters {
+			if !adapter.Selected {
+				continue
+			}
 			outbounds = append(outbounds, Outbound{ID: "nic_" + adapter.ID, Label: adapter.Name})
 		}
 	}
@@ -129,6 +167,9 @@ func (s *RoutingRuleService) Validate(rule RoutingRule, existing []RoutingRule) 
 	normalized, err := normalizeRule(rule)
 	if err != nil {
 		return RoutingValidation{Valid: false, Rule: rule, Message: err.Error()}
+	}
+	if err := s.validateSelectedOutbounds([]RoutingRule{normalized}); err != nil {
+		return RoutingValidation{Valid: false, Rule: normalized, Message: err.Error()}
 	}
 	identity := ruleIdentity(normalized)
 	for _, candidate := range existing {
@@ -146,6 +187,9 @@ func (s *RoutingRuleService) Validate(rule RoutingRule, existing []RoutingRule) 
 func (s *RoutingRuleService) Save(rules []RoutingRule) (RoutingSnapshot, error) {
 	normalized, err := normalizeRulesStrict(rules)
 	if err != nil {
+		return RoutingSnapshot{}, err
+	}
+	if err := s.validateSelectedOutbounds(normalized); err != nil {
 		return RoutingSnapshot{}, err
 	}
 	if err := s.settings.saveRoutingRules(normalized); err != nil {
@@ -243,11 +287,26 @@ func parseRoutingBackup(data []byte) ([]RoutingRule, error) {
 			rulesData = envelope.RoutingRules
 		}
 	}
-	var rules []RoutingRule
-	if len(rulesData) == 0 || json.Unmarshal(rulesData, &rules) != nil {
+	if len(rulesData) == 0 {
 		return nil, fmt.Errorf("规则文件必须包含 rules 数组")
 	}
-	return normalizeRulesStrict(rules)
+	return parseRoutingRulesJSON(rulesData)
+}
+
+func parseRoutingRulesJSON(data []byte) ([]RoutingRule, error) {
+	var entries []json.RawMessage
+	if err := json.Unmarshal(data, &entries); err != nil {
+		return nil, fmt.Errorf("规则必须是 JSON 数组：%w", err)
+	}
+	expanded := make([]RoutingRule, 0, len(entries))
+	for index, entry := range entries {
+		rules, err := expandRoutingRule(entry)
+		if err != nil {
+			return nil, fmt.Errorf("第 %d 条旧版规则无效：%w", index+1, err)
+		}
+		expanded = append(expanded, rules...)
+	}
+	return normalizeRulesStrict(expanded)
 }
 
 func normalizeRulesStrict(rules []RoutingRule) ([]RoutingRule, error) {
@@ -286,6 +345,29 @@ func normalizeRules(rules []RoutingRule) ([]RoutingRule, error) {
 	}
 	sortRules(result)
 	return result, nil
+}
+
+func (s *RoutingRuleService) validateSelectedOutbounds(rules []RoutingRule) error {
+	adapters, err := s.adapters.List()
+	if err != nil {
+		return fmt.Errorf("读取可用网卡失败：%w", err)
+	}
+	return validateRoutingOutbounds(rules, adapters)
+}
+
+func validateRoutingOutbounds(rules []RoutingRule, adapters []AdapterView) error {
+	available := map[string]struct{}{"aggregation": {}, "direct": {}}
+	for _, adapter := range adapters {
+		if adapter.Selected && adapter.Operational {
+			available["nic_"+adapter.ID] = struct{}{}
+		}
+	}
+	for index, rule := range rules {
+		if _, ok := available[rule.Outbound]; !ok {
+			return fmt.Errorf("第 %d 条分流规则引用了未启用或不可用的网卡出口：%s", index+1, rule.Outbound)
+		}
+	}
+	return nil
 }
 
 func normalizeRule(rule RoutingRule) (RoutingRule, error) {
