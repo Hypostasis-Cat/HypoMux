@@ -35,9 +35,14 @@ Unicode true
 ## Include the wails tools
 ####
 !include "LogicLib.nsh"
+; Keep the uninstall identity stable even when company and product names are
+; identical. The generated default would otherwise become HypoMuxHypoMux.
+!define UNINST_KEY_NAME "HypoMux"
 !include "wails_tools.nsh"
 
 !define HYPOMUX_CORE_SERVICE "HypoMuxCore"
+!define HYPOMUX_NESTED_UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\HypoMuxHypoMux"
+!define HYPOMUX_LEGACY_INNO_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\{7637d353-b9c0-4145-bc81-7a474e534d07}_is1"
 
 # The version information for this two must consist of 4 parts
 VIProductVersion "${INFO_PRODUCTVERSION}.0"
@@ -111,6 +116,10 @@ LangString CoreServiceForceStopping ${LANG_ENGLISH} "The previous Core Service d
 LangString CoreServiceForceStopping ${LANG_SIMPCHINESE} "旧版 Core 服务未能及时停止，正在结束其服务进程…"
 LangString CoreServiceStopFailed ${LANG_ENGLISH} "Could not stop HypoMux Core Service. Setup cannot safely replace the application files."
 LangString CoreServiceStopFailed ${LANG_SIMPCHINESE} "无法停止 HypoMux Core 服务，安装程序不能安全替换应用文件。"
+LangString LegacyInstallRemoving ${LANG_ENGLISH} "Removing the previous HypoMux installation before migrating files..."
+LangString LegacyInstallRemoving ${LANG_SIMPCHINESE} "正在移除旧版 HypoMux 并迁移安装目录…"
+LangString LegacyInstallRemoveFailed ${LANG_ENGLISH} "The previous HypoMux installation could not be removed safely."
+LangString LegacyInstallRemoveFailed ${LANG_SIMPCHINESE} "无法安全移除旧版 HypoMux，安装已停止。"
 
 !define WAILS_WIN10_REQUIRED "$(WailsWin10Required)"
 !define WAILS_ARCHITECTURE_NOT_SUPPORTED "$(WailsArchitectureNotSupported)"
@@ -124,8 +133,10 @@ Name "${INFO_PRODUCTNAME}"
 OutFile "..\..\..\bin\${INFO_PROJECTNAME}-${ARCH}-installer.exe" # Name of the installer's file.
 !if "${WAILS_INSTALL_SCOPE}" == "user"
     InstallDir "$LOCALAPPDATA\Programs\${INFO_PRODUCTNAME}"
+    InstallDirRegKey HKCU "${UNINST_KEY}" "InstallLocation"
 !else
-    InstallDir "$PROGRAMFILES64\${INFO_COMPANYNAME}\${INFO_PRODUCTNAME}"
+    InstallDir "$PROGRAMFILES64\${INFO_PRODUCTNAME}"
+    InstallDirRegKey HKLM "${UNINST_KEY}" "InstallLocation"
 !endif
 ShowInstDetails show # This will always show the installation details.
 
@@ -189,6 +200,60 @@ Function StopCoreServiceForUpgrade
     ${EndIf}
 FunctionEnd
 
+Function RemoveLegacyInstallations
+    !if "${WAILS_INSTALL_SCOPE}" != "user"
+        SetRegView 64
+
+        ; Affected Wails builds used CompanyName/ProductName as two path
+        ; segments and registered under HypoMuxHypoMux. Remove that exact
+        ; installation before the corrected root is populated.
+        ReadRegStr $0 HKLM "${HYPOMUX_NESTED_UNINST_KEY}" "UninstallString"
+        ${If} $0 == ""
+            IfFileExists "$PROGRAMFILES64\HypoMux\HypoMux\uninstall.exe" 0 nestedRemoved
+            StrCpy $0 '$"$PROGRAMFILES64\HypoMux\HypoMux\uninstall.exe$"'
+        ${EndIf}
+        DetailPrint "$(LegacyInstallRemoving)"
+        ClearErrors
+        ExecWait '$0 /S' $1
+        IfErrors nestedUninstallFailed
+        ${If} $1 != 0
+            Goto nestedUninstallFailed
+        ${EndIf}
+        Goto nestedUninstallSucceeded
+        nestedUninstallFailed:
+        Abort "$(LegacyInstallRemoveFailed)"
+        nestedUninstallSucceeded:
+        DeleteRegKey HKLM "${HYPOMUX_NESTED_UNINST_KEY}"
+        RMDir /r "$PROGRAMFILES64\HypoMux\HypoMux"
+        nestedRemoved:
+
+        ; v2.2.0 and earlier used this stable Inno Setup AppId. Running the
+        ; registered uninstaller removes only files owned by that package;
+        ; user configuration under %USERPROFILE%\.hypomux is untouched.
+        ReadRegStr $0 HKLM "${HYPOMUX_LEGACY_INNO_KEY}" "UninstallString"
+        ${If} $0 != ""
+            DetailPrint "$(LegacyInstallRemoving)"
+            ClearErrors
+            ExecWait '$0 /VERYSILENT /SUPPRESSMSGBOXES /NORESTART' $1
+            IfErrors legacyInnoUninstallFailed
+            ${If} $1 != 0
+                Goto legacyInnoUninstallFailed
+            ${EndIf}
+            Goto legacyInnoUninstallSucceeded
+            legacyInnoUninstallFailed:
+            Abort "$(LegacyInstallRemoveFailed)"
+            legacyInnoUninstallSucceeded:
+            DeleteRegKey HKLM "${HYPOMUX_LEGACY_INNO_KEY}"
+        ${EndIf}
+
+        ; Never mix the Python/PySide payload with the Wails application if a
+        ; damaged legacy registration points to a missing uninstaller.
+        IfFileExists "$PROGRAMFILES64\HypoMux\python313.dll" 0 legacyRemoved
+            Abort "$(LegacyInstallRemoveFailed)"
+        legacyRemoved:
+    !endif
+FunctionEnd
+
 Section
     !insertmacro wails.setShellContext
 
@@ -205,6 +270,10 @@ Section
         nsExec::ExecToLog '"$INSTDIR\bin\hypomux-engine.exe" recover'
     IfFileExists "$INSTDIR\${PRODUCT_EXECUTABLE}" 0 +2
         nsExec::ExecToLog '"$INSTDIR\${PRODUCT_EXECUTABLE}" --recover-network'
+    IfFileExists "$PROGRAMFILES64\HypoMux\HypoMux\bin\hypomux-engine.exe" 0 +2
+        nsExec::ExecToLog '"$PROGRAMFILES64\HypoMux\HypoMux\bin\hypomux-engine.exe" recover'
+
+    Call RemoveLegacyInstallations
 
     SetOutPath $INSTDIR
 
@@ -240,6 +309,11 @@ Section
     !insertmacro wails.associateCustomProtocols
 
     !insertmacro wails.writeUninstaller
+    !if "${WAILS_INSTALL_SCOPE}" == "user"
+        WriteRegStr HKCU "${UNINST_KEY}" "InstallLocation" "$INSTDIR"
+    !else
+        WriteRegStr HKLM "${UNINST_KEY}" "InstallLocation" "$INSTDIR"
+    !endif
 SectionEnd
 
 Section "uninstall"
@@ -267,7 +341,7 @@ Section "uninstall"
     IfFileExists "$INSTDIR\${PRODUCT_EXECUTABLE}" 0 +2
         nsExec::ExecToLog '"$INSTDIR\${PRODUCT_EXECUTABLE}" --recover-network'
 
-    ; Device-local settings under %AppData%\HypoMux are deliberately retained
+    ; Device-local settings under %USERPROFILE%\.hypomux are deliberately retained
     ; for reinstall/rollback. Autostart, WebView data and installed files are
     ; application-owned and are removed.
     DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "HypoMux"

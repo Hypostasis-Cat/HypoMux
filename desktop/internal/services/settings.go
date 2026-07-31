@@ -77,7 +77,8 @@ type ConfigMigrationStatus struct {
 }
 
 func NewSettingsService() *SettingsService {
-	service := &SettingsService{path: filepath.Join(settingsDirectory(), "settings.json")}
+	directory := settingsDirectory()
+	service := &SettingsService{path: filepath.Join(directory, "settings.json")}
 	service.settings = DefaultSettings()
 	_ = service.reload()
 	service.inspectLegacyConfig()
@@ -90,11 +91,14 @@ func settingsDirectory() string {
 			return expanded
 		}
 	}
-	root, err := os.UserConfigDir()
-	if err != nil || root == "" {
-		root = os.TempDir()
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		if root, configErr := os.UserConfigDir(); configErr == nil && root != "" {
+			return filepath.Join(root, "HypoMux")
+		}
+		return filepath.Join(os.TempDir(), "HypoMux")
 	}
-	return filepath.Join(root, "HypoMux")
+	return filepath.Join(home, ".hypomux")
 }
 
 func (s *SettingsService) Get() AppSettings {
