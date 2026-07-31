@@ -11,11 +11,14 @@ import (
 
 	"github.com/Hypostasis-Cat/HypoMux/engine/internal/diagnostic"
 	"github.com/Hypostasis-Cat/HypoMux/engine/internal/server"
+	"github.com/Hypostasis-Cat/HypoMux/engine/internal/tun"
 )
 
 var (
 	version = "dev"
 	commit  = "unknown"
+
+	recoverTUN = tun.Recover
 )
 
 func main() {
@@ -30,18 +33,46 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 
 	switch command {
 	case "serve":
-		engineServer := server.New(stdin, stdout, server.Metadata{
+		return runServer(stdin, stdout, stderr)
+	case "service":
+		return runWindowsService(stderr, server.Metadata{
 			Name:    "hypomux-engine",
 			Version: version,
 			Commit:  commit,
 		})
-		if err := engineServer.Run(context.Background()); err != nil {
-			fmt.Fprintf(stderr, "hypomux-engine: %v\n", err)
+	case "serve-pipe":
+		flags := flag.NewFlagSet("serve-pipe", flag.ContinueOnError)
+		flags.SetOutput(stderr)
+		pipeName := flags.String("pipe", "", "authenticated host pipe name")
+		sessionToken := flags.String("session-token", "", "one-time host session token")
+		hostPID := flags.Int("host-pid", 0, "expected desktop host process ID")
+		if err := flags.Parse(args[1:]); err != nil {
+			return 2
+		}
+		if *pipeName == "" || *sessionToken == "" || *hostPID <= 0 {
+			fmt.Fprintln(stderr, "serve-pipe requires --pipe, --session-token and --host-pid")
+			return 2
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		connection, err := connectAuthenticatedPipe(ctx, *pipeName, *sessionToken, *hostPID)
+		cancel()
+		if err != nil {
+			fmt.Fprintf(stderr, "connect authenticated host pipe: %v\n", err)
 			return 1
 		}
-		return 0
+		defer connection.Close()
+		return runServer(connection, connection, stderr)
 	case "version", "--version", "-version":
 		fmt.Fprintf(stdout, "hypomux-engine %s (%s)\n", version, commit)
+		return 0
+	case "recover":
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		if err := recoverTUN(ctx); err != nil {
+			fmt.Fprintf(stderr, "recover HypoMux network state: %v\n", err)
+			return 1
+		}
+		fmt.Fprintln(stdout, "HypoMux network state recovered")
 		return 0
 	case "diagnose", "diagnostic":
 		flags := flag.NewFlagSet("diagnose", flag.ContinueOnError)
@@ -66,7 +97,20 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return 0
 	default:
 		fmt.Fprintf(stderr, "unknown command %q\n", command)
-		fmt.Fprintln(stderr, "usage: hypomux-engine [serve|version|diagnose]")
+		fmt.Fprintln(stderr, "usage: hypomux-engine [serve|serve-pipe|service|version|recover|diagnose]")
 		return 2
 	}
+}
+
+func runServer(input io.Reader, output, stderr io.Writer) int {
+	engineServer := server.New(input, output, server.Metadata{
+		Name:    "hypomux-engine",
+		Version: version,
+		Commit:  commit,
+	})
+	if err := engineServer.Run(context.Background()); err != nil {
+		fmt.Fprintf(stderr, "hypomux-engine: %v\n", err)
+		return 1
+	}
+	return 0
 }

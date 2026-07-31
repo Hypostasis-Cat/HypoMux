@@ -1,0 +1,514 @@
+package services
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net"
+	"os"
+	"path/filepath"
+	"sync"
+
+	desktopplatform "github.com/Hypostasis-Cat/HypoMux/desktop/internal/platform"
+)
+
+const (
+	AdapterWeightMin     = 1
+	AdapterWeightMax     = 100
+	AdapterWeightStep    = 1
+	AdapterWeightDefault = 1
+)
+
+type AppSettings struct {
+	Mode                string                `json:"mode"`
+	Language            string                `json:"language"`
+	SOCKSPort           int                   `json:"socks_port"`
+	HTTPPort            int                   `json:"http_port"`
+	Weighted            bool                  `json:"weighted"`
+	StrictRoute         bool                  `json:"strict_route"`
+	WFPCompatibility    WFPCompatibilityState `json:"wfp_compatibility_state,omitempty"`
+	ForceTUNBypass      bool                  `json:"force_tun_connectivity_bypass"`
+	BlockedDomainBypass bool                  `json:"blocked_domain_bypass"`
+	BlockedDomainExpiry bool                  `json:"blocked_domain_expiry"`
+	CloseToTray         bool                  `json:"close_to_tray"`
+	Autostart           bool                  `json:"autostart"`
+	DNSServer           string                `json:"dns_server"`
+	DNSPolicy           string                `json:"dns_policy"`
+	SelectedAdapterIDs  []string              `json:"selected_adapter_ids"`
+	AdapterWeights      map[string]int        `json:"adapter_weights"`
+	RoutingRules        []RoutingRule         `json:"routing_rules"`
+}
+
+type WFPCompatibilityState struct {
+	Status      string `json:"status,omitempty"`
+	Fingerprint string `json:"fingerprint,omitempty"`
+	Detail      string `json:"detail,omitempty"`
+}
+
+func DefaultSettings() AppSettings {
+	return AppSettings{
+		Mode:                "tun",
+		Language:            "zh",
+		SOCKSPort:           10800,
+		HTTPPort:            10801,
+		StrictRoute:         true,
+		BlockedDomainExpiry: true,
+		CloseToTray:         true,
+		DNSServer:           "223.5.5.5",
+		DNSPolicy:           "auto",
+		AdapterWeights:      map[string]int{},
+		RoutingRules:        []RoutingRule{},
+	}
+}
+
+type SettingsService struct {
+	mu        sync.RWMutex
+	path      string
+	settings  AppSettings
+	migration ConfigMigrationStatus
+}
+
+type ConfigMigrationStatus struct {
+	LegacyFound bool   `json:"legacy_found"`
+	Applied     bool   `json:"applied"`
+	LegacyPath  string `json:"legacy_path"`
+	BackupPath  string `json:"backup_path,omitempty"`
+	Message     string `json:"message"`
+}
+
+func NewSettingsService() *SettingsService {
+	service := &SettingsService{path: filepath.Join(settingsDirectory(), "settings.json")}
+	service.settings = DefaultSettings()
+	_ = service.reload()
+	service.inspectLegacyConfig()
+	return service
+}
+
+func settingsDirectory() string {
+	if configured := os.Getenv("HYPOMUX_DATA_DIR"); configured != "" {
+		if expanded, err := filepath.Abs(os.ExpandEnv(configured)); err == nil {
+			return expanded
+		}
+	}
+	root, err := os.UserConfigDir()
+	if err != nil || root == "" {
+		root = os.TempDir()
+	}
+	return filepath.Join(root, "HypoMux")
+}
+
+func (s *SettingsService) Get() AppSettings {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := cloneSettings(s.settings)
+	if enabled, err := desktopplatform.AutostartEnabled(); err == nil {
+		result.Autostart = enabled
+	}
+	return result
+}
+
+func (s *SettingsService) ConfigPath() string {
+	return s.path
+}
+
+func (s *SettingsService) MigrationStatus() ConfigMigrationStatus {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.migration
+}
+
+func (s *SettingsService) MigrateLegacy() (AppSettings, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	legacyPath, err := legacyConfigPath()
+	if err != nil {
+		return AppSettings{}, err
+	}
+	data, err := os.ReadFile(legacyPath)
+	if err != nil {
+		return AppSettings{}, fmt.Errorf("读取旧版配置失败：%w", err)
+	}
+	migrated, err := migrateLegacySettings(data)
+	if err != nil {
+		return AppSettings{}, err
+	}
+	if current, readErr := os.ReadFile(s.path); readErr == nil {
+		backup := filepath.Join(settingsDirectory(), "settings.before-legacy-migration.json")
+		if writeErr := os.WriteFile(backup, current, 0o600); writeErr != nil {
+			return AppSettings{}, fmt.Errorf("备份新版配置失败：%w", writeErr)
+		}
+		s.migration.BackupPath = backup
+	}
+	s.settings = migrated
+	if err := s.saveLocked(); err != nil {
+		return AppSettings{}, err
+	}
+	s.migration.LegacyFound = true
+	s.migration.Applied = true
+	s.migration.LegacyPath = legacyPath
+	s.migration.Message = "旧版配置已迁移；原文件保持不变"
+	return cloneSettings(s.settings), nil
+}
+
+func (s *SettingsService) RollbackLegacyMigration() (AppSettings, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.migration.Applied {
+		return AppSettings{}, errors.New("当前没有可回滚的旧配置迁移")
+	}
+	if s.migration.BackupPath != "" {
+		data, err := os.ReadFile(s.migration.BackupPath)
+		if err != nil {
+			return AppSettings{}, fmt.Errorf("读取迁移前备份失败：%w", err)
+		}
+		var restored AppSettings
+		if err := json.Unmarshal(data, &restored); err != nil {
+			return AppSettings{}, fmt.Errorf("迁移前备份格式无效：%w", err)
+		}
+		s.settings = restored
+	} else {
+		s.settings = DefaultSettings()
+	}
+	if err := s.saveLocked(); err != nil {
+		return AppSettings{}, err
+	}
+	s.migration.Applied = false
+	s.migration.Message = "已回滚迁移结果；旧版配置文件未删除"
+	return cloneSettings(s.settings), nil
+}
+
+// Update persists every ordinary setting exposed by the Settings page. Home
+// selection and routing data are submitted with the latest snapshot so a
+// settings-only save cannot silently discard them.
+func (s *SettingsService) Update(next AppSettings) (AppSettings, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := validateSettings(next); err != nil {
+		return AppSettings{}, err
+	}
+	// The compatibility result is device-owned state, not a user-editable
+	// preference. Ordinary settings writes must not erase or forge it.
+	next.WFPCompatibility = s.settings.WFPCompatibility
+	if !s.settings.StrictRoute && next.StrictRoute {
+		next.WFPCompatibility = WFPCompatibilityState{}
+	}
+	next.SelectedAdapterIDs = uniqueNonEmpty(next.SelectedAdapterIDs)
+	next.AdapterWeights = cloneWeights(next.AdapterWeights)
+	next.RoutingRules = append([]RoutingRule(nil), next.RoutingRules...)
+	if next.AdapterWeights == nil {
+		next.AdapterWeights = map[string]int{}
+	}
+	if next.RoutingRules == nil {
+		next.RoutingRules = []RoutingRule{}
+	}
+	s.settings = next
+	if err := s.saveLocked(); err != nil {
+		return AppSettings{}, err
+	}
+	return cloneSettings(s.settings), nil
+}
+
+func (s *SettingsService) SetAutostart(enabled bool) (AppSettings, error) {
+	if err := desktopplatform.SetAutostart(enabled); err != nil {
+		return AppSettings{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.settings.Autostart = enabled
+	if err := s.saveLocked(); err != nil {
+		return AppSettings{}, err
+	}
+	return cloneSettings(s.settings), nil
+}
+
+func (s *SettingsService) UpdateHome(
+	mode string,
+	weighted bool,
+	selectedIDs []string,
+	weights map[string]int,
+) (AppSettings, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if mode != "proxy" && mode != "tun" {
+		return AppSettings{}, fmt.Errorf("不支持的运行模式：%s", mode)
+	}
+	cleanWeights := make(map[string]int, len(weights))
+	for id, weight := range weights {
+		if weight < AdapterWeightMin || weight > AdapterWeightMax {
+			return AppSettings{}, fmt.Errorf("网卡 %s 的调度权重必须在 %d–%d 之间", id, AdapterWeightMin, AdapterWeightMax)
+		}
+		cleanWeights[id] = weight
+	}
+	s.settings.Mode = mode
+	s.settings.Weighted = weighted
+	s.settings.SelectedAdapterIDs = uniqueNonEmpty(selectedIDs)
+	s.settings.AdapterWeights = cleanWeights
+	if err := s.saveLocked(); err != nil {
+		return AppSettings{}, err
+	}
+	return cloneSettings(s.settings), nil
+}
+
+func (s *SettingsService) saveRoutingRules(rules []RoutingRule) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.settings.RoutingRules = append([]RoutingRule(nil), rules...)
+	return s.saveLocked()
+}
+
+func (s *SettingsService) reload() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	data, err := os.ReadFile(s.path)
+	if errors.Is(err, os.ErrNotExist) {
+		legacyPath, pathErr := legacyConfigPath()
+		if pathErr != nil {
+			return nil
+		}
+		legacyData, legacyErr := os.ReadFile(legacyPath)
+		if legacyErr != nil {
+			return nil
+		}
+		migrated, migrationErr := migrateLegacySettings(legacyData)
+		if migrationErr != nil {
+			return migrationErr
+		}
+		s.settings = migrated
+		s.migration = ConfigMigrationStatus{
+			LegacyFound: true, Applied: true, LegacyPath: legacyPath,
+			Message: "首次启动已迁移旧版配置；原文件保持不变",
+		}
+		return s.saveLocked()
+	}
+	if err != nil {
+		return fmt.Errorf("读取设置失败：%w", err)
+	}
+	var loaded AppSettings
+	if err := json.Unmarshal(data, &loaded); err != nil {
+		return fmt.Errorf("设置文件格式无效：%w", err)
+	}
+	defaults := DefaultSettings()
+	if loaded.Mode != "proxy" && loaded.Mode != "tun" {
+		loaded.Mode = defaults.Mode
+	}
+	if loaded.SOCKSPort == 0 {
+		loaded.SOCKSPort = defaults.SOCKSPort
+	}
+	if loaded.HTTPPort == 0 {
+		loaded.HTTPPort = defaults.HTTPPort
+	}
+	if loaded.DNSServer == "" {
+		loaded.DNSServer = defaults.DNSServer
+	}
+	if loaded.DNSPolicy == "" {
+		loaded.DNSPolicy = defaults.DNSPolicy
+	}
+	if loaded.Language != "zh" && loaded.Language != "en" {
+		loaded.Language = defaults.Language
+	}
+	if loaded.AdapterWeights == nil {
+		loaded.AdapterWeights = map[string]int{}
+	}
+	if loaded.RoutingRules == nil {
+		loaded.RoutingRules = []RoutingRule{}
+	}
+	if loaded.WFPCompatibility.Status != "failed" &&
+		loaded.WFPCompatibility.Status != "healthy" {
+		loaded.WFPCompatibility = WFPCompatibilityState{}
+	} else {
+		loaded.WFPCompatibility.Fingerprint = limitSettingText(
+			loaded.WFPCompatibility.Fingerprint,
+			512,
+		)
+		loaded.WFPCompatibility.Detail = limitSettingText(
+			loaded.WFPCompatibility.Detail,
+			1024,
+		)
+	}
+	for id, weight := range loaded.AdapterWeights {
+		if weight < AdapterWeightMin || weight > AdapterWeightMax {
+			loaded.AdapterWeights[id] = AdapterWeightDefault
+		}
+	}
+	s.settings = loaded
+	return nil
+}
+
+func (s *SettingsService) inspectLegacyConfig() {
+	legacyPath, err := legacyConfigPath()
+	if err != nil {
+		return
+	}
+	if info, statErr := os.Stat(legacyPath); statErr == nil && !info.IsDir() {
+		s.mu.Lock()
+		s.migration.LegacyFound = true
+		s.migration.LegacyPath = legacyPath
+		if s.migration.Message == "" {
+			s.migration.Message = "检测到 HypoMux v2.x 配置，可手动迁移"
+		}
+		s.mu.Unlock()
+	}
+}
+
+func legacyConfigPath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".hypomux", "config.json"), nil
+}
+
+func migrateLegacySettings(data []byte) (AppSettings, error) {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return AppSettings{}, fmt.Errorf("旧版配置格式无效：%w", err)
+	}
+	result := DefaultSettings()
+	decode := func(key string, target any) {
+		if payload := raw[key]; payload != nil {
+			_ = json.Unmarshal(payload, target)
+		}
+	}
+	decode("run_mode", &result.Mode)
+	decode("selected_adapters", &result.SelectedAdapterIDs)
+	decode("socks_port", &result.SOCKSPort)
+	decode("http_port", &result.HTTPPort)
+	decode("weighted_scheduler", &result.Weighted)
+	decode("wfp_strict_route", &result.StrictRoute)
+	decode("wfp_compatibility_state", &result.WFPCompatibility)
+	decode("force_tun_connectivity_bypass", &result.ForceTUNBypass)
+	decode("blocked_domain_bypass", &result.BlockedDomainBypass)
+	decode("blocked_domain_expiry", &result.BlockedDomainExpiry)
+	decode("dns_server", &result.DNSServer)
+	decode("doh_provider", &result.DNSPolicy)
+	decode("nic_bandwidth_limits", &result.AdapterWeights)
+	decode("routing_rules", &result.RoutingRules)
+	if err := validateSettings(result); err != nil {
+		return AppSettings{}, fmt.Errorf("旧版配置校验失败：%w", err)
+	}
+	return result, nil
+}
+
+func (s *SettingsService) rememberedWFPCompatibilityFailure() (bool, string) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	state := s.settings.WFPCompatibility
+	if state.Status != "failed" || state.Fingerprint == "" ||
+		state.Fingerprint != currentWFPFingerprint() {
+		return false, ""
+	}
+	return true, state.Detail
+}
+
+func (s *SettingsService) RememberWFPCompatibilityFailure(detail string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.settings.WFPCompatibility = WFPCompatibilityState{
+		Status:      "failed",
+		Fingerprint: currentWFPFingerprint(),
+		Detail:      limitSettingText(detail, 1024),
+	}
+	return s.saveLocked()
+}
+
+func (s *SettingsService) ClearWFPCompatibilityFailure() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.settings.WFPCompatibility = WFPCompatibilityState{
+		Status:      "healthy",
+		Fingerprint: currentWFPFingerprint(),
+	}
+	return s.saveLocked()
+}
+
+func validateSettings(value AppSettings) error {
+	if value.Mode != "proxy" && value.Mode != "tun" {
+		return fmt.Errorf("不支持的运行模式：%s", value.Mode)
+	}
+	if value.Language != "zh" && value.Language != "en" {
+		return fmt.Errorf("不支持的界面语言：%s", value.Language)
+	}
+	if value.SOCKSPort < 1 || value.SOCKSPort > 65534 {
+		return errors.New("SOCKS5 端口必须在 1–65534 之间")
+	}
+	if value.HTTPPort < 1 || value.HTTPPort > 65534 {
+		return errors.New("HTTP 端口必须在 1–65534 之间")
+	}
+	if value.SOCKSPort == value.HTTPPort {
+		return errors.New("SOCKS5 与 HTTP 端口不能相同")
+	}
+	ip := net.ParseIP(value.DNSServer)
+	if ip == nil || ip.To4() == nil {
+		return errors.New("DNS 地址格式无效，请输入合法 IPv4 地址")
+	}
+	switch value.DNSPolicy {
+	case "auto", "off", "alidns", "dnspod", "google":
+	default:
+		return fmt.Errorf("不支持的 DoH 解析策略：%s", value.DNSPolicy)
+	}
+	for id, weight := range value.AdapterWeights {
+		if weight < AdapterWeightMin || weight > AdapterWeightMax {
+			return fmt.Errorf("网卡 %s 的调度权重必须在 %d–%d 之间", id, AdapterWeightMin, AdapterWeightMax)
+		}
+	}
+	return nil
+}
+
+func limitSettingText(value string, limit int) string {
+	if limit <= 0 || len(value) <= limit {
+		return value
+	}
+	return value[:limit]
+}
+
+func (s *SettingsService) saveLocked() error {
+	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
+		return fmt.Errorf("创建设置目录失败：%w", err)
+	}
+	data, err := json.MarshalIndent(s.settings, "", "  ")
+	if err != nil {
+		return fmt.Errorf("序列化设置失败：%w", err)
+	}
+	temporary := s.path + ".tmp"
+	if err := os.WriteFile(temporary, data, 0o600); err != nil {
+		return fmt.Errorf("写入设置失败：%w", err)
+	}
+	if err := os.Rename(temporary, s.path); err != nil {
+		_ = os.Remove(temporary)
+		return fmt.Errorf("提交设置失败：%w", err)
+	}
+	return nil
+}
+
+func cloneSettings(value AppSettings) AppSettings {
+	result := value
+	result.SelectedAdapterIDs = append([]string(nil), value.SelectedAdapterIDs...)
+	result.AdapterWeights = cloneWeights(value.AdapterWeights)
+	result.RoutingRules = append([]RoutingRule(nil), value.RoutingRules...)
+	return result
+}
+
+func cloneWeights(value map[string]int) map[string]int {
+	result := make(map[string]int, len(value))
+	for key, weight := range value {
+		result[key] = weight
+	}
+	return result
+}
+
+func uniqueNonEmpty(values []string) []string {
+	seen := map[string]struct{}{}
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		if value == "" {
+			continue
+		}
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
+}

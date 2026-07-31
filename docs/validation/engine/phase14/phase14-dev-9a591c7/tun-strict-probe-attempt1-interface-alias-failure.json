@@ -1,0 +1,883 @@
+{
+  "strict_route": true,
+  "started_at": "2026-07-30T10:00:41.356423Z",
+  "passed": false,
+  "error": "RuntimeError: curl failed (56): curl: (56) Recv failure: Connection was reset",
+  "events": [
+    {
+      "protocol": 1,
+      "sequence": 1,
+      "event": "engine.state_changed",
+      "data": {
+        "state": "running",
+        "sequence": 2,
+        "state_changed_at": "2026-07-30T10:00:41.3717951Z",
+        "reason": "tun_tcp_pool listeners ready"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 2,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[TUN] sing-box configuration check passed"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 3,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[TUN] sing-box process started (PID=26200), waiting for stable takeover"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 4,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:44 \u001b[31mERROR\u001b[0m [\u001b[38;5;143m2536119167\u001b[0m 3ms] dns: lookup failed for chatgpt.com: (exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 5,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:44 \u001b[31mERROR\u001b[0m [\u001b[38;5;143m2536119167\u001b[0m 8ms] router: lookup chatgpt.com: (exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 6,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:44 \u001b[31mERROR\u001b[0m [\u001b[38;5;121m3954703726\u001b[0m 4ms] dns: lookup failed for chatgpt.com: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 7,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:44 \u001b[31mERROR\u001b[0m [\u001b[38;5;121m3954703726\u001b[0m 4ms] router: lookup chatgpt.com: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 8,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:44 \u001b[31mERROR\u001b[0m [\u001b[38;5;211m4190108099\u001b[0m 4ms] dns: lookup failed for geo.prod.do.dsp.mp.microsoft.com: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 9,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:44 \u001b[31mERROR\u001b[0m [\u001b[38;5;211m4190108099\u001b[0m 4ms] router: lookup geo.prod.do.dsp.mp.microsoft.com: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 10,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:44 \u001b[31mERROR\u001b[0m [\u001b[38;5;218m2205800138\u001b[0m 4ms] dns: lookup failed for kv501.prod.do.dsp.mp.microsoft.com: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 11,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:44 \u001b[31mERROR\u001b[0m [\u001b[38;5;218m2205800138\u001b[0m 4ms] router: lookup kv501.prod.do.dsp.mp.microsoft.com: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 12,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:44 \u001b[31mERROR\u001b[0m [\u001b[38;5;141m157474685\u001b[0m 5ms] dns: lookup failed for login.live.com: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 13,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:44 \u001b[31mERROR\u001b[0m [\u001b[38;5;141m157474685\u001b[0m 5ms] router: lookup login.live.com: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 14,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:44 \u001b[31mERROR\u001b[0m [\u001b[38;5;148m2905799812\u001b[0m 4ms] dns: lookup failed for login.live.com: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 15,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:44 \u001b[31mERROR\u001b[0m [\u001b[38;5;148m2905799812\u001b[0m 4ms] router: lookup login.live.com: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 16,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:45 \u001b[31mERROR\u001b[0m [\u001b[38;5;223m1326408968\u001b[0m 7ms] dns: lookup failed for mtalk.google.com: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 17,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:45 \u001b[31mERROR\u001b[0m [\u001b[38;5;223m1326408968\u001b[0m 7ms] router: lookup mtalk.google.com: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 18,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:45 \u001b[31mERROR\u001b[0m [\u001b[38;5;159m938464911\u001b[0m 8ms] dns: lookup failed for mtalk.google.com: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 19,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:45 \u001b[31mERROR\u001b[0m [\u001b[38;5;159m938464911\u001b[0m 9ms] router: lookup mtalk.google.com: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 20,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:45 \u001b[31mERROR\u001b[0m [\u001b[38;5;200m1784816056\u001b[0m 4ms] dns: lookup failed for mtalk.google.com: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 21,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:45 \u001b[31mERROR\u001b[0m [\u001b[38;5;200m1784816056\u001b[0m 4ms] router: lookup mtalk.google.com: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 22,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:45 \u001b[31mERROR\u001b[0m [\u001b[38;5;31m3436339983\u001b[0m 17ms] dns: lookup failed for mtalk.google.com: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 23,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:45 \u001b[31mERROR\u001b[0m [\u001b[38;5;31m3436339983\u001b[0m 17ms] router: lookup mtalk.google.com: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 24,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:45 \u001b[31mERROR\u001b[0m [\u001b[38;5;62m1796700462\u001b[0m 8ms] dns: lookup failed for accounts.google.com: (exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 25,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:45 \u001b[31mERROR\u001b[0m [\u001b[38;5;62m1796700462\u001b[0m 8ms] router: lookup accounts.google.com: (exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 26,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:45 \u001b[31mERROR\u001b[0m [\u001b[38;5;167m4039474071\u001b[0m 16ms] dns: lookup failed for mtalk.google.com: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 27,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:45 \u001b[31mERROR\u001b[0m [\u001b[38;5;167m4039474071\u001b[0m 16ms] router: lookup mtalk.google.com: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 28,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:45 \u001b[31mERROR\u001b[0m [\u001b[38;5;186m923620909\u001b[0m 25ms] dns: lookup failed for mtalk.google.com: (exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 29,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:45 \u001b[31mERROR\u001b[0m [\u001b[38;5;186m923620909\u001b[0m 25ms] router: lookup mtalk.google.com: (exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 30,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:45 \u001b[31mERROR\u001b[0m [\u001b[38;5;203m81232827\u001b[0m 13ms] dns: lookup failed for mtalk.google.com: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 31,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:45 \u001b[31mERROR\u001b[0m [\u001b[38;5;203m81232827\u001b[0m 13ms] router: lookup mtalk.google.com: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 32,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:45 \u001b[31mERROR\u001b[0m [\u001b[38;5;95m1194542671\u001b[0m 30ms] dns: lookup failed for mtalk.google.com: (exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 33,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:45 \u001b[31mERROR\u001b[0m [\u001b[38;5;95m1194542671\u001b[0m 30ms] router: lookup mtalk.google.com: (exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 34,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:45 \u001b[31mERROR\u001b[0m [\u001b[38;5;184m3989662120\u001b[0m 31ms] dns: lookup failed for mtalk.google.com: (exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 35,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:45 \u001b[31mERROR\u001b[0m [\u001b[38;5;184m3989662120\u001b[0m 31ms] router: lookup mtalk.google.com: (exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 36,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:45 \u001b[31mERROR\u001b[0m [\u001b[38;5;76m1856281660\u001b[0m 37ms] dns: lookup failed for accounts.google.com: (exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 37,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:45 \u001b[31mERROR\u001b[0m [\u001b[38;5;76m1856281660\u001b[0m 37ms] router: lookup accounts.google.com: (exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 38,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:45 \u001b[31mERROR\u001b[0m [\u001b[38;5;73m3260831033\u001b[0m 4ms] dns: lookup failed for accounts.google.com: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 39,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:45 \u001b[31mERROR\u001b[0m [\u001b[38;5;73m3260831033\u001b[0m 4ms] router: lookup accounts.google.com: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 40,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:45 \u001b[31mERROR\u001b[0m [\u001b[38;5;99m946448979\u001b[0m 17ms] dns: lookup failed for mtalk.google.com: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 41,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:45 \u001b[31mERROR\u001b[0m [\u001b[38;5;99m946448979\u001b[0m 17ms] router: lookup mtalk.google.com: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 42,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:45 \u001b[31mERROR\u001b[0m [\u001b[38;5;179m1445270691\u001b[0m 22ms] dns: lookup failed for mtalk.google.com: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 43,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:45 \u001b[31mERROR\u001b[0m [\u001b[38;5;179m1445270691\u001b[0m 22ms] router: lookup mtalk.google.com: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 44,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:45 \u001b[31mERROR\u001b[0m [\u001b[38;5;220m2246581218\u001b[0m 4ms] dns: lookup failed for dig.bdurl.net: (exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 45,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:45 \u001b[31mERROR\u001b[0m [\u001b[38;5;220m2246581218\u001b[0m 4ms] router: lookup dig.bdurl.net: (exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 46,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:45 \u001b[31mERROR\u001b[0m [\u001b[38;5;220m245867531\u001b[0m 23ms] dns: lookup failed for mtalk.google.com: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 47,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:45 \u001b[31mERROR\u001b[0m [\u001b[38;5;220m245867531\u001b[0m 23ms] router: lookup mtalk.google.com: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 48,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:45 \u001b[31mERROR\u001b[0m [\u001b[38;5;209m4199724481\u001b[0m 10ms] dns: lookup failed for mcs.zijieapi.com: (exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 49,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:45 \u001b[31mERROR\u001b[0m [\u001b[38;5;209m4199724481\u001b[0m 10ms] router: lookup mcs.zijieapi.com: (exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 50,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:45 \u001b[31mERROR\u001b[0m [\u001b[38;5;191m827220776\u001b[0m 28ms] dns: lookup failed for mtalk.google.com: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 51,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:45 \u001b[31mERROR\u001b[0m [\u001b[38;5;191m827220776\u001b[0m 28ms] router: lookup mtalk.google.com: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 52,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:45 \u001b[31mERROR\u001b[0m [\u001b[38;5;227m2470919940\u001b[0m 13ms] dns: lookup failed for dig.bdurl.net: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 53,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:45 \u001b[31mERROR\u001b[0m [\u001b[38;5;227m2470919940\u001b[0m 13ms] router: lookup dig.bdurl.net: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 54,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:45 \u001b[31mERROR\u001b[0m [\u001b[38;5;227m1928154587\u001b[0m 11ms] dns: lookup failed for mtalk.google.com: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 55,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:45 \u001b[31mERROR\u001b[0m [\u001b[38;5;227m1928154587\u001b[0m 11ms] router: lookup mtalk.google.com: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 56,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:45 \u001b[31mERROR\u001b[0m [\u001b[38;5;79m680966463\u001b[0m 10ms] dns: lookup failed for mcs.zijieapi.com: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 57,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:45 \u001b[31mERROR\u001b[0m [\u001b[38;5;79m680966463\u001b[0m 10ms] router: lookup mcs.zijieapi.com: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 58,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:45 \u001b[31mERROR\u001b[0m [\u001b[38;5;178m3849649570\u001b[0m 5ms] dns: lookup failed for mtalk.google.com: (exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 59,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:45 \u001b[31mERROR\u001b[0m [\u001b[38;5;178m3849649570\u001b[0m 5ms] router: lookup mtalk.google.com: (exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 60,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:45 \u001b[31mERROR\u001b[0m [\u001b[38;5;33m3224034024\u001b[0m 13ms] dns: lookup failed for mtalk.google.com: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 61,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:45 \u001b[31mERROR\u001b[0m [\u001b[38;5;33m3224034024\u001b[0m 13ms] router: lookup mtalk.google.com: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 62,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:45 \u001b[31mERROR\u001b[0m [\u001b[38;5;174m3719085726\u001b[0m 3ms] dns: lookup failed for www.msftconnecttest.com: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 63,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:45 \u001b[31mERROR\u001b[0m [\u001b[38;5;174m3719085726\u001b[0m 3ms] router: lookup www.msftconnecttest.com: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 64,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[TUN] sing-box is stable and owns TUN/WFP/routes"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 65,
+      "event": "tun.state_changed",
+      "data": {
+        "state": "running",
+        "pid": 26200,
+        "started_at": "2026-07-30T10:00:43.8885481Z",
+        "config_path": "C:\\Users\\28359\\Desktop\\code\\HypoMux\\build\\qualification\\phase14-dev-9a591c7\\singbox-tun-strict.json"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 66,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:45 \u001b[31mERROR\u001b[0m [\u001b[38;5;122m3103592813\u001b[0m 3ms] dns: lookup failed for dig.bdurl.net: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 67,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:45 \u001b[31mERROR\u001b[0m [\u001b[38;5;122m3103592813\u001b[0m 3ms] router: lookup dig.bdurl.net: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 68,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:45 \u001b[31mERROR\u001b[0m [\u001b[38;5;47m3001128694\u001b[0m 3ms] dns: lookup failed for dig.bdurl.net: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 69,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:45 \u001b[31mERROR\u001b[0m [\u001b[38;5;47m3001128694\u001b[0m 3ms] router: lookup dig.bdurl.net: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 70,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:46 \u001b[31mERROR\u001b[0m [\u001b[38;5;221m4211126477\u001b[0m 4ms] dns: lookup failed for dig.bdurl.net: (exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 71,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:46 \u001b[31mERROR\u001b[0m [\u001b[38;5;221m4211126477\u001b[0m 4ms] router: lookup dig.bdurl.net: (exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 72,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:46 \u001b[31mERROR\u001b[0m [\u001b[38;5;95m1197494095\u001b[0m 3ms] dns: lookup failed for dig.bdurl.net: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 73,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:46 \u001b[31mERROR\u001b[0m [\u001b[38;5;95m1197494095\u001b[0m 3ms] router: lookup dig.bdurl.net: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 74,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:46 \u001b[31mERROR\u001b[0m [\u001b[38;5;50m913706489\u001b[0m 303ms] dns: lookup failed for accounts.google.com: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 75,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:46 \u001b[31mERROR\u001b[0m [\u001b[38;5;50m913706489\u001b[0m 303ms] router: lookup accounts.google.com: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 76,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:46 \u001b[31mERROR\u001b[0m [\u001b[38;5;187m1383818923\u001b[0m 4ms] dns: lookup failed for chatgpt.com: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 77,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:46 \u001b[31mERROR\u001b[0m [\u001b[38;5;187m1383818923\u001b[0m 4ms] router: lookup chatgpt.com: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 78,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:46 \u001b[31mERROR\u001b[0m [\u001b[38;5;145m3074444161\u001b[0m 4ms] dns: lookup failed for chatgpt.com: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 79,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:46 \u001b[31mERROR\u001b[0m [\u001b[38;5;145m3074444161\u001b[0m 4ms] router: lookup chatgpt.com: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 80,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:46 \u001b[31mERROR\u001b[0m [\u001b[38;5;136m651481720\u001b[0m 4ms] dns: lookup failed for dig.bdurl.net: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 81,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:46 \u001b[31mERROR\u001b[0m [\u001b[38;5;136m651481720\u001b[0m 4ms] router: lookup dig.bdurl.net: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 82,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:46 \u001b[31mERROR\u001b[0m [\u001b[38;5;185m1933640617\u001b[0m 4ms] dns: lookup failed for dig.bdurl.net: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 83,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:46 \u001b[31mERROR\u001b[0m [\u001b[38;5;185m1933640617\u001b[0m 4ms] router: lookup dig.bdurl.net: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 84,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:46 \u001b[31mERROR\u001b[0m [\u001b[38;5;119m4236343152\u001b[0m 4ms] dns: lookup failed for dig.bdurl.net: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 85,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:46 \u001b[31mERROR\u001b[0m [\u001b[38;5;119m4236343152\u001b[0m 4ms] router: lookup dig.bdurl.net: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 86,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:46 \u001b[31mERROR\u001b[0m [\u001b[38;5;227m2324905691\u001b[0m 3ms] dns: lookup failed for dig.bdurl.net: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 87,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:46 \u001b[31mERROR\u001b[0m [\u001b[38;5;227m2324905691\u001b[0m 3ms] router: lookup dig.bdurl.net: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 88,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:46 \u001b[31mERROR\u001b[0m [\u001b[38;5;31m813910543\u001b[0m 3ms] dns: lookup failed for dig.bdurl.net: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 89,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:46 \u001b[31mERROR\u001b[0m [\u001b[38;5;31m813910543\u001b[0m 3ms] router: lookup dig.bdurl.net: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 90,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:46 \u001b[31mERROR\u001b[0m [\u001b[38;5;79m3421352511\u001b[0m 3ms] dns: lookup failed for dig.bdurl.net: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 91,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:46 \u001b[31mERROR\u001b[0m [\u001b[38;5;79m3421352511\u001b[0m 3ms] router: lookup dig.bdurl.net: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 92,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:46 \u001b[31mERROR\u001b[0m [\u001b[38;5;46m1838749685\u001b[0m 4ms] dns: lookup failed for www.msftconnecttest.com: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 93,
+      "event": "log.record",
+      "data": {
+        "component": "sing-box",
+        "message": "[sing-box:stderr] +0800 2026-07-30 18:00:46 \u001b[31mERROR\u001b[0m [\u001b[38;5;46m1838749685\u001b[0m 4ms] router: lookup www.msftconnecttest.com: (exchange6: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface | exchange4: dial UDP connection: dial udp 192.168.1.146:0->223.5.5.5:53: route ip+net : no such network interface)"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 94,
+      "event": "tun.state_changed",
+      "data": {
+        "state": "stopped"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 95,
+      "event": "engine.state_changed",
+      "data": {
+        "state": "stopped",
+        "sequence": 4,
+        "state_changed_at": "2026-07-30T10:00:47.5888914Z",
+        "reason": "proxy stopped"
+      }
+    },
+    {
+      "protocol": 1,
+      "sequence": 96,
+      "event": "host.exiting",
+      "data": {
+        "reason": "requested"
+      }
+    }
+  ],
+  "engine_stderr": [],
+  "cleanup_errors": [],
+  "post_cleanup": {
+    "routes": [],
+    "devices": []
+  },
+  "finished_at": "2026-07-30T10:00:48.438345Z"
+}

@@ -1,0 +1,86 @@
+{
+  "proxy": {
+    "passed": true,
+    "target": "www.msftconnecttest.com:80",
+    "socks_response_bytes": 187,
+    "http_connect_response_bytes": 187,
+    "ipv6_response_bytes": 1525,
+    "ipv6_dns_transport": "doh",
+    "adapter_telemetry": {
+      "name": "Ethernet",
+      "source_ip": "192.168.1.146",
+      "if_index": 11,
+      "source_ipv6": "2408:8221:2b10:7e0:f6c6:acd8:217a:9f49",
+      "ipv6_if_index": 11,
+      "connections": 0,
+      "bytes_up": 229,
+      "bytes_down": 1899,
+      "health_state": "healthy",
+      "consecutive_failures": 0,
+      "health_successes": 3,
+      "health_failures": 0,
+      "last_success_at": "2026-07-30T09:05:50.1375821Z",
+      "domain_quarantines": 0
+    }
+  },
+  "dns": {
+    "passed": false,
+    "queries": [
+      {
+        "policy": "off",
+        "record_type": "A",
+        "transport": "udp",
+        "server": "119.29.29.29:53",
+        "address_family": "A"
+      },
+      {
+        "policy": "off",
+        "record_type": "AAAA",
+        "transport": "udp",
+        "server": "119.29.29.29:53",
+        "address_family": "AAAA"
+      },
+      {
+        "policy": "alidns",
+        "record_type": "A",
+        "transport": "doh",
+        "server": "dns.alidns.com@223.5.5.5:443",
+        "address_family": "A"
+      },
+      {
+        "policy": "alidns",
+        "record_type": "AAAA",
+        "transport": "doh",
+        "server": "dns.alidns.com@223.5.5.5:443",
+        "address_family": "AAAA"
+      },
+      {
+        "policy": "dnspod",
+        "record_type": "A",
+        "transport": "doh",
+        "server": "doh.pub@1.12.12.12:443",
+        "address_family": "A"
+      },
+      {
+        "policy": "dnspod",
+        "record_type": "AAAA",
+        "transport": "doh",
+        "server": "doh.pub@1.12.12.12:443",
+        "address_family": "AAAA"
+      }
+    ],
+    "failures": [
+      {
+        "policy": "google",
+        "record_type": "A",
+        "error": "EngineRemoteError: dns_failed: DNS resolution failed"
+      },
+      {
+        "policy": "google",
+        "record_type": "AAAA",
+        "error": "EngineRemoteError: dns_failed: DNS resolution failed"
+      }
+    ]
+  },
+  "passed": false
+}

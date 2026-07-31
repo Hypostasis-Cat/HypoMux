@@ -1,0 +1,111 @@
+{
+  "churn": {
+    "passed": true,
+    "baseline": [
+      {
+        "name": "Ethernet",
+        "source_ip": "192.168.1.146",
+        "if_index": 11,
+        "source_ipv6": "2408:8221:2b10:7e0:f6c6:acd8:217a:9f49",
+        "ipv6_if_index": 11,
+        "connections": 0,
+        "bytes_up": 83,
+        "bytes_down": 187,
+        "health_state": "healthy",
+        "consecutive_failures": 0,
+        "health_successes": 1,
+        "health_failures": 0,
+        "last_success_at": "2026-07-30T09:43:30.3550352Z",
+        "domain_quarantines": 0
+      },
+      {
+        "name": "Wi-Fi",
+        "source_ip": "192.168.1.46",
+        "if_index": 14,
+        "source_ipv6": "2408:8221:2b10:7e0:e6d8:c72c:c6a4:a089",
+        "ipv6_if_index": 14,
+        "connections": 0,
+        "bytes_up": 83,
+        "bytes_down": 187,
+        "health_state": "healthy",
+        "consecutive_failures": 0,
+        "health_successes": 1,
+        "health_failures": 0,
+        "last_success_at": "2026-07-30T09:43:30.7942045Z",
+        "domain_quarantines": 0
+      }
+    ],
+    "failed_over": [
+      {
+        "name": "Ethernet",
+        "source_ip": "192.168.1.146",
+        "if_index": 11,
+        "source_ipv6": "2408:8221:2b10:7e0:f6c6:acd8:217a:9f49",
+        "ipv6_if_index": 11,
+        "connections": 0,
+        "bytes_up": 249,
+        "bytes_down": 561,
+        "health_state": "healthy",
+        "consecutive_failures": 0,
+        "health_successes": 3,
+        "health_failures": 0,
+        "last_success_at": "2026-07-30T09:43:32.5344976Z",
+        "domain_quarantines": 0
+      },
+      {
+        "name": "Wi-Fi",
+        "source_ip": "192.168.1.46",
+        "if_index": 14,
+        "source_ipv6": "2408:8221:2b10:7e0:e6d8:c72c:c6a4:a089",
+        "ipv6_if_index": 14,
+        "connections": 0,
+        "bytes_up": 83,
+        "bytes_down": 187,
+        "health_state": "cooldown",
+        "consecutive_failures": 1,
+        "health_successes": 1,
+        "health_failures": 1,
+        "last_success_at": "2026-07-30T09:43:30.7942045Z",
+        "last_failure_at": "2026-07-30T09:43:32.3087813Z",
+        "cooldown_until": "2026-07-30T09:43:34.3087813Z",
+        "domain_quarantines": 0
+      }
+    ],
+    "recovered": [
+      {
+        "name": "Ethernet",
+        "source_ip": "192.168.1.146",
+        "if_index": 11,
+        "source_ipv6": "2408:8221:2b10:7e0:f6c6:acd8:217a:9f49",
+        "ipv6_if_index": 11,
+        "connections": 0,
+        "bytes_up": 332,
+        "bytes_down": 748,
+        "health_state": "healthy",
+        "consecutive_failures": 0,
+        "health_successes": 4,
+        "health_failures": 0,
+        "last_success_at": "2026-07-30T09:43:38.6779501Z",
+        "domain_quarantines": 0
+      },
+      {
+        "name": "Wi-Fi",
+        "source_ip": "192.168.1.46",
+        "if_index": 14,
+        "source_ipv6": "2408:8221:2b10:7e0:e6d8:c72c:c6a4:a089",
+        "ipv6_if_index": 14,
+        "connections": 0,
+        "bytes_up": 166,
+        "bytes_down": 374,
+        "health_state": "healthy",
+        "consecutive_failures": 0,
+        "health_successes": 2,
+        "health_failures": 1,
+        "last_success_at": "2026-07-30T09:43:40.3478131Z",
+        "last_failure_at": "2026-07-30T09:43:32.3087813Z",
+        "domain_quarantines": 0
+      }
+    ]
+  },
+  "passed": true
+}

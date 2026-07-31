@@ -386,6 +386,55 @@ func TestSOCKSUDPRelaysLiteralIPv6WithStableFlow(t *testing.T) {
 	}
 }
 
+func TestSOCKSUDPDirectChannelUsesSystemRouteAndReportsTelemetry(t *testing.T) {
+	echoAddress, _, stopEcho := startUDPEchoServer(t)
+	defer stopEcho()
+	server, err := New(Config{
+		Adapters: []Adapter{{Name: "loopback", SourceIP: "127.0.0.2"}},
+		Channels: []Channel{
+			{Name: ChannelEthernet, AdapterNames: []string{"loopback"}},
+			{Name: ChannelWiFi, AdapterNames: []string{"loopback"}},
+			{Name: ChannelAggregation, AdapterNames: []string{"loopback"}},
+			{Name: ChannelDirect},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoints, err := server.Start()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stopServer(t, server)
+	control, relay := startUDPAssociation(t, endpoints.Channels[ChannelDirect], 0)
+	defer control.Close()
+	client := listenUDPClient(t)
+	defer client.Close()
+
+	sendSOCKSUDP(t, client, relay, echoAddress, []byte("direct-udp"))
+	if reply := readSOCKSUDP(t, client); string(reply) != "direct-udp" {
+		t.Fatalf("direct UDP reply = %q", reply)
+	}
+	snapshot := server.Snapshot(true)
+	var directUDP *ConnectionSnapshot
+	for index := range snapshot.Connections {
+		if snapshot.Connections[index].Protocol == "socks5_udp" {
+			directUDP = &snapshot.Connections[index]
+			break
+		}
+	}
+	if directUDP == nil ||
+		directUDP.Channel != ChannelDirect ||
+		directUDP.Adapter != "" {
+		t.Fatalf("direct UDP telemetry = %#v", snapshot.Connections)
+	}
+	if snapshot.Total.Connections != 1 ||
+		snapshot.Total.BytesUp == 0 ||
+		snapshot.Total.BytesDown == 0 {
+		t.Fatalf("direct UDP totals = %#v", snapshot.Total)
+	}
+}
+
 func newTUNPoolTestServer(t *testing.T) *Server {
 	t.Helper()
 	server, err := New(Config{

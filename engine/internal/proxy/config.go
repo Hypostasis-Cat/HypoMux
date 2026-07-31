@@ -16,6 +16,7 @@ const (
 	ChannelEthernet    = "nic_ethernet"
 	ChannelWiFi        = "nic_wifi"
 	ChannelAggregation = "aggregation"
+	ChannelDirect      = "direct"
 )
 
 type Adapter struct {
@@ -35,14 +36,23 @@ type Channel struct {
 }
 
 type Config struct {
-	ListenHost     string        `json:"listen_host"`
-	SOCKSPort      int           `json:"socks_port"`
-	HTTPPort       int           `json:"http_port"`
-	Weighted       bool          `json:"weighted"`
-	Adapters       []Adapter     `json:"adapters"`
-	Channels       []Channel     `json:"channels,omitempty"`
-	ConnectTimeout time.Duration `json:"-"`
-	DNS            dns.Config    `json:"-"`
+	ListenHost            string                 `json:"listen_host"`
+	SOCKSPort             int                    `json:"socks_port"`
+	HTTPPort              int                    `json:"http_port"`
+	Weighted              bool                   `json:"weighted"`
+	Adapters              []Adapter              `json:"adapters"`
+	Channels              []Channel              `json:"channels,omitempty"`
+	ConnectTimeout        time.Duration          `json:"-"`
+	DNS                   dns.Config             `json:"-"`
+	DomainIsolation       *bool                  `json:"domain_isolation,omitempty"`
+	DomainIsolationExpiry *bool                  `json:"domain_isolation_expiry,omitempty"`
+	DomainQuarantines     []DomainQuarantineSeed `json:"domain_quarantines,omitempty"`
+}
+
+type DomainQuarantineSeed struct {
+	Adapter   string    `json:"adapter"`
+	Domain    string    `json:"domain"`
+	ExpiresAt time.Time `json:"expires_at"`
 }
 
 type Endpoints struct {
@@ -169,6 +179,35 @@ func normalizeConfig(config Config) (Config, error) {
 		return Config{}, err
 	}
 	config.DNS = dnsConfig
+	domainIsolation := true
+	if config.DomainIsolation != nil {
+		domainIsolation = *config.DomainIsolation
+	}
+	config.DomainIsolation = &domainIsolation
+	domainIsolationExpiry := true
+	if config.DomainIsolationExpiry != nil {
+		domainIsolationExpiry = *config.DomainIsolationExpiry
+	}
+	config.DomainIsolationExpiry = &domainIsolationExpiry
+	knownAdapters := make(map[string]struct{}, len(config.Adapters))
+	for _, adapter := range config.Adapters {
+		knownAdapters[adapter.Name] = struct{}{}
+	}
+	now := time.Now()
+	seeds := make([]DomainQuarantineSeed, 0, len(config.DomainQuarantines))
+	for _, seed := range config.DomainQuarantines {
+		seed.Adapter = strings.TrimSpace(seed.Adapter)
+		seed.Domain = normalizeDomain(seed.Domain)
+		if !domainIsolationExpiry {
+			seed.ExpiresAt = now.AddDate(100, 0, 0)
+		}
+		if _, exists := knownAdapters[seed.Adapter]; !exists || seed.Domain == "" ||
+			!seed.ExpiresAt.After(now) {
+			continue
+		}
+		seeds = append(seeds, seed)
+	}
+	config.DomainQuarantines = seeds
 	return config, nil
 }
 
@@ -176,8 +215,8 @@ func normalizeChannels(config *Config) error {
 	if len(config.Channels) == 0 {
 		return nil
 	}
-	if len(config.Channels) != 3 {
-		return fmt.Errorf("TUN TCP pool requires exactly three channels")
+	if len(config.Channels) < 3 {
+		return fmt.Errorf("TUN TCP pool requires the three baseline channels")
 	}
 	requiredChannels := map[string]bool{
 		ChannelEthernet:    false,
@@ -196,7 +235,9 @@ func normalizeChannels(config *Config) error {
 		if channel.Name == "" {
 			return fmt.Errorf("channel name is required")
 		}
-		if _, required := requiredChannels[channel.Name]; !required {
+		_, baselineChannel := requiredChannels[channel.Name]
+		if !baselineChannel && channel.Name != ChannelDirect &&
+			(!strings.HasPrefix(channel.Name, "nic_") || len(channel.Name) <= 4) {
 			return fmt.Errorf("unsupported channel name %q", channel.Name)
 		}
 		if _, exists := seenNames[channel.Name]; exists {
@@ -211,8 +252,11 @@ func normalizeChannels(config *Config) error {
 			}
 			seenPorts[channel.Port] = struct{}{}
 		}
-		if len(channel.AdapterNames) == 0 {
+		if channel.Name != ChannelDirect && len(channel.AdapterNames) == 0 {
 			return fmt.Errorf("channel %q requires at least one adapter", channel.Name)
+		}
+		if channel.Name == ChannelDirect && len(channel.AdapterNames) != 0 {
+			return fmt.Errorf("direct channel must follow the system route without adapter bindings")
 		}
 		seenAdapters := make(map[string]struct{}, len(channel.AdapterNames))
 		names := make([]string, 0, len(channel.AdapterNames))

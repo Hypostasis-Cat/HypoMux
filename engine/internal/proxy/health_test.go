@@ -126,6 +126,41 @@ func TestDomainQuarantineRequiresComparativeEvidenceAndAvoidsOutage(t *testing.T
 	}
 }
 
+func TestDomainIsolationCanBeDisabled(t *testing.T) {
+	adapters := []Adapter{
+		{Name: "a", SourceIP: "127.0.0.1"},
+		{Name: "b", SourceIP: "127.0.0.2"},
+	}
+	health := newHealthTableConfigured(adapters, false, true, nil)
+	health.recordComparativeDomainFailure("a", "example.com")
+	health.recordComparativeDomainFailure("a", "example.com")
+
+	scheduler := newScheduler(adapters, false, health)
+	selected, ok := scheduler.SelectForDomain(nil, "example.com")
+	if !ok || selected.Name != "a" {
+		t.Fatalf("disabled domain isolation selected %#v, %v", selected, ok)
+	}
+	_, quarantines := health.snapshot()
+	if len(quarantines) != 0 {
+		t.Fatalf("disabled domain isolation retained quarantines: %#v", quarantines)
+	}
+}
+
+func TestDomainIsolationCanKeepQuarantineWithoutAutomaticExpiry(t *testing.T) {
+	adapters := []Adapter{{Name: "a", SourceIP: "127.0.0.1"}}
+	now := time.Date(2026, 7, 30, 4, 0, 0, 0, time.UTC)
+	health := newHealthTableConfigured(adapters, true, false, nil)
+	health.now = func() time.Time { return now }
+	health.recordComparativeDomainFailure("a", "example.com")
+	health.recordComparativeDomainFailure("a", "example.com")
+
+	_, quarantines := health.snapshot()
+	if len(quarantines) != 1 ||
+		!quarantines[0].ExpiresAt.Equal(now.AddDate(100, 0, 0)) {
+		t.Fatalf("permanent domain quarantine = %#v", quarantines)
+	}
+}
+
 func TestSuccessClearsOnlyMatchingDomainEvidence(t *testing.T) {
 	adapters := []Adapter{{Name: "a", SourceIP: "127.0.0.1"}}
 	health := newHealthTable(adapters)

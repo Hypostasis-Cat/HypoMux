@@ -88,6 +88,8 @@ func TestNormalizeConfigValidatesTUNChannelBoundary(t *testing.T) {
 				Port:         2003,
 				AdapterNames: []string{"Ethernet", "Wi-Fi"},
 			},
+			{Name: "nic_Ethernet", Port: 2004, AdapterNames: []string{"Ethernet"}},
+			{Name: ChannelDirect, Port: 2005},
 		},
 	})
 	if err != nil {
@@ -95,6 +97,12 @@ func TestNormalizeConfigValidatesTUNChannelBoundary(t *testing.T) {
 	}
 	if got := len(adaptersForChannel(config.Adapters, config.Channels[1])); got != 1 {
 		t.Fatalf("Wi-Fi channel adapter count = %d", got)
+	}
+	if got := len(adaptersForChannel(config.Adapters, config.Channels[3])); got != 1 {
+		t.Fatalf("dynamic single-adapter channel count = %d", got)
+	}
+	if got := len(adaptersForChannel(config.Adapters, config.Channels[4])); got != 0 {
+		t.Fatalf("direct channel unexpectedly binds %d adapters", got)
 	}
 
 	invalid := []Config{
@@ -120,6 +128,15 @@ func TestNormalizeConfigValidatesTUNChannelBoundary(t *testing.T) {
 			Adapters: config.Adapters,
 			Channels: []Channel{
 				{Name: "empty", Port: 2001},
+			},
+		},
+		{
+			Adapters: config.Adapters,
+			Channels: []Channel{
+				{Name: ChannelEthernet, AdapterNames: []string{"Ethernet"}},
+				{Name: ChannelWiFi, AdapterNames: []string{"Wi-Fi"}},
+				{Name: ChannelAggregation, AdapterNames: []string{"Ethernet", "Wi-Fi"}},
+				{Name: ChannelDirect, AdapterNames: []string{"Ethernet"}},
 			},
 		},
 	}

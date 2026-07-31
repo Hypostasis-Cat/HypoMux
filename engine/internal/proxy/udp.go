@@ -93,7 +93,7 @@ func (s *Server) handleUDPAssociation(
 		sweepInterval: s.udpSweepInterval,
 		flows:         make(map[string]*udpFlow),
 	}
-	if association.scheduler == nil {
+	if association.scheduler == nil && association.channel != ChannelDirect {
 		_ = relay.Close()
 		return false, fmt.Errorf("unknown UDP channel %q", session.channel)
 	}
@@ -227,6 +227,9 @@ func (a *udpAssociation) createFlow(
 		return nil, errors.New("UDP target must be a literal IP address")
 	}
 	network := networkForIP("udp", targetIP)
+	if a.channel == ChannelDirect {
+		return a.createDirectFlow(clientAddress, target, network, firstPayload)
+	}
 	excluded := make(map[string]struct{}, len(a.scheduler.adapters))
 	for _, adapter := range a.scheduler.adapters {
 		if !adapterSupportsNetwork(adapter, network) {
@@ -301,6 +304,51 @@ func (a *udpAssociation) createFlow(
 		return nil, errors.New("no UDP adapter available")
 	}
 	return nil, errors.Join(failures...)
+}
+
+func (a *udpAssociation) createDirectFlow(
+	clientAddress *net.UDPAddr,
+	target string,
+	network string,
+	firstPayload []byte,
+) (*udpFlow, error) {
+	dialer := &net.Dialer{Timeout: a.server.config.ConnectTimeout}
+	if network == "udp6" {
+		dialer.LocalAddr = &net.UDPAddr{IP: net.IPv6unspecified}
+	}
+	ctx, cancel := context.WithTimeout(
+		a.server.ctx,
+		a.server.config.ConnectTimeout,
+	)
+	upstream, err := a.server.dialUDP(ctx, dialer, target)
+	cancel()
+	if err != nil {
+		return nil, fmt.Errorf("direct UDP setup: %w", err)
+	}
+	written, err := upstream.Write(firstPayload)
+	if err == nil && written != len(firstPayload) {
+		err = io.ErrShortWrite
+	}
+	if err != nil {
+		_ = upstream.Close()
+		return nil, fmt.Errorf("direct UDP setup: %w", err)
+	}
+	telemetry := a.server.registry.BeginAddress(
+		"socks5_udp",
+		a.channel,
+		clientAddress.String(),
+		a.relay,
+	)
+	a.server.registry.AttachDirect(telemetry, upstream, target)
+	a.server.registry.AddUp(telemetry, uint64(len(firstPayload)))
+	flow := &udpFlow{
+		association: a,
+		target:      target,
+		connection:  upstream,
+		session:     telemetry,
+	}
+	flow.touch()
+	return flow, nil
 }
 
 func (f *udpFlow) send(payload []byte) error {

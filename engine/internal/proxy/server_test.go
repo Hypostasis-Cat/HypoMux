@@ -405,6 +405,55 @@ func TestTUNTCPPoolRelaysLiteralIPv6WithBoundSource(t *testing.T) {
 	}
 }
 
+func TestTUNDirectChannelUsesSystemRouteAndReportsTelemetry(t *testing.T) {
+	echoAddress, stopEcho := startEchoServer(t)
+	defer stopEcho()
+	server, err := New(Config{
+		Adapters: []Adapter{{Name: "loopback", SourceIP: "127.0.0.2"}},
+		Channels: []Channel{
+			{Name: ChannelEthernet, AdapterNames: []string{"loopback"}},
+			{Name: ChannelWiFi, AdapterNames: []string{"loopback"}},
+			{Name: ChannelAggregation, AdapterNames: []string{"loopback"}},
+			{Name: ChannelDirect},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoints, err := server.Start()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stopServer(t, server)
+
+	client := dialSOCKSIPv4(t, endpoints.Channels[ChannelDirect], echoAddress, 1)
+	defer client.Close()
+	assertEcho(t, client, []byte("direct-system-route"))
+
+	var snapshot TelemetrySnapshot
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		snapshot = server.Snapshot(true)
+		if snapshot.Total.BytesUp > 0 && snapshot.Total.BytesDown > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if len(snapshot.Connections) != 1 {
+		t.Fatalf("direct connections = %#v", snapshot.Connections)
+	}
+	connection := snapshot.Connections[0]
+	if connection.Channel != ChannelDirect || connection.Adapter != "" {
+		t.Fatalf("direct telemetry = %#v", connection)
+	}
+	if snapshot.Total.Connections != 1 || snapshot.Total.BytesUp == 0 || snapshot.Total.BytesDown == 0 {
+		t.Fatalf("direct totals = %#v", snapshot.Total)
+	}
+	if snapshot.Adapters[0].Connections != 0 {
+		t.Fatalf("direct flow was attributed to bound adapter: %#v", snapshot.Adapters[0])
+	}
+}
+
 func TestSOCKSDomainIsResolvedBeforeBoundTCPDial(t *testing.T) {
 	echoAddress, stopEcho := startEchoServer(t)
 	defer stopEcho()

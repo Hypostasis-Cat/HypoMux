@@ -1,0 +1,176 @@
+{
+  "schema_version": 1,
+  "kind": "hypomux.strict_go.physical_session",
+  "created_at": "2026-07-30T08:58:20.906625Z",
+  "updated_at": "2026-07-30T09:06:52.745946Z",
+  "candidate": {
+    "executable": "C:\\Program Files\\HypoMux\\bin\\hypomux-engine.exe",
+    "size": 9425712,
+    "sha256": "e107ed422f6fde84fe93fdaf0261795ae493e0637352826f0ffc2888bf6cd613",
+    "engine_version": "dev-19e672f",
+    "commit": "19e672fc77599a04e1f33ed60f148dfc71b24797"
+  },
+  "policy": {
+    "require_elevated": true,
+    "require_signed": true,
+    "allowed_test_signer_thumbprints": [
+      "F7408E1AF9B519E5D9D97D1862775020861B673A"
+    ]
+  },
+  "preflight": {
+    "path": "preflight.json",
+    "passed": true
+  },
+  "scenarios": [
+    {
+      "id": "package",
+      "title": "Fresh install and signed packaged engine",
+      "status": "passed",
+      "evidence": [
+        "Fresh test-signed install launched dev-19e672f engine from the packaged bin directory",
+        "Normal tray exit reaped HypoMux and hypomux-engine with zero route, Wintun, or sing-box residue"
+      ],
+      "notes": "",
+      "postflight": "postflight-package.json",
+      "recorded_at": "2026-07-30T08:58:58.637884Z"
+    },
+    {
+      "id": "proxy",
+      "title": "SOCKS5 and HTTP CONNECT on selected adapters",
+      "status": "passed",
+      "evidence": [
+        "Physical Ethernet SOCKS5 and HTTP CONNECT both reached www.msftconnecttest.com:80",
+        "Ethernet telemetry: 166 bytes up, 374 bytes down, 2 health successes, 0 health failures",
+        "Probe artifact: network-probe.json"
+      ],
+      "notes": "",
+      "postflight": "postflight-proxy.json",
+      "recorded_at": "2026-07-30T09:04:50.410521Z"
+    },
+    {
+      "id": "dns",
+      "title": "Traditional DNS, DoH, A, and AAAA",
+      "status": "blocked",
+      "evidence": [
+        "Traditional DNS, AliDNS, and DNSPod all passed A and AAAA over physical Ethernet",
+        "Google DoH A and AAAA were unreachable because direct Ethernet TCP to 8.8.8.8:443 timed out",
+        "Probe artifact: network-probe.json"
+      ],
+      "notes": "Environmental block: Google DoH is reachable only through the active Meta virtual tunnel, not through the selected physical Ethernet path",
+      "postflight": "postflight-dns.json",
+      "recorded_at": "2026-07-30T09:04:52.553973Z"
+    },
+    {
+      "id": "scheduling",
+      "title": "Scheduling, adapter failure, and recovery",
+      "status": "pending",
+      "evidence": [],
+      "notes": "",
+      "postflight": null,
+      "recorded_at": null
+    },
+    {
+      "id": "ipv6",
+      "title": "IPv6-capable and IPv4-only adapter selection",
+      "status": "passed",
+      "evidence": [
+        "Forced SOCKS5 IPv6 connection reached a physical-DNS Cloudflare AAAA address and returned 1525 bytes",
+        "The same adapter reached the A-only www.msftconnecttest.com peer without weakening source/interface binding",
+        "Ethernet telemetry: physical IPv6 source with interface index 11, 3 health successes, 0 failures",
+        "Probe artifact: network-probe.json"
+      ],
+      "notes": "",
+      "postflight": "postflight-ipv6.json",
+      "recorded_at": "2026-07-30T09:06:52.745926Z"
+    },
+    {
+      "id": "tun_tcp",
+      "title": "Managed TUN TCP and sustained download",
+      "status": "pending",
+      "evidence": [],
+      "notes": "",
+      "postflight": null,
+      "recorded_at": null
+    },
+    {
+      "id": "tun_udp",
+      "title": "Managed TUN UDP or QUIC",
+      "status": "pending",
+      "evidence": [],
+      "notes": "",
+      "postflight": null,
+      "recorded_at": null
+    },
+    {
+      "id": "wfp",
+      "title": "Strict WFP route and compatibility retry",
+      "status": "pending",
+      "evidence": [],
+      "notes": "",
+      "postflight": null,
+      "recorded_at": null
+    },
+    {
+      "id": "lifecycle",
+      "title": "Start, stop, restart, tray, and full exit",
+      "status": "pending",
+      "evidence": [],
+      "notes": "",
+      "postflight": null,
+      "recorded_at": null
+    },
+    {
+      "id": "crash",
+      "title": "UI and Go-host crash recovery",
+      "status": "pending",
+      "evidence": [],
+      "notes": "",
+      "postflight": null,
+      "recorded_at": null
+    },
+    {
+      "id": "adapter_churn",
+      "title": "Physical adapter disable and re-enable",
+      "status": "pending",
+      "evidence": [],
+      "notes": "",
+      "postflight": null,
+      "recorded_at": null
+    },
+    {
+      "id": "power",
+      "title": "Sleep and resume",
+      "status": "pending",
+      "evidence": [],
+      "notes": "",
+      "postflight": null,
+      "recorded_at": null
+    },
+    {
+      "id": "upgrade",
+      "title": "Upgrade over previous production version",
+      "status": "pending",
+      "evidence": [],
+      "notes": "",
+      "postflight": null,
+      "recorded_at": null
+    },
+    {
+      "id": "uninstall",
+      "title": "Uninstall and residue cleanup",
+      "status": "pending",
+      "evidence": [],
+      "notes": "",
+      "postflight": null,
+      "recorded_at": null
+    }
+  ],
+  "verdict": {
+    "python_removal_ready": false,
+    "reasons": [
+      "physical scenarios not passed: dns, scheduling, tun_tcp, tun_udp, wfp, lifecycle, crash, adapter_churn, power, upgrade, uninstall"
+    ],
+    "passed": 3,
+    "total": 14
+  }
+}

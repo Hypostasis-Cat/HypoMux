@@ -20,6 +20,7 @@ import (
 	"github.com/Hypostasis-Cat/HypoMux/engine/internal/proxy"
 	engineRuntime "github.com/Hypostasis-Cat/HypoMux/engine/internal/runtime"
 	"github.com/Hypostasis-Cat/HypoMux/engine/internal/tun"
+	"github.com/Hypostasis-Cat/HypoMux/engine/internal/wfp"
 )
 
 type Metadata struct {
@@ -36,19 +37,21 @@ type tunController interface {
 }
 
 type Server struct {
-	input       io.Reader
-	encoder     *json.Encoder
-	metadata    Metadata
-	identity    platform.Identity
-	runtime     *engineRuntime.Runtime
-	proxy       *proxy.Server
-	tun         tunController
-	mode        string
-	startedAt   time.Time
-	started     time.Time
-	writeMu     sync.Mutex
-	lifecycleMu sync.Mutex
-	eventSeq    uint64
+	input        io.Reader
+	encoder      *json.Encoder
+	metadata     Metadata
+	identity     platform.Identity
+	runtime      *engineRuntime.Runtime
+	proxy        *proxy.Server
+	tun          tunController
+	adapters     []wfp.Adapter
+	dnsExemption wfp.DNSExemption
+	mode         string
+	startedAt    time.Time
+	started      time.Time
+	writeMu      sync.Mutex
+	lifecycleMu  sync.Mutex
+	eventSeq     uint64
 }
 
 func New(input io.Reader, output io.Writer, metadata Metadata) *Server {
@@ -181,6 +184,24 @@ func (s *Server) handle(ctx context.Context, line []byte) (protocol.Response, bo
 		}
 		result := diagnostic.Run(ctx, params.Config())
 		return protocol.Result(request.ID, result), false
+	case api.MethodWFPInspect:
+		var params api.WFPInspectParams
+		if len(request.Params) > 0 {
+			if err := json.Unmarshal(request.Params, &params); err != nil {
+				return protocol.Failure(request.ID, "invalid_params", "WFP params are not valid JSON", nil), false
+			}
+		}
+		result, err := platform.InspectWFP(params.Repair)
+		if err != nil {
+			code := "wfp_unavailable"
+			if params.Repair && !s.identity.Elevated {
+				code = "elevation_required"
+			}
+			return protocol.Failure(request.ID, code, err.Error(), map[string]any{
+				"status": result,
+			}), false
+		}
+		return protocol.Result(request.ID, result), false
 	case api.MethodHostShutdown:
 		_ = s.stopProxy(request.ID)
 		return protocol.Result(request.ID, api.ShutdownResult{Accepted: true}), true
@@ -282,6 +303,17 @@ func (s *Server) startProxy(request protocol.Request) protocol.Response {
 		if err == nil {
 			s.proxy = proxyServer
 			s.mode = mode
+			s.adapters = make([]wfp.Adapter, 0, len(params.Adapters))
+			for _, adapter := range params.Adapters {
+				if adapter.IfIndex <= 0 {
+					continue
+				}
+				s.adapters = append(s.adapters, wfp.Adapter{
+					Name:     adapter.Name,
+					SourceIP: adapter.SourceIP,
+					IfIndex:  uint32(adapter.IfIndex),
+				})
+			}
 			_, _ = s.runtime.Transition(engineRuntime.StateRunning, mode+" listeners ready")
 			return protocol.Result(request.ID, api.EngineStartResult{
 				State:     s.runtime.Snapshot(),
@@ -317,6 +349,7 @@ func (s *Server) stopProxyLocked(requestID string) protocol.Response {
 		stopCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		_, tunErr := s.tun.Stop(stopCtx)
 		cancel()
+		wfpErr := s.closeDNSExemption()
 		var proxyErr error
 		if s.proxy != nil {
 			proxyCtx, proxyCancel := context.WithTimeout(
@@ -328,8 +361,9 @@ func (s *Server) stopProxyLocked(requestID string) protocol.Response {
 		}
 		s.proxy = nil
 		s.mode = ""
+		s.adapters = nil
 		_, _ = s.runtime.Transition(engineRuntime.StateStopped, "failed proxy cleared")
-		if err := errors.Join(tunErr, proxyErr); err != nil {
+		if err := errors.Join(tunErr, wfpErr, proxyErr); err != nil {
 			return protocol.Failure(
 				requestID,
 				"stop_failed",
@@ -357,13 +391,14 @@ func (s *Server) stopProxyLocked(requestID string) protocol.Response {
 	)
 	_, tunErr := s.tun.Stop(stopCtx)
 	stopCancel()
+	wfpErr := s.closeDNSExemption()
 	var proxyErr error
 	if s.proxy != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		proxyErr = s.proxy.Stop(ctx)
 		cancel()
 	}
-	if err := errors.Join(tunErr, proxyErr); err != nil {
+	if err := errors.Join(tunErr, wfpErr, proxyErr); err != nil {
 		_, _ = s.runtime.Transition(engineRuntime.StateFailed, "engine stop failed")
 		return protocol.Failure(
 			requestID,
@@ -374,6 +409,7 @@ func (s *Server) stopProxyLocked(requestID string) protocol.Response {
 	}
 	s.proxy = nil
 	s.mode = ""
+	s.adapters = nil
 	_, _ = s.runtime.Transition(engineRuntime.StateStopped, "proxy stopped")
 	return protocol.Result(requestID, api.EngineStopResult{
 		Accepted: true,
@@ -464,6 +500,35 @@ func (s *Server) activateTun(
 			nil,
 		)
 	}
+	if params.StrictRoute {
+		if !s.identity.Elevated {
+			return protocol.Failure(
+				request.ID,
+				"elevation_required",
+				"strict-route WFP DNS exemption requires an elevated Core",
+				nil,
+			)
+		}
+		exemption, err := wfp.OpenDNSExemption("", s.adapters)
+		if err != nil {
+			return protocol.Failure(
+				request.ID,
+				"wfp_unavailable",
+				"could not install the dynamic WFP DNS exemption",
+				map[string]any{"message": err.Error()},
+			)
+		}
+		if closeErr := s.closeDNSExemption(); closeErr != nil {
+			_ = exemption.Close()
+			return protocol.Failure(
+				request.ID,
+				"wfp_unavailable",
+				"could not replace the previous dynamic WFP DNS exemption",
+				map[string]any{"message": closeErr.Error()},
+			)
+		}
+		s.dnsExemption = exemption
+	}
 	status, err := s.tun.Activate(ctx, params.Config())
 	if err == nil {
 		return protocol.Result(request.ID, api.TunLifecycleResult{
@@ -478,6 +543,7 @@ func (s *Server) activateTun(
 	)
 	_, tunStopErr := s.tun.Stop(stopCtx)
 	stopCancel()
+	wfpErr := s.closeDNSExemption()
 	proxyCtx, proxyCancel := context.WithTimeout(
 		context.Background(),
 		5*time.Second,
@@ -486,13 +552,14 @@ func (s *Server) activateTun(
 	proxyCancel()
 	s.proxy = nil
 	s.mode = ""
+	s.adapters = nil
 	_, _ = s.runtime.Transition(engineRuntime.StateFailed, "TUN activation failed")
 	return protocol.Failure(
 		request.ID,
 		"tun_failed",
 		"could not activate managed TUN lifecycle",
 		map[string]any{
-			"message": errors.Join(err, tunStopErr, proxyStopErr).Error(),
+			"message": errors.Join(err, tunStopErr, wfpErr, proxyStopErr).Error(),
 		},
 	)
 }
@@ -505,12 +572,13 @@ func (s *Server) deactivateTun(
 	defer s.lifecycleMu.Unlock()
 	statusBefore := s.tun.Status()
 	status, err := s.tun.Stop(ctx)
-	if err != nil {
+	wfpErr := s.closeDNSExemption()
+	if joined := errors.Join(err, wfpErr); joined != nil {
 		return protocol.Failure(
 			requestID,
 			"tun_failed",
 			"could not deactivate managed TUN lifecycle",
-			map[string]any{"message": err.Error()},
+			map[string]any{"message": joined.Error()},
 		)
 	}
 	return protocol.Result(requestID, api.TunLifecycleResult{
@@ -528,12 +596,14 @@ func (s *Server) handleTunLog(message string) {
 
 func (s *Server) handleTunUnexpectedExit(status tun.Status) {
 	s.lifecycleMu.Lock()
+	_ = s.closeDNSExemption()
 	if s.mode == "tun_tcp_pool" && s.proxy != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		_ = s.proxy.Stop(ctx)
 		cancel()
 		s.proxy = nil
 		s.mode = ""
+		s.adapters = nil
 	}
 	state := s.runtime.Snapshot().State
 	if state == engineRuntime.StateRunning || state == engineRuntime.StateDegraded {
@@ -554,6 +624,7 @@ func (s *Server) stopProxyForHostExit() {
 	tunCtx, tunCancel := context.WithTimeout(context.Background(), 20*time.Second)
 	_, _ = s.tun.Stop(tunCtx)
 	tunCancel()
+	_ = s.closeDNSExemption()
 	if s.proxy != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		_ = s.proxy.Stop(ctx)
@@ -561,11 +632,21 @@ func (s *Server) stopProxyForHostExit() {
 	}
 	s.proxy = nil
 	s.mode = ""
+	s.adapters = nil
 	state := s.runtime.Snapshot().State
 	if state == engineRuntime.StateRunning || state == engineRuntime.StateDegraded {
 		_, _ = s.runtime.Transition(engineRuntime.StateStopping, "host exiting")
 		_, _ = s.runtime.Transition(engineRuntime.StateStopped, "host exited")
 	}
+}
+
+func (s *Server) closeDNSExemption() error {
+	if s.dnsExemption == nil {
+		return nil
+	}
+	current := s.dnsExemption
+	s.dnsExemption = nil
+	return current.Close()
 }
 
 func (s *Server) uptimeMilliseconds() int64 {

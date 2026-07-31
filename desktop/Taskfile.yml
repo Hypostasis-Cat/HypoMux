@@ -1,0 +1,37 @@
+version: '3'
+
+vars:
+  APP_NAME: "hypomux"
+  BIN_DIR: "bin"
+  PACKAGE_MANAGER: '{{.PACKAGE_MANAGER | default "pnpm"}}'
+  WAILS3: '{{.WAILS3 | default "wails3"}}'
+  PNPM: '{{.PNPM | default "pnpm"}}'
+  NODE: '{{.NODE | default "node"}}'
+  NODE_DIR: '{{.NODE_DIR | default ""}}'
+  PNPM_CLI: '{{.PNPM_CLI | default ""}}'
+  MAKENSIS: '{{.MAKENSIS | default "makensis"}}'
+  VITE_PORT: '{{.WAILS_VITE_PORT | default 9245}}'
+includes:
+  common: ./build/Taskfile.yml
+  windows: ./build/windows/Taskfile.yml
+
+tasks:
+  build:
+    summary: Builds the Windows application
+    cmds:
+      - task: windows:build
+
+  package:
+    summary: Packages a production Windows build
+    cmds:
+      - task: windows:package
+
+  run:
+    summary: Runs the Windows application
+    cmds:
+      - task: windows:run
+
+  dev:
+    summary: Runs the application in development mode
+    cmds:
+      - '"{{.WAILS3}}" dev -config ./build/config.yml -port {{.VITE_PORT}}'

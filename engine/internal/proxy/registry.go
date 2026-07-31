@@ -40,7 +40,9 @@ type ConnectionSnapshot struct {
 	Protocol  string    `json:"protocol"`
 	Channel   string    `json:"channel,omitempty"`
 	Client    string    `json:"client"`
+	Listener  string    `json:"listener,omitempty"`
 	Target    string    `json:"target,omitempty"`
+	Remote    string    `json:"remote,omitempty"`
 	Adapter   string    `json:"adapter,omitempty"`
 	StartedAt time.Time `json:"started_at"`
 	BytesUp   uint64    `json:"bytes_up"`
@@ -73,24 +75,30 @@ type connection struct {
 	protocol   string
 	channel    string
 	client     string
+	listener   string
 	startedAt  time.Time
 	clientConn net.Conn
 
 	mu        sync.RWMutex
 	upstream  net.Conn
 	target    string
+	remote    string
 	adapter   string
+	direct    bool
 	bytesUp   atomic.Uint64
 	bytesDown atomic.Uint64
 }
 
 type registry struct {
-	mu          sync.RWMutex
-	nextID      atomic.Uint64
-	startedAt   time.Time
-	connections map[uint64]*connection
-	adapters    map[string]*adapterCounters
-	order       []string
+	mu              sync.RWMutex
+	nextID          atomic.Uint64
+	startedAt       time.Time
+	connections     map[uint64]*connection
+	adapters        map[string]*adapterCounters
+	order           []string
+	directActive    atomic.Uint64
+	directBytesUp   atomic.Uint64
+	directBytesDown atomic.Uint64
 }
 
 func newRegistry(adapters []Adapter) *registry {
@@ -109,10 +117,14 @@ func newRegistry(adapters []Adapter) *registry {
 
 func (r *registry) Begin(protocol string, channel string, client net.Conn) *connection {
 	clientAddress := ""
+	listenerAddress := ""
 	if address := client.RemoteAddr(); address != nil {
 		clientAddress = address.String()
 	}
-	return r.BeginAddress(protocol, channel, clientAddress, client)
+	if address := client.LocalAddr(); address != nil {
+		listenerAddress = address.String()
+	}
+	return r.beginAddress(protocol, channel, clientAddress, listenerAddress, client)
 }
 
 func (r *registry) BeginAddress(
@@ -121,11 +133,22 @@ func (r *registry) BeginAddress(
 	clientAddress string,
 	client net.Conn,
 ) *connection {
+	return r.beginAddress(protocol, channel, clientAddress, "", client)
+}
+
+func (r *registry) beginAddress(
+	protocol string,
+	channel string,
+	clientAddress string,
+	listenerAddress string,
+	client net.Conn,
+) *connection {
 	session := &connection{
 		id:         r.nextID.Add(1),
 		protocol:   protocol,
 		channel:    channel,
 		client:     clientAddress,
+		listener:   listenerAddress,
 		startedAt:  time.Now().UTC(),
 		clientConn: client,
 	}
@@ -139,11 +162,27 @@ func (r *registry) Attach(session *connection, upstream net.Conn, target string,
 	session.mu.Lock()
 	session.upstream = upstream
 	session.target = target
+	if address := upstream.RemoteAddr(); address != nil {
+		session.remote = address.String()
+	}
 	session.adapter = adapter.Name
 	session.mu.Unlock()
 	if counters := r.adapters[adapter.Name]; counters != nil {
 		counters.active.Add(1)
 	}
+}
+
+func (r *registry) AttachDirect(session *connection, upstream net.Conn, target string) {
+	session.mu.Lock()
+	session.upstream = upstream
+	session.target = target
+	if address := upstream.RemoteAddr(); address != nil {
+		session.remote = address.String()
+	}
+	session.adapter = ""
+	session.direct = true
+	session.mu.Unlock()
+	r.directActive.Add(1)
 }
 
 func (r *registry) AddUp(session *connection, amount uint64) {
@@ -153,9 +192,12 @@ func (r *registry) AddUp(session *connection, amount uint64) {
 	session.bytesUp.Add(amount)
 	session.mu.RLock()
 	counters := r.adapters[session.adapter]
+	direct := session.direct
 	session.mu.RUnlock()
 	if counters != nil {
 		counters.bytesUp.Add(amount)
+	} else if direct {
+		r.directBytesUp.Add(amount)
 	}
 }
 
@@ -166,9 +208,12 @@ func (r *registry) AddDown(session *connection, amount uint64) {
 	session.bytesDown.Add(amount)
 	session.mu.RLock()
 	counters := r.adapters[session.adapter]
+	direct := session.direct
 	session.mu.RUnlock()
 	if counters != nil {
 		counters.bytesDown.Add(amount)
+	} else if direct {
+		r.directBytesDown.Add(amount)
 	}
 }
 
@@ -179,9 +224,12 @@ func (r *registry) Finish(session *connection) {
 
 	session.mu.RLock()
 	adapter := session.adapter
+	direct := session.direct
 	session.mu.RUnlock()
 	if counters := r.adapters[adapter]; counters != nil {
 		counters.active.Add(^uint64(0))
+	} else if direct {
+		r.directActive.Add(^uint64(0))
 	}
 }
 
@@ -226,6 +274,9 @@ func (r *registry) Snapshot(includeConnections bool) TelemetrySnapshot {
 		result.Total.BytesUp += item.BytesUp
 		result.Total.BytesDown += item.BytesDown
 	}
+	result.Total.Connections += r.directActive.Load()
+	result.Total.BytesUp += r.directBytesUp.Load()
+	result.Total.BytesDown += r.directBytesDown.Load()
 	if !includeConnections {
 		return result
 	}
@@ -244,7 +295,9 @@ func (r *registry) Snapshot(includeConnections bool) TelemetrySnapshot {
 			Protocol:  session.protocol,
 			Channel:   session.channel,
 			Client:    session.client,
+			Listener:  session.listener,
 			Target:    session.target,
+			Remote:    session.remote,
 			Adapter:   session.adapter,
 			StartedAt: session.startedAt,
 			BytesUp:   session.bytesUp.Load(),

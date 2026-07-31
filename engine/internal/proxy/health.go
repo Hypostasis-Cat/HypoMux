@@ -38,9 +38,11 @@ type domainHealth struct {
 }
 
 type healthTable struct {
-	mu       sync.Mutex
-	adapters map[string]*adapterHealth
-	now      func() time.Time
+	mu                    sync.Mutex
+	adapters              map[string]*adapterHealth
+	now                   func() time.Time
+	domainIsolation       bool
+	domainIsolationExpiry bool
 }
 
 type adapterHealthSnapshot struct {
@@ -62,13 +64,33 @@ type domainQuarantineSnapshot struct {
 }
 
 func newHealthTable(adapters []Adapter) *healthTable {
+	return newHealthTableConfigured(adapters, true, true, nil)
+}
+
+func newHealthTableConfigured(
+	adapters []Adapter,
+	domainIsolation bool,
+	domainIsolationExpiry bool,
+	seeds []DomainQuarantineSeed,
+) *healthTable {
 	table := &healthTable{
-		adapters: make(map[string]*adapterHealth, len(adapters)),
-		now:      time.Now,
+		adapters:              make(map[string]*adapterHealth, len(adapters)),
+		now:                   time.Now,
+		domainIsolation:       domainIsolation,
+		domainIsolationExpiry: domainIsolationExpiry,
 	}
 	for _, adapter := range adapters {
 		table.adapters[adapter.Name] = &adapterHealth{
 			domains: make(map[string]*domainHealth),
+		}
+	}
+	for _, seed := range seeds {
+		state := table.adapters[seed.Adapter]
+		if state == nil {
+			continue
+		}
+		state.domains[normalizeDomain(seed.Domain)] = &domainHealth{
+			evidence: domainFailureThreshold, expiresAt: seed.ExpiresAt.UTC(),
 		}
 	}
 	return table
@@ -84,6 +106,9 @@ func (h *healthTable) candidates(
 
 	now := h.now()
 	domain = normalizeDomain(domain)
+	if !h.domainIsolation {
+		domain = ""
+	}
 	healthy := make([]Adapter, 0, len(adapters))
 	domainFallback := make([]Adapter, 0, len(adapters))
 	recovery := make([]Adapter, 0, len(adapters))
@@ -161,6 +186,9 @@ func (h *healthTable) recordComparativeDomainFailure(
 	name string,
 	domain string,
 ) {
+	if !h.domainIsolation {
+		return
+	}
 	domain = normalizeDomain(domain)
 	if domain == "" {
 		return
@@ -179,7 +207,11 @@ func (h *healthTable) recordComparativeDomainFailure(
 	}
 	entry.evidence++
 	if entry.evidence >= domainFailureThreshold {
-		entry.expiresAt = now.Add(domainQuarantineTTL)
+		if h.domainIsolationExpiry {
+			entry.expiresAt = now.Add(domainQuarantineTTL)
+		} else {
+			entry.expiresAt = now.AddDate(100, 0, 0)
+		}
 	} else {
 		entry.expiresAt = now.Add(domainEvidenceTTL)
 	}
@@ -198,6 +230,9 @@ func (h *healthTable) snapshot() (
 		h.pruneExpiredDomains(state, now)
 		domainCount := 0
 		for domain, entry := range state.domains {
+			if !h.domainIsolation {
+				break
+			}
 			if entry.evidence < domainFailureThreshold ||
 				!entry.expiresAt.After(now) {
 				continue

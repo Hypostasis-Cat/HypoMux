@@ -1,7 +1,7 @@
 # HypoMux engine protocol v1
 
 This directory is the language-neutral contract shared by the Go engine and
-the production C# WPF client.
+the production Wails desktop client.
 
 - `manifest.json` records the advertised methods, events, lifecycle states,
   error codes, and operational semantics.

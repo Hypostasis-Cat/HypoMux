@@ -1,0 +1,101 @@
+{
+  "kind": "hypomux.phase14.tun_preflight",
+  "captured_at": "2026-07-30T09:53:01.144762Z",
+  "ready_to_run": false,
+  "checks": {
+    "elevated": true,
+    "engine_exact_candidate": true,
+    "sing_box_present": true,
+    "wfp_available": true,
+    "no_foreign_tun_default_route": false,
+    "no_hypomux_residue": true,
+    "physical_sources_bindable": true
+  },
+  "engine": {
+    "exists": true,
+    "path": "C:\\Program Files\\HypoMux\\bin\\hypomux-engine.exe",
+    "sha256": "3b72ce18b3110d49f1d260a967a07f252ff282e16a12a2f2d2c68b453b5b06a1",
+    "sha256_matches": true,
+    "hello": {
+      "engine": "hypomux-engine",
+      "engine_version": "dev-9a591c7",
+      "commit": "9a591c72a77777914d10ca4dee4350d12ccf8b29",
+      "protocol_version": 1,
+      "transport": "stdio-jsonl",
+      "capabilities": [
+        "engine.hello",
+        "engine.status",
+        "engine.start",
+        "engine.stop",
+        "engine.telemetry",
+        "tun.activate",
+        "tun.status",
+        "tun.deactivate",
+        "dns.resolve",
+        "dns.status",
+        "health.check",
+        "diagnostic.run",
+        "host.shutdown"
+      ],
+      "modes": [
+        "proxy",
+        "tun_tcp_pool"
+      ],
+      "mode_features": {
+        "proxy": [
+          "socks5_connect",
+          "http_connect",
+          "source_bound_dns",
+          "ipv6_egress",
+          "adaptive_health",
+          "domain_quarantine"
+        ],
+        "tun_tcp_pool": [
+          "tcp_connect",
+          "udp_associate",
+          "ipv6_egress",
+          "adaptive_health",
+          "managed_tun_lifecycle"
+        ]
+      },
+      "os": "windows",
+      "arch": "amd64",
+      "pid": 25196,
+      "elevated": true,
+      "started_at": "2026-07-30T09:53:01.1408752Z"
+    }
+  },
+  "sing_box": {
+    "path": "C:\\Program Files\\HypoMux\\bin\\sing-box.exe",
+    "exists": true
+  },
+  "wfp": {
+    "ready": true,
+    "detail": "FwpmEngineOpen0 succeeded"
+  },
+  "foreign_default_routes": [
+    {
+      "InterfaceAlias": "Meta",
+      "ifIndex": 32,
+      "NextHop": "198.18.0.2",
+      "RouteMetric": 0,
+      "InterfaceMetric": null
+    }
+  ],
+  "hypomux_residue": {
+    "routes": [],
+    "devices": []
+  },
+  "adapters": [
+    {
+      "name": "Ethernet",
+      "source_ip": "192.168.1.146",
+      "bindable": true
+    },
+    {
+      "name": "Wi-Fi",
+      "source_ip": "192.168.1.46",
+      "bindable": true
+    }
+  ]
+}

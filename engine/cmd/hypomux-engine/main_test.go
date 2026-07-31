@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -28,5 +30,45 @@ func TestDiagnoseCommandEmitsCompatibleJSONForInvalidSource(t *testing.T) {
 	}
 	if result["loss_rate"] != float64(100) || result["sent"] != float64(0) {
 		t.Fatalf("counters = %#v", result)
+	}
+}
+
+func TestServePipeRejectsMissingAuthenticatedSessionArguments(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	exitCode := run(
+		[]string{"serve-pipe", "--pipe", `\\.\pipe\HypoMux-Core-test`},
+		strings.NewReader(""),
+		&stdout,
+		&stderr,
+	)
+	if exitCode != 2 {
+		t.Fatalf("exit code = %d, stderr = %s", exitCode, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "--session-token") {
+		t.Fatalf("missing safe argument error: %s", stderr.String())
+	}
+}
+
+func TestRecoverCommandReportsCleanupFailure(t *testing.T) {
+	originalRecoverTUN := recoverTUN
+	recoverTUN = func(context.Context) error {
+		return errors.New("cleanup failed")
+	}
+	t.Cleanup(func() {
+		recoverTUN = originalRecoverTUN
+	})
+
+	var stdout, stderr bytes.Buffer
+	exitCode := run(
+		[]string{"recover"},
+		strings.NewReader(""),
+		&stdout,
+		&stderr,
+	)
+	if exitCode != 1 {
+		t.Fatalf("exit code = %d, stderr = %s", exitCode, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "cleanup failed") {
+		t.Fatalf("missing cleanup failure: %s", stderr.String())
 	}
 }

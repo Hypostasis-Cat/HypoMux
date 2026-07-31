@@ -129,18 +129,17 @@ domain state.
 
 ## Production boundary
 
-The WPF UI sends commands and renders events. Go exclusively owns proxy
+The Wails desktop client sends commands and renders events. Go exclusively owns proxy
 listeners, source-bound DNS, connection scheduling, telemetry, sing-box
 containment, and TUN cleanup. There is no alternate Python network backend.
 
 Installed builds discover the signed engine at
-`<runtime>\bin\hypomux-engine.exe`. Source builds can point the WPF client or
-the C# smoke client at a local executable:
+`<runtime>\bin\hypomux-engine.exe`. Source builds stage the engine through the
+desktop Wails task:
 
 ```powershell
-go -C engine build -trimpath -o ..\hypomux-engine.exe .\cmd\hypomux-engine
-$env:HYPOMUX_ENGINE_PATH = "$PWD\hypomux-engine.exe"
-dotnet run --project .\frontend\HypoMux.App\HypoMux.App.csproj
+cd desktop
+wails3 task windows:build
 ```
 
 The historical migration decisions remain under `docs/architecture`; the

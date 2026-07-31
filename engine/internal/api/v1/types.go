@@ -1,7 +1,7 @@
 // Package v1 defines the transport DTOs exposed by protocol version 1.
 //
 // These types are deliberately independent of any UI toolkit. Their JSON
-// representation is the public boundary consumed by the WPF client.
+// representation is the public boundary consumed by desktop clients.
 package v1
 
 import (
@@ -10,6 +10,7 @@ import (
 
 	"github.com/Hypostasis-Cat/HypoMux/engine/internal/diagnostic"
 	"github.com/Hypostasis-Cat/HypoMux/engine/internal/dns"
+	"github.com/Hypostasis-Cat/HypoMux/engine/internal/platform"
 	"github.com/Hypostasis-Cat/HypoMux/engine/internal/protocol"
 	"github.com/Hypostasis-Cat/HypoMux/engine/internal/proxy"
 	engineRuntime "github.com/Hypostasis-Cat/HypoMux/engine/internal/runtime"
@@ -29,6 +30,7 @@ const (
 	MethodDNSStatus       = "dns.status"
 	MethodHealthCheck     = "health.check"
 	MethodDiagnosticRun   = "diagnostic.run"
+	MethodWFPInspect      = "wfp.inspect"
 	MethodHostShutdown    = "host.shutdown"
 
 	EventEngineStateChanged  = "engine.state_changed"
@@ -51,6 +53,7 @@ var capabilities = []string{
 	MethodDNSStatus,
 	MethodHealthCheck,
 	MethodDiagnosticRun,
+	MethodWFPInspect,
 	MethodHostShutdown,
 }
 
@@ -107,6 +110,7 @@ func NewHelloResult(
 				"ipv6_egress",
 				"adaptive_health",
 				"managed_tun_lifecycle",
+				"dynamic_nic_channels",
 			},
 		},
 		OS:        runtime.GOOS,
@@ -144,6 +148,12 @@ type DiagnosticRunParams struct {
 	Timeout  int    `json:"timeout_ms"`
 }
 
+type WFPInspectParams struct {
+	Repair bool `json:"repair"`
+}
+
+type WFPInspectResult = platform.WFPStatus
+
 func (p DiagnosticRunParams) Config() diagnostic.Config {
 	return diagnostic.Config{
 		SourceIP: p.SourceIP,
@@ -154,15 +164,18 @@ func (p DiagnosticRunParams) Config() diagnostic.Config {
 }
 
 type EngineStartParams struct {
-	Mode             string          `json:"mode"`
-	ListenHost       string          `json:"listen_host"`
-	SOCKSPort        int             `json:"socks_port"`
-	HTTPPort         int             `json:"http_port"`
-	Weighted         bool            `json:"weighted"`
-	Adapters         []proxy.Adapter `json:"adapters"`
-	Channels         []proxy.Channel `json:"channels,omitempty"`
-	ConnectTimeoutMS int             `json:"connect_timeout_ms"`
-	DNS              DNSStartConfig  `json:"dns"`
+	Mode                  string                       `json:"mode"`
+	ListenHost            string                       `json:"listen_host"`
+	SOCKSPort             int                          `json:"socks_port"`
+	HTTPPort              int                          `json:"http_port"`
+	Weighted              bool                         `json:"weighted"`
+	Adapters              []proxy.Adapter              `json:"adapters"`
+	Channels              []proxy.Channel              `json:"channels,omitempty"`
+	ConnectTimeoutMS      int                          `json:"connect_timeout_ms"`
+	DNS                   DNSStartConfig               `json:"dns"`
+	DomainIsolation       *bool                        `json:"domain_isolation,omitempty"`
+	DomainIsolationExpiry *bool                        `json:"domain_isolation_expiry,omitempty"`
+	DomainQuarantines     []proxy.DomainQuarantineSeed `json:"domain_quarantines,omitempty"`
 }
 
 type DNSStartConfig struct {
@@ -182,15 +195,26 @@ func (c DNSStartConfig) ResolverConfig() dns.Config {
 }
 
 func (p EngineStartParams) ProxyConfig() proxy.Config {
+	domainIsolation := true
+	if p.DomainIsolation != nil {
+		domainIsolation = *p.DomainIsolation
+	}
+	domainIsolationExpiry := true
+	if p.DomainIsolationExpiry != nil {
+		domainIsolationExpiry = *p.DomainIsolationExpiry
+	}
 	return proxy.Config{
-		ListenHost:     p.ListenHost,
-		SOCKSPort:      p.SOCKSPort,
-		HTTPPort:       p.HTTPPort,
-		Weighted:       p.Weighted,
-		Adapters:       p.Adapters,
-		Channels:       p.Channels,
-		ConnectTimeout: time.Duration(p.ConnectTimeoutMS) * time.Millisecond,
-		DNS:            p.DNS.ResolverConfig(),
+		ListenHost:            p.ListenHost,
+		SOCKSPort:             p.SOCKSPort,
+		HTTPPort:              p.HTTPPort,
+		Weighted:              p.Weighted,
+		Adapters:              p.Adapters,
+		Channels:              p.Channels,
+		ConnectTimeout:        time.Duration(p.ConnectTimeoutMS) * time.Millisecond,
+		DNS:                   p.DNS.ResolverConfig(),
+		DomainIsolation:       &domainIsolation,
+		DomainIsolationExpiry: &domainIsolationExpiry,
+		DomainQuarantines:     append([]proxy.DomainQuarantineSeed(nil), p.DomainQuarantines...),
 	}
 }
 
@@ -213,6 +237,7 @@ type TunActivateParams struct {
 	Executable       string `json:"executable"`
 	ConfigPath       string `json:"config_path"`
 	StartupTimeoutMS int    `json:"startup_timeout_ms"`
+	StrictRoute      bool   `json:"strict_route"`
 }
 
 func (p TunActivateParams) Config() tun.Config {

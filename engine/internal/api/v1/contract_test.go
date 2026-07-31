@@ -207,6 +207,8 @@ func decodeRequestParams(t *testing.T, request protocol.Request) {
 		target = &DNSResolveParams{}
 	case MethodDiagnosticRun:
 		target = &DiagnosticRunParams{}
+	case MethodWFPInspect:
+		target = &WFPInspectParams{}
 	case MethodEngineHello,
 		MethodEngineStatus,
 		MethodEngineStop,
@@ -253,6 +255,8 @@ func decodeResult(t *testing.T, method string, payload json.RawMessage) {
 		target = &HealthResult{}
 	case MethodDiagnosticRun:
 		target = &diagnostic.Result{}
+	case MethodWFPInspect:
+		target = &WFPInspectResult{}
 	case MethodHostShutdown:
 		target = &ShutdownResult{}
 	default:

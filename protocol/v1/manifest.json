@@ -85,6 +85,12 @@
       "cancellation": "host_context_only"
     },
     {
+      "name": "wfp.inspect",
+      "idempotency": "safe_retry",
+      "privilege": "administrator_for_repair",
+      "cancellation": "caller_deadline_and_host_context"
+    },
+    {
       "name": "host.shutdown",
       "idempotency": "process_terminal",
       "privilege": "none",
@@ -129,6 +135,8 @@
     "start_failed",
     "stop_failed",
     "dns_failed",
-    "tun_failed"
+    "tun_failed",
+    "wfp_unavailable",
+    "elevation_required"
   ]
 }

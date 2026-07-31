@@ -5,16 +5,12 @@ on:
     branches: [main]
     paths:
       - 'engine/**'
-      - 'frontend/**'
-      - 'global.json'
       - 'protocol/**'
       - '.github/workflows/go-engine.yml'
   pull_request:
     branches: [main]
     paths:
       - 'engine/**'
-      - 'frontend/**'
-      - 'global.json'
       - 'protocol/**'
       - '.github/workflows/go-engine.yml'
   workflow_dispatch:
@@ -64,19 +60,3 @@ jobs:
         shell: pwsh
         run: |
           go build -trimpath -o "$env:RUNNER_TEMP\hypomux-engine.exe" .\cmd\hypomux-engine
-
-      - name: Set up .NET
-        uses: actions/setup-dotnet@v5
-        with:
-          global-json-file: global.json
-
-      - name: Test the real child-process protocol through C#
-        shell: pwsh
-        working-directory: .
-        env:
-          HYPOMUX_ENGINE_PATH: ${{ runner.temp }}\hypomux-engine.exe
-        run: |
-          dotnet restore frontend\HypoMux.EngineClient.Smoke\HypoMux.EngineClient.Smoke.csproj
-          dotnet run `
-            --project frontend\HypoMux.EngineClient.Smoke\HypoMux.EngineClient.Smoke.csproj `
-            --configuration Release

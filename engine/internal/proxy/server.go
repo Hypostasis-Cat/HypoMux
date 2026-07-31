@@ -44,7 +44,12 @@ func New(config Config) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	health := newHealthTable(normalized.Adapters)
+	health := newHealthTableConfigured(
+		normalized.Adapters,
+		*normalized.DomainIsolation,
+		*normalized.DomainIsolationExpiry,
+		normalized.DomainQuarantines,
+	)
 	server := &Server{
 		config:     normalized,
 		scheduler:  newScheduler(normalized.Adapters, normalized.Weighted, health),
@@ -53,6 +58,9 @@ func New(config Config) (*Server, error) {
 		registry:   newRegistry(normalized.Adapters),
 	}
 	for _, channel := range normalized.Channels {
+		if channel.Name == ChannelDirect {
+			continue
+		}
 		server.schedulers[channel.Name] = newScheduler(
 			adaptersForChannel(normalized.Adapters, channel),
 			normalized.Weighted,
@@ -373,6 +381,14 @@ func (s *Server) handleClient(protocol string, client net.Conn, session *connect
 func (s *Server) connect(session *connection, target string) (net.Conn, Adapter, error) {
 	ctx, cancel := context.WithTimeout(s.ctx, s.config.ConnectTimeout)
 	defer cancel()
+	if session.channel == ChannelDirect {
+		upstream, err := s.dialDirectTCP(ctx, target)
+		if err != nil {
+			return nil, Adapter{}, err
+		}
+		s.registry.AttachDirect(session, upstream, target)
+		return upstream, Adapter{}, nil
+	}
 	channelScheduler := s.scheduler
 	literalIPOnly := false
 	if session.channel != "" {
@@ -393,6 +409,22 @@ func (s *Server) connect(session *connection, target string) (net.Conn, Adapter,
 	}
 	s.registry.Attach(session, upstream, target, adapter)
 	return upstream, adapter, nil
+}
+
+func (s *Server) dialDirectTCP(ctx context.Context, target string) (net.Conn, error) {
+	host, _, err := net.SplitHostPort(target)
+	if err != nil {
+		return nil, fmt.Errorf("direct target: %w", err)
+	}
+	dialer := &net.Dialer{Timeout: s.config.ConnectTimeout}
+	if ip := net.ParseIP(host); ip != nil && ip.To4() == nil {
+		dialer.LocalAddr = &net.TCPAddr{IP: net.IPv6unspecified}
+	}
+	connection, err := s.dialTCP(ctx, dialer, target)
+	if err != nil {
+		return nil, fmt.Errorf("direct connect: %w", err)
+	}
+	return connection, nil
 }
 
 func (s *Server) relay(clientReader io.Reader, client net.Conn, upstream net.Conn, session *connection) {
