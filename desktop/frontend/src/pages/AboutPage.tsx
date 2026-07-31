@@ -20,49 +20,38 @@ import {
   ArrowSync20Regular,
   Code20Regular,
 } from "@fluentui/react-icons";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { GlassSurface } from "../components/material/GlassSurface";
 import { desktopPlatform } from "../platform/desktop";
 import { appServices, type UpdateCheckResult } from "../platform/services";
 import { productInfo } from "../product";
-import { Fragment, useState, type ReactNode } from "react";
+import { useState } from "react";
 import { useI18n } from "../i18n/i18n";
-
-const releaseLinkPattern = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/[^\s]+)/g;
-
-function releaseNotesLine(line: string): ReactNode[] {
-  const nodes: ReactNode[] = [];
-  let cursor = 0;
-  for (const match of line.matchAll(releaseLinkPattern)) {
-    const index = match.index ?? 0;
-    if (index > cursor) {
-      nodes.push(line.slice(cursor, index));
-    }
-    const label = match[1] || match[3];
-    const url = match[2] || match[3];
-    nodes.push(
-      <Link key={`${index}-${url}`} onClick={() => desktopPlatform.openURL(url)}>
-        {label}
-      </Link>,
-    );
-    cursor = index + match[0].length;
-  }
-  if (cursor < line.length) {
-    nodes.push(line.slice(cursor));
-  }
-  return nodes;
-}
 
 function ReleaseNotes({ notes, emptyText }: { notes?: string; emptyText: string }) {
   const value = notes?.trim() || emptyText;
   return (
     <div className="update-notes">
-      {value.split(/\r?\n/).map((line, index) => (
-        <Fragment key={`${index}-${line.slice(0, 24)}`}>
-          {line.trim() === ""
-            ? <span className="update-note-spacer" aria-hidden="true" />
-            : <p>{releaseNotesLine(line)}</p>}
-        </Fragment>
-      ))}
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        skipHtml
+        components={{
+          a: ({ href, children }) => (
+            <Link
+              href={href}
+              onClick={(event) => {
+                event.preventDefault();
+                if (href) void desktopPlatform.openURL(href);
+              }}
+            >
+              {children}
+            </Link>
+          ),
+        }}
+      >
+        {value}
+      </ReactMarkdown>
     </div>
   );
 }
@@ -74,6 +63,7 @@ export function AboutPage() {
   const [downloading, setDownloading] = useState(false);
   const [downloadPercent, setDownloadPercent] = useState(0);
   const [update, setUpdate] = useState<UpdateCheckResult | null>(null);
+  const [updateDialogOpen, setUpdateDialogOpen] = useState(false);
   const toasterId = useId("about-toaster");
   const { dispatchToast } = useToastController(toasterId);
 
@@ -90,7 +80,10 @@ export function AboutPage() {
       const result = await appServices.updater.check();
       if (result.available) {
         setUpdate(result);
+        setUpdateDialogOpen(true);
       } else {
+        setUpdateDialogOpen(false);
+        setUpdate(null);
         notify(
           text("已是最新版本", "You're up to date"),
           text(`当前版本：v${result.current_version}`, `Current version: v${result.current_version}`),
@@ -204,7 +197,12 @@ export function AboutPage() {
         </GlassSurface>
       </div>
 
-      <Dialog open={Boolean(update)} onOpenChange={(_, data) => !data.open && !downloading && setUpdate(null)}>
+      <Dialog
+        open={updateDialogOpen}
+        onOpenChange={(_, data) => {
+          if (!data.open && !downloading) setUpdateDialogOpen(false);
+        }}
+      >
         <DialogSurface className="update-dialog">
           <DialogBody>
             <DialogTitle>{t("about_update_available_title")}</DialogTitle>
@@ -218,7 +216,7 @@ export function AboutPage() {
               <p>{t("about_update_download_hint")}</p>
             </DialogContent>
             <DialogActions>
-              <Button disabled={downloading} onClick={() => setUpdate(null)}>{t("about_update_later")}</Button>
+              <Button disabled={downloading} onClick={() => setUpdateDialogOpen(false)}>{t("about_update_later")}</Button>
               <Button appearance="primary" disabled={downloading} icon={downloading ? <Spinner size="tiny" /> : undefined} onClick={installUpdate}>
                 {downloading ? t("about_update_downloading", { percent: downloadPercent }) : t("about_update_now")}
               </Button>

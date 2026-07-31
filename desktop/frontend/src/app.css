@@ -2303,7 +2303,6 @@ svg {
   background: color-mix(in srgb, var(--hm-row-hover) 72%, transparent);
   font-size: 11px;
   line-height: 1.55;
-  white-space: pre-wrap;
 }
 
 .update-notes p {
@@ -2313,12 +2312,81 @@ svg {
 }
 
 .update-notes p + p {
-  margin-top: 5px;
+  margin-top: 8px;
 }
 
-.update-note-spacer {
-  display: block;
-  height: 8px;
+.update-notes h1,
+.update-notes h2,
+.update-notes h3,
+.update-notes h4,
+.update-notes h5,
+.update-notes h6 {
+  margin: 12px 0 6px;
+  color: var(--hm-text-primary);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.update-notes h1:first-child,
+.update-notes h2:first-child,
+.update-notes h3:first-child {
+  margin-top: 0;
+}
+
+.update-notes ul,
+.update-notes ol {
+  margin: 6px 0;
+  padding-left: 22px;
+}
+
+.update-notes li + li {
+  margin-top: 3px;
+}
+
+.update-notes blockquote {
+  margin: 8px 0;
+  padding: 2px 10px;
+  border-left: 3px solid var(--hm-accent);
+  color: var(--hm-text-tertiary);
+}
+
+.update-notes code {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--hm-outer-border) 54%, transparent);
+  font-family: Consolas, "Cascadia Code", monospace;
+  font-size: 0.94em;
+}
+
+.update-notes pre {
+  margin: 8px 0;
+  padding: 10px;
+  overflow: auto;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--hm-outer-border) 70%, transparent);
+}
+
+.update-notes pre code {
+  padding: 0;
+  background: transparent;
+}
+
+.update-notes table {
+  width: 100%;
+  margin: 8px 0;
+  border-collapse: collapse;
+}
+
+.update-notes th,
+.update-notes td {
+  padding: 5px 7px;
+  border: 1px solid var(--hm-outer-border);
+  text-align: left;
+}
+
+.update-notes th {
+  color: var(--hm-text-primary);
+  background: color-mix(in srgb, var(--hm-row-hover) 84%, transparent);
 }
 
 @media (max-width: 880px) {
