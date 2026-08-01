@@ -1,5 +1,6 @@
 import { FluentProvider, Spinner } from "@fluentui/react-components";
 import { lazy, Suspense, useEffect, useState } from "react";
+import "./theme/design.tokens.css";
 import "./theme/material.tokens.css";
 import "./theme/semantic.tokens.css";
 import "./theme/typography.tokens.css";

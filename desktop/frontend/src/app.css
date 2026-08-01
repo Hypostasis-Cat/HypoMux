@@ -2,6 +2,19 @@
   box-sizing: border-box;
 }
 
+/* ========================================
+ * Global Focus Indicator (Accessibility)
+ * ======================================== */
+*:focus-visible {
+  outline: var(--hm-focus-ring-width) solid var(--hm-focus-ring);
+  outline-offset: var(--hm-focus-ring-offset);
+}
+
+/* Remove outline for mouse users (focus-visible handles keyboard) */
+*:focus:not(:focus-visible) {
+  outline: none;
+}
+
 html,
 body,
 #root {
@@ -122,11 +135,13 @@ svg {
   border-radius: inherit;
   opacity: 0;
   background: transparent;
-  filter:
-    drop-shadow(0 0 4px var(--hm-card-glow-near))
-    drop-shadow(0 0 14px var(--hm-card-glow-far));
+  box-shadow:
+    0 0 4px var(--hm-card-glow-near),
+    0 0 14px var(--hm-card-glow-far),
+    inset 0 0 0 1px var(--hm-card-glow-border);
   pointer-events: none;
   transition: opacity var(--hm-motion-normal) var(--hm-motion-ease-out);
+  will-change: opacity;
   content: "";
 }
 
@@ -397,7 +412,7 @@ svg {
     0 0 18px var(--hm-accent-soft);
   pointer-events: none;
   transition:
-    transform 400ms var(--hm-motion-spring),
+    transform 300ms cubic-bezier(0.34, 1.3, 0.64, 1),
     opacity var(--hm-motion-normal) var(--hm-motion-ease-out),
     background var(--hm-motion-normal) var(--hm-motion-ease-out),
     border-color var(--hm-motion-normal) var(--hm-motion-ease-out);
@@ -459,6 +474,7 @@ svg {
 
 .nav-button:active {
   transform: scale(0.94);
+  background: color-mix(in srgb, var(--hm-accent-soft) 42%, transparent);
 }
 
 .nav-button:focus-visible {
@@ -526,11 +542,13 @@ svg {
 
 @keyframes page-content-in {
   from {
-    left: var(--hm-page-enter-offset);
+    opacity: 0.7;
+    transform: translateX(var(--hm-page-enter-offset));
   }
 
   to {
-    left: 0;
+    opacity: 1;
+    transform: translateX(0);
   }
 }
 
@@ -1285,9 +1303,9 @@ svg {
 
 .routing-cell-input:focus-within,
 .routing-cell-dropdown:focus-within {
-  border-color: color-mix(in srgb, var(--hm-accent) 62%, var(--hm-outer-border)) !important;
-  background: color-mix(in srgb, rgb(var(--hm-surface-secondary-rgb)) 72%, transparent) !important;
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--hm-accent-soft) 64%, transparent) !important;
+  border-color: var(--hm-accent) !important;
+  background: rgba(var(--hm-surface-rgb), 0.85) !important;
+  box-shadow: 0 0 0 3px var(--hm-focus-ring) !important;
 }
 
 .routing-rule-status {

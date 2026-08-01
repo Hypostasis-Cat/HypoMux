@@ -1,0 +1,153 @@
+/* HypoMux Design System Tokens
+ * Centralized design variables for consistent UI
+ */
+
+:root {
+  /* ========================================
+   * Typography Scale
+   * Base: 13px, Scale: 1.25 (major third)
+   * ======================================== */
+  --hm-font-xs: 10px;
+  --hm-font-sm: 11px;
+  --hm-font-base: 13px;
+  --hm-font-md: 14px;
+  --hm-font-lg: 16px;
+  --hm-font-xl: 18px;
+  --hm-font-2xl: 24px;
+  --hm-font-3xl: 32px;
+  --hm-font-4xl: 40px;
+
+  /* Line Heights */
+  --hm-line-height-tight: 1.3;
+  --hm-line-height-normal: 1.5;
+  --hm-line-height-relaxed: 1.7;
+
+  /* Font Weights */
+  --hm-font-normal: 400;
+  --hm-font-medium: 500;
+  --hm-font-semibold: 600;
+  --hm-font-bold: 700;
+
+  /* Letter Spacing */
+  --hm-letter-spacing-tight: -0.01em;
+  --hm-letter-spacing-normal: 0;
+  --hm-letter-spacing-wide: 0.02em;
+
+  /* ========================================
+   * Spacing Scale
+   * Base: 4px (8px grid system)
+   * ======================================== */
+  --hm-space-0: 0;
+  --hm-space-1: 4px;
+  --hm-space-2: 8px;
+  --hm-space-3: 12px;
+  --hm-space-4: 16px;
+  --hm-space-5: 20px;
+  --hm-space-6: 24px;
+  --hm-space-7: 28px;
+  --hm-space-8: 32px;
+  --hm-space-10: 40px;
+  --hm-space-12: 48px;
+  --hm-space-16: 64px;
+  --hm-space-20: 80px;
+
+  /* ========================================
+   * Border Radius Scale
+   * Base: 10px (from --hm-radius)
+   * ======================================== */
+  --hm-radius-xs: 4px;
+  --hm-radius-sm: 6px;
+  --hm-radius-md: 8px;
+  --hm-radius-base: 10px;
+  --hm-radius-lg: 12px;
+  --hm-radius-xl: 16px;
+  --hm-radius-2xl: 20px;
+  --hm-radius-full: 9999px;
+
+  /* Legacy compatibility */
+  --hm-radius: var(--hm-radius-base);
+
+  /* ========================================
+   * Shadow Scale
+   * Elevation system based on Material Design
+   * ======================================== */
+  --hm-shadow-xs: 0 1px 3px rgba(var(--hm-shadow-colour), calc(0.06 * var(--hm-shadow-strength)));
+  --hm-shadow-sm: 0 2px 8px rgba(var(--hm-shadow-colour), calc(0.08 * var(--hm-shadow-strength)));
+  --hm-shadow-md: 0 4px 16px rgba(var(--hm-shadow-colour), calc(0.12 * var(--hm-shadow-strength)));
+  --hm-shadow-lg: 0 8px 24px rgba(var(--hm-shadow-colour), calc(0.18 * var(--hm-shadow-strength)));
+  --hm-shadow-xl: 0 14px 38px rgba(var(--hm-shadow-colour), calc(0.24 * var(--hm-shadow-strength)));
+  --hm-shadow-2xl: 0 20px 56px rgba(var(--hm-shadow-colour), calc(0.32 * var(--hm-shadow-strength)));
+
+  /* Focus ring for accessibility */
+  --hm-focus-ring: color-mix(in srgb, var(--hm-accent) 40%, transparent);
+  --hm-focus-ring-offset: 2px;
+  --hm-focus-ring-width: 2px;
+
+  /* ========================================
+   * Layout & Container Sizes
+   * ======================================== */
+  --hm-page-max-width: 1360px;
+  --hm-content-max-width: 1180px;
+  --hm-compact-max-width: 880px;
+
+  /* Window chrome */
+  --hm-titlebar-height: 36px;
+  --hm-sidebar-width: 240px;
+
+  /* ========================================
+   * Transition & Animation
+   * Inherited from motion.tokens.css
+   * ======================================== */
+  --hm-transition-fast: var(--hm-motion-fast) var(--hm-motion-ease-out);
+  --hm-transition-normal: var(--hm-motion-normal) var(--hm-motion-ease-out);
+  --hm-transition-slow: var(--hm-motion-page) var(--hm-motion-ease-out);
+
+  /* ========================================
+   * Z-Index Scale
+   * Stacking context hierarchy
+   * ======================================== */
+  --hm-z-base: 0;
+  --hm-z-dropdown: 1000;
+  --hm-z-sticky: 1100;
+  --hm-z-overlay: 2000;
+  --hm-z-modal: 3000;
+  --hm-z-popover: 4000;
+  --hm-z-toast: 5000;
+  --hm-z-tooltip: 6000;
+
+  /* ========================================
+   * Opacity Scale
+   * ======================================== */
+  --hm-opacity-disabled: 0.38;
+  --hm-opacity-secondary: 0.62;
+  --hm-opacity-hover: 0.08;
+  --hm-opacity-pressed: 0.12;
+  --hm-opacity-focus: 0.16;
+
+  /* ========================================
+   * Density Multipliers
+   * Applied to spacing and sizing
+   * ======================================== */
+  --hm-density-multiplier: 1;
+  --hm-density-space: calc(8px * var(--hm-density-multiplier));
+}
+
+/* Density variants */
+[data-density="compact"] {
+  --hm-density-multiplier: 0.875;
+}
+
+[data-density="comfortable"] {
+  --hm-density-multiplier: 1.125;
+}
+
+/* ========================================
+ * Responsive Breakpoints
+ * Use with @media (max-width: ...)
+ * ======================================== */
+/*
+  xs: 0-640px    (mobile)
+  sm: 641-960px  (small screen)
+  md: 961-1280px (medium screen)
+  lg: 1281+px    (large screen)
+*/
