@@ -130,14 +130,20 @@ export function AppearanceProvider({ children }: PropsWithChildren) {
             });
             setSettings(normalized);
           }
-          // Always set hydrated to true, even if no saved settings
-          // This ensures first-time users get the default settings saved
-          setHydrated(true);
+          // IMPORTANT: Set hydrated AFTER a microtask delay to ensure setSettings completes first
+          // This prevents saving initial/empty settings before the loaded settings are applied
+          queueMicrotask(() => {
+            if (active) setHydrated(true);
+          });
         }
       })
       .catch((error) => {
         console.error("Unable to load appearance settings", error);
-        if (active) setHydrated(true);
+        if (active) {
+          queueMicrotask(() => {
+            if (active) setHydrated(true);
+          });
+        }
       });
     return () => {
       active = false;
@@ -154,10 +160,19 @@ export function AppearanceProvider({ children }: PropsWithChildren) {
   useEffect(() => {
     applyDocumentTokens(settings, resolvedMode, accent);
     if (hydrated) {
+      console.log('[Appearance] Saving to backend:', {
+        backgroundSource: settings.backgroundSource,
+        hasLocalBackgroundUrl: !!settings.localBackgroundUrl,
+        localBackgroundUrlLength: settings.localBackgroundUrl?.length,
+      });
       void appearancePersistence.save(settings)
-        .then(() => setPersistenceError(undefined))
+        .then(() => {
+          console.log('[Appearance] Save successful');
+          setPersistenceError(undefined);
+        })
         .catch((error) => {
           const message = error instanceof Error ? error.message : String(error);
+          console.error('[Appearance] Save failed:', message);
           setPersistenceError(message);
           console.error("Unable to save appearance settings", error);
         });
