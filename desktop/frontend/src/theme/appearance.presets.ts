@@ -11,9 +11,9 @@ export const accentColours: Record<Exclude<AccentPreset, "custom">, string> = {
 
 const baseSettings: AppearanceSettings = {
   schemaVersion: 2,
-  presetId: "fluent-solid",
+  presetId: "windows-mica",
   mode: "system",
-  material: "solid",
+  material: "mica",
   panelMaterial: "blur",
   accentPreset: "hypomux",
   customAccent: "#1677D2",
@@ -42,16 +42,16 @@ const make = (values: Partial<AppearanceSettings>): AppearanceSettings => ({ ...
 
 export const appearancePresets: AppearancePreset[] = [
   {
-    id: "fluent-solid",
-    name: "Fluent Solid",
-    description: "Stable theme background for the default light and dark appearances.",
-    settings: make({ presetId: "fluent-solid", material: "solid", backgroundSource: "system" }),
-  },
-  {
     id: "windows-mica",
     name: "Windows Mica",
     description: "安静、低透明度，优先使用 Windows 11 原生材质。",
     settings: make({ presetId: "windows-mica", material: "mica", backgroundSource: "system" }),
+  },
+  {
+    id: "fluent-solid",
+    name: "Fluent Solid",
+    description: "Stable theme background for the default light and dark appearances.",
+    settings: make({ presetId: "fluent-solid", material: "solid", backgroundSource: "system" }),
   },
   {
     id: "pure-performance",

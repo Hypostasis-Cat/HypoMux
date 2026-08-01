@@ -31,9 +31,7 @@ const clamp = (value: number, minimum: number, maximum: number) =>
   Math.min(maximum, Math.max(minimum, Number.isFinite(value) ? value : minimum));
 
 const migrateAppearance = (value: Partial<AppearanceSettings>): Partial<AppearanceSettings> => {
-  if ((value.schemaVersion ?? 0) < 2 && value.backgroundSource === "system" && value.material === "mica") {
-    return { ...value, schemaVersion: 2, presetId: "fluent-solid", material: "solid" };
-  }
+  // Schema version 2: no migration needed, just mark as current version
   return { ...value, schemaVersion: 2 };
 };
 
@@ -43,9 +41,11 @@ const normaliseAppearance = (value: AppearanceSettings): AppearanceSettings => (
   material: value.material === "solid" ? "solid" : "mica",
   panelMaterial: value.panelMaterial === "solid" ? "solid" : "blur",
   presetId:
-    value.presetId === "windows-mica" || value.presetId === "pure-performance"
+    value.presetId === "windows-mica" ||
+    value.presetId === "pure-performance" ||
+    value.presetId === "fluent-solid"
       ? value.presetId
-      : "fluent-solid",
+      : "windows-mica",
   panelOpacity: clamp(value.panelOpacity, 0, 100),
   panelBlur: clamp(value.panelBlur, 0, 40),
   backgroundBlur: 0,
@@ -109,12 +109,18 @@ export function AppearanceProvider({ children }: PropsWithChildren) {
     let active = true;
     appearancePersistence.load()
       .then((saved) => {
-        if (active && saved) {
-          setSettings(normaliseAppearance({ ...defaultAppearance, ...migrateAppearance(saved) }));
+        if (active) {
+          if (saved) {
+            // Load saved settings from backend
+            setSettings(normaliseAppearance({ ...defaultAppearance, ...migrateAppearance(saved) }));
+          }
+          // Always set hydrated to true, even if no saved settings
+          // This ensures first-time users get the default settings saved
+          setHydrated(true);
         }
       })
-      .catch((error) => console.error("Unable to load appearance settings", error))
-      .finally(() => {
+      .catch((error) => {
+        console.error("Unable to load appearance settings", error);
         if (active) setHydrated(true);
       });
     return () => {
