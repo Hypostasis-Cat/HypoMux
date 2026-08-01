@@ -390,8 +390,8 @@ export function SettingsPage({ onOpenBlockedDomains }: { onOpenBlockedDomains: (
                   updateAppearance({
                     localBackgroundUrl: undefined,
                     backgroundSource: "system",
-                    material: "solid",
-                    presetId: "fluent-solid",
+                    material: "mica",
+                    presetId: "windows-mica",
                   });
                 }}
               >

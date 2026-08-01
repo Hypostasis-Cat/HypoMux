@@ -163,7 +163,17 @@ func decodeBackgroundDataURL(value string) ([]byte, string, string, error) {
 		return nil, "", "", fmt.Errorf("背景图片为空或超过 %d MiB", maxBackgroundBytes>>20)
 	}
 	mimeType, extension, valid := detectBackgroundType(content)
-	if !valid || !strings.EqualFold(strings.TrimSuffix(strings.TrimPrefix(header, "data:"), ";base64"), mimeType) {
+	if !valid {
+		return nil, "", "", fmt.Errorf("背景图片格式不支持")
+	}
+	// Validate MIME type in header matches detected type
+	// Allow both image/jpeg and image/jpg for JPEG files (browser inconsistency)
+	declaredMime := strings.ToLower(strings.TrimSuffix(strings.TrimPrefix(header, "data:"), ";base64"))
+	if mimeType == "image/jpeg" {
+		if declaredMime != "image/jpeg" && declaredMime != "image/jpg" {
+			return nil, "", "", fmt.Errorf("背景图片声明格式与实际内容不一致")
+		}
+	} else if declaredMime != mimeType {
 		return nil, "", "", fmt.Errorf("背景图片声明格式与实际内容不一致")
 	}
 	if mimeType == "image/png" || mimeType == "image/jpeg" {
