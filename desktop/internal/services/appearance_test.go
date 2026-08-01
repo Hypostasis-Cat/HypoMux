@@ -26,6 +26,13 @@ func TestAppearancePersistsBackgroundOutsideJSONAndReloadsIt(t *testing.T) {
 	if _, err := service.Save(loaded); err != nil {
 		t.Fatalf("updating an existing appearance document failed: %v", err)
 	}
+	loadedWithoutImage, err := service.Save(`{"backgroundSource":"local","mode":"light"}`)
+	if err != nil {
+		t.Fatalf("reusing an existing background without resending its bytes failed: %v", err)
+	}
+	if !strings.Contains(loadedWithoutImage, dataURL) {
+		t.Fatalf("reused background was not rehydrated: %s", loadedWithoutImage)
+	}
 	document, err := os.ReadFile(filepath.Join(settingsDirectory(), "appearance.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -43,6 +50,15 @@ func TestAppearancePersistsBackgroundOutsideJSONAndReloadsIt(t *testing.T) {
 	}
 	if !strings.Contains(reloaded, dataURL) {
 		t.Fatalf("background did not survive a service restart: %s", reloaded)
+	}
+}
+
+func TestAppearanceRequiresBytesForFirstLocalBackgroundSave(t *testing.T) {
+	t.Setenv("HYPOMUX_DATA_DIR", t.TempDir())
+	service := NewAppearanceService()
+	_, err := service.Save(`{"backgroundSource":"local","mode":"dark"}`)
+	if err == nil || !strings.Contains(err.Error(), "本地背景设置缺少图片数据") {
+		t.Fatalf("expected missing first-upload data error, got %v", err)
 	}
 }
 

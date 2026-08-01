@@ -3,6 +3,20 @@ import { appServices } from "../platform/services";
 import { isDesktopRuntime } from "../platform/runtime";
 
 const STORAGE_KEY = "hypomux.appearance.v1";
+let persistedLocalBackgroundURL: string | undefined;
+let appearanceSaveQueue: Promise<void> = Promise.resolve();
+
+const rememberPersistedBackground = (settings: AppearanceSettings) => {
+  persistedLocalBackgroundURL = settings.backgroundSource === "local"
+    ? settings.localBackgroundUrl
+    : undefined;
+};
+
+const enqueueAppearanceSave = (operation: () => Promise<void>) => {
+  const pending = appearanceSaveQueue.then(operation);
+  appearanceSaveQueue = pending.catch(() => undefined);
+  return pending;
+};
 
 const removeLegacyBrowserAppearance = () => {
   try {
@@ -36,6 +50,7 @@ export const appearancePersistence: AppearancePersistence = {
   async load() {
     const legacy = loadLegacyBrowserAppearance();
     if (!isDesktopRuntime()) return legacy;
+    persistedLocalBackgroundURL = undefined;
     const payload = await appServices.appearance.load();
     if (payload) {
       removeLegacyBrowserAppearance();
@@ -45,13 +60,16 @@ export const appearancePersistence: AppearancePersistence = {
       if (loaded.backgroundSource === "local" && !loaded.localBackgroundUrl) {
         loaded.backgroundSource = "system";
       }
+      rememberPersistedBackground(loaded);
       return loaded;
     }
     if (legacy) {
       const migrated = await appServices.appearance.save(JSON.stringify(legacy));
       if (migrated) {
         removeLegacyBrowserAppearance();
-        return JSON.parse(migrated) as AppearanceSettings;
+        const loaded = JSON.parse(migrated) as AppearanceSettings;
+        rememberPersistedBackground(loaded);
+        return loaded;
       }
       return legacy;
     }
@@ -62,21 +80,21 @@ export const appearancePersistence: AppearancePersistence = {
       saveBrowserPreview(settings);
       return;
     }
-    // The Go appearance service stores the image outside appearance.json and
-    // rehydrates it on load. When backgroundSource is "local" and localBackgroundUrl
-    // was loaded from the backend (not freshly uploaded), we can omit the large
-    // data URL - the backend will reuse the existing background file.
-    const settingsToSave = { ...settings };
-    if (
-      settings.backgroundSource === "local" &&
-      settings.localBackgroundUrl &&
-      settings.localBackgroundUrl.startsWith("data:") &&
-      settings.localBackgroundUrl.length > 100000 // > 100KB, likely from backend
-    ) {
-      // Omit the large data URL - backend will reuse existing file
-      delete settingsToSave.localBackgroundUrl;
-    }
-    await appServices.appearance.save(JSON.stringify(settingsToSave));
+    return enqueueAppearanceSave(async () => {
+      // A freshly selected image must be sent once regardless of its size.
+      // Only omit it after this exact URL has been saved successfully or was
+      // rehydrated from the backend during load.
+      const settingsToSave = { ...settings };
+      const localBackgroundURL = settings.backgroundSource === "local"
+        ? settings.localBackgroundUrl
+        : undefined;
+      if (localBackgroundURL && localBackgroundURL === persistedLocalBackgroundURL) {
+        delete settingsToSave.localBackgroundUrl;
+      }
+
+      await appServices.appearance.save(JSON.stringify(settingsToSave));
+      persistedLocalBackgroundURL = localBackgroundURL;
+    });
   },
 };
 

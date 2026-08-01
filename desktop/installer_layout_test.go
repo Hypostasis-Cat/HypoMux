@@ -165,11 +165,22 @@ func TestFrontendUsesWailsV3RuntimeDetection(t *testing.T) {
 		t.Fatal("appearance persistence is not guarded by the Wails v3 desktop check")
 	}
 	backgroundSource := string(backgroundData)
-	if !strings.Contains(backgroundSource, `appServices.appearance.save(JSON.stringify(settings))`) {
-		t.Fatal("custom background data is not forwarded to the Go persistence service")
-	}
 	if strings.Contains(backgroundSource, `const { localBackgroundUrl, ...persistable }`) {
 		t.Fatal("frontend still strips the custom background before durable persistence")
+	}
+	for _, required := range []string{
+		`let persistedLocalBackgroundURL: string | undefined`,
+		`let appearanceSaveQueue: Promise<void> = Promise.resolve()`,
+		`localBackgroundURL === persistedLocalBackgroundURL`,
+		`await appServices.appearance.save(JSON.stringify(settingsToSave))`,
+		`persistedLocalBackgroundURL = localBackgroundURL`,
+	} {
+		if !strings.Contains(backgroundSource, required) {
+			t.Fatalf("appearance persistence protocol is missing %q", required)
+		}
+	}
+	if strings.Contains(backgroundSource, `localBackgroundUrl.length > 100000`) {
+		t.Fatal("frontend still guesses background persistence from Data URL size")
 	}
 }
 
