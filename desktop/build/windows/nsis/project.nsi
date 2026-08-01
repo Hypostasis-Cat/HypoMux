@@ -116,6 +116,10 @@ LangString CoreServiceForceStopping ${LANG_ENGLISH} "The previous Core Service d
 LangString CoreServiceForceStopping ${LANG_SIMPCHINESE} "旧版 Core 服务未能及时停止，正在结束其服务进程…"
 LangString CoreServiceStopFailed ${LANG_ENGLISH} "Could not stop HypoMux Core Service. Setup cannot safely replace the application files."
 LangString CoreServiceStopFailed ${LANG_SIMPCHINESE} "无法停止 HypoMux Core 服务，安装程序不能安全替换应用文件。"
+LangString CoreProcessStopping ${LANG_ENGLISH} "Stopping remaining HypoMux Core processes before updating files..."
+LangString CoreProcessStopping ${LANG_SIMPCHINESE} "正在结束残留的 HypoMux Core 进程以更新文件…"
+LangString CoreProcessStopFailed ${LANG_ENGLISH} "Could not unlock the previous HypoMux Core executable. Setup cannot safely replace the application files."
+LangString CoreProcessStopFailed ${LANG_SIMPCHINESE} "无法解除旧版 HypoMux Core 程序的文件占用，安装程序不能安全替换应用文件。"
 LangString LegacyInstallRemoving ${LANG_ENGLISH} "Removing the previous HypoMux installation before migrating files..."
 LangString LegacyInstallRemoving ${LANG_SIMPCHINESE} "正在移除旧版 HypoMux 并迁移安装目录…"
 LangString LegacyInstallRemoveFailed ${LANG_ENGLISH} "The previous HypoMux installation could not be removed safely."
@@ -190,6 +194,20 @@ Function StopCoreServiceForUpgrade
     SetDetailsPrint textonly
     DetailPrint "$(CoreServiceStopping)"
     SetDetailsPrint both
+    ; Disable restart before requesting a stop. A previous Core can have
+    ; recovery actions, and install-service restores Automatic start after
+    ; the new executable has been written successfully.
+    nsExec::Exec '"$SYSDIR\sc.exe" query "${HYPOMUX_CORE_SERVICE}"'
+    Pop $0
+    ${If} $0 != 0
+        Return
+    ${EndIf}
+    nsExec::Exec '"$SYSDIR\sc.exe" config "${HYPOMUX_CORE_SERVICE}" start= disabled'
+    Pop $0
+    ${If} $0 != 0
+        Abort "$(CoreServiceStopFailed)"
+    ${EndIf}
+
     ; sc.exe only submits the stop request. Waiting is kept in a separate
     ; bounded process so a deadlocked legacy service cannot freeze Setup.
     nsExec::Exec '"$SYSDIR\sc.exe" stop "${HYPOMUX_CORE_SERVICE}"'
@@ -201,14 +219,8 @@ Function StopCoreServiceForUpgrade
         Return
     ${EndIf}
     DetailPrint "$(CoreServiceForceStopping)"
-    ; Old releases could deadlock in synchronous ConnectNamedPipe. Disable
-    ; automatic restart, terminate only the process hosting HypoMuxCore, then
-    ; let install-service restore Automatic start and recovery actions below.
-    nsExec::Exec '"$SYSDIR\sc.exe" config "${HYPOMUX_CORE_SERVICE}" start= disabled'
-    Pop $0
-    ${If} $0 != 0
-        Abort "$(CoreServiceStopFailed)"
-    ${EndIf}
+    ; Old releases could deadlock in synchronous ConnectNamedPipe. Terminate
+    ; only the process hosting HypoMuxCore; automatic restart is already off.
     nsExec::Exec '"$SYSDIR\taskkill.exe" /F /FI "SERVICES eq ${HYPOMUX_CORE_SERVICE}"'
     Pop $0
     Sleep 1000
@@ -218,6 +230,25 @@ Function StopCoreServiceForUpgrade
     ${If} $0 != 0
         DetailPrint "$1"
         Abort "$(CoreServiceStopFailed)"
+    ${EndIf}
+FunctionEnd
+
+Function StopCoreProcessesForUpgrade
+    SetDetailsPrint textonly
+    DetailPrint "$(CoreProcessStopping)"
+    SetDetailsPrint both
+    ; Recovery commands can briefly launch Core outside the service. Use the
+    ; exact installation path as the ownership boundary, then require an
+    ; exclusive open before NSIS attempts to replace the executable.
+    InitPluginsDir
+    SetOutPath "$PLUGINSDIR"
+    File /oname=stop-core-for-upgrade.ps1 "stop-core-for-upgrade.ps1"
+    nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\stop-core-for-upgrade.ps1" -EnginePath "$INSTDIR\bin\hypomux-engine.exe"'
+    Pop $0
+    Pop $1
+    ${If} $0 != 0
+        DetailPrint "$1"
+        Abort "$(CoreProcessStopFailed)"
     ${EndIf}
 FunctionEnd
 
@@ -366,6 +397,10 @@ Section
     Call RecoverWailsInstallations
 
     Call RemoveLegacyInstallations
+
+    ; Final path-scoped barrier: nothing may still own the old executable
+    ; when NSIS reaches the File instruction below.
+    Call StopCoreProcessesForUpgrade
 
     SetOutPath $INSTDIR
 

@@ -20,9 +20,11 @@ func TestInstallerMigratesLegacyLayoutsBeforeWritingCorrectedRoot(t *testing.T) 
 		`Call RemoveLegacyInstallations`,
 		`Call RecoverLegacyV22Network`,
 		`Call RecoverWailsInstallations`,
+		`Call StopCoreProcessesForUpgrade`,
 		`Function RemoveLegacyAutostartTask`,
 		`/Delete /TN "\HypoMuxAutoStart" /F`,
 		`File /oname=legacy-v22-recover.ps1 "legacy-v22-recover.ps1"`,
+		`File /oname=stop-core-for-upgrade.ps1 "stop-core-for-upgrade.ps1"`,
 		`%USERPROFILE%\.hypomux`,
 	} {
 		if !strings.Contains(script, required) {
@@ -47,14 +49,40 @@ func TestInstallerMigratesLegacyLayoutsBeforeWritingCorrectedRoot(t *testing.T) 
 	legacyRecoverAt := strings.Index(script, "Call RecoverLegacyV22Network")
 	wailsRecoverAt := strings.Index(script, "Call RecoverWailsInstallations")
 	migrateAt := strings.Index(script, "Call RemoveLegacyInstallations")
+	quiesceAt := strings.Index(script, "Call StopCoreProcessesForUpgrade")
 	writeAt := strings.Index(script, "SetOutPath $INSTDIR")
 	legacyTaskCleanupAt := strings.Index(script, "Call RemoveLegacyAutostartTask")
 	if closeAt < 0 || legacyRecoverAt <= closeAt || wailsRecoverAt <= legacyRecoverAt ||
-		migrateAt <= wailsRecoverAt || writeAt <= migrateAt || legacyTaskCleanupAt < 0 || legacyTaskCleanupAt >= writeAt {
+		migrateAt <= wailsRecoverAt || quiesceAt <= migrateAt || writeAt <= quiesceAt ||
+		legacyTaskCleanupAt < 0 || legacyTaskCleanupAt >= writeAt {
 		t.Fatalf(
-			"upgrade order is unsafe: task-cleanup=%d close=%d legacy-recover=%d wails-recover=%d migrate=%d write=%d",
-			legacyTaskCleanupAt, closeAt, legacyRecoverAt, wailsRecoverAt, migrateAt, writeAt,
+			"upgrade order is unsafe: task-cleanup=%d close=%d legacy-recover=%d wails-recover=%d migrate=%d quiesce=%d write=%d",
+			legacyTaskCleanupAt, closeAt, legacyRecoverAt, wailsRecoverAt, migrateAt, quiesceAt, writeAt,
 		)
+	}
+	disableAt := strings.Index(script, `sc.exe" config "${HYPOMUX_CORE_SERVICE}" start= disabled`)
+	stopAt := strings.Index(script, `sc.exe" stop "${HYPOMUX_CORE_SERVICE}"`)
+	if disableAt < 0 || stopAt <= disableAt {
+		t.Fatalf("Core service restart must be disabled before stop: disable=%d stop=%d", disableAt, stopAt)
+	}
+}
+
+func TestInstallerCoreShutdownBarrierIsPathScopedAndBounded(t *testing.T) {
+	data, err := os.ReadFile("build/windows/nsis/stop-core-for-upgrade.ps1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(data)
+	for _, required := range []string{
+		`[System.IO.Path]::GetFullPath($_.Path).Equals(`,
+		`[System.StringComparison]::OrdinalIgnoreCase`,
+		`Stop-Process -Id $process.Id -Force`,
+		`[System.IO.FileShare]::None`,
+		`[DateTime]::UtcNow -lt $deadline`,
+	} {
+		if !strings.Contains(script, required) {
+			t.Fatalf("Core shutdown barrier is missing safety guard %q", required)
+		}
 	}
 }
 
