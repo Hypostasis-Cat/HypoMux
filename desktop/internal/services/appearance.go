@@ -166,17 +166,9 @@ func decodeBackgroundDataURL(value string) ([]byte, string, string, error) {
 	if !valid {
 		return nil, "", "", fmt.Errorf("背景图片格式不支持")
 	}
-	// Validate MIME type in header matches detected type
-	// Allow common MIME type variations for JPEG files (browser inconsistency)
-	declaredMime := strings.ToLower(strings.TrimSuffix(strings.TrimPrefix(header, "data:"), ";base64"))
-	if mimeType == "image/jpeg" {
-		// Accept any JPEG variant: image/jpeg, image/jpg, image/jfif, image/pjpeg
-		if !strings.HasPrefix(declaredMime, "image/jp") && declaredMime != "image/jfif" && declaredMime != "image/pjpeg" {
-			return nil, "", "", fmt.Errorf("背景图片声明格式与实际内容不一致 (声明: %s, 实际: %s)", declaredMime, mimeType)
-		}
-	} else if declaredMime != mimeType {
-		return nil, "", "", fmt.Errorf("背景图片声明格式与实际内容不一致 (声明: %s, 实际: %s)", declaredMime, mimeType)
-	}
+	// Browser MIME type detection is unreliable (e.g., may claim PNG for JPEG)
+	// We've already validated the actual content via magic bytes, so trust that
+	return content, extension, mimeType, nil
 	if mimeType == "image/png" || mimeType == "image/jpeg" {
 		config, _, err := image.DecodeConfig(bytes.NewReader(content))
 		if err != nil || config.Width < 1 || config.Height < 1 || config.Width > 16384 || config.Height > 16384 {

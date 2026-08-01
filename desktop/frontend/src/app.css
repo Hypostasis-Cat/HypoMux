@@ -203,11 +203,22 @@ svg {
   background:
     linear-gradient(
       105deg,
-      rgba(218, 227, 234, 0.26),
-      rgba(240, 244, 246, 0.08) 48%,
-      rgba(221, 229, 236, 0.16)
+      rgba(218, 227, 234, 0.12),
+      rgba(240, 244, 246, 0.03) 48%,
+      rgba(221, 229, 236, 0.08)
     );
-  backdrop-filter: saturate(88%) contrast(98%);
+  backdrop-filter: saturate(95%) contrast(99%);
+}
+
+[data-appearance="dark"][data-background-source="local"] .wallpaper-overlay {
+  background:
+    linear-gradient(
+      105deg,
+      rgba(18, 23, 28, 0.12),
+      rgba(8, 12, 16, 0.03) 48%,
+      rgba(15, 20, 25, 0.08)
+    );
+  backdrop-filter: saturate(95%) contrast(99%);
 }
 
 .wallpaper-layer.is-native-mica .wallpaper-overlay {
@@ -280,9 +291,18 @@ svg {
 [data-appearance="light"][data-background-source="local"] .app-shell {
   background: linear-gradient(
     110deg,
-    rgba(222, 230, 236, 0.2),
-    rgba(241, 244, 246, 0.055) 52%,
-    rgba(225, 232, 238, 0.11)
+    rgba(222, 230, 236, 0.08),
+    rgba(241, 244, 246, 0.02) 52%,
+    rgba(225, 232, 238, 0.05)
+  );
+}
+
+[data-appearance="dark"][data-background-source="local"] .app-shell {
+  background: linear-gradient(
+    110deg,
+    rgba(22, 28, 33, 0.08),
+    rgba(12, 16, 20, 0.02) 52%,
+    rgba(18, 24, 29, 0.05)
   );
 }
 
