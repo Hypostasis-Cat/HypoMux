@@ -17,7 +17,7 @@
         PackageDisplayName="HypoMux"
         PublisherName="CN=HypoMux"
         PublisherDisplayName="HypoMux"
-        Version="2.5.0.0"
+        Version="2.5.1.0"
         PackageDescription="HypoMux">
         <Capabilities>
             <Capability Name="runFullTrust" />

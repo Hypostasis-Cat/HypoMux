@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	CurrentVersion   = "2.5.0"
+	CurrentVersion   = "2.5.1"
 	latestReleaseAPI = "https://api.github.com/repos/Hypostasis-Cat/HypoMux/releases/latest"
 )
 

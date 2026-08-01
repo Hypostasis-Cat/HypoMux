@@ -1,11 +1,11 @@
 {
 	"fixed": {
-		"file_version": "2.5.0",
-		"product_version": "2.5.0"
+		"file_version": "2.5.1",
+		"product_version": "2.5.1"
 	},
 	"info": {
 		"0409": {
-			"ProductVersion": "2.5.0",
+			"ProductVersion": "2.5.1",
 			"CompanyName": "HypoMux",
 			"FileDescription": "HypoMux",
 			"LegalCopyright": "Copyright 2026 HypoMux contributors",
