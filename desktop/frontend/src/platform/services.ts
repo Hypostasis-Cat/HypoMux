@@ -40,6 +40,7 @@ export type CompleteAppSettings = AppSettings & {
   blocked_domain_bypass: boolean;
   blocked_domain_expiry: boolean;
   autostart: boolean;
+  auto_start_engine: boolean;
 };
 
 export type BlockedDomainEntry = {
@@ -197,6 +198,8 @@ export const appServices = {
       Call.ByName(settingsMethod("Update"), settings) as Promise<CompleteAppSettings>,
     setAutostart: (enabled: boolean) =>
       Call.ByName(settingsMethod("SetAutostart"), enabled) as Promise<CompleteAppSettings>,
+    setAutoStartEngine: (enabled: boolean) =>
+      Call.ByName(settingsMethod("SetAutoStartEngine"), enabled) as Promise<CompleteAppSettings>,
     configPath: () => Call.ByName(settingsMethod("ConfigPath")) as Promise<string>,
     migrationStatus: () =>
       Call.ByName(settingsMethod("MigrationStatus")) as Promise<ConfigMigrationStatus>,

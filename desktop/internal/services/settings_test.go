@@ -7,6 +7,36 @@ func TestFreshInstallDefaultsExitOnClose(t *testing.T) {
 	if settings.CloseToTray {
 		t.Fatal("fresh installs must exit directly when the main window closes")
 	}
+	if settings.AutoStartEngine {
+		t.Fatal("fresh installs must not start acceleration automatically")
+	}
+}
+
+func TestAutoStartEngineRequiresLaunchAtStartup(t *testing.T) {
+	settings := DefaultSettings()
+	settings.AutoStartEngine = true
+	if err := validateSettings(settings); err == nil {
+		t.Fatal("automatic acceleration must require launch at startup")
+	}
+	settings.Autostart = true
+	if err := validateSettings(settings); err != nil {
+		t.Fatalf("valid automatic acceleration settings were rejected: %v", err)
+	}
+}
+
+func TestAutoStartEnginePreferencePersists(t *testing.T) {
+	t.Setenv("HYPOMUX_DATA_DIR", t.TempDir())
+	service := NewSettingsService()
+	next := DefaultSettings()
+	next.Autostart = true
+	next.AutoStartEngine = true
+	if _, err := service.Update(next); err != nil {
+		t.Fatal(err)
+	}
+	reloaded := NewSettingsService()
+	if !reloaded.settings.Autostart || !reloaded.settings.AutoStartEngine {
+		t.Fatalf("automatic acceleration preference did not persist: %#v", reloaded.settings)
+	}
 }
 
 func TestRoutingServicePersistsCanonicalRules(t *testing.T) {

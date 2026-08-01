@@ -50,6 +50,7 @@ const emptySettings: CompleteAppSettings = {
   blocked_domain_expiry: true,
   close_to_tray: false,
   autostart: false,
+  auto_start_engine: false,
   dns_server: "223.5.5.5",
   dns_policy: "auto",
   selected_adapter_ids: [],
@@ -186,6 +187,22 @@ export function SettingsPage({ onOpenBlockedDomains }: { onOpenBlockedDomains: (
       );
     } catch (error) {
       notify(t("settings_autostart_failed"), String(error), "error");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const setAutoStartEngine = async (enabled: boolean) => {
+    setSaving(true);
+    try {
+      const persisted = await appServices.settings.setAutoStartEngine(enabled);
+      setSettings({ ...emptySettings, ...persisted });
+      notify(
+        enabled ? t("settings_auto_start_engine_on") : t("settings_auto_start_engine_off"),
+        t("settings_auto_start_engine_hint"),
+      );
+    } catch (error) {
+      notify(t("settings_auto_start_engine_failed"), String(error), "error");
     } finally {
       setSaving(false);
     }
@@ -548,6 +565,13 @@ export function SettingsPage({ onOpenBlockedDomains }: { onOpenBlockedDomains: (
           <h2>{t("settings_config_group")}</h2>
           <SettingRow title={t("settings_autostart")} description={t("settings_autostart_hint")}>
             <Switch checked={settings.autostart} disabled={saving} onChange={(_, data) => setAutostart(data.checked)} />
+          </SettingRow>
+          <SettingRow title={t("settings_auto_start_engine")} description={t("settings_auto_start_engine_hint")}>
+            <Switch
+              checked={settings.auto_start_engine}
+              disabled={saving || !settings.autostart}
+              onChange={(_, data) => setAutoStartEngine(data.checked)}
+            />
           </SettingRow>
           <SettingRow title={t("settings_config_path")} description={configPath || text("正在读取配置文件位置…", "Reading configuration path…")}>
             <Button

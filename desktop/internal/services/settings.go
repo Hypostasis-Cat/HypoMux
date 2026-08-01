@@ -32,6 +32,7 @@ type AppSettings struct {
 	BlockedDomainExpiry bool                  `json:"blocked_domain_expiry"`
 	CloseToTray         bool                  `json:"close_to_tray"`
 	Autostart           bool                  `json:"autostart"`
+	AutoStartEngine     bool                  `json:"auto_start_engine"`
 	DNSServer           string                `json:"dns_server"`
 	DNSPolicy           string                `json:"dns_policy"`
 	SelectedAdapterIDs  []string              `json:"selected_adapter_ids"`
@@ -107,6 +108,9 @@ func (s *SettingsService) Get() AppSettings {
 	result := cloneSettings(s.settings)
 	if enabled, err := desktopplatform.AutostartEnabled(); err == nil {
 		result.Autostart = enabled
+		if !enabled {
+			result.AutoStartEngine = false
+		}
 	}
 	return result
 }
@@ -220,6 +224,31 @@ func (s *SettingsService) SetAutostart(enabled bool) (AppSettings, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.settings.Autostart = enabled
+	if !enabled {
+		s.settings.AutoStartEngine = false
+	}
+	if err := s.saveLocked(); err != nil {
+		return AppSettings{}, err
+	}
+	return cloneSettings(s.settings), nil
+}
+
+func (s *SettingsService) SetAutoStartEngine(enabled bool) (AppSettings, error) {
+	if enabled {
+		autostartEnabled, err := desktopplatform.AutostartEnabled()
+		if err != nil {
+			return AppSettings{}, err
+		}
+		if !autostartEnabled {
+			return AppSettings{}, errors.New("请先开启开机自动启动")
+		}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if enabled {
+		s.settings.Autostart = true
+	}
+	s.settings.AutoStartEngine = enabled
 	if err := s.saveLocked(); err != nil {
 		return AppSettings{}, err
 	}
@@ -438,6 +467,9 @@ func validateSettings(value AppSettings) error {
 	}
 	if value.Language != "zh" && value.Language != "en" {
 		return fmt.Errorf("不支持的界面语言：%s", value.Language)
+	}
+	if value.AutoStartEngine && !value.Autostart {
+		return errors.New("开机自动启动加速需要先开启开机自启")
 	}
 	if value.SOCKSPort < 1 || value.SOCKSPort > 65534 {
 		return errors.New("SOCKS5 端口必须在 1–65534 之间")

@@ -117,6 +117,18 @@ func main() {
 		desktop.SetWindowMaterial("mica")
 		if startSilent {
 			desktop.HideToTray()
+			startupSettings := settingsService.Get()
+			if shouldAutoStartAcceleration(startSilent, startupSettings) {
+				go func() {
+					if err := runAutoStartAcceleration(
+						startupSettings,
+						engineService.Start,
+						desktop.SetEngineTrayStatus,
+					); err != nil {
+						log.Printf("auto-start HypoMux acceleration: %v", err)
+					}
+				}()
+			}
 			return
 		}
 		// The frontend normally reveals the fully rendered window. Keep a
@@ -129,6 +141,25 @@ func main() {
 	if err := app.Run(); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func shouldAutoStartAcceleration(startSilent bool, settings services.AppSettings) bool {
+	return startSilent && settings.Autostart && settings.AutoStartEngine
+}
+
+func runAutoStartAcceleration(
+	settings services.AppSettings,
+	start func(string) (services.EngineSnapshot, error),
+	setStatus func(string, string),
+) error {
+	setStatus("starting", settings.Mode)
+	snapshot, err := start(settings.Mode)
+	if err != nil {
+		setStatus("failed", settings.Mode)
+		return err
+	}
+	setStatus(snapshot.Phase, snapshot.Mode)
+	return nil
 }
 
 func hasArgument(arguments []string, expected string) bool {
