@@ -84,11 +84,18 @@ func TestAppearanceRequiresBytesForFirstLocalBackgroundSave(t *testing.T) {
 	}
 }
 
-func TestAppearanceRejectsMismatchedBackgroundType(t *testing.T) {
+func TestAppearanceUsesActualBackgroundTypeWhenMIMEIsWrong(t *testing.T) {
 	t.Setenv("HYPOMUX_DATA_DIR", t.TempDir())
 	service := NewAppearanceService()
 	png := "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
-	if _, err := service.Save(`{"backgroundSource":"local","localBackgroundUrl":"data:image/jpeg;base64,` + png + `"}`); err == nil {
-		t.Fatal("expected mismatched content type to fail")
+	loaded, err := service.Save(`{"backgroundSource":"local","localBackgroundUrl":"data:image/jpeg;base64,` + png + `"}`)
+	if err != nil {
+		t.Fatalf("valid PNG with a wrong declared MIME was rejected: %v", err)
+	}
+	if !strings.Contains(loaded, `"localBackgroundMime":"image/png"`) {
+		t.Fatalf("background did not use its detected PNG type: %s", loaded)
+	}
+	if _, err := os.Stat(filepath.Join(settingsDirectory(), "appearance", "background.png")); err != nil {
+		t.Fatalf("background was not persisted with its detected PNG extension: %v", err)
 	}
 }

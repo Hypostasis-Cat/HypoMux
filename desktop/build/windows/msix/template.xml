@@ -18,7 +18,7 @@
         PublisherName="CN=HypoMux"
         PublisherDisplayName="HypoMux"
         Version="2.5.0.0"
-        PackageDescription="Multi-link network aggregation desktop client">
+        PackageDescription="HypoMux">
         <Capabilities>
             <Capability Name="runFullTrust" />
 
@@ -26,7 +26,7 @@
         <Applications>
             <Application
                 Id="io.hypomux.desktop"
-                Description="Multi-link network aggregation desktop client"
+                Description="HypoMux"
                 DisplayName="HypoMux"
                 ExecutableName="hypomux.exe"
                 EntryPoint="Windows.FullTrustApplication">
@@ -43,7 +43,7 @@
             <Framework>false</Framework>
             <DisplayName>HypoMux</DisplayName>
             <PublisherDisplayName>HypoMux</PublisherDisplayName>
-            <Description>Multi-link network aggregation desktop client</Description>
+            <Description>HypoMux</Description>
             <Logo>Assets\AppIcon.png</Logo>
         </Properties>
     </PackageInformation>

@@ -16,7 +16,7 @@
   <Properties>
     <DisplayName>HypoMux</DisplayName>
     <PublisherDisplayName>HypoMux</PublisherDisplayName>
-    <Description>Multi-link network aggregation desktop client</Description>
+    <Description>HypoMux</Description>
     <Logo>Assets\StoreLogo.png</Logo>
   </Properties>
 
@@ -32,7 +32,7 @@
     <Application Id="io.hypomux.desktop" Executable="hypomux.exe" EntryPoint="Windows.FullTrustApplication">
       <uap:VisualElements
         DisplayName="HypoMux"
-        Description="Multi-link network aggregation desktop client"
+        Description="HypoMux"
         BackgroundColor="transparent"
         Square150x150Logo="Assets\Square150x150Logo.png"
         Square44x44Logo="Assets\Square44x44Logo.png">
