@@ -60,8 +60,16 @@ HypoMux does not collect, sell, or upload personal data or telemetry. The progra
 
 ## UI preview
 
+### Default interface
+
 <p align="center">
-  <img src="assets/ui_idle_2.0.png" alt="HypoMux desktop UI" width="850" style="border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
+  <img src="assets/ui_idle_2.5.png" alt="HypoMux 2.5 default desktop interface" width="850" style="border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
+</p>
+
+### Custom theme
+
+<p align="center">
+  <img src="assets/paper_dark.png" alt="HypoMux custom dark theme" width="850" style="border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
 </p>
 
 ## Core features
