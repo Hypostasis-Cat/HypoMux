@@ -79,10 +79,11 @@ func main() {
 		Frameless:       true,
 		Hidden:          true,
 		InitialPosition: application.WindowCentered,
-		// Creating WebView2 as translucent can fail on some preview Windows /
-		// WebView2 combinations. Start transparent, then apply DWM material only
-		// after the native window and controller are ready.
-		BackgroundType:   application.BackgroundTypeTransparent,
+		// Wails only applies Windows backdrops after WebView2 is ready when the
+		// window uses its translucent composition path. Using Transparent here
+		// leaves the first launch on an uninitialised fallback until a later
+		// appearance change happens to reapply the DWM material.
+		BackgroundType:   application.BackgroundTypeTranslucent,
 		BackgroundColour: application.NewRGBA(0, 0, 0, 0),
 		URL:              "/",
 		Windows: application.WindowsWindow{
@@ -126,7 +127,6 @@ func main() {
 	app.RegisterService(application.NewService(updaterService))
 	app.RegisterService(application.NewService(appearanceService))
 	app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(_ *application.ApplicationEvent) {
-		desktop.SetWindowMaterial("mica")
 		if startSilent {
 			desktop.HideToTray()
 			startupSettings := settingsService.Get()

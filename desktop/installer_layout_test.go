@@ -167,6 +167,18 @@ func TestFrontendUsesWailsV3RuntimeDetection(t *testing.T) {
 }
 
 func TestFrontendFreshInstallAppearanceDefaults(t *testing.T) {
+	mainData, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mainSource := string(mainData)
+	if !strings.Contains(mainSource, `BackgroundType:   application.BackgroundTypeTranslucent`) {
+		t.Fatal("Mica window does not use Wails' translucent composition path")
+	}
+	if strings.Contains(mainSource, `BackgroundType:   application.BackgroundTypeTransparent`) {
+		t.Fatal("Mica window still uses the transparent path that skips backdrop initialisation")
+	}
+
 	presetData, err := os.ReadFile("frontend/src/theme/appearance.presets.ts")
 	if err != nil {
 		t.Fatal(err)
