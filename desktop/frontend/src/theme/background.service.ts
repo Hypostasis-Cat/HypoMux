@@ -56,7 +56,10 @@ export const appearancePersistence: AppearancePersistence = {
       saveBrowserPreview(settings);
       return;
     }
-    await appServices.appearance.save(JSON.stringify(settings));
+    // Exclude localBackgroundUrl (data URL) from persistence as it can be very large.
+    // Background images are ephemeral per session; users re-select after restart.
+    const { localBackgroundUrl, ...persistable } = settings;
+    await appServices.appearance.save(JSON.stringify(persistable));
   },
 };
 
