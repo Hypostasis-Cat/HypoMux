@@ -278,7 +278,6 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           files: |
-            artifacts/HypoMux-amd64-installer.exe
             artifacts/HypoMux_Setup_*.exe
           fail_on_unmatched_files: true
         env:
