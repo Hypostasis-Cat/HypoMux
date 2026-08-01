@@ -63,8 +63,20 @@ export const appearancePersistence: AppearancePersistence = {
       return;
     }
     // The Go appearance service stores the image outside appearance.json and
-    // rehydrates it on load, so the complete payload must reach that service.
-    await appServices.appearance.save(JSON.stringify(settings));
+    // rehydrates it on load. When backgroundSource is "local" and localBackgroundUrl
+    // was loaded from the backend (not freshly uploaded), we can omit the large
+    // data URL - the backend will reuse the existing background file.
+    const settingsToSave = { ...settings };
+    if (
+      settings.backgroundSource === "local" &&
+      settings.localBackgroundUrl &&
+      settings.localBackgroundUrl.startsWith("data:") &&
+      settings.localBackgroundUrl.length > 100000 // > 100KB, likely from backend
+    ) {
+      // Omit the large data URL - backend will reuse existing file
+      delete settingsToSave.localBackgroundUrl;
+    }
+    await appServices.appearance.save(JSON.stringify(settingsToSave));
   },
 };
 

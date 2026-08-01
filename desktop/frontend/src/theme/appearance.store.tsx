@@ -109,41 +109,39 @@ export function AppearanceProvider({ children }: PropsWithChildren) {
     let active = true;
     appearancePersistence.load()
       .then((saved) => {
-        if (active) {
-          if (saved) {
-            // Load saved settings from backend
-            console.log('[Appearance] Loaded from backend:', {
-              backgroundSource: saved.backgroundSource,
-              hasLocalBackgroundUrl: !!saved.localBackgroundUrl,
-              localBackgroundUrlLength: saved.localBackgroundUrl?.length,
-            });
-            const migrated = migrateAppearance(saved);
-            const merged = { ...defaultAppearance, ...migrated };
-            console.log('[Appearance] After merge:', {
-              backgroundSource: merged.backgroundSource,
-              hasLocalBackgroundUrl: !!merged.localBackgroundUrl,
-            });
-            const normalized = normaliseAppearance(merged);
-            console.log('[Appearance] After normalize:', {
-              backgroundSource: normalized.backgroundSource,
-              hasLocalBackgroundUrl: !!normalized.localBackgroundUrl,
-            });
-            setSettings(normalized);
-          }
-          // IMPORTANT: Set hydrated AFTER a microtask delay to ensure setSettings completes first
-          // This prevents saving initial/empty settings before the loaded settings are applied
-          queueMicrotask(() => {
-            if (active) setHydrated(true);
+        if (!active) return;
+
+        if (saved) {
+          // Load saved settings from backend
+          console.log('[Appearance] Loaded from backend:', {
+            backgroundSource: saved.backgroundSource,
+            hasLocalBackgroundUrl: !!saved.localBackgroundUrl,
+            localBackgroundUrlLength: saved.localBackgroundUrl?.length,
           });
+          const migrated = migrateAppearance(saved);
+          const merged = { ...defaultAppearance, ...migrated };
+          console.log('[Appearance] After merge:', {
+            backgroundSource: merged.backgroundSource,
+            hasLocalBackgroundUrl: !!merged.localBackgroundUrl,
+          });
+          const normalized = normaliseAppearance(merged);
+          console.log('[Appearance] After normalize:', {
+            backgroundSource: normalized.backgroundSource,
+            hasLocalBackgroundUrl: !!normalized.localBackgroundUrl,
+          });
+
+          // Use React 18's automatic batching: both state updates in same task
+          // will be batched together, ensuring settings is updated before hydrated triggers save
+          setSettings(normalized);
+          setHydrated(true);
+        } else {
+          // No saved settings - use defaults
+          setHydrated(true);
         }
       })
       .catch((error) => {
         console.error("Unable to load appearance settings", error);
-        if (active) {
-          queueMicrotask(() => {
-            if (active) setHydrated(true);
-          });
-        }
+        if (active) setHydrated(true);
       });
     return () => {
       active = false;
