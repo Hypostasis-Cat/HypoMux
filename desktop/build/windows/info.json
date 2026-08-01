@@ -1,12 +1,13 @@
 {
 	"fixed": {
-		"file_version": "2.5.0"
+		"file_version": "2.5.0",
+		"product_version": "2.5.0"
 	},
 	"info": {
-		"0000": {
+		"0409": {
 			"ProductVersion": "2.5.0",
 			"CompanyName": "HypoMux",
-			"FileDescription": "Multi-link network aggregation desktop client",
+			"FileDescription": "HypoMux",
 			"LegalCopyright": "Copyright 2026 HypoMux contributors",
 			"ProductName": "HypoMux",
 			"Comments": "HypoMux Wails v3 desktop client"

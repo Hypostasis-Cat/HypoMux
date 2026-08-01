@@ -2,10 +2,34 @@ package main
 
 import (
 	"errors"
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/Hypostasis-Cat/HypoMux/desktop/internal/services"
 )
+
+func TestPrivilegeNormalizationPrecedesDesktopSideEffects(t *testing.T) {
+	sourceBytes, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(sourceBytes)
+	prepareAt := strings.Index(source, "startup.PrepareDesktopLaunch")
+	if prepareAt < 0 || !strings.Contains(source[prepareAt:], "if launchSecurity.Relaunched") {
+		t.Fatal("desktop entry point does not exit after a successful standard-permission relaunch")
+	}
+	for _, sideEffect := range []string{
+		"startup.CleanupZombieProcesses",
+		"desktopplatform.WebView2Available",
+		"application.New(",
+	} {
+		sideEffectAt := strings.Index(source, sideEffect)
+		if sideEffectAt < 0 || prepareAt >= sideEffectAt {
+			t.Fatalf("privilege normalization must precede %s: prepare=%d side-effect=%d", sideEffect, prepareAt, sideEffectAt)
+		}
+	}
+}
 
 func TestHasArgument(t *testing.T) {
 	if !hasArgument([]string{"--silent", "--recover-network"}, "--recover-network") {

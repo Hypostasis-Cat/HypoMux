@@ -29,6 +29,16 @@ func main() {
 		}
 		return
 	}
+	launchSecurity := startup.PrepareDesktopLaunch(os.Args[1:])
+	if launchSecurity.Relaunched {
+		return
+	}
+	if launchSecurity.Elevated {
+		desktopplatform.ShowElevationCompatibilityMessage(
+			launchSecurity.ProxyCompatible,
+			launchSecurity.Detail,
+		)
+	}
 	// Clean up zombie processes and stale network state from previous crashed sessions.
 	// This prevents "port already in use" and TUN adapter conflicts.
 	// Equivalent to Python version's force_evict_zombie_backends from main.py:83-108.
@@ -50,7 +60,7 @@ func main() {
 	frontendAssets := application.AssetFileServerFS(assets)
 	app := application.New(application.Options{
 		Name:        "HypoMux",
-		Description: "Multi-link network aggregation desktop client",
+		Description: "HypoMux",
 		Icon:        trayIcon,
 		Assets: application.AssetOptions{
 			Handler: http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
@@ -109,8 +119,16 @@ func main() {
 	tunService := services.NewTunService(settingsService, adapterService)
 	blockedDomainService := services.NewBlockedDomainService(settingsService)
 	updaterService := services.NewUpdaterService()
-	engineService := services.NewEngineServiceWithDomains(
-		settingsService, adapterService, blockedDomainService, supportLogs,
+	engineService := services.NewEngineServiceWithDomainsAndHostPrivilege(
+		settingsService,
+		adapterService,
+		blockedDomainService,
+		services.HostPrivilegeCompatibility{
+			Elevated:  launchSecurity.Elevated,
+			ProxySafe: launchSecurity.ProxyCompatible,
+			Detail:    launchSecurity.Detail,
+		},
+		supportLogs,
 	)
 	var diagnosticsService *services.DiagnosticsService
 	desktop := wails.NewDesktopHost(app, mainWindow, startSilent, func() {

@@ -155,6 +155,21 @@ Function un.onInit
    !insertmacro MUI_UNGETLANGUAGE
 FunctionEnd
 
+Function RemoveLegacyAutostartTask
+    ; v2.2.0 used a highest-privilege logon task. Remove the exact
+    ; application-owned task on every install/upgrade instead of relying on
+    ; the legacy uninstaller registration still being intact.
+    nsExec::ExecToStack '"$SYSDIR\schtasks.exe" /Delete /TN "\HypoMuxAutoStart" /F'
+    Pop $0
+    Pop $1
+FunctionEnd
+
+Function un.RemoveLegacyAutostartTask
+    nsExec::ExecToStack '"$SYSDIR\schtasks.exe" /Delete /TN "\HypoMuxAutoStart" /F'
+    Pop $0
+    Pop $1
+FunctionEnd
+
 Function CloseRunningHypoMux
 closeRetry:
     SetDetailsPrint textonly
@@ -338,6 +353,8 @@ Section
 
     !insertmacro wails.webview2runtime
 
+    Call RemoveLegacyAutostartTask
+
     ; Close the previous UI and stop Core before replacing binaries. Recovery
     ; is layout-aware: v2.2.0 uses its dedicated cleanup script, while current
     ; and future Wails builds use their supported recovery entry points.
@@ -393,6 +410,8 @@ SectionEnd
 
 Section "uninstall"
     !insertmacro wails.setShellContext
+
+    Call un.RemoveLegacyAutostartTask
 
     ; Stop the ordinary-permission UI first, then recover the current user's
     ; proxy snapshot and the machine-owned TUN state before files disappear.

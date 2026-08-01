@@ -197,9 +197,11 @@ func (s *AppearanceService) readDocumentLocked() (appearanceDocument, error) {
 
 func decodeBackgroundDataURL(value string) ([]byte, string, string, error) {
 	header, encoded, ok := strings.Cut(value, ",")
-	if !ok || !strings.HasSuffix(strings.ToLower(header), ";base64") {
+	headerLower := strings.ToLower(strings.TrimSpace(header))
+	if !ok || !strings.HasPrefix(headerLower, "data:") || !strings.HasSuffix(headerLower, ";base64") {
 		return nil, "", "", fmt.Errorf("背景图片必须使用 base64 Data URL")
 	}
+	declaredType := strings.TrimPrefix(strings.SplitN(headerLower, ";", 2)[0], "data:")
 	content, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
 		return nil, "", "", fmt.Errorf("背景图片编码无效：%w", err)
@@ -211,8 +213,9 @@ func decodeBackgroundDataURL(value string) ([]byte, string, string, error) {
 	if !valid {
 		return nil, "", "", fmt.Errorf("背景图片格式不支持")
 	}
-	// Browser MIME type detection is unreliable (e.g., may claim PNG for JPEG)
-	// We've already validated the actual content via magic bytes, so trust that
+	if declaredType != mimeType {
+		return nil, "", "", fmt.Errorf("背景图片声明格式与实际内容不一致")
+	}
 	if mimeType == "image/png" || mimeType == "image/jpeg" {
 		config, _, err := image.DecodeConfig(bytes.NewReader(content))
 		if err != nil || config.Width < 1 || config.Height < 1 || config.Width > 16384 || config.Height > 16384 {

@@ -20,12 +20,18 @@ func TestInstallerMigratesLegacyLayoutsBeforeWritingCorrectedRoot(t *testing.T) 
 		`Call RemoveLegacyInstallations`,
 		`Call RecoverLegacyV22Network`,
 		`Call RecoverWailsInstallations`,
+		`Function RemoveLegacyAutostartTask`,
+		`/Delete /TN "\HypoMuxAutoStart" /F`,
 		`File /oname=legacy-v22-recover.ps1 "legacy-v22-recover.ps1"`,
 		`%USERPROFILE%\.hypomux`,
 	} {
 		if !strings.Contains(script, required) {
 			t.Fatalf("installer is missing %q", required)
 		}
+	}
+	if !strings.Contains(script, `Call RemoveLegacyAutostartTask`) ||
+		!strings.Contains(script, `Call un.RemoveLegacyAutostartTask`) {
+		t.Fatal("installer and uninstaller must both remove the legacy elevated autostart task")
 	}
 	if strings.Contains(script, `InstallDir "$PROGRAMFILES64\${INFO_COMPANYNAME}\${INFO_PRODUCTNAME}"`) {
 		t.Fatal("installer still uses the duplicated company/product directory")
@@ -42,11 +48,12 @@ func TestInstallerMigratesLegacyLayoutsBeforeWritingCorrectedRoot(t *testing.T) 
 	wailsRecoverAt := strings.Index(script, "Call RecoverWailsInstallations")
 	migrateAt := strings.Index(script, "Call RemoveLegacyInstallations")
 	writeAt := strings.Index(script, "SetOutPath $INSTDIR")
+	legacyTaskCleanupAt := strings.Index(script, "Call RemoveLegacyAutostartTask")
 	if closeAt < 0 || legacyRecoverAt <= closeAt || wailsRecoverAt <= legacyRecoverAt ||
-		migrateAt <= wailsRecoverAt || writeAt <= migrateAt {
+		migrateAt <= wailsRecoverAt || writeAt <= migrateAt || legacyTaskCleanupAt < 0 || legacyTaskCleanupAt >= writeAt {
 		t.Fatalf(
-			"upgrade order is unsafe: close=%d legacy-recover=%d wails-recover=%d migrate=%d write=%d",
-			closeAt, legacyRecoverAt, wailsRecoverAt, migrateAt, writeAt,
+			"upgrade order is unsafe: task-cleanup=%d close=%d legacy-recover=%d wails-recover=%d migrate=%d write=%d",
+			legacyTaskCleanupAt, closeAt, legacyRecoverAt, wailsRecoverAt, migrateAt, writeAt,
 		)
 	}
 }
@@ -211,9 +218,9 @@ func TestFrontendFreshInstallAppearanceDefaults(t *testing.T) {
 	preset := string(presetData)
 	for _, required := range []string{
 		`schemaVersion: 2`,
-		`presetId: "fluent-solid"`,
+		`presetId: "windows-mica"`,
 		`mode: "system"`,
-		`material: "solid"`,
+		`material: "mica"`,
 		`panelOpacity: 50`,
 		`panelBlur: 20`,
 	} {
@@ -246,8 +253,8 @@ func TestFrontendFreshInstallAppearanceDefaults(t *testing.T) {
 	settingsPage := string(settingsPageData)
 	for _, required := range []string{
 		`backgroundSource: "system",`,
-		`material: "solid",`,
-		`presetId: "fluent-solid",`,
+		`material: "mica",`,
+		`presetId: "windows-mica",`,
 		`disabled={appearance.backgroundSource !== "local"}`,
 		`disabled={appearance.backgroundSource !== "local" || appearance.panelMaterial !== "blur"}`,
 	} {
@@ -260,9 +267,34 @@ func TestFrontendFreshInstallAppearanceDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(storeData), `value.schemaVersion ?? 0`) ||
-		!strings.Contains(string(storeData), `presetId: "fluent-solid", material: "solid"`) {
-		t.Fatal("legacy Mica defaults are not migrated to the stable solid appearance")
+	if !strings.Contains(string(storeData), `return { ...value, schemaVersion: 2 }`) {
+		t.Fatal("legacy appearance settings are not migrated without overwriting the selected preset")
+	}
+}
+
+func TestWindowsTaskManagerUsesProductName(t *testing.T) {
+	infoData, err := os.ReadFile("build/windows/info.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mainData, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for path, source := range map[string]string{
+		"build/windows/info.json": string(infoData),
+		"main.go":                 string(mainData),
+	} {
+		if !strings.Contains(source, `Description": "HypoMux"`) &&
+			!strings.Contains(source, `Description: "HypoMux"`) {
+			t.Fatalf("%s does not expose HypoMux as the Windows application description", path)
+		}
+		if strings.Contains(source, "Multi-link network aggregation desktop client") {
+			t.Fatalf("%s still exposes the tagline as the Task Manager application name", path)
+		}
+	}
+	if !strings.Contains(string(infoData), `"0409"`) {
+		t.Fatal("Windows version strings must use an explicit language so Explorer and Task Manager can read FileDescription")
 	}
 }
 
@@ -277,7 +309,7 @@ func TestCardsUseThemeAccentHoverGlow(t *testing.T) {
 		`.hm-card:hover:not(:has(.hm-card:hover))::before`,
 		`border-color: var(--hm-card-glow-border)`,
 		`border: 1px solid var(--hm-card-glow-border)`,
-		`drop-shadow(0 0 14px var(--hm-card-glow-far))`,
+		`0 0 14px var(--hm-card-glow-far)`,
 		`@media (hover: hover) and (pointer: fine)`,
 	} {
 		if !strings.Contains(css, required) {

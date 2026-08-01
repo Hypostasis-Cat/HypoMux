@@ -122,6 +122,12 @@ type WFPRepairResult struct {
 	Detail          string `json:"detail,omitempty"`
 }
 
+type HostPrivilegeCompatibility struct {
+	Elevated  bool
+	ProxySafe bool
+	Detail    string
+}
+
 type telemetrySample struct {
 	at       time.Time
 	down     int64
@@ -149,6 +155,9 @@ type EngineService struct {
 	compatibilityNotice string
 	proxyRecoveryNotice string
 	proxyRecoveryError  string
+	hostElevated        bool
+	elevatedProxySafe   bool
+	hostPrivilegeDetail string
 	clashAPI            clashAPIConfig
 	closing             bool
 }
@@ -165,7 +174,7 @@ type coreLogEvent struct {
 }
 
 func NewEngineService(settings *SettingsService, adapters *AdapterService, logs ...*SupportLogStore) *EngineService {
-	return newEngineService(settings, adapters, nil, logs...)
+	return newEngineService(settings, adapters, nil, HostPrivilegeCompatibility{}, logs...)
 }
 
 func NewEngineServiceWithDomains(
@@ -174,16 +183,31 @@ func NewEngineServiceWithDomains(
 	blockedDomains *BlockedDomainService,
 	logs ...*SupportLogStore,
 ) *EngineService {
-	return newEngineService(settings, adapters, blockedDomains, logs...)
+	return newEngineService(settings, adapters, blockedDomains, HostPrivilegeCompatibility{}, logs...)
+}
+
+func NewEngineServiceWithDomainsAndHostPrivilege(
+	settings *SettingsService,
+	adapters *AdapterService,
+	blockedDomains *BlockedDomainService,
+	hostPrivilege HostPrivilegeCompatibility,
+	logs ...*SupportLogStore,
+) *EngineService {
+	return newEngineService(settings, adapters, blockedDomains, hostPrivilege, logs...)
 }
 
 func newEngineService(
 	settings *SettingsService,
 	adapters *AdapterService,
 	blockedDomains *BlockedDomainService,
+	hostPrivilege HostPrivilegeCompatibility,
 	logs ...*SupportLogStore,
 ) *EngineService {
-	recoveryNotice, recoveryErr := restoreSystemProxyDetailed()
+	var recoveryNotice string
+	var recoveryErr error
+	if !hostPrivilege.Elevated || hostPrivilege.ProxySafe {
+		recoveryNotice, recoveryErr = restoreSystemProxyDetailed()
+	}
 	var supportLogs *SupportLogStore
 	if len(logs) > 0 {
 		supportLogs = logs[0]
@@ -193,11 +217,20 @@ func newEngineService(
 		logs: supportLogs, tun: NewTunService(settings, adapters),
 		blockedDomains: blockedDomains, lifecycleGate: make(chan struct{}, 1),
 		proxyRecoveryNotice: recoveryNotice,
+		hostElevated:        hostPrivilege.Elevated,
+		elevatedProxySafe:   hostPrivilege.ProxySafe,
+		hostPrivilegeDetail: strings.TrimSpace(hostPrivilege.Detail),
 	}
 	if recoveryErr != nil {
 		service.proxyRecoveryError = recoveryErr.Error()
 	}
 	if supportLogs != nil {
+		if hostPrivilege.Elevated {
+			supportLogs.RecordEvent("host_privilege", "compatibility_mode", map[string]any{
+				"proxy_safe": hostPrivilege.ProxySafe,
+				"detail":     strings.TrimSpace(hostPrivilege.Detail),
+			})
+		}
 		if service.proxyRecoveryError != "" {
 			supportLogs.RecordEvent("system_proxy", "startup_recovery_failed", map[string]any{"message": service.proxyRecoveryError})
 		} else if service.proxyRecoveryNotice != "" {
@@ -537,6 +570,14 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 		recoveryError := s.proxyRecoveryError
 		s.mu.Unlock()
 		return EngineSnapshot{}, fmt.Errorf("系统代理状态尚未安全恢复：%s", recoveryError)
+	}
+	if mode == "proxy" && s.hostElevated && !s.elevatedProxySafe {
+		detail := s.hostPrivilegeDetail
+		s.mu.Unlock()
+		if detail == "" {
+			detail = "无法验证管理员进程与当前桌面用户属于同一身份"
+		}
+		return EngineSnapshot{}, fmt.Errorf("管理员兼容模式已阻止系统代理：%s；请恢复普通权限后重试", detail)
 	}
 	if !s.compatRestarting {
 		s.dnsFallbackApplied = false
