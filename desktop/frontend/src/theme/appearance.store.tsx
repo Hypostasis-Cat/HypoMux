@@ -112,7 +112,23 @@ export function AppearanceProvider({ children }: PropsWithChildren) {
         if (active) {
           if (saved) {
             // Load saved settings from backend
-            setSettings(normaliseAppearance({ ...defaultAppearance, ...migrateAppearance(saved) }));
+            console.log('[Appearance] Loaded from backend:', {
+              backgroundSource: saved.backgroundSource,
+              hasLocalBackgroundUrl: !!saved.localBackgroundUrl,
+              localBackgroundUrlLength: saved.localBackgroundUrl?.length,
+            });
+            const migrated = migrateAppearance(saved);
+            const merged = { ...defaultAppearance, ...migrated };
+            console.log('[Appearance] After merge:', {
+              backgroundSource: merged.backgroundSource,
+              hasLocalBackgroundUrl: !!merged.localBackgroundUrl,
+            });
+            const normalized = normaliseAppearance(merged);
+            console.log('[Appearance] After normalize:', {
+              backgroundSource: normalized.backgroundSource,
+              hasLocalBackgroundUrl: !!normalized.localBackgroundUrl,
+            });
+            setSettings(normalized);
           }
           // Always set hydrated to true, even if no saved settings
           // This ensures first-time users get the default settings saved
