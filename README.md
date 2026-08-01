@@ -60,8 +60,16 @@ HypoMux 不收集、出售或上传个人数据及遥测信息。程序仅会在
 
 ## 界面预览
 
+### 默认界面
+
 <p align="center">
-  <img src="assets/ui_idle_2.0.png" alt="HypoMux 桌面界面" width="850" style="border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
+  <img src="assets/ui_idle_2.5.png" alt="HypoMux 2.5 默认桌面界面" width="850" style="border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
+</p>
+
+### 自定义主题
+
+<p align="center">
+  <img src="assets/paper_dark.png" alt="HypoMux 深色自定义主题" width="850" style="border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
 </p>
 
 ## 核心功能
