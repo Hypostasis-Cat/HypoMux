@@ -289,11 +289,11 @@ Function RemoveLegacyInstallations
         ReadRegStr $0 HKLM "${HYPOMUX_NESTED_UNINST_KEY}" "UninstallString"
         ${If} $0 == ""
             IfFileExists "$PROGRAMFILES64\HypoMux\HypoMux\uninstall.exe" 0 nestedRemoved
-            StrCpy $0 '$"$PROGRAMFILES64\HypoMux\HypoMux\uninstall.exe$"'
+            StrCpy $0 "$PROGRAMFILES64\HypoMux\HypoMux\uninstall.exe"
         ${EndIf}
         DetailPrint "$(LegacyInstallRemoving)"
         ClearErrors
-        ExecWait '$0 /S' $1
+        ExecWait '"$0" /S' $1
         IfErrors nestedUninstallFailed
         ${If} $1 != 0
             Goto nestedUninstallFailed

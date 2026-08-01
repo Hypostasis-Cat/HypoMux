@@ -39,7 +39,13 @@ export const appearancePersistence: AppearancePersistence = {
     const payload = await appServices.appearance.load();
     if (payload) {
       removeLegacyBrowserAppearance();
-      return JSON.parse(payload) as AppearanceSettings;
+      const loaded = JSON.parse(payload) as AppearanceSettings;
+      // If backgroundSource is "local" but localBackgroundUrl is missing,
+      // reset to system background to prevent visual corruption
+      if (loaded.backgroundSource === "local" && !loaded.localBackgroundUrl) {
+        loaded.backgroundSource = "system";
+      }
+      return loaded;
     }
     if (legacy) {
       const migrated = await appServices.appearance.save(JSON.stringify(legacy));
@@ -57,8 +63,11 @@ export const appearancePersistence: AppearancePersistence = {
       return;
     }
     // Exclude localBackgroundUrl (data URL) from persistence as it can be very large.
-    // Background images are ephemeral per session; users re-select after restart.
+    // Reset backgroundSource to "system" when saving to prevent loading with missing image.
     const { localBackgroundUrl, ...persistable } = settings;
+    if (settings.backgroundSource === "local") {
+      persistable.backgroundSource = "system";
+    }
     await appServices.appearance.save(JSON.stringify(persistable));
   },
 };
