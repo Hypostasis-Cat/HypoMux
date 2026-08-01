@@ -148,7 +148,6 @@ export function AppearanceLab() {
                 update({
                   localBackgroundUrl: await backgroundService.fromFile(file),
                   backgroundSource: "local",
-                  material: "mica",
                 });
               }}
             />

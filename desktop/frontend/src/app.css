@@ -859,10 +859,6 @@ svg {
     transform var(--hm-motion-fast) var(--hm-motion-ease-out);
 }
 
-.network-adapter:hover {
-  transform: translateY(-1px);
-}
-
 .network-adapter.is-selected {
   border-color: color-mix(in srgb, var(--hm-accent) 24%, var(--hm-outer-border));
   box-shadow: inset 0 1px 0 var(--hm-inner-highlight), 0 0 20px color-mix(in srgb, var(--hm-accent) 6%, transparent);

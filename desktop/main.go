@@ -87,7 +87,7 @@ func main() {
 		BackgroundColour: application.NewRGBA(0, 0, 0, 0),
 		URL:              "/",
 		Windows: application.WindowsWindow{
-			BackdropType:                      application.Mica,
+			BackdropType:                      application.None,
 			Theme:                             application.SystemDefault,
 			DisableFramelessWindowDecorations: false,
 		},

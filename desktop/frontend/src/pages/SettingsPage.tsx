@@ -326,8 +326,8 @@ export function SettingsPage({ onOpenBlockedDomains }: { onOpenBlockedDomains: (
                     "The custom background covers the window material. Clear it to switch between Mica and solid.",
                   )
                 : text(
-                    "Mica 使用 Windows 11 原生窗口背景；纯色使用当前主题底色。内容卡片磨砂由下方选项独立控制。",
-                    "Mica uses the native Windows 11 backdrop; Solid uses the current theme colour. Card blur is controlled separately below.",
+                    "默认浅色和深色使用稳定的纯色背景；如手动启用 Mica，将显示 Windows 11 原生窗口背景。卡片磨砂仅在使用自定义背景图时生效。",
+                    "Light and dark use a stable solid background by default. Mica may be enabled manually. Card frosting only applies to custom backgrounds.",
                   )
             }
           >
@@ -387,7 +387,12 @@ export function SettingsPage({ onOpenBlockedDomains }: { onOpenBlockedDomains: (
                 disabled={!appearance.localBackgroundUrl}
                 onClick={() => {
                   backgroundService.release(appearance.localBackgroundUrl);
-                  updateAppearance({ localBackgroundUrl: undefined, backgroundSource: "system", material: "mica" });
+                  updateAppearance({
+                    localBackgroundUrl: undefined,
+                    backgroundSource: "system",
+                    material: "solid",
+                    presetId: "fluent-solid",
+                  });
                 }}
               >
                 {t("settings_background_image_clear")}
@@ -405,7 +410,6 @@ export function SettingsPage({ onOpenBlockedDomains }: { onOpenBlockedDomains: (
                   updateAppearance({
                     localBackgroundUrl: dataURL,
                     backgroundSource: "local",
-                    material: "mica",
                   });
                   } catch (error) {
                     notify(t("settings_background_image_invalid"), String(error), "error");
@@ -419,12 +423,13 @@ export function SettingsPage({ onOpenBlockedDomains }: { onOpenBlockedDomains: (
           <SettingRow
             title={text("卡片材质", "Card material")}
             description={text(
-              "独立于窗口 Mica 或纯色材质，决定内容卡片是否使用实时高斯磨砂。",
-              "Independent of the Mica or solid window material; controls whether content cards use live Gaussian frosting.",
+              "仅在使用自定义背景图时生效，决定内容卡片使用高斯磨砂还是纯色。",
+              "Only available with a custom background; chooses frosted or solid cards.",
             )}
           >
             <SettingDropdown
               value={appearance.panelMaterial}
+              disabled={appearance.backgroundSource !== "local"}
               options={[
                 { value: "blur", label: text("高斯磨砂", "Gaussian frost") },
                 { value: "solid", label: text("纯色卡片", "Solid cards") },
@@ -435,8 +440,8 @@ export function SettingsPage({ onOpenBlockedDomains }: { onOpenBlockedDomains: (
           <SettingRow
             title={text("磨砂强度", "Frost strength")}
             description={text(
-              "控制卡片后方内容的实时模糊半径；数值越高，背景细节越柔和。",
-              "Controls the live blur radius behind cards. Higher values soften more background detail.",
+              "仅在自定义背景和高斯磨砂卡片下生效；数值越高，背景细节越柔和。",
+              "Only applies to frosted cards over a custom background. Higher values soften more detail.",
             )}
           >
             <div className="slider-value">
@@ -444,7 +449,7 @@ export function SettingsPage({ onOpenBlockedDomains }: { onOpenBlockedDomains: (
                 min={0}
                 max={40}
                 value={appearance.panelBlur}
-                disabled={appearance.panelMaterial !== "blur"}
+                disabled={appearance.backgroundSource !== "local" || appearance.panelMaterial !== "blur"}
                 onChange={(_, data) => updateAppearance({ panelBlur: data.value })}
               />
               <span>{appearance.panelBlur}px</span>

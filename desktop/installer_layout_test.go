@@ -164,6 +164,13 @@ func TestFrontendUsesWailsV3RuntimeDetection(t *testing.T) {
 	if strings.Count(string(backgroundData), "isDesktopRuntime()") < 2 {
 		t.Fatal("appearance persistence is not guarded by the Wails v3 desktop check")
 	}
+	backgroundSource := string(backgroundData)
+	if !strings.Contains(backgroundSource, `appServices.appearance.save(JSON.stringify(settings))`) {
+		t.Fatal("custom background data is not forwarded to the Go persistence service")
+	}
+	if strings.Contains(backgroundSource, `const { localBackgroundUrl, ...persistable }`) {
+		t.Fatal("frontend still strips the custom background before durable persistence")
+	}
 }
 
 func TestFrontendFreshInstallAppearanceDefaults(t *testing.T) {
@@ -173,10 +180,13 @@ func TestFrontendFreshInstallAppearanceDefaults(t *testing.T) {
 	}
 	mainSource := string(mainData)
 	if !strings.Contains(mainSource, `BackgroundType:   application.BackgroundTypeTranslucent`) {
-		t.Fatal("Mica window does not use Wails' translucent composition path")
+		t.Fatal("window does not support the translucent composition path used by optional Mica")
 	}
 	if strings.Contains(mainSource, `BackgroundType:   application.BackgroundTypeTransparent`) {
 		t.Fatal("Mica window still uses the transparent path that skips backdrop initialisation")
+	}
+	if !strings.Contains(mainSource, `BackdropType:                      application.None`) {
+		t.Fatal("fresh installs still request a native backdrop before appearance settings load")
 	}
 
 	presetData, err := os.ReadFile("frontend/src/theme/appearance.presets.ts")
@@ -185,7 +195,10 @@ func TestFrontendFreshInstallAppearanceDefaults(t *testing.T) {
 	}
 	preset := string(presetData)
 	for _, required := range []string{
+		`schemaVersion: 2`,
+		`presetId: "fluent-solid"`,
 		`mode: "system"`,
+		`material: "solid"`,
 		`panelOpacity: 50`,
 		`panelBlur: 20`,
 	} {
@@ -203,6 +216,10 @@ func TestFrontendFreshInstallAppearanceDefaults(t *testing.T) {
 		!strings.Contains(tokens, `--hm-panel-blur: 20px`) {
 		t.Fatal("pre-hydration material tokens do not match the appearance defaults")
 	}
+	if !strings.Contains(tokens, `[data-background-source="local"][data-panel-material="blur"] .glass-surface`) ||
+		!strings.Contains(tokens, `[data-background-source="local"][data-panel-material="blur"] .network-adapter`) {
+		t.Fatal("card frosting is not scoped to custom backgrounds")
+	}
 
 	settingsPageData, err := os.ReadFile("frontend/src/pages/SettingsPage.tsx")
 	if err != nil {
@@ -210,6 +227,27 @@ func TestFrontendFreshInstallAppearanceDefaults(t *testing.T) {
 	}
 	if !strings.Contains(string(settingsPageData), `close_to_tray: false`) {
 		t.Fatal("settings page fallback does not exit directly on close")
+	}
+	settingsPage := string(settingsPageData)
+	for _, required := range []string{
+		`backgroundSource: "system",`,
+		`material: "solid",`,
+		`presetId: "fluent-solid",`,
+		`disabled={appearance.backgroundSource !== "local"}`,
+		`disabled={appearance.backgroundSource !== "local" || appearance.panelMaterial !== "blur"}`,
+	} {
+		if !strings.Contains(settingsPage, required) {
+			t.Fatalf("appearance controls are missing %q", required)
+		}
+	}
+
+	storeData, err := os.ReadFile("frontend/src/theme/appearance.store.tsx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(storeData), `value.schemaVersion ?? 0`) ||
+		!strings.Contains(string(storeData), `presetId: "fluent-solid", material: "solid"`) {
+		t.Fatal("legacy Mica defaults are not migrated to the stable solid appearance")
 	}
 }
 

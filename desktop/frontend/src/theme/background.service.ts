@@ -62,13 +62,9 @@ export const appearancePersistence: AppearancePersistence = {
       saveBrowserPreview(settings);
       return;
     }
-    // Exclude localBackgroundUrl (data URL) from persistence as it can be very large.
-    // Reset backgroundSource to "system" when saving to prevent loading with missing image.
-    const { localBackgroundUrl, ...persistable } = settings;
-    if (settings.backgroundSource === "local") {
-      persistable.backgroundSource = "system";
-    }
-    await appServices.appearance.save(JSON.stringify(persistable));
+    // The Go appearance service stores the image outside appearance.json and
+    // rehydrates it on load, so the complete payload must reach that service.
+    await appServices.appearance.save(JSON.stringify(settings));
   },
 };
 

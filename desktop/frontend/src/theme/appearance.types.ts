@@ -10,6 +10,7 @@ export type InterfaceDensity = "compact" | "standard" | "comfortable";
 export type MotionMode = "off" | "reduced" | "standard";
 
 export type AppearanceSettings = {
+  schemaVersion: number;
   presetId: AppearancePresetId;
   mode: AppearanceMode;
   material: WindowMaterial;
@@ -38,7 +39,7 @@ export type AppearanceSettings = {
   motion: MotionMode;
 };
 
-export type AppearancePresetId = "windows-mica" | "pure-performance";
+export type AppearancePresetId = "fluent-solid" | "windows-mica" | "pure-performance";
 
 export type AppearancePreset = {
   id: AppearancePresetId;

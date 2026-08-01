@@ -10,9 +10,10 @@ export const accentColours: Record<Exclude<AccentPreset, "custom">, string> = {
 };
 
 const baseSettings: AppearanceSettings = {
-  presetId: "windows-mica",
+  schemaVersion: 2,
+  presetId: "fluent-solid",
   mode: "system",
-  material: "mica",
+  material: "solid",
   panelMaterial: "blur",
   accentPreset: "hypomux",
   customAccent: "#1677D2",
@@ -40,6 +41,12 @@ const baseSettings: AppearanceSettings = {
 const make = (values: Partial<AppearanceSettings>): AppearanceSettings => ({ ...baseSettings, ...values });
 
 export const appearancePresets: AppearancePreset[] = [
+  {
+    id: "fluent-solid",
+    name: "Fluent Solid",
+    description: "Stable theme background for the default light and dark appearances.",
+    settings: make({ presetId: "fluent-solid", material: "solid", backgroundSource: "system" }),
+  },
   {
     id: "windows-mica",
     name: "Windows Mica",

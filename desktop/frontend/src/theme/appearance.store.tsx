@@ -30,11 +30,22 @@ const getSystemMode = (): ResolvedAppearance =>
 const clamp = (value: number, minimum: number, maximum: number) =>
   Math.min(maximum, Math.max(minimum, Number.isFinite(value) ? value : minimum));
 
+const migrateAppearance = (value: Partial<AppearanceSettings>): Partial<AppearanceSettings> => {
+  if ((value.schemaVersion ?? 0) < 2 && value.backgroundSource === "system" && value.material === "mica") {
+    return { ...value, schemaVersion: 2, presetId: "fluent-solid", material: "solid" };
+  }
+  return { ...value, schemaVersion: 2 };
+};
+
 const normaliseAppearance = (value: AppearanceSettings): AppearanceSettings => ({
   ...value,
+  schemaVersion: 2,
   material: value.material === "solid" ? "solid" : "mica",
   panelMaterial: value.panelMaterial === "solid" ? "solid" : "blur",
-  presetId: value.presetId === "pure-performance" ? "pure-performance" : "windows-mica",
+  presetId:
+    value.presetId === "windows-mica" || value.presetId === "pure-performance"
+      ? value.presetId
+      : "fluent-solid",
   panelOpacity: clamp(value.panelOpacity, 0, 100),
   panelBlur: clamp(value.panelBlur, 0, 40),
   backgroundBlur: 0,
@@ -42,7 +53,7 @@ const normaliseAppearance = (value: AppearanceSettings): AppearanceSettings => (
 
 const getInitialAppearance = (): AppearanceSettings => {
   const saved = loadLegacyBrowserAppearance();
-  let initial = saved ? { ...defaultAppearance, ...saved } : { ...defaultAppearance };
+  let initial = saved ? { ...defaultAppearance, ...migrateAppearance(saved) } : { ...defaultAppearance };
 
   if (import.meta.env.DEV) {
     const query = new URLSearchParams(window.location.search);
@@ -67,7 +78,8 @@ const applyDocumentTokens = (settings: AppearanceSettings, resolvedMode: Resolve
   root.dataset.density = settings.density;
   root.dataset.motion = settings.motion;
   root.style.setProperty("--hm-accent", accent);
-  root.style.setProperty("--hm-panel-opacity", `${settings.panelOpacity / 100}`);
+  const panelOpacity = settings.backgroundSource === "local" ? settings.panelOpacity : 50;
+  root.style.setProperty("--hm-panel-opacity", `${panelOpacity / 100}`);
   root.style.setProperty("--hm-panel-blur", `${settings.panelBlur}px`);
   root.style.setProperty("--hm-panel-saturation", `${settings.panelSaturation}%`);
   root.style.setProperty("--hm-border-brightness", `${settings.borderBrightness / 100}`);
@@ -97,7 +109,9 @@ export function AppearanceProvider({ children }: PropsWithChildren) {
     let active = true;
     appearancePersistence.load()
       .then((saved) => {
-        if (active && saved) setSettings(normaliseAppearance({ ...defaultAppearance, ...saved }));
+        if (active && saved) {
+          setSettings(normaliseAppearance({ ...defaultAppearance, ...migrateAppearance(saved) }));
+        }
       })
       .catch((error) => console.error("Unable to load appearance settings", error))
       .finally(() => {
