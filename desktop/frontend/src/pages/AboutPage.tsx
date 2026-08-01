@@ -183,12 +183,12 @@ export function AboutPage() {
           <h2>{t("about_sponsorship_title")}</h2>
           <p>{t("settings_sponsorship_text")}</p>
           <div className="payment-grid">
-            <figure className="payment-item">
+            <figure className="payment-item hm-card">
               <figcaption>{t("about_wechat")}</figcaption>
               <Image src="/support/wei.png" alt={text("微信支付二维码", "WeChat Pay QR code")} />
               <span>{text("微信赞赏（请备注您的昵称，未备注则表示匿名）", "WeChat sponsorship (leave your nickname; blank means anonymous)")}</span>
             </figure>
-            <figure className="payment-item">
+            <figure className="payment-item hm-card">
               <figcaption>{t("about_alipay")}</figcaption>
               <Image src="/support/zhi.jpg" alt={text("支付宝二维码", "Alipay QR code")} />
               <span>{text("支付宝赞赏（请备注您的昵称，未备注则表示匿名）", "Alipay sponsorship (leave your nickname; blank means anonymous)")}</span>

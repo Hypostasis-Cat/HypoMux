@@ -16,7 +16,7 @@ export function GlassSurface<T extends ElementType = "section">({
 }: GlassSurfaceProps<T>) {
   const Component = as ?? "section";
   return (
-    <Component className={`glass-surface ${className}`.trim()} data-tone={tone} {...props}>
+    <Component className={`glass-surface hm-card ${className}`.trim()} data-tone={tone} {...props}>
       {children}
     </Component>
   );

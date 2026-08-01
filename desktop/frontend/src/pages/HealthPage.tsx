@@ -348,7 +348,7 @@ export function HealthPage() {
           ) : adapters.map((adapter) => {
             const result = resultByID.get(adapter.id);
             return (
-              <label className={`health-adapter-choice${adapter.selected ? " is-selected" : ""}`} key={adapter.id}>
+              <label className={`health-adapter-choice hm-card${adapter.selected ? " is-selected" : ""}`} key={adapter.id}>
                 <Checkbox
                   checked={adapter.selected}
                   disabled={running || engineRunning}

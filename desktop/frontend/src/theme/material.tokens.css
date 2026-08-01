@@ -14,21 +14,25 @@
   --hm-bg-position: center;
   --hm-gradient-background: linear-gradient(135deg, #cbd8e2 0%, #e9e3da 52%, #c7d9e4 100%);
   --hm-solid-background: #dce4ea;
+  --hm-card-glow-border: color-mix(in srgb, var(--hm-accent) 62%, transparent);
+  --hm-card-glow-near: color-mix(in srgb, var(--hm-accent) 34%, transparent);
+  --hm-card-glow-far: color-mix(in srgb, var(--hm-accent) 18%, transparent);
 }
 
 [data-appearance="light"] {
-  --hm-window-base: #dce4e8;
+  --hm-window-base: #f3f3f3;
   --hm-system-background:
-    radial-gradient(circle at 78% 5%, rgba(122, 167, 194, 0.32), transparent 34%),
-    radial-gradient(circle at 14% 92%, rgba(196, 165, 137, 0.22), transparent 38%),
-    linear-gradient(135deg, #d6e0e5 0%, #e8e7e2 51%, #cedde5 100%);
-  --hm-window-tint: rgba(239, 243, 244, 0.46);
-  --hm-shell: rgba(231, 237, 240, 0.48);
-  --hm-surface-rgb: 241, 245, 246;
-  --hm-surface-secondary-rgb: 232, 238, 241;
-  --hm-inner-highlight: rgba(255, 255, 255, calc(0.48 * var(--hm-border-brightness)));
-  --hm-outer-border: rgba(47, 64, 75, 0.075);
-  --hm-shadow-colour: 39, 55, 65;
+    radial-gradient(circle at 78% 5%, rgba(0, 95, 184, 0.055), transparent 34%),
+    radial-gradient(circle at 14% 92%, rgba(180, 91, 0, 0.035), transparent 38%),
+    linear-gradient(135deg, #fafafa 0%, #f3f3f3 52%, #eeeeee 100%);
+  --hm-window-tint: rgba(255, 255, 255, 0.62);
+  --hm-shell: rgba(250, 250, 250, 0.56);
+  --hm-solid-chrome: #f9f9f9;
+  --hm-surface-rgb: 255, 255, 255;
+  --hm-surface-secondary-rgb: 250, 250, 250;
+  --hm-inner-highlight: rgba(255, 255, 255, calc(0.76 * var(--hm-border-brightness)));
+  --hm-outer-border: rgba(0, 0, 0, 0.075);
+  --hm-shadow-colour: 0, 0, 0;
 }
 
 [data-appearance="light"][data-background-source="local"] {
@@ -42,18 +46,19 @@
 }
 
 [data-appearance="dark"] {
-  --hm-window-base: #0e1820;
+  --hm-window-base: #202020;
   --hm-system-background:
-    radial-gradient(circle at 82% 4%, rgba(39, 91, 121, 0.34), transparent 34%),
-    radial-gradient(circle at 12% 92%, rgba(89, 66, 107, 0.2), transparent 36%),
-    linear-gradient(140deg, #101b23 0%, #16242d 52%, #0d1921 100%);
-  --hm-window-tint: rgba(17, 29, 38, 0.5);
-  --hm-shell: rgba(15, 27, 35, 0.52);
-  --hm-surface-rgb: 28, 42, 52;
-  --hm-surface-secondary-rgb: 20, 33, 42;
-  --hm-inner-highlight: rgba(255, 255, 255, calc(0.14 * var(--hm-border-brightness)));
-  --hm-outer-border: rgba(229, 239, 246, 0.085);
-  --hm-shadow-colour: 2, 8, 12;
+    radial-gradient(circle at 82% 4%, rgba(0, 120, 212, 0.075), transparent 34%),
+    radial-gradient(circle at 12% 92%, rgba(116, 85, 195, 0.05), transparent 36%),
+    linear-gradient(140deg, #181818 0%, #202020 52%, #151515 100%);
+  --hm-window-tint: rgba(8, 8, 8, 0.62);
+  --hm-shell: rgba(20, 20, 20, 0.58);
+  --hm-solid-chrome: #1c1c1c;
+  --hm-surface-rgb: 44, 44, 44;
+  --hm-surface-secondary-rgb: 36, 36, 36;
+  --hm-inner-highlight: rgba(255, 255, 255, calc(0.16 * var(--hm-border-brightness)));
+  --hm-outer-border: rgba(255, 255, 255, 0.083);
+  --hm-shadow-colour: 0, 0, 0;
 }
 
 .glass-surface {

@@ -42,7 +42,7 @@ export function NetworkAdapterItem({
     onWeightChange(normalized);
   };
   return (
-    <article className={`network-adapter${adapter.selected ? " is-selected" : " is-muted"}`}>
+    <article className={`network-adapter hm-card${adapter.selected ? " is-selected" : " is-muted"}`}>
       <div className="adapter-primary">
         <Checkbox
           checked={adapter.selected}

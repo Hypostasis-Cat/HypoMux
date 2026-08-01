@@ -144,9 +144,9 @@ export function HomePage({ onNavigate }: { onNavigate?: (page: AppPage) => void 
         </div>
         <div className="network-adapter-list">
           {engine.loading ? (
-            <div className="adapter-empty"><Spinner label={text("正在扫描活动网络适配器", "Scanning active network adapters")} /></div>
+            <div className="adapter-empty hm-card"><Spinner label={text("正在扫描活动网络适配器", "Scanning active network adapters")} /></div>
           ) : engine.adapters.length === 0 ? (
-            <div className="adapter-empty">
+            <div className="adapter-empty hm-card">
               <strong>{text("未发现可参与聚合的活动网卡", "No active adapters can participate in aggregation")}</strong>
               <span>{text(
                 "请检查网卡是否已连接并具有可用 IPv4 地址，然后重新扫描。",

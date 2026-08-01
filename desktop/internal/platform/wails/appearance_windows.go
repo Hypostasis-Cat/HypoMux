@@ -45,6 +45,14 @@ func nativeResult(err error) platform.NativeAppearanceResult {
 }
 
 func setNativeMaterial(hwnd unsafe.Pointer, material string) platform.NativeAppearanceResult {
+	value, ok := nativeMaterialValue(material)
+	if !ok {
+		return platform.NativeAppearanceResult{Fallback: true, Reason: "unknown window material"}
+	}
+	return nativeResult(setDWMAttribute(hwnd, dwmSystemBackdropType, &value))
+}
+
+func nativeMaterialValue(material string) (uint32, bool) {
 	values := map[string]uint32{
 		"mica":      2,
 		"acrylic":   3,
@@ -53,10 +61,7 @@ func setNativeMaterial(hwnd unsafe.Pointer, material string) platform.NativeAppe
 		"solid":     1,
 	}
 	value, ok := values[strings.ToLower(material)]
-	if !ok {
-		return platform.NativeAppearanceResult{Fallback: true, Reason: "unknown window material"}
-	}
-	return nativeResult(setDWMAttribute(hwnd, dwmSystemBackdropType, &value))
+	return value, ok
 }
 
 func setNativeTheme(hwnd unsafe.Pointer, mode string) platform.NativeAppearanceResult {

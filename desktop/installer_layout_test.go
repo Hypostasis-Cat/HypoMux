@@ -200,3 +200,71 @@ func TestFrontendFreshInstallAppearanceDefaults(t *testing.T) {
 		t.Fatal("settings page fallback does not exit directly on close")
 	}
 }
+
+func TestCardsUseThemeAccentHoverGlow(t *testing.T) {
+	cssData, err := os.ReadFile("frontend/src/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	css := string(cssData)
+	for _, required := range []string{
+		`.hm-card:hover:not(:has(.hm-card:hover))`,
+		`border-color: var(--hm-card-glow-border)`,
+		`drop-shadow(0 0 14px var(--hm-card-glow-far))`,
+		`@media (hover: hover) and (pointer: fine)`,
+	} {
+		if !strings.Contains(css, required) {
+			t.Fatalf("card hover treatment is missing %q", required)
+		}
+	}
+
+	tokenData, err := os.ReadFile("frontend/src/theme/material.tokens.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(tokenData), `--hm-card-glow-border: color-mix(in srgb, var(--hm-accent)`) {
+		t.Fatal("card glow border is not derived from the active theme accent")
+	}
+
+	surfaceData, err := os.ReadFile("frontend/src/components/material/GlassSurface.tsx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(surfaceData), `glass-surface hm-card`) {
+		t.Fatal("shared card component does not opt into the hover glow")
+	}
+}
+
+func TestFrontendUsesWindowsNeutralPaletteAndDistinctWindowMaterials(t *testing.T) {
+	tokenData, err := os.ReadFile("frontend/src/theme/material.tokens.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tokens := string(tokenData)
+	for _, required := range []string{
+		`--hm-window-base: #f3f3f3`,
+		`--hm-window-base: #202020`,
+		`--hm-solid-chrome: #f9f9f9`,
+		`--hm-solid-chrome: #1c1c1c`,
+	} {
+		if !strings.Contains(tokens, required) {
+			t.Fatalf("Windows neutral appearance token is missing %q", required)
+		}
+	}
+
+	cssData, err := os.ReadFile("frontend/src/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	css := string(cssData)
+	for _, required := range []string{
+		`[data-material="mica"][data-background-source="system"] .app-shell`,
+		`[data-material="solid"][data-background-source="system"] .app-shell`,
+		`background: var(--hm-window-base)`,
+		`[data-material="solid"][data-background-source="system"] .wallpaper-noise`,
+	} {
+		if !strings.Contains(css, required) {
+			t.Fatalf("window material distinction is missing %q", required)
+		}
+	}
+}

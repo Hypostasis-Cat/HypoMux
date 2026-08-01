@@ -57,7 +57,7 @@ export function AppearancePreview({ onToast }: { onToast: () => void }) {
           <Switch defaultChecked label="启用链路" />
           <Button disabled>禁用状态</Button>
         </div>
-        <div className="preview-adapter">
+        <div className="preview-adapter hm-card">
           <span className="preview-adapter-icon">E</span>
           <div>
             <strong>以太网</strong>

@@ -10,11 +10,11 @@
 }
 
 [data-appearance="light"] {
-  --hm-text-primary: #0f1d26;
-  --hm-text-secondary: #293c47;
-  --hm-text-tertiary: #506671;
+  --hm-text-primary: #1f1f1f;
+  --hm-text-secondary: #424242;
+  --hm-text-tertiary: #616161;
   --hm-text-on-accent: #ffffff;
-  --hm-row-hover: rgba(255, 255, 255, 0.3);
+  --hm-row-hover: rgba(0, 0, 0, 0.035);
 }
 
 [data-appearance="light"][data-background-source="local"] {
@@ -24,9 +24,9 @@
 }
 
 [data-appearance="dark"] {
-  --hm-text-primary: #e7eef3;
-  --hm-text-secondary: #c1ced6;
-  --hm-text-tertiary: #94a6b1;
+  --hm-text-primary: #ffffff;
+  --hm-text-secondary: #d6d6d6;
+  --hm-text-tertiary: #adadad;
   --hm-text-on-accent: #ffffff;
-  --hm-row-hover: rgba(255, 255, 255, 0.045);
+  --hm-row-hover: rgba(255, 255, 255, 0.055);
 }

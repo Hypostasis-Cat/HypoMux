@@ -77,7 +77,7 @@ export function AppearanceLab() {
           {appearancePresets.map((preset) => (
             <button
               key={preset.id}
-              className={`preset-button${settings.presetId === preset.id ? " is-active" : ""}`}
+              className={`preset-button hm-card${settings.presetId === preset.id ? " is-active" : ""}`}
               onClick={() => applyPreset(preset.id)}
             >
               <strong>{preset.name}</strong>

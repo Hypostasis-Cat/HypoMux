@@ -101,6 +101,34 @@ svg {
   box-shadow: 0 8px 22px rgba(var(--hm-shadow-colour), 0.28) !important;
 }
 
+/* Every card opts into the same accent-aware hover treatment. Using filter
+ * keeps each card's material shadow intact, while :has prevents an outer card
+ * from glowing together with a nested card under the pointer. */
+.hm-card {
+  filter: none;
+  transition:
+    background var(--hm-motion-normal) var(--hm-motion-ease),
+    border-color var(--hm-motion-normal) var(--hm-motion-ease),
+    box-shadow var(--hm-motion-normal) var(--hm-motion-ease),
+    filter var(--hm-motion-normal) var(--hm-motion-ease),
+    opacity var(--hm-motion-normal) ease;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .hm-card:hover:not(:has(.hm-card:hover)) {
+    border-color: var(--hm-card-glow-border);
+    filter:
+      drop-shadow(0 0 4px var(--hm-card-glow-near))
+      drop-shadow(0 0 14px var(--hm-card-glow-far));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hm-card {
+    transition-duration: 0ms;
+  }
+}
+
 .wallpaper-layer {
   position: fixed;
   z-index: 0;
@@ -150,8 +178,12 @@ svg {
 }
 
 .wallpaper-layer.is-native-mica .wallpaper-overlay {
-  background: color-mix(in srgb, var(--hm-window-tint) 34%, transparent);
+  background: color-mix(in srgb, var(--hm-window-tint) 50%, transparent);
   backdrop-filter: none;
+}
+
+[data-appearance="dark"] .wallpaper-layer.is-native-mica .wallpaper-overlay {
+  background: color-mix(in srgb, var(--hm-window-tint) 60%, transparent);
 }
 
 .wallpaper-layer.is-native-mica .wallpaper-noise {
@@ -181,6 +213,35 @@ svg {
     color-mix(in srgb, var(--hm-shell) 45%, transparent),
     color-mix(in srgb, var(--hm-shell) 20%, transparent)
   );
+}
+
+[data-material="solid"][data-background-source="system"] .wallpaper-overlay {
+  background: transparent;
+  backdrop-filter: none;
+}
+
+[data-material="solid"][data-background-source="system"] .wallpaper-noise {
+  opacity: 0;
+}
+
+[data-material="solid"][data-background-source="system"] .app-shell {
+  background: var(--hm-window-base);
+}
+
+[data-material="solid"][data-background-source="system"] .titlebar {
+  background: var(--hm-solid-chrome);
+}
+
+[data-material="solid"][data-background-source="system"] .compact-navigation {
+  --hm-navigation-surface: var(--hm-solid-chrome);
+}
+
+[data-material="mica"][data-background-source="system"] .titlebar {
+  background: color-mix(in srgb, var(--hm-shell) 54%, transparent);
+}
+
+[data-material="mica"][data-background-source="system"] .compact-navigation {
+  --hm-navigation-surface: rgba(var(--hm-surface-secondary-rgb), 0.32);
 }
 
 [data-appearance="light"][data-background-source="local"] .app-shell {
@@ -474,7 +535,10 @@ svg {
   grid-template-columns: minmax(300px, 0.82fr) minmax(380px, 1.18fr);
   gap: clamp(24px, 4vw, 54px);
   overflow: hidden;
-  transition: border-color var(--hm-motion-normal) ease, background var(--hm-motion-normal) ease;
+  transition:
+    border-color var(--hm-motion-normal) ease,
+    background var(--hm-motion-normal) ease,
+    filter var(--hm-motion-normal) var(--hm-motion-ease);
 }
 
 .engine-hero::after {
@@ -753,6 +817,7 @@ svg {
     background var(--hm-motion-normal) var(--hm-motion-ease),
     border-color var(--hm-motion-normal) var(--hm-motion-ease),
     box-shadow var(--hm-motion-normal) var(--hm-motion-ease),
+    filter var(--hm-motion-normal) var(--hm-motion-ease),
     opacity var(--hm-motion-normal) ease;
 }
 
@@ -1534,7 +1599,10 @@ svg {
   border-radius: 8px;
   color: var(--hm-text-primary);
   background: color-mix(in srgb, var(--hm-row-hover) 45%, transparent);
-  transition: border-color var(--hm-motion-normal) ease, background var(--hm-motion-normal) ease;
+  transition:
+    border-color var(--hm-motion-normal) ease,
+    background var(--hm-motion-normal) ease,
+    filter var(--hm-motion-normal) var(--hm-motion-ease);
 }
 
 .health-adapter-choice:hover {
