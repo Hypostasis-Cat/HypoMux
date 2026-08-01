@@ -168,7 +168,6 @@ func decodeBackgroundDataURL(value string) ([]byte, string, string, error) {
 	}
 	// Browser MIME type detection is unreliable (e.g., may claim PNG for JPEG)
 	// We've already validated the actual content via magic bytes, so trust that
-	return content, extension, mimeType, nil
 	if mimeType == "image/png" || mimeType == "image/jpeg" {
 		config, _, err := image.DecodeConfig(bytes.NewReader(content))
 		if err != nil || config.Width < 1 || config.Height < 1 || config.Width > 16384 || config.Height > 16384 {
