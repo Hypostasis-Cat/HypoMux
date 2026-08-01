@@ -542,13 +542,11 @@ svg {
 
 @keyframes page-content-in {
   from {
-    opacity: 0.7;
-    transform: translateX(var(--hm-page-enter-offset));
+    left: var(--hm-page-enter-offset);
   }
 
   to {
-    opacity: 1;
-    transform: translateX(0);
+    left: 0;
   }
 }
 

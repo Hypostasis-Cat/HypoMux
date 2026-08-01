@@ -78,8 +78,7 @@ const applyDocumentTokens = (settings: AppearanceSettings, resolvedMode: Resolve
   root.dataset.density = settings.density;
   root.dataset.motion = settings.motion;
   root.style.setProperty("--hm-accent", accent);
-  const panelOpacity = settings.backgroundSource === "local" ? settings.panelOpacity : 50;
-  root.style.setProperty("--hm-panel-opacity", `${panelOpacity / 100}`);
+  root.style.setProperty("--hm-panel-opacity", `${settings.panelOpacity / 100}`);
   root.style.setProperty("--hm-panel-blur", `${settings.panelBlur}px`);
   root.style.setProperty("--hm-panel-saturation", `${settings.panelSaturation}%`);
   root.style.setProperty("--hm-border-brightness", `${settings.borderBrightness / 100}`);
