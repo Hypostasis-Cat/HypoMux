@@ -4,6 +4,7 @@ import (
 	"context"
 	"embed"
 	"log"
+	"net/http"
 	"os"
 	"time"
 
@@ -44,12 +45,21 @@ func main() {
 	}
 	var mainWindow application.Window
 	startSilent := hasArgument(os.Args[1:], "--silent")
+	appearanceService := services.NewAppearanceService()
+	appearanceBackground := services.NewAppearanceBackgroundHandler(appearanceService)
+	frontendAssets := application.AssetFileServerFS(assets)
 	app := application.New(application.Options{
 		Name:        "HypoMux",
 		Description: "Multi-link network aggregation desktop client",
 		Icon:        trayIcon,
 		Assets: application.AssetOptions{
-			Handler: application.AssetFileServerFS(assets),
+			Handler: http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+				if request.URL.Path == services.AppearanceBackgroundPath {
+					appearanceBackground.ServeHTTP(response, request)
+					return
+				}
+				frontendAssets.ServeHTTP(response, request)
+			}),
 		},
 		Mac: application.MacOptions{
 			ApplicationShouldTerminateAfterLastWindowClosed: false,
@@ -99,7 +109,6 @@ func main() {
 	tunService := services.NewTunService(settingsService, adapterService)
 	blockedDomainService := services.NewBlockedDomainService(settingsService)
 	updaterService := services.NewUpdaterService()
-	appearanceService := services.NewAppearanceService()
 	engineService := services.NewEngineServiceWithDomains(
 		settingsService, adapterService, blockedDomainService, supportLogs,
 	)

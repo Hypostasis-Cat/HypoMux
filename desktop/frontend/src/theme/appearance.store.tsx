@@ -112,26 +112,9 @@ export function AppearanceProvider({ children }: PropsWithChildren) {
         if (!active) return;
 
         if (saved) {
-          // Load saved settings from backend
-          console.log('[Appearance] Loaded from backend:', {
-            backgroundSource: saved.backgroundSource,
-            hasLocalBackgroundUrl: !!saved.localBackgroundUrl,
-            localBackgroundUrlLength: saved.localBackgroundUrl?.length,
-          });
           const migrated = migrateAppearance(saved);
           const merged = { ...defaultAppearance, ...migrated };
-          console.log('[Appearance] After merge:', {
-            backgroundSource: merged.backgroundSource,
-            hasLocalBackgroundUrl: !!merged.localBackgroundUrl,
-          });
           const normalized = normaliseAppearance(merged);
-          console.log('[Appearance] After normalize:', {
-            backgroundSource: normalized.backgroundSource,
-            hasLocalBackgroundUrl: !!normalized.localBackgroundUrl,
-          });
-
-          // Use React 18's automatic batching: both state updates in same task
-          // will be batched together, ensuring settings is updated before hydrated triggers save
           setSettings(normalized);
           setHydrated(true);
         } else {
@@ -141,7 +124,9 @@ export function AppearanceProvider({ children }: PropsWithChildren) {
       })
       .catch((error) => {
         console.error("Unable to load appearance settings", error);
-        if (active) setHydrated(true);
+        // Do not enable automatic persistence after a failed load. Otherwise
+        // the in-memory defaults overwrite a valid appearance document (and
+        // delete its background) before the user can recover or retry.
       });
     return () => {
       active = false;
@@ -158,19 +143,12 @@ export function AppearanceProvider({ children }: PropsWithChildren) {
   useEffect(() => {
     applyDocumentTokens(settings, resolvedMode, accent);
     if (hydrated) {
-      console.log('[Appearance] Saving to backend:', {
-        backgroundSource: settings.backgroundSource,
-        hasLocalBackgroundUrl: !!settings.localBackgroundUrl,
-        localBackgroundUrlLength: settings.localBackgroundUrl?.length,
-      });
       void appearancePersistence.save(settings)
         .then(() => {
-          console.log('[Appearance] Save successful');
           setPersistenceError(undefined);
         })
         .catch((error) => {
           const message = error instanceof Error ? error.message : String(error);
-          console.error('[Appearance] Save failed:', message);
           setPersistenceError(message);
           console.error("Unable to save appearance settings", error);
         });
@@ -188,9 +166,18 @@ export function AppearanceProvider({ children }: PropsWithChildren) {
       fluentTheme: createHypoMuxTheme(resolvedMode, accent),
       nativeResult,
       persistenceError,
-      update: (patch) => setSettings((current) => normaliseAppearance({ ...current, ...patch })),
-      applyPreset: (id) => setSettings({ ...getAppearancePreset(id).settings, mode: settings.mode }),
-      reset: () => setSettings({ ...appearancePresets[0].settings }),
+      update: (patch) => {
+        setHydrated(true);
+        setSettings((current) => normaliseAppearance({ ...current, ...patch }));
+      },
+      applyPreset: (id) => {
+        setHydrated(true);
+        setSettings({ ...getAppearancePreset(id).settings, mode: settings.mode });
+      },
+      reset: () => {
+        setHydrated(true);
+        setSettings({ ...appearancePresets[0].settings });
+      },
     }),
     [accent, nativeResult, persistenceError, resolvedMode, settings],
   );

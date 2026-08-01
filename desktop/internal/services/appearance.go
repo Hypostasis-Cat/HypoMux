@@ -10,15 +10,18 @@ import (
 	"image"
 	_ "image/jpeg"
 	_ "image/png"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 )
 
 const (
-	maxBackgroundBytes   = 20 << 20
-	maxAppearancePayload = 28 << 20
+	maxBackgroundBytes       = 20 << 20
+	maxAppearancePayload     = 28 << 20
+	AppearanceBackgroundPath = "/hypomux/appearance/background"
 )
 
 type appearanceDocument struct {
@@ -126,13 +129,55 @@ func (s *AppearanceService) loadLocked() (string, error) {
 		if !valid {
 			return "", fmt.Errorf("保存的背景图片格式无效")
 		}
-		settings["localBackgroundUrl"] = "data:" + mimeType + ";base64," + base64.StdEncoding.EncodeToString(content)
+		settings["localBackgroundMime"] = mimeType
+		settings["localBackgroundUrl"] = AppearanceBackgroundPath + "?v=" + document.BackgroundSHA256
 	}
 	payload, err := json.Marshal(settings)
 	if err != nil {
 		return "", fmt.Errorf("读取外观设置失败：%w", err)
 	}
 	return string(payload), nil
+}
+
+// NewAppearanceBackgroundHandler keeps the persisted image out of Wails
+// binding responses without exposing an http.ResponseWriter method as a Wails
+// service binding.
+func NewAppearanceBackgroundHandler(service *AppearanceService) http.Handler {
+	return http.HandlerFunc(service.serveBackground)
+}
+
+// Returning a multi-megabyte Data URL from Load or Save can exceed WebView2's
+// response buffering and make the frontend treat a valid appearance document
+// as a failed load. The WebView fetches the image from this same-origin route
+// instead.
+func (s *AppearanceService) serveBackground(response http.ResponseWriter, request *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	document, err := s.readDocumentLocked()
+	if err != nil || document.BackgroundFile == "" {
+		http.NotFound(response, request)
+		return
+	}
+	if version := request.URL.Query().Get("v"); version != "" && version != document.BackgroundSHA256 {
+		http.NotFound(response, request)
+		return
+	}
+
+	path := filepath.Join(settingsDirectory(), "appearance", filepath.Base(document.BackgroundFile))
+	content, err := os.ReadFile(path)
+	if err != nil {
+		http.NotFound(response, request)
+		return
+	}
+	mimeType, _, valid := detectBackgroundType(content)
+	if !valid {
+		http.Error(response, "invalid background image", http.StatusUnsupportedMediaType)
+		return
+	}
+	response.Header().Set("Content-Type", mimeType)
+	response.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
+	http.ServeContent(response, request, filepath.Base(path), time.Time{}, bytes.NewReader(content))
 }
 
 func (s *AppearanceService) readDocumentLocked() (appearanceDocument, error) {

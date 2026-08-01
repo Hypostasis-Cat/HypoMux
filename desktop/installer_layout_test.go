@@ -137,8 +137,12 @@ func TestFrontendUsesWailsV3RuntimeDetection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(runtimeData), `System.IsDesktop()`) {
+	runtimeSource := string(runtimeData)
+	if !strings.Contains(runtimeSource, `System.IsDesktop()`) {
 		t.Fatal("frontend runtime detection does not use the Wails v3 API")
+	}
+	if !strings.Contains(runtimeSource, `runtimeWindow.chrome?.webview?.postMessage`) {
+		t.Fatal("desktop detection still depends only on the asynchronously injected Wails environment")
 	}
 
 	paths := []string{
