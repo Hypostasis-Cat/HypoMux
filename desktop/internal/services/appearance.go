@@ -74,7 +74,7 @@ func (s *AppearanceService) Save(payload string) (string, error) {
 			backgroundPath := filepath.Join(settingsDirectory(), "appearance", document.BackgroundFile)
 			if current.BackgroundSHA256 != document.BackgroundSHA256 || current.BackgroundFile != document.BackgroundFile {
 				if err := atomicWriteFile(backgroundPath, content, 0o600); err != nil {
-					return "", fmt.Errorf("保存背景图片失败：%w", err)
+					return "", fmt.Errorf("保存背景图片失败，请检查配置目录权限：%w", err)
 				}
 			}
 			settings["localBackgroundMime"] = mimeType
@@ -167,14 +167,15 @@ func decodeBackgroundDataURL(value string) ([]byte, string, string, error) {
 		return nil, "", "", fmt.Errorf("背景图片格式不支持")
 	}
 	// Validate MIME type in header matches detected type
-	// Allow both image/jpeg and image/jpg for JPEG files (browser inconsistency)
+	// Allow common MIME type variations for JPEG files (browser inconsistency)
 	declaredMime := strings.ToLower(strings.TrimSuffix(strings.TrimPrefix(header, "data:"), ";base64"))
 	if mimeType == "image/jpeg" {
-		if declaredMime != "image/jpeg" && declaredMime != "image/jpg" {
-			return nil, "", "", fmt.Errorf("背景图片声明格式与实际内容不一致")
+		// Accept any JPEG variant: image/jpeg, image/jpg, image/jfif, image/pjpeg
+		if !strings.HasPrefix(declaredMime, "image/jp") && declaredMime != "image/jfif" && declaredMime != "image/pjpeg" {
+			return nil, "", "", fmt.Errorf("背景图片声明格式与实际内容不一致 (声明: %s, 实际: %s)", declaredMime, mimeType)
 		}
 	} else if declaredMime != mimeType {
-		return nil, "", "", fmt.Errorf("背景图片声明格式与实际内容不一致")
+		return nil, "", "", fmt.Errorf("背景图片声明格式与实际内容不一致 (声明: %s, 实际: %s)", declaredMime, mimeType)
 	}
 	if mimeType == "image/png" || mimeType == "image/jpeg" {
 		config, _, err := image.DecodeConfig(bytes.NewReader(content))
