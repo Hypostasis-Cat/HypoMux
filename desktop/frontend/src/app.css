@@ -19,13 +19,13 @@ body,
   transform: scale(1);
   transform-origin: center;
   transition:
-    opacity 180ms var(--hm-motion-ease),
-    transform 180ms var(--hm-motion-ease);
+    opacity 250ms var(--hm-motion-ease-out),
+    transform 250ms var(--hm-motion-ease-out);
 }
 
 html.window-closing #root > .hypomux-provider {
   opacity: 0;
-  transform: scale(0.985);
+  transform: scale(0.96);
   pointer-events: none;
 }
 
@@ -38,7 +38,7 @@ html.window-closing #root > .hypomux-provider {
     radial-gradient(circle at 50% 46%, color-mix(in srgb, var(--hm-accent) 10%, transparent), transparent 42%),
     var(--hm-window-base);
   pointer-events: none;
-  transition: opacity var(--hm-motion-background) var(--hm-motion-ease);
+  transition: opacity 450ms var(--hm-motion-ease-out);
 }
 
 .startup-reveal.is-ready {
@@ -107,10 +107,11 @@ svg {
 .hm-card {
   position: relative;
   transition:
-    background var(--hm-motion-normal) var(--hm-motion-ease),
-    border-color var(--hm-motion-normal) var(--hm-motion-ease),
-    box-shadow var(--hm-motion-normal) var(--hm-motion-ease),
-    opacity var(--hm-motion-normal) ease;
+    background var(--hm-motion-normal) var(--hm-motion-ease-out),
+    border-color var(--hm-motion-normal) var(--hm-motion-ease-out),
+    box-shadow var(--hm-motion-normal) var(--hm-motion-ease-out),
+    opacity var(--hm-motion-normal) var(--hm-motion-ease-out),
+    transform var(--hm-motion-fast) var(--hm-motion-ease-out);
 }
 
 .hm-card::before {
@@ -125,7 +126,7 @@ svg {
     drop-shadow(0 0 4px var(--hm-card-glow-near))
     drop-shadow(0 0 14px var(--hm-card-glow-far));
   pointer-events: none;
-  transition: opacity var(--hm-motion-normal) var(--hm-motion-ease);
+  transition: opacity var(--hm-motion-normal) var(--hm-motion-ease-out);
   content: "";
 }
 
@@ -329,7 +330,10 @@ svg {
   border-radius: 0 !important;
   color: var(--hm-text-primary);
   background: transparent !important;
-  transition: background var(--hm-motion-instant) ease, color var(--hm-motion-instant) ease;
+  transition:
+    background var(--hm-motion-fast) var(--hm-motion-ease-out),
+    color var(--hm-motion-fast) var(--hm-motion-ease-out),
+    transform var(--hm-motion-fast) var(--hm-motion-ease-out);
 }
 
 .window-button:hover {
@@ -338,16 +342,19 @@ svg {
 
 .window-button:active {
   background: color-mix(in srgb, var(--hm-accent) 16%, transparent) !important;
+  transform: scale(0.96);
 }
 
 .window-close:hover {
   color: #fff !important;
   background: #c42b1c !important;
+  transform: scale(1);
 }
 
 .window-close:active {
   color: #fff !important;
   background: #a4262c !important;
+  transform: scale(0.94);
 }
 
 .product-mark {
@@ -390,10 +397,10 @@ svg {
     0 0 18px var(--hm-accent-soft);
   pointer-events: none;
   transition:
-    transform calc(var(--hm-motion-page) + 40ms) var(--hm-motion-ease),
-    opacity var(--hm-motion-normal) ease,
-    background var(--hm-motion-normal) ease,
-    border-color var(--hm-motion-normal) ease;
+    transform 400ms var(--hm-motion-spring),
+    opacity var(--hm-motion-normal) var(--hm-motion-ease-out),
+    background var(--hm-motion-normal) var(--hm-motion-ease-out),
+    border-color var(--hm-motion-normal) var(--hm-motion-ease-out);
   will-change: transform;
 }
 
@@ -439,14 +446,19 @@ svg {
   color: var(--hm-text-tertiary);
   background: transparent;
   transition:
-    color var(--hm-motion-normal) var(--hm-motion-ease),
-    background var(--hm-motion-normal) var(--hm-motion-ease),
-    box-shadow var(--hm-motion-normal) var(--hm-motion-ease);
+    color var(--hm-motion-normal) var(--hm-motion-ease-out),
+    background var(--hm-motion-normal) var(--hm-motion-ease-out),
+    box-shadow var(--hm-motion-normal) var(--hm-motion-ease-out),
+    transform var(--hm-motion-fast) var(--hm-motion-ease-out);
 }
 
 .nav-button:hover {
   color: var(--hm-text-primary);
   background: var(--hm-row-hover);
+}
+
+.nav-button:active {
+  transform: scale(0.94);
 }
 
 .nav-button:focus-visible {
@@ -469,7 +481,7 @@ svg {
 }
 
 .nav-button.is-active > svg {
-  animation: nav-icon-in var(--hm-motion-normal) var(--hm-motion-ease) both;
+  animation: nav-icon-in 400ms var(--hm-motion-spring) both;
 }
 
 .page-viewport {
@@ -500,7 +512,7 @@ svg {
    * Animate the layout offset instead: it preserves the slide while keeping
    * every glass surface in the stable root compositor layer.
    */
-  animation: page-content-in var(--hm-motion-page) var(--hm-motion-ease);
+  animation: page-content-in 400ms var(--hm-motion-ease-out);
 }
 
 [data-motion="reduced"] .page-transition-layer.is-entering,
@@ -524,8 +536,8 @@ svg {
 
 @keyframes nav-icon-in {
   from {
-    opacity: 0.62;
-    transform: scale(0.88);
+    opacity: 0.5;
+    transform: scale(0.85);
   }
 
   to {
@@ -840,10 +852,15 @@ svg {
   background: rgba(var(--hm-surface-rgb), calc(var(--hm-panel-opacity) * 0.72));
   box-shadow: inset 0 1px 0 var(--hm-inner-highlight);
   transition:
-    background var(--hm-motion-normal) var(--hm-motion-ease),
-    border-color var(--hm-motion-normal) var(--hm-motion-ease),
-    box-shadow var(--hm-motion-normal) var(--hm-motion-ease),
-    opacity var(--hm-motion-normal) ease;
+    background var(--hm-motion-normal) var(--hm-motion-ease-out),
+    border-color var(--hm-motion-normal) var(--hm-motion-ease-out),
+    box-shadow var(--hm-motion-normal) var(--hm-motion-ease-out),
+    opacity var(--hm-motion-normal) var(--hm-motion-ease-out),
+    transform var(--hm-motion-fast) var(--hm-motion-ease-out);
+}
+
+.network-adapter:hover {
+  transform: translateY(-1px);
 }
 
 .network-adapter.is-selected {
@@ -1218,8 +1235,8 @@ svg {
   border-bottom: 1px solid color-mix(in srgb, var(--hm-outer-border) 68%, transparent);
   background: transparent !important;
   transition:
-    background var(--hm-motion-instant) ease,
-    box-shadow var(--hm-motion-instant) ease;
+    background var(--hm-motion-fast) var(--hm-motion-ease-out),
+    box-shadow var(--hm-motion-fast) var(--hm-motion-ease-out);
 }
 
 .routing-row:last-child {
@@ -1259,8 +1276,9 @@ svg {
   background: color-mix(in srgb, var(--hm-row-hover) 42%, transparent) !important;
   box-shadow: none !important;
   transition:
-    border-color var(--hm-motion-instant) ease,
-    background var(--hm-motion-instant) ease;
+    border-color var(--hm-motion-fast) var(--hm-motion-ease-out),
+    background var(--hm-motion-fast) var(--hm-motion-ease-out),
+    box-shadow var(--hm-motion-normal) var(--hm-motion-ease-out);
 }
 
 .routing-row:hover .routing-cell-input,
@@ -1968,11 +1986,14 @@ svg {
   min-height: 72px;
   padding: 10px 15px;
   border-bottom: 1px solid color-mix(in srgb, var(--hm-outer-border) 68%, transparent);
-  transition: background var(--hm-motion-instant) ease;
+  transition:
+    background var(--hm-motion-fast) var(--hm-motion-ease-out),
+    transform var(--hm-motion-fast) var(--hm-motion-ease-out);
 }
 
 .connection-row:hover {
   background: color-mix(in srgb, var(--hm-accent-soft) 62%, transparent);
+  transform: translateX(2px);
 }
 
 .connection-row:last-child {
