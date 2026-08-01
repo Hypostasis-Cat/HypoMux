@@ -122,6 +122,7 @@ export function RoutingPage() {
   const [importPreviewOpen, setImportPreviewOpen] = useState(false);
   const loaded = useRef(false);
   const validationSequence = useRef(new Map<string, number>());
+  const addRuleInputRef = useRef<HTMLInputElement>(null);
   const toasterId = useId("routing-toaster");
   const { dispatchToast } = useToastController(toasterId);
 
@@ -443,6 +444,7 @@ export function RoutingPage() {
         </TabList>
         <div className="routing-add-row">
           <Input
+            ref={addRuleInputRef}
             value={newValue}
             placeholder={placeholders[activeType]}
             onChange={(_, data) => setNewValue(data.value)}
@@ -493,6 +495,15 @@ export function RoutingPage() {
             <span>{filter
               ? text("清除筛选后查看全部规则。", "Clear the filter to see every rule.")
               : text(`使用上方输入框添加第一条规则，${placeholders[activeType]}。`, `Use the field above to add the first rule. ${placeholders[activeType]}.`)}</span>
+            {!filter && (
+              <Button
+                appearance="primary"
+                icon={<Add20Regular />}
+                onClick={() => addRuleInputRef.current?.focus()}
+              >
+                {text("添加第一条规则", "Add first rule")}
+              </Button>
+            )}
           </div>
         ) : (
           <DataGrid

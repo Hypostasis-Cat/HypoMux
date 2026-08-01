@@ -76,7 +76,7 @@ export function NetworkAdapterItem({
           <span>{t("home_bw_column")}</span>
           <strong>{percentage}% {text("份额", "share")}</strong>
         </div>
-        <Tooltip content={t("home_bw_column_hint")} relationship="description">
+        <Tooltip content={`${t("home_bw_column_hint")}${text("（可用 ↑↓ 键调整）", " (Use ↑↓ keys to adjust)")}`} relationship="description">
           <Input
             className="weight-stepper"
             appearance="outline"

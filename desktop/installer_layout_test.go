@@ -209,12 +209,22 @@ func TestCardsUseThemeAccentHoverGlow(t *testing.T) {
 	css := string(cssData)
 	for _, required := range []string{
 		`.hm-card:hover:not(:has(.hm-card:hover))`,
+		`.hm-card:hover:not(:has(.hm-card:hover))::before`,
 		`border-color: var(--hm-card-glow-border)`,
+		`border: 1px solid var(--hm-card-glow-border)`,
 		`drop-shadow(0 0 14px var(--hm-card-glow-far))`,
 		`@media (hover: hover) and (pointer: fine)`,
 	} {
 		if !strings.Contains(css, required) {
 			t.Fatalf("card hover treatment is missing %q", required)
+		}
+	}
+	for _, removed := range []string{
+		`.network-adapter:hover {`,
+		`.health-adapter-choice:hover {`,
+	} {
+		if strings.Contains(css, removed) {
+			t.Fatalf("card hover still changes the surface fill via %q", removed)
 		}
 	}
 

@@ -101,30 +101,47 @@ svg {
   box-shadow: 0 8px 22px rgba(var(--hm-shadow-colour), 0.28) !important;
 }
 
-/* Every card opts into the same accent-aware hover treatment. Using filter
- * keeps each card's material shadow intact, while :has prevents an outer card
- * from glowing together with a nested card under the pointer. */
+/* Draw the hover treatment as a transparent border layer above the card. Keeping
+ * the glow off the translucent card itself prevents the accent from bleeding
+ * through and tinting the whole surface. */
 .hm-card {
-  filter: none;
+  position: relative;
   transition:
     background var(--hm-motion-normal) var(--hm-motion-ease),
     border-color var(--hm-motion-normal) var(--hm-motion-ease),
     box-shadow var(--hm-motion-normal) var(--hm-motion-ease),
-    filter var(--hm-motion-normal) var(--hm-motion-ease),
     opacity var(--hm-motion-normal) ease;
+}
+
+.hm-card::before {
+  position: absolute;
+  z-index: 5;
+  inset: -1px;
+  border: 1px solid var(--hm-card-glow-border);
+  border-radius: inherit;
+  opacity: 0;
+  background: transparent;
+  filter:
+    drop-shadow(0 0 4px var(--hm-card-glow-near))
+    drop-shadow(0 0 14px var(--hm-card-glow-far));
+  pointer-events: none;
+  transition: opacity var(--hm-motion-normal) var(--hm-motion-ease);
+  content: "";
 }
 
 @media (hover: hover) and (pointer: fine) {
   .hm-card:hover:not(:has(.hm-card:hover)) {
     border-color: var(--hm-card-glow-border);
-    filter:
-      drop-shadow(0 0 4px var(--hm-card-glow-near))
-      drop-shadow(0 0 14px var(--hm-card-glow-far));
+  }
+
+  .hm-card:hover:not(:has(.hm-card:hover))::before {
+    opacity: 1;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .hm-card {
+  .hm-card,
+  .hm-card::before {
     transition-duration: 0ms;
   }
 }
@@ -432,6 +449,11 @@ svg {
   background: var(--hm-row-hover);
 }
 
+.nav-button:focus-visible {
+  outline: 2px solid var(--hm-focus-ring);
+  outline-offset: 2px;
+}
+
 .nav-button[aria-disabled="true"] {
   opacity: 0.68;
 }
@@ -479,6 +501,11 @@ svg {
    * every glass surface in the stable root compositor layer.
    */
   animation: page-content-in var(--hm-motion-page) var(--hm-motion-ease);
+}
+
+[data-motion="reduced"] .page-transition-layer.is-entering,
+[data-motion="off"] .page-transition-layer.is-entering {
+  --hm-page-enter-offset: 0;
 }
 
 .page-transition-layer.is-entering[data-direction="backward"] {
@@ -537,8 +564,7 @@ svg {
   overflow: hidden;
   transition:
     border-color var(--hm-motion-normal) ease,
-    background var(--hm-motion-normal) ease,
-    filter var(--hm-motion-normal) var(--hm-motion-ease);
+    background var(--hm-motion-normal) ease;
 }
 
 .engine-hero::after {
@@ -817,12 +843,7 @@ svg {
     background var(--hm-motion-normal) var(--hm-motion-ease),
     border-color var(--hm-motion-normal) var(--hm-motion-ease),
     box-shadow var(--hm-motion-normal) var(--hm-motion-ease),
-    filter var(--hm-motion-normal) var(--hm-motion-ease),
     opacity var(--hm-motion-normal) ease;
-}
-
-.network-adapter:hover {
-  background: color-mix(in srgb, rgba(var(--hm-surface-rgb), calc(var(--hm-panel-opacity) * 0.72)) 82%, var(--hm-row-hover));
 }
 
 .network-adapter.is-selected {
@@ -1397,6 +1418,8 @@ svg {
 
 .tun-preflight-issues {
   display: grid;
+  max-height: 320px;
+  overflow-y: auto;
   gap: 8px;
 }
 
@@ -1601,12 +1624,7 @@ svg {
   background: color-mix(in srgb, var(--hm-row-hover) 45%, transparent);
   transition:
     border-color var(--hm-motion-normal) ease,
-    background var(--hm-motion-normal) ease,
-    filter var(--hm-motion-normal) var(--hm-motion-ease);
-}
-
-.health-adapter-choice:hover {
-  background: var(--hm-row-hover);
+    background var(--hm-motion-normal) ease;
 }
 
 .health-adapter-choice.is-selected {
