@@ -31,22 +31,8 @@ const clamp = (value: number, minimum: number, maximum: number) =>
   Math.min(maximum, Math.max(minimum, Number.isFinite(value) ? value : minimum));
 
 const migrateAppearance = (value: Partial<AppearanceSettings>): Partial<AppearanceSettings> => {
-  // Migrate fluent-solid users to windows-mica if they're using system background
-  // This fixes the startup transparency issue for users on the old default preset
-  if (
-    value.presetId === "fluent-solid" &&
-    value.material === "solid" &&
-    value.backgroundSource === "system"
-  ) {
-    // User was on fluent-solid with system background
-    // Migrate them to windows-mica for better native appearance
-    return {
-      ...value,
-      schemaVersion: 2,
-      presetId: "windows-mica",
-      material: "mica",
-    };
-  }
+  // Schema version 2: no forced migration to avoid breaking user preferences
+  // Users who prefer fluent-solid should keep their choice
   return { ...value, schemaVersion: 2 };
 };
 
