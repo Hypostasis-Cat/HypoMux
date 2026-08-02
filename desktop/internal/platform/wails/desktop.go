@@ -17,43 +17,47 @@ var _ platform.DesktopHost = (*DesktopHost)(nil)
 // DesktopHost contains every direct Wails desktop dependency used by HypoMux.
 // Future services should depend on platform.DesktopHost instead of Wails types.
 type DesktopHost struct {
-	app            *application.App
-	window         application.Window
-	trayMenuWindow application.Window
-	tray           *application.SystemTray
-	onQuit         func()
-	closeToTray    func() bool
-	startSilent    bool
-	startupShown   atomic.Bool
-	quitting       atomic.Bool
-	cleanupOnce    sync.Once
+	app          *application.App
+	window       application.Window
+	tray         *application.SystemTray
+	trayStatus   *application.MenuItem
+	onQuit       func()
+	closeToTray  func() bool
+	startSilent  bool
+	startupShown atomic.Bool
+	quitting     atomic.Bool
+	cleanupOnce  sync.Once
 }
 
-func NewDesktopHost(app *application.App, window application.Window, trayMenuWindow application.Window, startSilent bool, onQuit func(), closeToTray func() bool) *DesktopHost {
-	return &DesktopHost{app: app, window: window, trayMenuWindow: trayMenuWindow, startSilent: startSilent, onQuit: onQuit, closeToTray: closeToTray}
+func NewDesktopHost(app *application.App, window application.Window, startSilent bool, onQuit func(), closeToTray func() bool) *DesktopHost {
+	return &DesktopHost{app: app, window: window, startSilent: startSilent, onQuit: onQuit, closeToTray: closeToTray}
 }
 
 func (d *DesktopHost) ConfigureTray(icon []byte) {
+	menu := d.app.Menu.New()
+	d.trayStatus = menu.Add("聚合引擎：未启动").SetEnabled(false)
+	menu.AddSeparator()
+	menu.Add("打开 HypoMux").OnClick(func(_ *application.Context) {
+		d.Show()
+	})
+	menu.Add("隐藏窗口").OnClick(func(_ *application.Context) {
+		d.HideToTray()
+	})
+	menu.AddSeparator()
+	menu.Add("退出").OnClick(func(_ *application.Context) {
+		d.Quit()
+	})
+
 	d.tray = d.app.SystemTray.New()
 	d.tray.SetIcon(icon)
 	d.tray.SetTooltip("HypoMux · 聚合引擎未启动")
-
-	// Keep the tray flyout alive between clicks. Wails owns its positioning,
-	// focus-loss hiding and Windows notification-area click debounce.
-	if d.trayMenuWindow != nil {
-		d.trayMenuWindow.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) {
-			d.trayMenuWindow.Hide()
-			event.Cancel()
-		})
-		d.tray.AttachWindow(d.trayMenuWindow).WindowOffset(8)
-	}
-
+	// Keep the application window independent from the tray menu. Wails uses
+	// the native Windows popup menu here, so no second WebView2 controller or
+	// taskbar window is created.
 	d.tray.OnClick(func() {
-		d.tray.ToggleWindow()
+		d.Show()
 	})
-	d.tray.OnRightClick(func() {
-		d.tray.ToggleWindow()
-	})
+	d.tray.SetMenu(menu)
 }
 
 func (d *DesktopHost) SetEngineTrayStatus(phase string, mode string) {
@@ -75,13 +79,12 @@ func (d *DesktopHost) SetEngineTrayStatus(phase string, mode string) {
 		modeName = "虚拟网卡"
 	}
 	label := fmt.Sprintf("聚合引擎：%s · %s", state, modeName)
+	if d.trayStatus != nil {
+		d.trayStatus.SetLabel(label)
+	}
 	if d.tray != nil {
 		d.tray.SetTooltip("HypoMux · " + label)
 	}
-	d.app.Event.Emit("engine:status", map[string]string{
-		"phase": phase,
-		"mode":  mode,
-	})
 }
 
 func (d *DesktopHost) ConfigureCloseToTray() {

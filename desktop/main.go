@@ -54,7 +54,6 @@ func main() {
 		return
 	}
 	var mainWindow application.Window
-	var trayMenuWindow application.Window
 	startSilent := hasArgument(os.Args[1:], "--silent")
 	appearanceService := services.NewAppearanceService()
 	appearanceBackground := services.NewAppearanceBackgroundHandler(appearanceService)
@@ -114,28 +113,6 @@ func main() {
 		},
 	})
 
-	// Create tray menu window - small, frameless, transparent, always on top
-	trayMenuWindow = app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Name:             "tray-menu",
-		Title:            "HypoMux Tray Menu",
-		Width:            260,
-		Height:           226,
-		Frameless:        true,
-		Hidden:           true,
-		AlwaysOnTop:      true,
-		DisableResize:    true,
-		HideOnFocusLost:  true,
-		BackgroundType:   application.BackgroundTypeTranslucent,
-		BackgroundColour: application.NewRGBA(0, 0, 0, 0),
-		URL:              "/tray-menu.html",
-		Windows: application.WindowsWindow{
-			BackdropType:                      application.Acrylic,
-			Theme:                             application.Light,
-			DisableFramelessWindowDecorations: true,
-			HiddenOnTaskbar:                   true,
-		},
-	})
-
 	settingsService := services.NewSettingsService()
 	adapterService := services.NewAdapterService(settingsService)
 	supportLogs := services.NewSupportLogStore()
@@ -154,7 +131,7 @@ func main() {
 		supportLogs,
 	)
 	var diagnosticsService *services.DiagnosticsService
-	desktop := wails.NewDesktopHost(app, mainWindow, trayMenuWindow, startSilent, func() {
+	desktop := wails.NewDesktopHost(app, mainWindow, startSilent, func() {
 		if diagnosticsService != nil {
 			diagnosticsService.Shutdown()
 		}

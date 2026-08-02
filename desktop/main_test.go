@@ -31,20 +31,15 @@ func TestPrivilegeNormalizationPrecedesDesktopSideEffects(t *testing.T) {
 	}
 }
 
-func TestTrayMenuUsesAttachedToolWindow(t *testing.T) {
+func TestTrayUsesNativeMenuWithoutSecondWebView(t *testing.T) {
 	mainSource, err := os.ReadFile("main.go")
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, required := range []string{
-		"HideOnFocusLost:  true",
-		"DisableResize:    true",
-		"HiddenOnTaskbar:                   true",
-		"BackdropType:                      application.Acrylic",
-		"Theme:                             application.Light",
-	} {
-		if !strings.Contains(string(mainSource), required) {
-			t.Fatalf("tray menu window is missing %q", required)
+	mainText := string(mainSource)
+	for _, forbidden := range []string{"createTrayMenuWindow", "tray-menu.html", "Name:             \"tray-menu\""} {
+		if strings.Contains(mainText, forbidden) {
+			t.Fatalf("desktop entry point still creates a tray WebView: found %q", forbidden)
 		}
 	}
 
@@ -53,12 +48,19 @@ func TestTrayMenuUsesAttachedToolWindow(t *testing.T) {
 		t.Fatal(err)
 	}
 	host := string(hostSource)
-	if !strings.Contains(host, "d.tray.AttachWindow(d.trayMenuWindow).WindowOffset(8)") {
-		t.Fatal("tray menu is not attached to the Wails system tray")
+	for _, required := range []string{
+		"menu := d.app.Menu.New()",
+		"d.trayStatus = menu.Add",
+		"d.tray.OnClick",
+		"d.tray.SetMenu(menu)",
+	} {
+		if !strings.Contains(host, required) {
+			t.Fatalf("native tray menu is missing %q", required)
+		}
 	}
-	for _, forbidden := range []string{"screenWidth :=", "screenHeight :=", "time.Sleep(100 * time.Millisecond)"} {
+	for _, forbidden := range []string{"AttachWindow", "ToggleWindow", "trayMenuWindow", "trayMenuFactory"} {
 		if strings.Contains(host, forbidden) {
-			t.Fatalf("tray menu retained manual popup logic %q", forbidden)
+			t.Fatalf("tray host still uses a WebView popup: found %q", forbidden)
 		}
 	}
 }
