@@ -117,7 +117,7 @@ func TestReleasePublishesLegacyUpdaterCompatibleInstallerName(t *testing.T) {
 }
 
 func TestVersionMetadataIsConsistent(t *testing.T) {
-	const version = "2.5.1"
+	const version = "2.5.2"
 	files := []string{
 		"Taskfile.yml",
 		"build/config.yml",

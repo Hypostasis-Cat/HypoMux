@@ -317,8 +317,8 @@
 新版：
 
 - 安装程序仅在安装、升级、卸载 Core Service 时提升。
-- 不保留“WebView2 UI 长期管理员运行”的实现。
-- Wails Host 以 `asInvoker` 普通用户运行。
+- Wails Host 使用 `asInvoker`，默认以普通用户运行，并在 WebView2 初始化前主动纠正意外提升。
+- 自动降权不可用时进入管理员兼容模式，仅显示安全提醒，不按 UI 权限禁用系统代理或 TUN。
 - 正式版由 `HypoMuxCore` Windows Service 执行代理、DNS、TUN、路由、WFP 和恢复。
 - 开发版未安装服务时才使用按需 `runas` Core。
 - 权限请求直接使用 Windows 原生 UAC，不显示重复自定义确认。
