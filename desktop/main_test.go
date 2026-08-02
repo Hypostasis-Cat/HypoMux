@@ -31,6 +31,38 @@ func TestPrivilegeNormalizationPrecedesDesktopSideEffects(t *testing.T) {
 	}
 }
 
+func TestTrayMenuUsesAttachedToolWindow(t *testing.T) {
+	mainSource, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, required := range []string{
+		"HideOnFocusLost:  true",
+		"DisableResize:    true",
+		"HiddenOnTaskbar:                   true",
+		"BackdropType:                      application.Acrylic",
+		"Theme:                             application.Light",
+	} {
+		if !strings.Contains(string(mainSource), required) {
+			t.Fatalf("tray menu window is missing %q", required)
+		}
+	}
+
+	hostSource, err := os.ReadFile("internal/platform/wails/desktop.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	host := string(hostSource)
+	if !strings.Contains(host, "d.tray.AttachWindow(d.trayMenuWindow).WindowOffset(8)") {
+		t.Fatal("tray menu is not attached to the Wails system tray")
+	}
+	for _, forbidden := range []string{"screenWidth :=", "screenHeight :=", "time.Sleep(100 * time.Millisecond)"} {
+		if strings.Contains(host, forbidden) {
+			t.Fatalf("tray menu retained manual popup logic %q", forbidden)
+		}
+	}
+}
+
 func TestHasArgument(t *testing.T) {
 	if !hasArgument([]string{"--silent", "--recover-network"}, "--recover-network") {
 		t.Fatal("expected recovery argument to be found")

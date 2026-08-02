@@ -6,6 +6,7 @@ Desktop.ini
 **/.vs/
 .vscode/
 .idea/
+.claude/
 *.suo
 *.user
 *.userosscache

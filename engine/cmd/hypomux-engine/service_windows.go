@@ -373,18 +373,9 @@ func validateServicePipeClient(handle windows.Handle) error {
 			clientSession,
 		)
 	}
-	process, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, clientPID)
-	if err != nil {
-		return fmt.Errorf("open Core Service client process: %w", err)
-	}
-	defer windows.CloseHandle(process)
-	var token windows.Token
-	if err := windows.OpenProcessToken(process, windows.TOKEN_QUERY, &token); err != nil {
-		return fmt.Errorf("open Core Service client token: %w", err)
-	}
-	defer token.Close()
-	if token.IsElevated() {
-		return fmt.Errorf("reject elevated Core Service UI client (PID %d)", clientPID)
-	}
+	// The desktop normally connects with a standard token, but an explicitly
+	// elevated or legacy-scheduled UI is also a supported compatibility client.
+	// Integrity level is not an authentication boundary: the pipe ACL, local-only
+	// transport, concrete client PID and active console session remain enforced.
 	return nil
 }

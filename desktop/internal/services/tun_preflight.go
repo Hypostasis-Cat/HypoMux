@@ -147,12 +147,13 @@ func (s *TunService) checkSelected(selected []AdapterView) TunPreflightSnapshot 
 		))
 	}
 	if platform.HostElevated {
-		snapshot.Issues = append(snapshot.Issues, tunBlocker(
+		snapshot.Issues = append(snapshot.Issues, tunWarning(
 			"elevated_ui_host",
 			"桌面界面正在管理员权限下运行",
-			"WebView2 UI Host 不应长期持有管理员权限。请使用普通权限启动 HypoMux，由独立聚合核心按需承接高权限操作。",
+			"HypoMux 已进入管理员兼容模式，系统代理与 TUN 仍可使用。建议下次使用普通权限启动；高权限网络操作仍由独立聚合核心承接。",
 		))
-	} else if !platform.PrivilegeBrokerAvailable {
+	}
+	if !platform.PrivilegeBrokerAvailable {
 		snapshot.Issues = append(snapshot.Issues, tunBlocker(
 			"privilege_broker_unavailable",
 			"未连接高权限聚合核心",
