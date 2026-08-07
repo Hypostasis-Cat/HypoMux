@@ -33,6 +33,7 @@ type TunPreflightSnapshot struct {
 	EffectiveStrictRoute     bool                `json:"effective_strict_route"`
 	ForeignTUN               string              `json:"foreign_tun,omitempty"`
 	SharedGatewayRisks       []string            `json:"shared_gateway_risks"`
+	NetworkRisks             []string            `json:"network_risks"`
 	Issues                   []TunPreflightIssue `json:"issues"`
 }
 
@@ -43,6 +44,7 @@ type tunPlatformSnapshot struct {
 	WFPDetail                string
 	DefaultRouteAliases      []string
 	RouteScanError           string
+	NetworkRisks             []string
 }
 
 type TunService struct {
@@ -125,6 +127,7 @@ func (s *TunService) checkSelected(selected []AdapterView) TunPreflightSnapshot 
 		StrictRouteRequested:     settings.StrictRoute,
 		EffectiveStrictRoute:     settings.StrictRoute && platform.WFPReady,
 		SharedGatewayRisks:       sharedIPv4GatewayRisks(selected),
+		NetworkRisks:             append([]string(nil), platform.NetworkRisks...),
 		Issues:                   []TunPreflightIssue{},
 	}
 	for _, adapter := range selected {
@@ -181,6 +184,15 @@ func (s *TunService) checkSelected(selected []AdapterView) TunPreflightSnapshot 
 	if platform.RouteScanError != "" {
 		snapshot.Issues = append(snapshot.Issues, tunWarning(
 			"route_scan_failed", "未能完成默认路由检查", platform.RouteScanError,
+		))
+	}
+	for _, detail := range snapshot.NetworkRisks {
+		if strings.TrimSpace(detail) == "" {
+			continue
+		}
+		snapshot.Issues = append(snapshot.Issues, tunWarning(
+			"foreign_network_risk", "检测到第三方网络接管风险",
+			detail+"；HypoMux 仅提供只读诊断，不会修改第三方网络设置。",
 		))
 	}
 	if settings.StrictRoute && !platform.WFPReady {
@@ -270,6 +282,7 @@ func primaryGateway(value string) string {
 func cloneTunPreflight(value TunPreflightSnapshot) TunPreflightSnapshot {
 	value.SelectedAdapterIDs = append([]string(nil), value.SelectedAdapterIDs...)
 	value.SharedGatewayRisks = append([]string(nil), value.SharedGatewayRisks...)
+	value.NetworkRisks = append([]string(nil), value.NetworkRisks...)
 	value.Issues = append([]TunPreflightIssue(nil), value.Issues...)
 	return value
 }

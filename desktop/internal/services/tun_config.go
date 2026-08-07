@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -29,6 +30,13 @@ type dnsResolveResult struct {
 	Cached     bool   `json:"cached"`
 }
 
+type tunConfigOptions struct {
+	DNSPolicy     string
+	IPv6Available bool
+	ConfigName    string
+	ClashAPI      *clashAPIConfig
+}
+
 func writeSingBoxConfig(
 	endpoints map[string]string,
 	dnsAdapter AdapterView,
@@ -36,6 +44,24 @@ func writeSingBoxConfig(
 	rules []RoutingRule,
 	compatibility compatibilityPlan,
 	strictRoute bool,
+) (string, string, clashAPIConfig, error) {
+	return writeSingBoxConfigWithOptions(
+		endpoints, dnsAdapter, dnsResult, rules, compatibility, strictRoute,
+		tunConfigOptions{
+			DNSPolicy:     "auto",
+			IPv6Available: strings.TrimSpace(dnsAdapter.SourceIPv6) != "",
+		},
+	)
+}
+
+func writeSingBoxConfigWithOptions(
+	endpoints map[string]string,
+	dnsAdapter AdapterView,
+	dnsResult dnsResolveResult,
+	rules []RoutingRule,
+	compatibility compatibilityPlan,
+	strictRoute bool,
+	options tunConfigOptions,
 ) (string, string, clashAPIConfig, error) {
 	ethernetPort, err := loopbackPort(endpoints, "nic_ethernet")
 	if err != nil {
@@ -49,17 +75,28 @@ func writeSingBoxConfig(
 	if err != nil {
 		return "", "", clashAPIConfig{}, err
 	}
-	upstream, err := buildDNSUpstream(dnsAdapter, dnsResult)
-	if err != nil {
-		return "", "", clashAPIConfig{}, err
+	dnsPolicy := normalizeTunDNSPolicy(options.DNSPolicy)
+	var upstream map[string]any
+	if dnsPolicy == "system" {
+		upstream = map[string]any{"type": "local", "tag": "dns-local"}
+	} else {
+		upstream, err = buildDNSUpstreamForPolicy(dnsAdapter, dnsResult, dnsPolicy)
+		if err != nil {
+			return "", "", clashAPIConfig{}, err
+		}
 	}
 	singBox, err := resolveRuntimeAsset("sing-box.exe")
 	if err != nil {
 		return "", "", clashAPIConfig{}, err
 	}
-	clashAPI, err := reserveClashAPI()
-	if err != nil {
-		return "", "", clashAPIConfig{}, err
+	clashAPI := clashAPIConfig{}
+	if options.ClashAPI != nil {
+		clashAPI = *options.ClashAPI
+	} else {
+		clashAPI, err = reserveClashAPI()
+		if err != nil {
+			return "", "", clashAPIConfig{}, err
+		}
 	}
 	processPaths := []string{}
 	for _, candidate := range []string{os.Args[0], engineExecutableOrEmpty(), singBox} {
@@ -89,11 +126,13 @@ func writeSingBoxConfig(
 			"process_name": compatibility.ProcessNames, "outbound": "system-direct",
 		})
 	}
-	routeRules = append(routeRules,
-		map[string]any{"port": []int{53}, "action": "hijack-dns"},
-		map[string]any{"protocol": []string{"dns"}, "action": "hijack-dns"},
-		map[string]any{"action": "resolve", "server": "dns-local", "strategy": "prefer_ipv4"},
-	)
+	if dnsPolicy != "system" {
+		routeRules = append(routeRules,
+			map[string]any{"port": []int{53}, "action": "hijack-dns"},
+			map[string]any{"protocol": []string{"dns"}, "action": "hijack-dns"},
+			map[string]any{"action": "resolve", "server": "dns-local", "strategy": "prefer_ipv4"},
+		)
+	}
 	for _, rule := range rules {
 		entry := map[string]any{"outbound": rule.Outbound}
 		switch rule.MatchType {
@@ -132,24 +171,40 @@ func writeSingBoxConfig(
 		_ = endpoint
 		outbounds = append(outbounds, socksOutbound(name, port))
 	}
-	config := map[string]any{
-		"log": map[string]any{"level": "warn", "timestamp": true},
-		"dns": map[string]any{
-			"servers": []any{
-				upstream,
-				map[string]any{
-					"type": "fakeip", "tag": "dns-fakeip",
-					"inet4_range": "198.18.0.0/15", "inet6_range": "fc00::/18",
-				},
+	usesFakeIP := tunDNSNeedsFakeIP(dnsPolicy, rules)
+	dnsServers := []any{upstream}
+	dnsConfig := map[string]any{
+		"servers": dnsServers,
+		"final":   "dns-local",
+	}
+	if usesFakeIP {
+		dnsConfig["servers"] = append(dnsServers,
+			map[string]any{
+				"type": "fakeip", "tag": "dns-fakeip",
+				"inet4_range": "198.18.0.0/15", "inet6_range": "fc00::/18",
 			},
-			"rules": []any{map[string]any{"query_type": []string{"A", "AAAA"}, "server": "dns-fakeip"}},
-			"final": "dns-local", "reverse_mapping": true,
-		},
-		"inbounds": []any{map[string]any{
-			"type": "tun", "tag": "tun-in", "interface_name": "HypoMux-Tun",
-			"address": []string{"172.19.0.1/30", "fdfe:dcba:9876::1/126"},
-			"mtu":     1492, "auto_route": true, "strict_route": strictRoute, "stack": "system",
-		}},
+		)
+		dnsConfig["rules"] = []any{
+			map[string]any{"query_type": []string{"A", "AAAA"}, "server": "dns-fakeip"},
+		}
+		dnsConfig["reverse_mapping"] = true
+	}
+	address := []string{"172.19.0.1/30"}
+	if options.IPv6Available {
+		address = append(address, "fdfe:dcba:9876::1/126")
+	}
+	tunInbound := map[string]any{
+		"type": "tun", "tag": "tun-in", "interface_name": "HypoMux-Tun",
+		"address": address,
+		"mtu":     1492, "auto_route": true, "strict_route": strictRoute, "stack": "system",
+	}
+	if exclusions := dnsBootstrapRouteExclusions(dnsResult); len(exclusions) > 0 && dnsPolicy != "system" {
+		tunInbound["route_exclude_address"] = exclusions
+	}
+	config := map[string]any{
+		"log":       map[string]any{"level": "warn", "timestamp": true},
+		"dns":       dnsConfig,
+		"inbounds":  []any{tunInbound},
 		"outbounds": outbounds,
 		"route": map[string]any{
 			"auto_detect_interface": true, "default_domain_resolver": "dns-local",
@@ -171,6 +226,9 @@ func writeSingBoxConfig(
 		return "", "", clashAPIConfig{}, fmt.Errorf("创建 TUN 运行目录失败：%w", err)
 	}
 	path := filepath.Join(directory, "sing-box.json")
+	if configName := strings.TrimSpace(options.ConfigName); configName != "" {
+		path = filepath.Join(directory, filepath.Base(configName))
+	}
 	temporary := path + ".tmp"
 	if err := os.WriteFile(temporary, data, 0o600); err != nil {
 		return "", "", clashAPIConfig{}, fmt.Errorf("写入 TUN 配置失败：%w", err)
@@ -222,31 +280,145 @@ func loopbackPort(endpoints map[string]string, name string) (int, error) {
 	return port, nil
 }
 
+func normalizeTunDNSPolicy(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" {
+		return "auto"
+	}
+	return value
+}
+
+func buildDNSUpstreamForPolicy(
+	adapter AdapterView,
+	result dnsResolveResult,
+	policy string,
+) (map[string]any, error) {
+	policy = normalizeTunDNSPolicy(policy)
+	transport := strings.ToLower(strings.TrimSpace(result.Transport))
+	if policy == "off" && (transport == "doh" || transport == "dot") {
+		return nil, fmt.Errorf("DNS 策略 off 不允许使用加密上游：%s", result.Server)
+	}
+	return buildDNSUpstream(adapter, result)
+}
+
 func buildDNSUpstream(adapter AdapterView, result dnsResolveResult) (map[string]any, error) {
-	if strings.EqualFold(result.Transport, "doh") {
-		parts := strings.SplitN(result.Server, "@", 2)
-		if len(parts) != 2 || parts[0] == "" {
+	transport := strings.ToLower(strings.TrimSpace(result.Transport))
+	server := strings.TrimSpace(result.Server)
+	serverName := ""
+	if parts := strings.SplitN(server, "@", 2); len(parts) == 2 {
+		serverName = strings.TrimSpace(parts[0])
+		server = strings.TrimSpace(parts[1])
+	}
+	defaultPort := 53
+	upstreamType := transport
+	switch transport {
+	case "doh":
+		if serverName == "" {
 			return nil, fmt.Errorf("聚合核心返回了无效的 DoH 端点：%s", result.Server)
 		}
-		host, port, err := splitEndpoint(parts[1], 443)
-		if err != nil {
-			return nil, err
-		}
-		return map[string]any{
-			"type": "https", "tag": "dns-local", "server": host, "server_port": port,
-			"path":           "/dns-query",
-			"tls":            map[string]any{"enabled": true, "server_name": parts[0]},
-			"bind_interface": adapter.Name, "inet4_bind_address": adapter.Address,
-		}, nil
+		defaultPort = 443
+		upstreamType = "https"
+	case "dot":
+		defaultPort = 853
+		upstreamType = "tls"
+	case "udp", "tcp":
+	default:
+		return nil, fmt.Errorf("聚合核心返回了不支持的 DNS 传输：%s", result.Transport)
 	}
-	host, port, err := splitEndpoint(result.Server, 53)
+	host, port, err := splitEndpoint(server, defaultPort)
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{
-		"type": "udp", "tag": "dns-local", "server": host, "server_port": port,
-		"bind_interface": adapter.Name, "inet4_bind_address": adapter.Address,
-	}, nil
+	upstream := map[string]any{
+		"type": upstreamType, "tag": "dns-local", "server": host, "server_port": port,
+	}
+	if transport == "doh" {
+		upstream["path"] = "/dns-query"
+	}
+	if transport == "doh" || transport == "dot" {
+		if serverName == "" {
+			serverName = host
+		}
+		upstream["tls"] = map[string]any{"enabled": true, "server_name": serverName}
+	}
+	if strings.TrimSpace(adapter.Name) != "" {
+		upstream["bind_interface"] = adapter.Name
+	}
+	if strings.TrimSpace(adapter.Address) != "" {
+		upstream["inet4_bind_address"] = adapter.Address
+	}
+	return upstream, nil
+}
+
+func tunDNSNeedsFakeIP(policy string, rules []RoutingRule) bool {
+	if policy != "off" && policy != "system" {
+		return true
+	}
+	for _, rule := range rules {
+		if rule.MatchType == MatchDomain {
+			return true
+		}
+	}
+	return false
+}
+
+func dnsBootstrapRouteExclusions(result dnsResolveResult) []string {
+	seen := map[string]struct{}{}
+	for _, value := range literalIPsInEndpoint(result.Server) {
+		ip := net.ParseIP(value)
+		if ip == nil {
+			continue
+		}
+		prefix := 128
+		if ipv4 := ip.To4(); ipv4 != nil {
+			ip = ipv4
+			prefix = 32
+		}
+		seen[ip.String()+"/"+strconv.Itoa(prefix)] = struct{}{}
+	}
+	resulting := make([]string, 0, len(seen))
+	for value := range seen {
+		resulting = append(resulting, value)
+	}
+	sort.Strings(resulting)
+	return resulting
+}
+
+func literalIPsInEndpoint(value string) []string {
+	seen := map[string]struct{}{}
+	add := func(candidate string) {
+		candidate = strings.TrimSpace(strings.Trim(candidate, "[]"))
+		if ip := net.ParseIP(candidate); ip != nil {
+			if ipv4 := ip.To4(); ipv4 != nil {
+				candidate = ipv4.String()
+			} else {
+				candidate = ip.String()
+			}
+			seen[candidate] = struct{}{}
+		}
+	}
+	for _, part := range strings.Split(value, "@") {
+		part = strings.TrimSpace(part)
+		if host, _, err := net.SplitHostPort(part); err == nil {
+			add(host)
+		}
+		if strings.HasPrefix(part, "[") {
+			if end := strings.IndexByte(part, ']'); end > 1 {
+				add(part[1:end])
+			}
+		}
+		for _, candidate := range strings.FieldsFunc(part, func(r rune) bool {
+			return r == '/' || r == '?' || r == '#'
+		}) {
+			add(candidate)
+		}
+	}
+	resulting := make([]string, 0, len(seen))
+	for candidate := range seen {
+		resulting = append(resulting, candidate)
+	}
+	sort.Strings(resulting)
+	return resulting
 }
 
 func splitEndpoint(value string, defaultPort int) (string, int, error) {

@@ -25,6 +25,9 @@ func inspectTunPlatform(checkWFP bool) tunPlatformSnapshot {
 		snapshot.WFPDetail = "严格路由已由用户关闭；未执行 WFP 探测"
 	}
 	snapshot.DefaultRouteAliases, snapshot.RouteScanError = foreignDefaultRouteAliases()
+	snapshot.NetworkRisks, snapshot.RouteScanError = appendForeignNetworkRisks(
+		snapshot.NetworkRisks, snapshot.RouteScanError,
+	)
 	return snapshot
 }
 
@@ -54,6 +57,8 @@ func probeWFPEngine() (bool, string) {
 
 func foreignDefaultRouteAliases() ([]string, string) {
 	const script = `
+$ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
 $pattern = 'meta|clash|mihomo|tun|wintun|wireguard|tailscale|vpn|tap'
 $items = @(Get-NetRoute -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' -ErrorAction Stop |
   Where-Object { $_.InterfaceAlias -match $pattern } |
@@ -88,4 +93,82 @@ ConvertTo-Json -InputObject @($items) -Compress
 		result = append(result, value)
 	}
 	return result, ""
+}
+
+func appendForeignNetworkRisks(risks []string, existingError string) ([]string, string) {
+	const script = `
+$ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
+$pattern = '(?i)(tun|tap|wintun|wireguard|tailscale|vpn|virtual|vgate)'
+$risks = @()
+$adapters = @(Get-NetAdapter -ErrorAction Stop)
+foreach ($adapter in $adapters) {
+  if ($adapter.Status -eq 'Up' -and $adapter.Name -ne 'HypoMux-Tun' -and
+      ($adapter.Name -match $pattern -or $adapter.InterfaceDescription -match $pattern)) {
+    $risks += ('active foreign virtual adapter: ' + $adapter.Name + ' [' + $adapter.InterfaceDescription + ']')
+  }
+}
+$routes = @(Get-NetRoute -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' -ErrorAction Stop)
+if ($routes.Count -gt 1) {
+  $aliases = @($routes | ForEach-Object { $_.InterfaceAlias + ' metric=' + $_.RouteMetric })
+  $risks += ('multiple IPv4 default routes: ' + ($aliases -join ', '))
+}
+foreach ($route in $routes) {
+  if ($route.InterfaceAlias -ne 'HypoMux-Tun' -and [int]$route.RouteMetric -le 5) {
+    $risks += ('low-metric IPv4 default route: ' + $route.InterfaceAlias + ' metric=' + $route.RouteMetric)
+  }
+}
+$forwarding = @(Get-NetIPInterface -AddressFamily IPv4 -ErrorAction Stop |
+  Where-Object { $_.Forwarding -eq 'Enabled' -and $_.InterfaceAlias -ne 'HypoMux-Tun' })
+foreach ($item in $forwarding) {
+  $risks += ('IPv4 forwarding enabled: ' + $item.InterfaceAlias)
+}
+$ics = Get-Service -Name SharedAccess -ErrorAction SilentlyContinue
+if ($null -ne $ics -and $ics.Status -eq 'Running') {
+  $risks += 'Internet Connection Sharing service is running'
+}
+ConvertTo-Json -InputObject @{ risks = @($risks) } -Compress
+`
+	command := exec.Command(
+		"powershell.exe", "-NoProfile", "-NonInteractive",
+		"-ExecutionPolicy", "Bypass", "-Command", script,
+	)
+	command.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	output, err := command.Output()
+	if err != nil {
+		if existingError == "" {
+			existingError = fmt.Sprintf("网络接管风险检查失败：%v", err)
+		} else {
+			existingError += fmt.Sprintf("；网络接管风险检查失败：%v", err)
+		}
+		return risks, existingError
+	}
+	var payload struct {
+		Risks []string `json:"risks"`
+	}
+	if err := json.Unmarshal(output, &payload); err != nil {
+		if existingError == "" {
+			existingError = fmt.Sprintf("网络接管风险检查结果无效：%v", err)
+		} else {
+			existingError += fmt.Sprintf("；网络接管风险检查结果无效：%v", err)
+		}
+		return risks, existingError
+	}
+	seen := make(map[string]struct{}, len(risks)+len(payload.Risks))
+	for _, value := range risks {
+		seen[strings.ToLower(strings.TrimSpace(value))] = struct{}{}
+	}
+	for _, value := range payload.Risks {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		key := strings.ToLower(value)
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		risks = append(risks, value)
+	}
+	return risks, existingError
 }

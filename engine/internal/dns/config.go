@@ -8,8 +8,12 @@ import (
 )
 
 const (
-	PolicyAuto   = "auto"
-	PolicyOff    = "off"
+	PolicyAuto = "auto"
+	PolicyOff  = "off"
+	// PolicySystem is the explicit native-DNS/no-DoH mode. The TUN sidecar maps
+	// it to sing-box's local resolver; the Go engine keeps its source-bound
+	// traditional DNS path and never enables DoH for this policy.
+	PolicySystem = "system"
 	PolicyAliDNS = "alidns"
 	PolicyDNSPod = "dnspod"
 	PolicyGoogle = "google"
@@ -75,7 +79,7 @@ func NormalizeConfig(config Config) (Config, error) {
 		config.Policy = PolicyAuto
 	}
 	switch config.Policy {
-	case PolicyAuto, PolicyOff, PolicyAliDNS, PolicyDNSPod, PolicyGoogle:
+	case PolicyAuto, PolicyOff, PolicySystem, PolicyAliDNS, PolicyDNSPod, PolicyGoogle:
 	default:
 		return Config{}, fmt.Errorf("unsupported DNS policy %q", config.Policy)
 	}

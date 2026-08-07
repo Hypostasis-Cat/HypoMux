@@ -7,5 +7,3 @@ func WebView2Available() bool {
 }
 
 func ShowWebView2MissingMessage() {}
-
-func ShowElevationCompatibilityMessage(bool, string) {}

@@ -49,24 +49,3 @@ func ShowWebView2MissingMessage() {
 		0x00000010,
 	)
 }
-
-func ShowElevationCompatibilityMessage(proxyCompatible bool, detail string) {
-	title, _ := windows.UTF16PtrFromString("HypoMux - 管理员兼容模式")
-	messageText := "HypoMux 无法自动切换到普通权限。\n\n"
-	if proxyCompatible {
-		messageText += "本次将以兼容模式继续：系统代理和 TUN 模式均可使用，高权限网络操作仍由独立聚合核心承接。建议下次使用普通权限启动 HypoMux。"
-	} else {
-		messageText += "无法确认当前管理员身份与桌面用户一致。TUN 仍可通过独立聚合核心使用；为避免修改错误账户，系统代理会继续执行账户身份保护。"
-	}
-	if detail != "" {
-		messageText += "\n\n诊断信息：" + detail
-	}
-	message, _ := windows.UTF16PtrFromString(messageText)
-	messageBox := windows.NewLazySystemDLL("user32.dll").NewProc("MessageBoxW")
-	_, _, _ = messageBox.Call(
-		0,
-		uintptr(unsafe.Pointer(message)),
-		uintptr(unsafe.Pointer(title)),
-		0x00000030,
-	)
-}

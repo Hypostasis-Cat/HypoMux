@@ -530,10 +530,29 @@ func (s *Server) activateTun(
 		s.dnsExemption = exemption
 	}
 	status, err := s.tun.Activate(ctx, params.Config())
+	ipv4OnlyFallback := false
+	if err != nil && strings.TrimSpace(params.IPv4FallbackConfigPath) != "" && isIPv6AddressSetupError(err) {
+		// The first activation can have created a partial Wintun/TUN state.
+		// Stop it completely before asking sing-box to try the IPv4-only file.
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), 20*time.Second)
+		_, cleanupErr := s.tun.Stop(stopCtx)
+		stopCancel()
+		if cleanupErr == nil {
+			status, err = s.tun.Activate(ctx, params.IPv4FallbackConfig())
+			if err == nil {
+				ipv4OnlyFallback = true
+			} else {
+				err = errors.Join(errors.New("IPv4-only TUN retry failed"), err)
+			}
+		} else {
+			err = errors.Join(errors.New("IPv4-only TUN retry cleanup failed"), cleanupErr)
+		}
+	}
 	if err == nil {
 		return protocol.Result(request.ID, api.TunLifecycleResult{
-			Accepted: true,
-			Tun:      status,
+			Accepted:         true,
+			IPv4OnlyFallback: ipv4OnlyFallback,
+			Tun:              status,
 		})
 	}
 
@@ -562,6 +581,15 @@ func (s *Server) activateTun(
 			"message": errors.Join(err, tunStopErr, wfpErr, proxyStopErr).Error(),
 		},
 	)
+}
+
+func isIPv6AddressSetupError(err error) bool {
+	if err == nil {
+		return false
+	}
+	value := strings.ToLower(err.Error())
+	return strings.Contains(value, "set ipv6 address") ||
+		(strings.Contains(value, "ipv6") && strings.Contains(value, "element not found"))
 }
 
 func (s *Server) deactivateTun(

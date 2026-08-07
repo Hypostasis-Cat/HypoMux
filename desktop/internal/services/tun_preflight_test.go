@@ -140,6 +140,27 @@ func TestTunPreflightReportsMissingResources(t *testing.T) {
 	}
 }
 
+func TestTunPreflightReportsReadOnlyForeignNetworkRisks(t *testing.T) {
+	service := testTunService(t, tunPlatformSnapshot{
+		PrivilegeBrokerAvailable: true,
+		WFPReady:                 true,
+		NetworkRisks: []string{
+			"active foreign virtual adapter: vgate0",
+			"multiple IPv4 default routes: Ethernet metric=25, vgate0 metric=1",
+		},
+	})
+	snapshot, err := service.Preflight([]string{"ethernet"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.NetworkRisks) != 2 || !hasTunIssue(snapshot, "foreign_network_risk") {
+		t.Fatalf("read-only network risk evidence missing: %+v", snapshot)
+	}
+	if snapshot.Ready == false {
+		t.Fatalf("network risks should warn without blocking: %+v", snapshot)
+	}
+}
+
 func hasTunIssue(snapshot TunPreflightSnapshot, code string) bool {
 	for _, issue := range snapshot.Issues {
 		if issue.Code == code {

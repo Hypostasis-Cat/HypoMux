@@ -41,8 +41,9 @@ type tunStatus struct {
 }
 
 type tunLifecycleResult struct {
-	Accepted bool      `json:"accepted"`
-	Tun      tunStatus `json:"tun"`
+	Accepted         bool      `json:"accepted"`
+	IPv4OnlyFallback bool      `json:"ipv4_only_fallback"`
+	Tun              tunStatus `json:"tun"`
 }
 
 type adapterTelemetry struct {
@@ -136,30 +137,32 @@ type telemetrySample struct {
 }
 
 type EngineService struct {
-	mu                  sync.Mutex
-	lifecycleGate       chan struct{}
-	transitionPhase     string
-	client              *engineclient.Client
-	settings            *SettingsService
-	adapters            *AdapterService
-	logs                *SupportLogStore
-	tun                 *TunService
-	last                telemetrySample
-	lastTUNHealthCheck  time.Time
-	tunHealthFailures   int
-	watchdogStopping    bool
-	blockedDomains      *BlockedDomainService
-	dnsFallbackApplied  bool
-	wfpFallbackApplied  bool
-	compatRestarting    bool
-	compatibilityNotice string
-	proxyRecoveryNotice string
-	proxyRecoveryError  string
-	hostElevated        bool
-	elevatedProxySafe   bool
-	hostPrivilegeDetail string
-	clashAPI            clashAPIConfig
-	closing             bool
+	mu                     sync.Mutex
+	lifecycleGate          chan struct{}
+	transitionPhase        string
+	client                 *engineclient.Client
+	settings               *SettingsService
+	adapters               *AdapterService
+	logs                   *SupportLogStore
+	tun                    *TunService
+	last                   telemetrySample
+	lastTUNHealthCheck     time.Time
+	tunHealthFailures      int
+	watchdogStopping       bool
+	blockedDomains         *BlockedDomainService
+	dnsFallbackApplied     bool
+	wfpFallbackApplied     bool
+	compatRestarting       bool
+	compatibilityNotice    string
+	proxyRecoveryNotice    string
+	proxyRecoveryError     string
+	hostElevated           bool
+	elevatedProxySafe      bool
+	hostPrivilegeDetail    string
+	clashAPI               clashAPIConfig
+	tunAggregationEndpoint string
+	tunDNSBootstrap        dnsResolveResult
+	closing                bool
 }
 
 type dnsFallbackEvent struct {
@@ -445,7 +448,25 @@ func (s *EngineService) Snapshot() (EngineSnapshot, error) {
 	s.mu.Unlock()
 	if shouldCheckTUN {
 		probeContext, cancel := context.WithTimeout(context.Background(), 12*time.Second)
-		_, tunErr := probeTUNConnectivity(probeContext)
+		s.mu.Lock()
+		aggregationEndpoint := s.tunAggregationEndpoint
+		dnsBootstrap := s.tunDNSBootstrap
+		s.mu.Unlock()
+		var tunReport tunConnectivityReport
+		var tunErr error
+		if aggregationEndpoint != "" {
+			tunReport, tunErr = probeTUNConnectivityThroughChannels(probeContext, aggregationEndpoint, dnsBootstrap)
+		} else {
+			tunErr = errors.New("aggregation channel endpoint is unavailable")
+			tunReport = tunConnectivityReport{Checks: []tunConnectivityCheck{{
+				Stage: "aggregation_data", Endpoint: "aggregation-channel", Outbound: "aggregation", Error: tunErr.Error(),
+			}}}
+		}
+		if s.logs != nil && len(tunReport.Checks) > 0 {
+			s.logs.RecordEvent("tun_connectivity", "watchdog_check", map[string]any{
+				"checks": tunReport.Checks, "error": errorText(tunErr),
+			})
+		}
 		cancel()
 		physicalOK := false
 		if tunErr != nil {
@@ -662,6 +683,7 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 				"effective_strict_route":     preflight.EffectiveStrictRoute,
 				"foreign_tun":                preflight.ForeignTUN,
 				"shared_gateway_risks":       preflight.SharedGatewayRisks,
+				"network_risks":              preflight.NetworkRisks,
 				"issues":                     preflight.Issues,
 			})
 			s.logs.RecordEvent("tun_compatibility", "resolved", map[string]any{
@@ -752,6 +774,8 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 		}
 		s.mu.Lock()
 		s.clashAPI = clashAPIConfig{}
+		s.tunAggregationEndpoint = ""
+		s.tunDNSBootstrap = dnsResolveResult{}
 		s.mu.Unlock()
 		return EngineSnapshot{}, cause
 	}
@@ -768,17 +792,50 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 			return rollback(fmt.Errorf("TUN 启动前 DNS 验证失败：%w", err))
 		}
 		s.recordStartStage("dns_validated", nil)
-		singBox, configPath, clashAPI, configErr := writeSingBoxConfig(
-			started.Endpoints.Channels, selected[0], dnsResult, routingRules, compatibility, effectiveStrictRoute,
+		configOptions := tunConfigOptions{
+			DNSPolicy:     effectiveDNSPolicy,
+			IPv6Available: selectedAdaptersHaveIPv6(selected),
+			ConfigName:    "sing-box.json",
+		}
+		singBox, configPath, clashAPI, configErr := writeSingBoxConfigWithOptions(
+			started.Endpoints.Channels, selected[0], dnsResult, routingRules, compatibility,
+			effectiveStrictRoute, configOptions,
 		)
 		if configErr != nil {
 			return rollback(configErr)
 		}
+		ipv4FallbackPath := ""
+		if configOptions.IPv6Available {
+			fallbackOptions := configOptions
+			fallbackOptions.IPv6Available = false
+			fallbackOptions.ConfigName = "sing-box-ipv4.json"
+			fallbackOptions.ClashAPI = &clashAPI
+			_, ipv4FallbackPath, _, configErr = writeSingBoxConfigWithOptions(
+				started.Endpoints.Channels, selected[0], dnsResult, routingRules, compatibility,
+				effectiveStrictRoute, fallbackOptions,
+			)
+			if configErr != nil {
+				return rollback(configErr)
+			}
+		}
+		if s.logs != nil {
+			s.logs.RecordEvent("tun_dns", "upstream_selected", map[string]any{
+				"policy":             effectiveDNSPolicy,
+				"transport":          dnsResult.Transport,
+				"server":             dnsResult.Server,
+				"route_exclusions":   dnsBootstrapRouteExclusions(dnsResult),
+				"ipv6_available":     configOptions.IPv6Available,
+				"ipv4_fallback_file": ipv4FallbackPath,
+			})
+		}
 		var activated tunLifecycleResult
 		s.recordStartStage("tun_activating", nil)
 		if err := s.client.Request(ctx, "tun.activate", map[string]any{
-			"executable": singBox, "config_path": configPath, "startup_timeout_ms": 1500,
-			"strict_route": effectiveStrictRoute,
+			"executable":                singBox,
+			"config_path":               configPath,
+			"ipv4_fallback_config_path": ipv4FallbackPath,
+			"startup_timeout_ms":        1500,
+			"strict_route":              effectiveStrictRoute,
 		}, &activated); err != nil {
 			if !hello.Elevated {
 				return rollback(fmt.Errorf("TUN 需要管理员权限的独立聚合核心：%w", err))
@@ -786,19 +843,34 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 			return rollback(fmt.Errorf("启动 TUN 侧车失败：%w", err))
 		}
 		s.recordStartStage("tun_activated", nil)
+		if activated.IPv4OnlyFallback && s.logs != nil {
+			s.logs.RecordEvent("tun_compatibility", "ipv4_only_fallback", map[string]any{
+				"reason": "sing-box could not configure the IPv6 TUN address",
+			})
+		}
 		if activated.Tun.State != "running" {
 			return rollback(fmt.Errorf("TUN 未进入稳定运行状态：%s", activated.Tun.LastError))
 		}
 		s.mu.Lock()
 		s.clashAPI = clashAPI
+		s.tunAggregationEndpoint = started.Endpoints.Channels["aggregation"]
+		s.tunDNSBootstrap = dnsResult
 		s.mu.Unlock()
 		if effectiveStrictRoute {
 			_ = s.settings.ClearWFPCompatibilityFailure()
 		}
 		if !settings.ForceTUNBypass {
 			s.recordStartStage("connectivity_validating", nil)
-			detail, validationErr := probeTUNConnectivity(ctx)
+			validationReport, validationErr := probeTUNConnectivityThroughChannels(
+				ctx, started.Endpoints.Channels["aggregation"], dnsResult,
+			)
 			if validationErr != nil {
+				if s.logs != nil {
+					s.logs.RecordEvent("tun_connectivity", "startup_failed", map[string]any{
+						"checks": validationReport.Checks,
+						"error":  validationErr.Error(),
+					})
+				}
 				return rollback(fmt.Errorf(
 					"虚拟网卡联网验证失败，已自动停止并恢复网络设置：%w",
 					validationErr,
@@ -806,7 +878,8 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 			}
 			if s.logs != nil {
 				s.logs.RecordEvent("tun_connectivity", "startup_validated", map[string]any{
-					"detail": detail,
+					"checks": validationReport.Checks,
+					"detail": validationReport.summary(),
 				})
 			}
 			s.recordStartStage("connectivity_validated", nil)
@@ -904,6 +977,8 @@ func (s *EngineService) Stop() (EngineSnapshot, error) {
 	s.mu.Lock()
 	s.last = telemetrySample{}
 	s.clashAPI = clashAPIConfig{}
+	s.tunAggregationEndpoint = ""
+	s.tunDNSBootstrap = dnsResolveResult{}
 	if !s.compatRestarting {
 		s.dnsFallbackApplied = false
 		s.wfpFallbackApplied = false
@@ -957,6 +1032,15 @@ func engineAdapters(adapters []AdapterView) []map[string]any {
 		})
 	}
 	return result
+}
+
+func selectedAdaptersHaveIPv6(adapters []AdapterView) bool {
+	for _, adapter := range adapters {
+		if strings.TrimSpace(adapter.SourceIPv6) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func engineChannels(adapters []AdapterView) []map[string]any {

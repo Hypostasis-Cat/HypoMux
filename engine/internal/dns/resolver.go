@@ -249,7 +249,7 @@ func (r *Resolver) resolveUncached(
 	binding Binding,
 ) (Result, time.Duration, error) {
 	_, wireType, _ := normalizeRecordType(recordType)
-	if r.config.Policy != PolicyOff {
+	if r.config.Policy != PolicyOff && r.config.Policy != PolicySystem {
 		result, ttl, err := r.resolveDoH(ctx, domain, wireType, binding)
 		if err == nil {
 			r.recordDoHSuccess(binding)

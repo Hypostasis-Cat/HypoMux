@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	api "github.com/Hypostasis-Cat/HypoMux/engine/internal/api/v1"
 	"github.com/Hypostasis-Cat/HypoMux/engine/internal/protocol"
 	engineRuntime "github.com/Hypostasis-Cat/HypoMux/engine/internal/runtime"
 	"github.com/Hypostasis-Cat/HypoMux/engine/internal/tun"
@@ -107,29 +108,57 @@ func TestServerHandshakeStatusAndShutdown(t *testing.T) {
 	}
 }
 
+func TestIPv6AddressSetupErrorClassifierDoesNotTreatTimeoutAsWFP(t *testing.T) {
+	for _, message := range []string{
+		"set ipv6 address: Element not found",
+		"sing-box: ipv6 interface address element not found",
+	} {
+		if !isIPv6AddressSetupError(errors.New(message)) {
+			t.Fatalf("expected IPv6 setup error: %q", message)
+		}
+	}
+	for _, message := range []string{
+		"ordinary upstream timeout",
+		"set ipv4 address: Element not found",
+		"WFP strict route filter rejected",
+	} {
+		if isIPv6AddressSetupError(errors.New(message)) {
+			t.Fatalf("unexpected IPv6 setup classification: %q", message)
+		}
+	}
+}
+
 type fakeTunController struct {
-	mu           sync.Mutex
-	status       tun.Status
-	activateErr  error
-	stopErr      error
-	stopCalls    int
-	onStop       func()
-	onLog        func(string)
-	onUnexpected func(tun.Status)
+	mu              sync.Mutex
+	status          tun.Status
+	activateErr     error
+	activateErrs    []error
+	activateConfigs []tun.Config
+	stopErr         error
+	stopCalls       int
+	onStop          func()
+	onLog           func(string)
+	onUnexpected    func(tun.Status)
 }
 
 func (f *fakeTunController) Activate(
-	context.Context,
-	tun.Config,
+	_ context.Context,
+	config tun.Config,
 ) (tun.Status, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if f.activateErr != nil {
+	f.activateConfigs = append(f.activateConfigs, config)
+	activateErr := f.activateErr
+	if len(f.activateErrs) > 0 {
+		activateErr = f.activateErrs[0]
+		f.activateErrs = f.activateErrs[1:]
+	}
+	if activateErr != nil {
 		f.status = tun.Status{
 			State:     tun.StateFailed,
-			LastError: f.activateErr.Error(),
+			LastError: activateErr.Error(),
 		}
-		return f.status, f.activateErr
+		return f.status, activateErr
 	}
 	now := time.Now().UTC()
 	f.status = tun.Status{
@@ -260,6 +289,51 @@ func TestManagedTunActivationFailureRollsBackPreparedPool(t *testing.T) {
 		)
 	}
 	_ = engineServer.stopProxy("clear-failed")
+}
+
+func TestTunActivateRetriesWithIPv4OnlyConfigAfterIPv6SetupFailure(t *testing.T) {
+	engineServer := New(
+		strings.NewReader(""),
+		&bytes.Buffer{},
+		Metadata{Name: "test"},
+	)
+	controller := &fakeTunController{
+		status:       tun.Status{State: tun.StateStopped},
+		activateErrs: []error{errors.New("set ipv6 address: Element not found"), nil},
+	}
+	engineServer.tun = controller
+	startTUNPoolForLifecycleTest(t, engineServer)
+
+	response, _ := engineServer.handle(
+		context.Background(),
+		[]byte(`{
+			"protocol":1,
+			"id":"tun-activate",
+			"method":"tun.activate",
+			"params":{
+				"executable":"C:\\HypoMux\\bin\\sing-box.exe",
+				"config_path":"C:\\Users\\Example\\singbox-dual-stack.json",
+				"ipv4_fallback_config_path":"C:\\Users\\Example\\singbox-ipv4.json",
+				"startup_timeout_ms":1500
+			}
+		}`),
+	)
+	if response.Error != nil {
+		t.Fatalf("IPv4-only fallback failed: %#v", response.Error)
+	}
+	result, ok := response.Result.(api.TunLifecycleResult)
+	if !ok || !result.IPv4OnlyFallback || result.Tun.State != tun.StateRunning {
+		t.Fatalf("fallback result = %#v", response.Result)
+	}
+	if len(controller.activateConfigs) != 2 ||
+		controller.activateConfigs[0].ConfigPath != `C:\Users\Example\singbox-dual-stack.json` ||
+		controller.activateConfigs[1].ConfigPath != `C:\Users\Example\singbox-ipv4.json` {
+		t.Fatalf("activation configs = %#v", controller.activateConfigs)
+	}
+	if controller.stopCalls != 1 {
+		t.Fatalf("IPv4-only retry did not clean the failed attempt: stopCalls=%d", controller.stopCalls)
+	}
+	_ = engineServer.stopProxy("clear-fallback")
 }
 
 func TestUnexpectedManagedTunExitStopsPoolAndFailsEngine(t *testing.T) {

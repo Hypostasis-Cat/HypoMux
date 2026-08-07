@@ -154,6 +154,48 @@ func TestAutoPolicyFallsBackOnlyToBoundTraditionalDNS(t *testing.T) {
 	}
 }
 
+func TestSystemPolicyUsesTraditionalDNSWithoutDoH(t *testing.T) {
+	var dohDials atomic.Int64
+	var legacyDials atomic.Int64
+	dial := func(
+		ctx context.Context,
+		network string,
+		address string,
+		binding Binding,
+	) (net.Conn, error) {
+		if strings.HasSuffix(address, ":443") {
+			dohDials.Add(1)
+			return nil, errors.New("system policy must not use DoH")
+		}
+		legacyDials.Add(1)
+		return answeringConnection(t, "192.0.2.47", 30, 0, network), nil
+	}
+	resolver, err := New(context.Background(), Config{
+		Policy:        PolicySystem,
+		LegacyServers: []string{"192.0.2.53"},
+		QueryTimeout:  time.Second,
+	}, dial)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := resolver.Resolve(context.Background(), Query{
+		Domain:  "system.example",
+		Binding: loopbackBinding,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Transport != "udp" || result.Server != "192.0.2.53:53" {
+		t.Fatalf("system result = %#v", result)
+	}
+	if dohDials.Load() != 0 || legacyDials.Load() != 1 {
+		t.Fatalf("DoH dials = %d, legacy dials = %d", dohDials.Load(), legacyDials.Load())
+	}
+	if endpoints := resolver.Status().DoHEndpoints; len(endpoints) != 0 {
+		t.Fatalf("system policy advertised DoH endpoints: %#v", endpoints)
+	}
+}
+
 func TestExplicitProviderEmitsOneControlledFallbackEvent(t *testing.T) {
 	resolver, err := New(context.Background(), Config{
 		Policy:           PolicyAliDNS,

@@ -34,7 +34,8 @@ func main() {
 		return
 	}
 	if launchSecurity.Elevated {
-		desktopplatform.ShowElevationCompatibilityMessage(
+		log.Printf(
+			"desktop privilege compatibility fallback: proxy_safe=%t detail=%s",
 			launchSecurity.ProxyCompatible,
 			launchSecurity.Detail,
 		)

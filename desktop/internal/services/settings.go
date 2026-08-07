@@ -485,7 +485,7 @@ func validateSettings(value AppSettings) error {
 		return errors.New("DNS 地址格式无效，请输入合法 IPv4 地址")
 	}
 	switch value.DNSPolicy {
-	case "auto", "off", "alidns", "dnspod", "google":
+	case "auto", "off", "system", "alidns", "dnspod", "google":
 	default:
 		return fmt.Errorf("不支持的 DoH 解析策略：%s", value.DNSPolicy)
 	}

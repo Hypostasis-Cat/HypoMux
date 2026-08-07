@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func TestSupportLogKeepsThreeSessionsAndRedactsSecrets(t *testing.T) {
@@ -82,5 +83,24 @@ func TestSupportLogAggregatesRepeatedEvents(t *testing.T) {
 	}
 	if !strings.Contains(text, "socket-bind ready") {
 		t.Fatalf("expected an aggregation summary, got: %s", text)
+	}
+}
+
+func TestSupportLogWritesChineseAdapterAndErrorTextAsUTF8(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "app.log")
+	store := newSupportLogStore(path)
+	if !store.Start("tun", []string{"以太网"}, nil) {
+		t.Fatal("expected a new log session")
+	}
+	store.RecordEvent("tun_preflight", "completed", map[string]any{
+		"message": "网卡绑定失败：Element not found",
+	})
+	store.Finish("失败")
+	data, err := store.Raw()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !utf8.Valid(data) || !strings.Contains(string(data), "以太网") || !strings.Contains(string(data), "网卡绑定失败") {
+		t.Fatalf("support log is not valid UTF-8 or lost Chinese text: %q", string(data))
 	}
 }

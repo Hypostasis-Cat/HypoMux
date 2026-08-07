@@ -234,10 +234,11 @@ type EngineTelemetryParams struct {
 }
 
 type TunActivateParams struct {
-	Executable       string `json:"executable"`
-	ConfigPath       string `json:"config_path"`
-	StartupTimeoutMS int    `json:"startup_timeout_ms"`
-	StrictRoute      bool   `json:"strict_route"`
+	Executable             string `json:"executable"`
+	ConfigPath             string `json:"config_path"`
+	IPv4FallbackConfigPath string `json:"ipv4_fallback_config_path,omitempty"`
+	StartupTimeoutMS       int    `json:"startup_timeout_ms"`
+	StrictRoute            bool   `json:"strict_route"`
 }
 
 func (p TunActivateParams) Config() tun.Config {
@@ -248,9 +249,18 @@ func (p TunActivateParams) Config() tun.Config {
 	}
 }
 
+func (p TunActivateParams) IPv4FallbackConfig() tun.Config {
+	return tun.Config{
+		Executable:     p.Executable,
+		ConfigPath:     p.IPv4FallbackConfigPath,
+		StartupTimeout: time.Duration(p.StartupTimeoutMS) * time.Millisecond,
+	}
+}
+
 type TunLifecycleResult struct {
-	Accepted bool       `json:"accepted"`
-	Tun      tun.Status `json:"tun"`
+	Accepted         bool       `json:"accepted"`
+	IPv4OnlyFallback bool       `json:"ipv4_only_fallback,omitempty"`
+	Tun              tun.Status `json:"tun"`
 }
 
 type LogRecordData struct {

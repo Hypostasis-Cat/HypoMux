@@ -31,6 +31,20 @@ func TestPrivilegeNormalizationPrecedesDesktopSideEffects(t *testing.T) {
 	}
 }
 
+func TestElevatedCompatibilityFallbackDoesNotShowStartupModal(t *testing.T) {
+	sourceBytes, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(sourceBytes)
+	if strings.Contains(source, "ShowElevationCompatibilityMessage") || strings.Contains(source, "MessageBoxW") {
+		t.Fatal("startup compatibility fallback must not show a modal message box")
+	}
+	if !strings.Contains(source, "desktop privilege compatibility fallback") {
+		t.Fatal("startup compatibility fallback must be recorded in the process log")
+	}
+}
+
 func TestTrayUsesNativeMenuWithoutSecondWebView(t *testing.T) {
 	mainSource, err := os.ReadFile("main.go")
 	if err != nil {
