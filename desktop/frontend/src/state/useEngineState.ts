@@ -101,6 +101,7 @@ const previewTunPreflight = (selected: AdapterView[]): TunPreflightSnapshot => {
     strict_route_requested: true,
     effective_strict_route: true,
     shared_gateway_risks: selected.length > 1 ? ["以太网与 WLAN 共用网关 192.168.10.1"] : [],
+    network_risks: [],
     issues,
   };
 };
