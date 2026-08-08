@@ -26,10 +26,24 @@ type RemoteError struct {
 }
 
 func (e *RemoteError) Error() string {
-	if e.Code == "" {
-		return e.Message
+	message := strings.TrimSpace(e.Message)
+	if detail, ok := e.Details["message"].(string); ok {
+		detail = strings.TrimSpace(detail)
+		if detail != "" && detail != message {
+			if message == "" {
+				message = detail
+			} else {
+				message += ": " + detail
+			}
+		}
 	}
-	return e.Code + ": " + e.Message
+	if e.Code == "" {
+		return message
+	}
+	if message == "" {
+		return e.Code
+	}
+	return e.Code + ": " + message
 }
 
 type response struct {

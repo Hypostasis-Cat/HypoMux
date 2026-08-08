@@ -258,9 +258,10 @@ func (p TunActivateParams) IPv4FallbackConfig() tun.Config {
 }
 
 type TunLifecycleResult struct {
-	Accepted         bool       `json:"accepted"`
-	IPv4OnlyFallback bool       `json:"ipv4_only_fallback,omitempty"`
-	Tun              tun.Status `json:"tun"`
+	Accepted              bool       `json:"accepted"`
+	RecoveredStaleAdapter bool       `json:"recovered_stale_adapter,omitempty"`
+	IPv4OnlyFallback      bool       `json:"ipv4_only_fallback,omitempty"`
+	Tun                   tun.Status `json:"tun"`
 }
 
 type LogRecordData struct {

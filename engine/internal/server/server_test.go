@@ -139,6 +139,7 @@ type fakeTunController struct {
 	onStop          func()
 	onLog           func(string)
 	onUnexpected    func(tun.Status)
+	nextGeneration  uint64
 }
 
 func (f *fakeTunController) Activate(
@@ -154,17 +155,21 @@ func (f *fakeTunController) Activate(
 		f.activateErrs = f.activateErrs[1:]
 	}
 	if activateErr != nil {
+		f.nextGeneration++
 		f.status = tun.Status{
-			State:     tun.StateFailed,
-			LastError: activateErr.Error(),
+			State:      tun.StateFailed,
+			Generation: f.nextGeneration,
+			LastError:  activateErr.Error(),
 		}
 		return f.status, activateErr
 	}
 	now := time.Now().UTC()
+	f.nextGeneration++
 	f.status = tun.Status{
-		State:     tun.StateRunning,
-		PID:       1234,
-		StartedAt: &now,
+		State:      tun.StateRunning,
+		Generation: f.nextGeneration,
+		PID:        1234,
+		StartedAt:  &now,
 	}
 	return f.status, nil
 }
@@ -336,6 +341,72 @@ func TestTunActivateRetriesWithIPv4OnlyConfigAfterIPv6SetupFailure(t *testing.T)
 	_ = engineServer.stopProxy("clear-fallback")
 }
 
+func TestTunActivateRecoversStaleWintunAdapterOnce(t *testing.T) {
+	engineServer := New(
+		strings.NewReader(""),
+		&bytes.Buffer{},
+		Metadata{Name: "test"},
+	)
+	controller := &fakeTunController{
+		status: tun.Status{State: tun.StateStopped},
+		activateErrs: []error{
+			errors.New("create adapter: Cannot create a file when that file already exists. | open existing adapter: Element not found."),
+			nil,
+		},
+	}
+	engineServer.tun = controller
+	startTUNPoolForLifecycleTest(t, engineServer)
+
+	response, _ := engineServer.handle(
+		context.Background(),
+		[]byte(`{
+			"protocol":1,
+			"id":"tun-activate",
+			"method":"tun.activate",
+			"params":{
+				"executable":"C:\\HypoMux\\bin\\sing-box.exe",
+				"config_path":"C:\\Users\\Example\\singbox.json",
+				"startup_timeout_ms":20000
+			}
+		}`),
+	)
+	if response.Error != nil {
+		t.Fatalf("stale Wintun recovery failed: %#v", response.Error)
+	}
+	result, ok := response.Result.(api.TunLifecycleResult)
+	if !ok || !result.RecoveredStaleAdapter || result.Tun.State != tun.StateRunning {
+		t.Fatalf("stale Wintun recovery result = %#v", response.Result)
+	}
+	if len(controller.activateConfigs) != 2 || controller.stopCalls != 1 {
+		t.Fatalf(
+			"stale Wintun retry count: activations=%d stops=%d",
+			len(controller.activateConfigs), controller.stopCalls,
+		)
+	}
+	_ = engineServer.stopProxy("clear-stale-wintun")
+}
+
+func TestStaleTunAdapterErrorClassificationIsNarrow(t *testing.T) {
+	for _, message := range []string{
+		"create adapter: Cannot create a file when that file already exists.",
+		"create adapter failed | open existing adapter: Element not found.",
+		"stale HypoMux-Tun device still exists: SWD\\WINTUN\\123",
+	} {
+		if !isStaleTunAdapterError(errors.New(message)) {
+			t.Fatalf("stale adapter error was not recognized: %q", message)
+		}
+	}
+	for _, message := range []string{
+		"ordinary upstream timeout",
+		"set ipv6 address: Element not found",
+		"WFP strict route filter rejected",
+	} {
+		if isStaleTunAdapterError(errors.New(message)) {
+			t.Fatalf("unrelated error was classified as stale adapter: %q", message)
+		}
+	}
+}
+
 func TestUnexpectedManagedTunExitStopsPoolAndFailsEngine(t *testing.T) {
 	engineServer := New(
 		strings.NewReader(""),
@@ -343,14 +414,16 @@ func TestUnexpectedManagedTunExitStopsPoolAndFailsEngine(t *testing.T) {
 		Metadata{Name: "test"},
 	)
 	controller := &fakeTunController{
-		status: tun.Status{State: tun.StateRunning, PID: 1234},
+		status: tun.Status{State: tun.StateRunning, Generation: 7, PID: 1234},
 	}
 	engineServer.tun = controller
 	startTUNPoolForLifecycleTest(t, engineServer)
+	engineServer.activeTunGeneration = 7
 
 	engineServer.handleTunUnexpectedExit(tun.Status{
-		State:     tun.StateFailed,
-		LastError: "synthetic crash",
+		State:      tun.StateFailed,
+		Generation: 7,
+		LastError:  "synthetic crash",
 	})
 	if engineServer.proxy != nil ||
 		engineServer.runtime.Snapshot().State != engineRuntime.StateFailed {
@@ -361,6 +434,32 @@ func TestUnexpectedManagedTunExitStopsPoolAndFailsEngine(t *testing.T) {
 		)
 	}
 	_ = engineServer.stopProxy("clear-failed")
+}
+
+func TestStaleTunExitCannotStopNewProxyGeneration(t *testing.T) {
+	engineServer := New(
+		strings.NewReader(""),
+		&bytes.Buffer{},
+		Metadata{Name: "test"},
+	)
+	controller := &fakeTunController{}
+	engineServer.tun = controller
+	startTUNPoolForLifecycleTest(t, engineServer)
+	engineServer.activeTunGeneration = 12
+
+	engineServer.handleTunUnexpectedExit(tun.Status{
+		State:      tun.StateFailed,
+		Generation: 11,
+		LastError:  "stale generation crash",
+	})
+	if engineServer.proxy == nil || !engineServer.proxy.Running() ||
+		engineServer.runtime.Snapshot().State != engineRuntime.StateRunning {
+		t.Fatalf(
+			"stale TUN callback stopped the new pool: proxy=%v state=%s",
+			engineServer.proxy, engineServer.runtime.Snapshot().State,
+		)
+	}
+	_ = engineServer.stopProxy("clear-stale-generation")
 }
 
 func TestTunActivateRejectsUnpreparedAndOrdinaryProxyModes(t *testing.T) {

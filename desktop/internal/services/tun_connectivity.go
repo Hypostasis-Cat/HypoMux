@@ -23,6 +23,12 @@ var tunConnectivityURLs = []string{
 	"https://www.baidu.com/",
 }
 
+const tunDataPathURL = "http://www.msftconnecttest.com/connecttest.txt"
+
+var tunDataPathProbe = func(parent context.Context) tunConnectivityCheck {
+	return probeTUNDataPathPlatform(parent, append([]string(nil), tunConnectivityURLs...))
+}
+
 type tunConnectivityCheck struct {
 	Stage    string `json:"stage"`
 	Endpoint string `json:"endpoint"`
@@ -126,7 +132,7 @@ func probeTUNConnectivityThroughChannels(
 	aggregationEndpoint string,
 	dnsResult dnsResolveResult,
 ) (tunConnectivityReport, error) {
-	report := tunConnectivityReport{Checks: make([]tunConnectivityCheck, 0, len(tunConnectivityURLs)+1)}
+	report := tunConnectivityReport{Checks: make([]tunConnectivityCheck, 0, len(tunConnectivityURLs)+2)}
 	report.Checks = append(report.Checks, probeDNSBootstrap(parent, dnsResult))
 	for _, endpoint := range tunConnectivityURLs {
 		report.Checks = append(report.Checks, probeHTTPURL(parent, endpoint, &aggregationEndpoint, "aggregation"))
@@ -137,6 +143,7 @@ func probeTUNConnectivityThroughChannels(
 			Error: "no HTTP connectivity endpoints configured",
 		})
 	}
+	report.Checks = append(report.Checks, tunDataPathProbe(parent))
 	return report, report.failure()
 }
 

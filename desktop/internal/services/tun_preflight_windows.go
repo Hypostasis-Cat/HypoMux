@@ -65,12 +65,7 @@ $items = @(Get-NetRoute -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' -Erro
   Select-Object -ExpandProperty InterfaceAlias -Unique)
 ConvertTo-Json -InputObject @($items) -Compress
 `
-	command := exec.Command(
-		"powershell.exe", "-NoProfile", "-NonInteractive",
-		"-ExecutionPolicy", "Bypass", "-Command", script,
-	)
-	command.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-	output, err := command.Output()
+	output, err := runPreflightPowerShell(script)
 	if err != nil {
 		return []string{}, fmt.Sprintf("默认路由检查失败：%v", err)
 	}
@@ -129,12 +124,7 @@ if ($null -ne $ics -and $ics.Status -eq 'Running') {
 }
 ConvertTo-Json -InputObject @{ risks = @($risks) } -Compress
 `
-	command := exec.Command(
-		"powershell.exe", "-NoProfile", "-NonInteractive",
-		"-ExecutionPolicy", "Bypass", "-Command", script,
-	)
-	command.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-	output, err := command.Output()
+	output, err := runPreflightPowerShell(script)
 	if err != nil {
 		if existingError == "" {
 			existingError = fmt.Sprintf("网络接管风险检查失败：%v", err)
@@ -171,4 +161,17 @@ ConvertTo-Json -InputObject @{ risks = @($risks) } -Compress
 		risks = append(risks, value)
 	}
 	return risks, existingError
+}
+
+func runPreflightPowerShell(script string) ([]byte, error) {
+	powerShell, err := resolveWindowsPowerShellExecutable()
+	if err != nil {
+		return nil, err
+	}
+	command := exec.Command(
+		powerShell, "-NoProfile", "-NonInteractive",
+		"-ExecutionPolicy", "Bypass", "-Command", script,
+	)
+	command.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	return command.Output()
 }

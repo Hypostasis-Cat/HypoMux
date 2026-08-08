@@ -37,21 +37,22 @@ type tunController interface {
 }
 
 type Server struct {
-	input        io.Reader
-	encoder      *json.Encoder
-	metadata     Metadata
-	identity     platform.Identity
-	runtime      *engineRuntime.Runtime
-	proxy        *proxy.Server
-	tun          tunController
-	adapters     []wfp.Adapter
-	dnsExemption wfp.DNSExemption
-	mode         string
-	startedAt    time.Time
-	started      time.Time
-	writeMu      sync.Mutex
-	lifecycleMu  sync.Mutex
-	eventSeq     uint64
+	input               io.Reader
+	encoder             *json.Encoder
+	metadata            Metadata
+	identity            platform.Identity
+	runtime             *engineRuntime.Runtime
+	proxy               *proxy.Server
+	tun                 tunController
+	adapters            []wfp.Adapter
+	dnsExemption        wfp.DNSExemption
+	mode                string
+	activeTunGeneration uint64
+	startedAt           time.Time
+	started             time.Time
+	writeMu             sync.Mutex
+	lifecycleMu         sync.Mutex
+	eventSeq            uint64
 }
 
 func New(input io.Reader, output io.Writer, metadata Metadata) *Server {
@@ -295,6 +296,9 @@ func (s *Server) startProxy(request protocol.Request) protocol.Response {
 	if _, err := s.runtime.Transition(engineRuntime.StateStarting, mode+" start requested"); err != nil {
 		return protocol.Failure(request.ID, "invalid_state", err.Error(), nil)
 	}
+	// A new proxy-pool transaction must never inherit ownership from a TUN
+	// process whose delayed cleanup callback is still in flight.
+	s.activeTunGeneration = 0
 	proxyServer, err := proxy.New(params.ProxyConfig())
 	if err == nil {
 		proxyServer.SetDNSFallbackHandler(s.handleDNSFallback)
@@ -340,6 +344,7 @@ func (s *Server) stopProxy(requestID string) protocol.Response {
 func (s *Server) stopProxyLocked(requestID string) protocol.Response {
 	state := s.runtime.Snapshot().State
 	if state == engineRuntime.StateStopped {
+		s.activeTunGeneration = 0
 		return protocol.Result(requestID, api.EngineStopResult{
 			Accepted: false,
 			State:    s.runtime.Snapshot(),
@@ -362,6 +367,7 @@ func (s *Server) stopProxyLocked(requestID string) protocol.Response {
 		s.proxy = nil
 		s.mode = ""
 		s.adapters = nil
+		s.activeTunGeneration = 0
 		_, _ = s.runtime.Transition(engineRuntime.StateStopped, "failed proxy cleared")
 		if err := errors.Join(tunErr, wfpErr, proxyErr); err != nil {
 			return protocol.Failure(
@@ -410,6 +416,7 @@ func (s *Server) stopProxyLocked(requestID string) protocol.Response {
 	s.proxy = nil
 	s.mode = ""
 	s.adapters = nil
+	s.activeTunGeneration = 0
 	_, _ = s.runtime.Transition(engineRuntime.StateStopped, "proxy stopped")
 	return protocol.Result(requestID, api.EngineStopResult{
 		Accepted: true,
@@ -530,6 +537,22 @@ func (s *Server) activateTun(
 		s.dnsExemption = exemption
 	}
 	status, err := s.tun.Activate(ctx, params.Config())
+	recoveredStaleAdapter := false
+	if err != nil && isStaleTunAdapterError(err) {
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), 20*time.Second)
+		_, cleanupErr := s.tun.Stop(stopCtx)
+		stopCancel()
+		if cleanupErr == nil {
+			status, err = s.tun.Activate(ctx, params.Config())
+			if err == nil {
+				recoveredStaleAdapter = true
+			} else {
+				err = errors.Join(errors.New("stale TUN adapter retry failed"), err)
+			}
+		} else {
+			err = errors.Join(errors.New("stale TUN adapter retry cleanup failed"), cleanupErr)
+		}
+	}
 	ipv4OnlyFallback := false
 	if err != nil && strings.TrimSpace(params.IPv4FallbackConfigPath) != "" && isIPv6AddressSetupError(err) {
 		// The first activation can have created a partial Wintun/TUN state.
@@ -549,10 +572,12 @@ func (s *Server) activateTun(
 		}
 	}
 	if err == nil {
+		s.activeTunGeneration = status.Generation
 		return protocol.Result(request.ID, api.TunLifecycleResult{
-			Accepted:         true,
-			IPv4OnlyFallback: ipv4OnlyFallback,
-			Tun:              status,
+			Accepted:              true,
+			RecoveredStaleAdapter: recoveredStaleAdapter,
+			IPv4OnlyFallback:      ipv4OnlyFallback,
+			Tun:                   status,
 		})
 	}
 
@@ -572,6 +597,7 @@ func (s *Server) activateTun(
 	s.proxy = nil
 	s.mode = ""
 	s.adapters = nil
+	s.activeTunGeneration = 0
 	_, _ = s.runtime.Transition(engineRuntime.StateFailed, "TUN activation failed")
 	return protocol.Failure(
 		request.ID,
@@ -592,6 +618,18 @@ func isIPv6AddressSetupError(err error) bool {
 		(strings.Contains(value, "ipv6") && strings.Contains(value, "element not found"))
 }
 
+func isStaleTunAdapterError(err error) bool {
+	if err == nil {
+		return false
+	}
+	value := strings.ToLower(err.Error())
+	return strings.Contains(value, "cannot create a file when that file already exists") ||
+		(strings.Contains(value, "create adapter") &&
+			strings.Contains(value, "open existing adapter") &&
+			strings.Contains(value, "element not found")) ||
+		strings.Contains(value, "stale hypomux-tun device still exists")
+}
+
 func (s *Server) deactivateTun(
 	ctx context.Context,
 	requestID string,
@@ -609,6 +647,7 @@ func (s *Server) deactivateTun(
 			map[string]any{"message": joined.Error()},
 		)
 	}
+	s.activeTunGeneration = 0
 	return protocol.Result(requestID, api.TunLifecycleResult{
 		Accepted: statusBefore.State != tun.StateStopped,
 		Tun:      status,
@@ -624,6 +663,11 @@ func (s *Server) handleTunLog(message string) {
 
 func (s *Server) handleTunUnexpectedExit(status tun.Status) {
 	s.lifecycleMu.Lock()
+	if status.Generation == 0 || status.Generation != s.activeTunGeneration {
+		s.lifecycleMu.Unlock()
+		return
+	}
+	s.activeTunGeneration = 0
 	_ = s.closeDNSExemption()
 	if s.mode == "tun_tcp_pool" && s.proxy != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -652,6 +696,7 @@ func (s *Server) stopProxyForHostExit() {
 	tunCtx, tunCancel := context.WithTimeout(context.Background(), 20*time.Second)
 	_, _ = s.tun.Stop(tunCtx)
 	tunCancel()
+	s.activeTunGeneration = 0
 	_ = s.closeDNSExemption()
 	if s.proxy != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

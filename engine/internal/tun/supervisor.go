@@ -17,10 +17,13 @@ import (
 )
 
 const (
-	defaultStartupTimeout = 1500 * time.Millisecond
+	defaultStartupTimeout = 20 * time.Second
+	defaultReadyStableFor = 750 * time.Millisecond
 	configCheckTimeout    = 10 * time.Second
 	cleanupTimeout        = 15 * time.Second
 	maxLogLineBytes       = 64 * 1024
+	tunInterfaceName      = "HypoMux-Tun"
+	tunIPv4Address        = "172.19.0.1"
 )
 
 type State string
@@ -41,6 +44,7 @@ type Config struct {
 
 type Status struct {
 	State      State      `json:"state"`
+	Generation uint64     `json:"generation,omitempty"`
 	PID        int        `json:"pid,omitempty"`
 	StartedAt  *time.Time `json:"started_at,omitempty"`
 	ExitedAt   *time.Time `json:"exited_at,omitempty"`
@@ -64,6 +68,11 @@ type sidecarRun struct {
 	done        chan struct{}
 	intentional atomic.Bool
 	containment processContainment
+	generation  uint64
+	configPath  string
+	startedAt   time.Time
+	stderrMu    sync.Mutex
+	lastStderr  string
 
 	cleanupOnce sync.Once
 	cleanupDone chan struct{}
@@ -76,24 +85,26 @@ type Supervisor struct {
 	status Status
 	run    *sidecarRun
 
-	command      commandFactory
-	cleanup      func(context.Context) error
-	contain      func(*os.Process) (processContainment, error)
-	configure    func(*exec.Cmd)
-	onLog        func(string)
-	onUnexpected func(Status)
-	startupReady func() bool
-	lastStderr   string
+	command        commandFactory
+	cleanup        func(context.Context) error
+	contain        func(*os.Process) (processContainment, error)
+	configure      func(*exec.Cmd)
+	onLog          func(string)
+	onUnexpected   func(Status)
+	startupReady   func() bool
+	readyStableFor time.Duration
+	nextGeneration uint64
 }
 
 func NewSupervisor() *Supervisor {
 	return &Supervisor{
-		status:       Status{State: StateStopped},
-		command:      exec.CommandContext,
-		cleanup:      cleanupPlatform,
-		contain:      containProcess,
-		configure:    configureProcess,
-		startupReady: tunInterfaceReady,
+		status:         Status{State: StateStopped},
+		command:        exec.CommandContext,
+		cleanup:        cleanupPlatform,
+		contain:        containProcess,
+		configure:      configureProcess,
+		startupReady:   tunPlatformReady,
+		readyStableFor: defaultReadyStableFor,
 	}
 }
 
@@ -127,11 +138,13 @@ func (s *Supervisor) Activate(ctx context.Context, config Config) (Status, error
 		s.mu.Unlock()
 		return s.Status(), fmt.Errorf("TUN sidecar cannot start from %s", state)
 	}
+	s.nextGeneration++
+	generation := s.nextGeneration
 	s.status = Status{
 		State:      StateStarting,
+		Generation: generation,
 		ConfigPath: normalized.ConfigPath,
 	}
-	s.lastStderr = ""
 	s.mu.Unlock()
 
 	if err := s.validateConfig(ctx, normalized); err != nil {
@@ -176,13 +189,16 @@ func (s *Supervisor) Activate(ctx context.Context, config Config) (Status, error
 		return s.Status(), fmt.Errorf("contain sing-box process: %w", err)
 	}
 
+	startedAt := time.Now().UTC()
 	run := &sidecarRun{
 		command:     command,
 		done:        make(chan struct{}),
 		containment: containment,
 		cleanupDone: make(chan struct{}),
+		generation:  generation,
+		configPath:  normalized.ConfigPath,
+		startedAt:   startedAt,
 	}
-	startedAt := time.Now().UTC()
 	s.mu.Lock()
 	s.run = run
 	s.status.PID = command.Process.Pid
@@ -193,21 +209,33 @@ func (s *Supervisor) Activate(ctx context.Context, config Config) (Status, error
 		command.Process.Pid,
 	))
 
-	go s.pump(stdout, "stdout")
-	go s.pump(stderr, "stderr")
+	go s.pump(run, stdout, "stdout")
+	go s.pump(run, stderr, "stderr")
 	go s.waitProcess(run)
 
 	timer := time.NewTimer(normalized.StartupTimeout)
 	defer timer.Stop()
 	readyTicker := time.NewTicker(40 * time.Millisecond)
 	defer readyTicker.Stop()
+	var readySince time.Time
 	for {
 		select {
 		case <-timer.C:
-			return s.markRunning(run)
+			err := fmt.Errorf(
+				"TUN interface %s did not become ready within %s",
+				tunInterfaceName, normalized.StartupTimeout,
+			)
+			return s.failStartedRun(run, err)
 		case <-readyTicker.C:
 			if s.startupReady != nil && s.startupReady() {
-				return s.markRunning(run)
+				if readySince.IsZero() {
+					readySince = time.Now()
+				}
+				if time.Since(readySince) >= s.readyStableFor {
+					return s.markRunning(run)
+				}
+			} else {
+				readySince = time.Time{}
 			}
 		case <-run.done:
 			status := s.Status()
@@ -216,13 +244,40 @@ func (s *Supervisor) Activate(ctx context.Context, config Config) (Status, error
 			}
 			return status, errors.New(status.LastError)
 		case <-ctx.Done():
-			run.intentional.Store(true)
-			_ = s.terminateRun(run, context.Background())
 			err := fmt.Errorf("activate TUN sidecar: %w", ctx.Err())
-			s.failStart(err)
-			return s.Status(), err
+			return s.failStartedRun(run, err)
 		}
 	}
+}
+
+func (s *Supervisor) failStartedRun(run *sidecarRun, cause error) (Status, error) {
+	run.intentional.Store(true)
+	if detail := strings.TrimSpace(run.stderrSnapshot()); detail != "" &&
+		!strings.Contains(cause.Error(), detail) {
+		cause = fmt.Errorf("%w; last sing-box error: %s", cause, detail)
+	}
+	stopCtx, cancel := context.WithTimeout(context.Background(), cleanupTimeout+5*time.Second)
+	stopErr := s.terminateRun(run, stopCtx)
+	cancel()
+	if stopErr != nil {
+		cause = errors.Join(cause, fmt.Errorf("rollback failed TUN startup: %w", stopErr))
+	}
+	s.mu.Lock()
+	if s.run == run {
+		status := s.status
+		status.State = StateFailed
+		status.PID = 0
+		status.LastError = cause.Error()
+		if status.ExitedAt == nil {
+			now := time.Now().UTC()
+			status.ExitedAt = &now
+		}
+		s.status = status
+		s.run = nil
+	}
+	status := s.status
+	s.mu.Unlock()
+	return status, cause
 }
 
 func (s *Supervisor) markRunning(run *sidecarRun) (Status, error) {
@@ -239,9 +294,23 @@ func (s *Supervisor) markRunning(run *sidecarRun) (Status, error) {
 	return status, nil
 }
 
-func tunInterfaceReady() bool {
-	device, err := net.InterfaceByName("HypoMux-Tun")
-	return err == nil && device.Flags&net.FlagUp != 0
+func tunInterfaceWithExpectedAddress() (*net.Interface, bool) {
+	device, err := net.InterfaceByName(tunInterfaceName)
+	if err != nil || device.Flags&net.FlagUp == 0 {
+		return nil, false
+	}
+	addresses, err := device.Addrs()
+	if err != nil {
+		return nil, false
+	}
+	for _, address := range addresses {
+		value := address.String()
+		host, _, splitErr := net.ParseCIDR(value)
+		if splitErr == nil && host.String() == tunIPv4Address {
+			return device, true
+		}
+	}
+	return nil, false
 }
 
 func (s *Supervisor) Stop(ctx context.Context) (Status, error) {
@@ -310,36 +379,35 @@ func (s *Supervisor) waitProcess(run *sidecarRun) {
 		exitCode = run.command.ProcessState.ExitCode()
 	}
 	unexpected := !run.intentional.Load()
+	status := Status{
+		State:      StateStopped,
+		Generation: run.generation,
+		PID:        0,
+		StartedAt:  timePointer(run.startedAt),
+		ExitedAt:   timePointer(exitedAt),
+		ExitCode:   intPointer(exitCode),
+		ConfigPath: run.configPath,
+	}
+	if unexpected {
+		status.State = StateFailed
+		status.LastError = exitError(exitCode, err, run.stderrSnapshot())
+	}
 
 	s.mu.Lock()
 	if s.run == run {
-		s.status.ExitedAt = timePointer(exitedAt)
-		s.status.ExitCode = intPointer(exitCode)
-		s.status.PID = 0
-		if unexpected {
-			s.status.State = StateFailed
-			s.status.LastError = exitError(
-				exitCode,
-				err,
-				s.lastStderr,
-			)
-		} else {
-			s.status.State = StateStopped
-			s.status.LastError = ""
-		}
+		s.status = status
 	}
-	status := s.status
 	s.mu.Unlock()
 
 	cleanupErr := s.cleanupRun(run, context.Background())
 	if cleanupErr != nil {
+		status.LastError = errors.Join(
+			errors.New(status.LastError),
+			fmt.Errorf("TUN cleanup: %w", cleanupErr),
+		).Error()
 		s.mu.Lock()
 		if s.run == run && unexpected {
-			s.status.LastError = errors.Join(
-				errors.New(s.status.LastError),
-				fmt.Errorf("TUN cleanup: %w", cleanupErr),
-			).Error()
-			status = s.status
+			s.status = status
 		}
 		s.mu.Unlock()
 	}
@@ -355,6 +423,12 @@ func (s *Supervisor) waitProcess(run *sidecarRun) {
 			handler(status)
 		}
 	}
+}
+
+func (r *sidecarRun) stderrSnapshot() string {
+	r.stderrMu.Lock()
+	defer r.stderrMu.Unlock()
+	return r.lastStderr
 }
 
 func (s *Supervisor) terminateRun(
@@ -411,7 +485,7 @@ func (s *Supervisor) cleanupWithTimeout(ctx context.Context) error {
 	return s.cleanup(cleanupCtx)
 }
 
-func (s *Supervisor) pump(stream io.Reader, name string) {
+func (s *Supervisor) pump(run *sidecarRun, stream io.Reader, name string) {
 	scanner := bufio.NewScanner(stream)
 	scanner.Buffer(make([]byte, 4096), maxLogLineBytes)
 	for scanner.Scan() {
@@ -420,9 +494,9 @@ func (s *Supervisor) pump(stream io.Reader, name string) {
 			continue
 		}
 		if name == "stderr" {
-			s.mu.Lock()
-			s.lastStderr = text
-			s.mu.Unlock()
+			run.stderrMu.Lock()
+			run.lastStderr = text
+			run.stderrMu.Unlock()
 		}
 		s.emitLog(fmt.Sprintf("[sing-box:%s] %s", name, text))
 	}
@@ -479,8 +553,8 @@ func normalizeConfig(config Config) (Config, error) {
 	if timeout <= 0 {
 		timeout = defaultStartupTimeout
 	}
-	if timeout < 100*time.Millisecond || timeout > 10*time.Second {
-		return Config{}, errors.New("startup timeout must be between 100ms and 10s")
+	if timeout < 100*time.Millisecond || timeout > 60*time.Second {
+		return Config{}, errors.New("startup timeout must be between 100ms and 60s")
 	}
 	return Config{
 		Executable:     filepath.Clean(executable),

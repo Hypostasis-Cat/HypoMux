@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Version-2.5.2-0078d4?style=flat-square" alt="Version 2.5.2">
+  <img src="https://img.shields.io/badge/Version-2.5.3-0078d4?style=flat-square" alt="Version 2.5.3">
   <img src="https://img.shields.io/badge/Core-Go-00ADD8?style=flat-square&logo=go&logoColor=white" alt="Go">
   <img src="https://img.shields.io/badge/Desktop-Wails%20v3-CB3837?style=flat-square" alt="Wails v3">
   <img src="https://img.shields.io/badge/UI-React%20%2B%20Fluent%20UI-61DAFB?style=flat-square&logo=react&logoColor=black" alt="React and Fluent UI">
@@ -17,9 +17,9 @@ HypoMux 是一款面向 Windows 的开源多网卡聚合与分流工具。它把
 
 HypoMux 聚合的是多个独立连接，而不是把单条 TCP 连接拆成多路。因此，它尤其适合 Steam、IDM、游戏平台更新器、浏览器大文件下载等高并发场景；单连接任务的速度仍受该连接本身限制。
 
-## 2.5.2 新版本
+## 2.5.3 新版本
 
-2.5.2 完成了桌面端从 Python/Qt 与过渡期 WPF 实现到 **Go + Wails v3 + React + Fluent UI** 的正式迁移。桌面界面以普通用户权限运行，TUN、WFP、路由、DNS 与网络恢复等高权限操作交给独立的 Go Core/Windows 服务处理。
+2.5.3 完成了桌面端从 Python/Qt 与过渡期 WPF 实现到 **Go + Wails v3 + React + Fluent UI** 的正式迁移。桌面界面以普通用户权限运行，TUN、WFP、路由、DNS 与网络恢复等高权限操作交给独立的 Go Core/Windows 服务处理。
 
 - **全 Go 后端**：桌面服务与网络引擎统一使用 Go，移除旧版 Python、Qt、asyncio 与 .NET/WPF 运行时依赖。
 - **更安全的 TUN 生命周期**：启动前验证网卡、DNS、权限服务、Wintun、sing-box、WFP 与第三方 TUN；失败时在修改系统网络前阻止启动或自动回滚。
@@ -113,7 +113,7 @@ HypoMux 是一个透明、开源的网络工具，仅用于用户本人拥有授
 
 ## 第三方代理与游戏加速器兼容
 
-2.5.2 对常见本地代理与游戏加速器增加了专门的兼容旁路，包括 UU、迅游、雷神、奇游，以及 Clash/Mihomo、v2rayN、Hiddify、Shadowsocks、Proxifier 等常见进程族。运行中的程序会优先按完整可执行文件路径识别；本地系统代理监听器还会按端口反查 PID，避免只依赖容易变化的进程名。
+2.5.3 对常见本地代理与游戏加速器增加了专门的兼容旁路，包括 UU、迅游、雷神、奇游，以及 Clash/Mihomo、v2rayN、Hiddify、Shadowsocks、Proxifier 等常见进程族。运行中的程序会优先按完整可执行文件路径识别；本地系统代理监听器还会按端口反查 PID，避免只依赖容易变化的进程名。
 
 仍需注意以下边界：
 

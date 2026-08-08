@@ -66,6 +66,7 @@ func TestSupervisorActivatesStopsAndCleansExactRun(t *testing.T) {
 func TestSupervisorReturnsWhenTunInterfaceIsReady(t *testing.T) {
 	supervisor, _, _ := testSupervisor(t, "stable")
 	supervisor.startupReady = func() bool { return true }
+	supervisor.readyStableFor = 20 * time.Millisecond
 	config := testConfig(t)
 	config.StartupTimeout = 900 * time.Millisecond
 	started := time.Now()
@@ -77,6 +78,23 @@ func TestSupervisorReturnsWhenTunInterfaceIsReady(t *testing.T) {
 	}
 	if _, err := supervisor.Stop(context.Background()); err != nil {
 		t.Fatalf("Stop() failed: %v", err)
+	}
+}
+
+func TestSupervisorTreatsStartupTimeoutAsFailure(t *testing.T) {
+	supervisor, cleanupCalls, _ := testSupervisor(t, "stable")
+	supervisor.startupReady = func() bool { return false }
+	config := testConfig(t)
+	config.StartupTimeout = 140 * time.Millisecond
+	status, err := supervisor.Activate(context.Background(), config)
+	if err == nil || status.State != StateFailed {
+		t.Fatalf("startup timeout must fail: status=%#v err=%v", status, err)
+	}
+	if !strings.Contains(status.LastError, "did not become ready") || status.PID != 0 {
+		t.Fatalf("timeout failure lost readiness evidence: %#v", status)
+	}
+	if cleanupCalls.Load() != 2 {
+		t.Fatalf("timeout cleanup calls = %d, want preflight + failed-run cleanup", cleanupCalls.Load())
 	}
 }
 
@@ -113,12 +131,13 @@ func TestSupervisorReportsEarlyAndUnexpectedExit(t *testing.T) {
 		t.Fatal("early sidecar exit unexpectedly activated")
 	}
 	if status.State != StateFailed || status.ExitCode == nil ||
-		*status.ExitCode != 17 {
+		*status.ExitCode != 17 || status.Generation == 0 {
 		t.Fatalf("early-exit status = %#v", status)
 	}
 	select {
 	case event := <-unexpected:
 		if event.State != StateFailed ||
+			event.Generation != status.Generation ||
 			!strings.Contains(event.LastError, "helper-crashed") {
 			t.Fatalf("unexpected-exit callback = %#v", event)
 		}
@@ -176,6 +195,12 @@ func testSupervisor(
 		return containment, nil
 	}
 	supervisor.configure = func(*exec.Cmd) {}
+	if mode == "stable" {
+		supervisor.startupReady = func() bool { return true }
+		supervisor.readyStableFor = 10 * time.Millisecond
+	} else {
+		supervisor.startupReady = func() bool { return false }
+	}
 	supervisor.command = func(
 		ctx context.Context,
 		_ string,

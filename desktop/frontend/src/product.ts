@@ -1,6 +1,6 @@
 export const productInfo = {
   name: "HypoMux",
-  version: "2.5.2",
+  version: "2.5.3",
   build: "Wails v3 · React · TypeScript · Windows",
   repository: "https://github.com/Hypostasis-Cat/HypoMux",
   releases: "https://github.com/Hypostasis-Cat/HypoMux/releases/latest",

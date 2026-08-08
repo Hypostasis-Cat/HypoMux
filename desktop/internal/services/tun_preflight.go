@@ -169,9 +169,9 @@ func (s *TunService) checkSelected(selected []AdapterView) TunPreflightSnapshot 
 			continue
 		}
 		if strings.EqualFold(clean, "HypoMux-Tun") {
-			snapshot.Issues = append(snapshot.Issues, tunBlocker(
+			snapshot.Issues = append(snapshot.Issues, tunWarning(
 				"stale_hypomux_tun", "检测到 HypoMux TUN 残留",
-				"系统仍存在由 HypoMux-Tun 接管的默认路由。应先由独立聚合核心执行精确恢复，再重新预检。",
+				"系统仍存在由 HypoMux-Tun 接管的默认路由；启动时将由高权限聚合核心精确清理并确认设备消失，清理失败则不会继续接管网络。",
 			))
 		} else if snapshot.ForeignTUN == "" {
 			snapshot.ForeignTUN = clean

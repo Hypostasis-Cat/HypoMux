@@ -161,6 +161,26 @@ func TestTunPreflightReportsReadOnlyForeignNetworkRisks(t *testing.T) {
 	}
 }
 
+func TestTunPreflightAllowsCoreToRecoverOwnedStaleTun(t *testing.T) {
+	service := testTunService(t, tunPlatformSnapshot{
+		PrivilegeBrokerAvailable: true,
+		WFPReady:                 true,
+		DefaultRouteAliases:      []string{"HypoMux-Tun"},
+	})
+	snapshot, err := service.Preflight([]string{"ethernet"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !snapshot.Ready || !hasTunIssue(snapshot, "stale_hypomux_tun") {
+		t.Fatalf("owned stale TUN should be recoverable by Core: %+v", snapshot)
+	}
+	for _, issue := range snapshot.Issues {
+		if issue.Code == "stale_hypomux_tun" && issue.Level != "warning" {
+			t.Fatalf("owned stale TUN must warn without blocking: %+v", issue)
+		}
+	}
+}
+
 func hasTunIssue(snapshot TunPreflightSnapshot, code string) bool {
 	for _, issue := range snapshot.Issues {
 		if issue.Code == code {

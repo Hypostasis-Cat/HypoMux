@@ -73,6 +73,7 @@ func TestProbeTUNConnectivityAllowsAnyHTTPAlternative(t *testing.T) {
 }
 
 func TestChannelConnectivitySeparatesDNSBootstrapAndAggregation(t *testing.T) {
+	stubTUNDataPathProbe(t, true)
 	original := tunConnectivityURLs
 	tunConnectivityURLs = []string{"http://127.0.0.1:1/aggregation"}
 	t.Cleanup(func() { tunConnectivityURLs = original })
@@ -83,7 +84,7 @@ func TestChannelConnectivitySeparatesDNSBootstrapAndAggregation(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected both channel checks to fail")
 	}
-	if len(report.Checks) != 2 {
+	if len(report.Checks) != 3 {
 		t.Fatalf("checks = %#v", report.Checks)
 	}
 	if report.Checks[0].Stage != "dns_bootstrap" || report.Checks[0].Outbound != "system-direct" {
@@ -92,12 +93,16 @@ func TestChannelConnectivitySeparatesDNSBootstrapAndAggregation(t *testing.T) {
 	if report.Checks[1].Stage != "aggregation_data" || report.Checks[1].Outbound != "aggregation" {
 		t.Fatalf("aggregation check = %#v", report.Checks[1])
 	}
+	if report.Checks[2].Stage != "tun_data_path" || report.Checks[2].Outbound != "windows-tun" {
+		t.Fatalf("TUN data-path check = %#v", report.Checks[2])
+	}
 	if !strings.Contains(err.Error(), "dns_bootstrap") || !strings.Contains(err.Error(), "aggregation_data") {
 		t.Fatalf("combined error lost stage context: %v", err)
 	}
 }
 
 func TestChannelConnectivityAllowsAnyAggregationHTTPAlternative(t *testing.T) {
+	stubTUNDataPathProbe(t, true)
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
 		response.WriteHeader(http.StatusNoContent)
 	}))
@@ -116,7 +121,8 @@ func TestChannelConnectivityAllowsAnyAggregationHTTPAlternative(t *testing.T) {
 	if err != nil {
 		t.Fatalf("one successful aggregation endpoint should pass: %v", err)
 	}
-	if len(report.Checks) != 3 || !report.Checks[0].OK || report.Checks[1].OK || !report.Checks[2].OK {
+	if len(report.Checks) != 4 || !report.Checks[0].OK || report.Checks[1].OK ||
+		!report.Checks[2].OK || !report.Checks[3].OK {
 		t.Fatalf("unexpected alternative endpoint report: %#v", report.Checks)
 	}
 	if !strings.Contains(report.summary(), failedEndpoint) {
@@ -125,6 +131,7 @@ func TestChannelConnectivityAllowsAnyAggregationHTTPAlternative(t *testing.T) {
 }
 
 func TestChannelConnectivityRequiresDNSBootstrapEvenWhenHTTPWorks(t *testing.T) {
+	stubTUNDataPathProbe(t, true)
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
 		response.WriteHeader(http.StatusNoContent)
 	}))
@@ -147,6 +154,7 @@ func TestChannelConnectivityRequiresDNSBootstrapEvenWhenHTTPWorks(t *testing.T) 
 }
 
 func TestChannelConnectivityReportsAllFailedAggregationEndpoints(t *testing.T) {
+	stubTUNDataPathProbe(t, true)
 	socksEndpoint := startTestSOCKS5(t)
 	dnsEndpoint := startTestDNSUDP(t)
 	first := closedTestHTTPURL(t)
@@ -164,6 +172,31 @@ func TestChannelConnectivityReportsAllFailedAggregationEndpoints(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), first) || !strings.Contains(err.Error(), second) {
 		t.Fatalf("aggregation failure lost an endpoint: %v", err)
+	}
+}
+
+func TestChannelConnectivityRequiresRealTunDataPath(t *testing.T) {
+	stubTUNDataPathProbe(t, false)
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		response.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	socksEndpoint := startTestSOCKS5(t)
+	dnsEndpoint := startTestDNSUDP(t)
+	original := tunConnectivityURLs
+	tunConnectivityURLs = []string{server.URL}
+	t.Cleanup(func() { tunConnectivityURLs = original })
+
+	report, err := probeTUNConnectivityThroughChannels(
+		context.Background(), socksEndpoint,
+		dnsResolveResult{Transport: "udp", Server: dnsEndpoint},
+	)
+	if err == nil || len(report.Checks) != 3 || !report.Checks[0].OK ||
+		!report.Checks[1].OK || report.Checks[2].OK {
+		t.Fatalf("real TUN path must be required: report=%#v err=%v", report.Checks, err)
+	}
+	if !strings.Contains(err.Error(), "tun_data_path") {
+		t.Fatalf("TUN data-path failure lost stage context: %v", err)
 	}
 }
 
@@ -303,4 +336,24 @@ func serveTestSOCKS5(connection net.Conn) {
 	go func() { _, _ = io.Copy(target, reader); done <- struct{}{} }()
 	go func() { _, _ = io.Copy(connection, target); done <- struct{}{} }()
 	<-done
+}
+
+func stubTUNDataPathProbe(t *testing.T, ok bool) {
+	t.Helper()
+	original := tunDataPathProbe
+	tunDataPathProbe = func(context.Context) tunConnectivityCheck {
+		check := tunConnectivityCheck{
+			Stage:    "tun_data_path",
+			Endpoint: tunDataPathURL,
+			Outbound: "windows-tun",
+			OK:       ok,
+		}
+		if ok {
+			check.Detail = "synthetic TUN path ready"
+		} else {
+			check.Error = "synthetic TUN path unavailable"
+		}
+		return check
+	}
+	t.Cleanup(func() { tunDataPathProbe = original })
 }

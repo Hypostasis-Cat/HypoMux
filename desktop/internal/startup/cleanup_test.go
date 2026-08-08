@@ -4,6 +4,8 @@ package startup
 
 import (
 	"context"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -21,6 +23,25 @@ func TestCleanupZombieProcesses(t *testing.T) {
 	}
 
 	t.Logf("cleanup completed with result: %v", err)
+}
+
+func TestStartupCleanupToolsDoNotDependOnPATH(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	for _, resolve := range []struct {
+		name string
+		call func() (string, error)
+	}{
+		{name: "powershell.exe", call: resolveStartupPowerShell},
+		{name: "taskkill.exe", call: func() (string, error) { return resolveStartupSystemExecutable("taskkill.exe") }},
+	} {
+		path, err := resolve.call()
+		if err != nil {
+			t.Fatalf("resolve %s: %v", resolve.name, err)
+		}
+		if !filepath.IsAbs(path) || !strings.EqualFold(filepath.Base(path), resolve.name) {
+			t.Fatalf("resolved %s path = %q", resolve.name, path)
+		}
+	}
 }
 
 func TestKillProcess(t *testing.T) {

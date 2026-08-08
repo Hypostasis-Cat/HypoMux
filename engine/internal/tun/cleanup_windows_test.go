@@ -3,6 +3,7 @@
 package tun
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -14,6 +15,8 @@ func TestCleanupPowerShellIsScopedToHypoMuxTun(t *testing.T) {
 		"DestinationPrefix -eq '::/0'",
 		"FriendlyName -eq 'HypoMux-Tun'",
 		"InstanceId -like '*WINTUN*'",
+		"Get-NetAdapter -IncludeHidden",
+		"stale HypoMux-Tun device still exists",
 	}
 	for _, fragment := range required {
 		if !strings.Contains(cleanupPowerShell, fragment) {
@@ -24,5 +27,17 @@ func TestCleanupPowerShellIsScopedToHypoMuxTun(t *testing.T) {
 		if strings.Contains(cleanupPowerShell, forbidden) {
 			t.Fatalf("cleanup command contains broad operation %q", forbidden)
 		}
+	}
+}
+
+func TestResolveWindowsPowerShellDoesNotDependOnPATH(t *testing.T) {
+	originalPath := t.TempDir()
+	t.Setenv("PATH", originalPath)
+	path, err := resolveWindowsPowerShell()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !filepath.IsAbs(path) || !strings.EqualFold(filepath.Base(path), "powershell.exe") {
+		t.Fatalf("resolved PowerShell path = %q", path)
 	}
 }

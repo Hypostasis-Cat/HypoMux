@@ -2,7 +2,7 @@ version: '3'
 
 vars:
   APP_NAME: "hypomux"
-  APP_VERSION: "2.5.2"
+  APP_VERSION: "2.5.3"
   BIN_DIR: "bin"
   PACKAGE_MANAGER: '{{.PACKAGE_MANAGER | default "pnpm"}}'
   WAILS3: '{{.WAILS3 | default "wails3"}}'

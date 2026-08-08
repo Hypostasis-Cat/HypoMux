@@ -41,9 +41,10 @@ type tunStatus struct {
 }
 
 type tunLifecycleResult struct {
-	Accepted         bool      `json:"accepted"`
-	IPv4OnlyFallback bool      `json:"ipv4_only_fallback"`
-	Tun              tunStatus `json:"tun"`
+	Accepted              bool      `json:"accepted"`
+	RecoveredStaleAdapter bool      `json:"recovered_stale_adapter"`
+	IPv4OnlyFallback      bool      `json:"ipv4_only_fallback"`
+	Tun                   tunStatus `json:"tun"`
 }
 
 type adapterTelemetry struct {
@@ -576,7 +577,7 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 	if mode != "proxy" && mode != "tun" {
 		return EngineSnapshot{}, fmt.Errorf("不支持的运行模式：%s", mode)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 75*time.Second)
 	defer cancel()
 	if err := s.acquireLifecycle(ctx); err != nil {
 		return EngineSnapshot{}, err
@@ -834,7 +835,7 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 			"executable":                singBox,
 			"config_path":               configPath,
 			"ipv4_fallback_config_path": ipv4FallbackPath,
-			"startup_timeout_ms":        1500,
+			"startup_timeout_ms":        20000,
 			"strict_route":              effectiveStrictRoute,
 		}, &activated); err != nil {
 			if !hello.Elevated {
@@ -843,6 +844,11 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 			return rollback(fmt.Errorf("启动 TUN 侧车失败：%w", err))
 		}
 		s.recordStartStage("tun_activated", nil)
+		if activated.RecoveredStaleAdapter && s.logs != nil {
+			s.logs.RecordEvent("tun_compatibility", "stale_adapter_recovered", map[string]any{
+				"adapter": "HypoMux-Tun",
+			})
+		}
 		if activated.IPv4OnlyFallback && s.logs != nil {
 			s.logs.RecordEvent("tun_compatibility", "ipv4_only_fallback", map[string]any{
 				"reason": "sing-box could not configure the IPv6 TUN address",
