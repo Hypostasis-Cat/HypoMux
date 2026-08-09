@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
@@ -20,8 +21,10 @@ import (
 )
 
 const (
-	CurrentVersion   = "2.5.3"
-	latestReleaseAPI = "https://api.github.com/repos/Hypostasis-Cat/HypoMux/releases/latest"
+	CurrentVersion     = "2.5.3"
+	latestReleaseAPI   = "https://api.github.com/repos/Hypostasis-Cat/HypoMux/releases/latest"
+	releasesFeedURL    = "https://github.com/Hypostasis-Cat/HypoMux/releases.atom"
+	releaseDownloadURL = "https://github.com/Hypostasis-Cat/HypoMux/releases/download/"
 )
 
 var (
@@ -79,8 +82,29 @@ func (s *UpdaterService) setProgress(progress UpdateProgress) {
 }
 
 func (s *UpdaterService) Check() (UpdateCheckResult, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
-	defer cancel()
+	apiCtx, apiCancel := context.WithTimeout(context.Background(), 6*time.Second)
+	result, apiErr := s.checkGitHubAPI(apiCtx)
+	apiCancel()
+	if apiErr == nil {
+		return result, nil
+	}
+
+	// GitHub's unauthenticated REST API is limited per public source IP.
+	// Users behind a shared proxy often receive HTTP 403 even though regular
+	// github.com release pages and assets remain reachable. The Atom feed is a
+	// quota-independent source for the latest tag; the release workflow uses a
+	// deterministic installer name, so it can safely reconstruct and validate
+	// the official download URL.
+	feedCtx, feedCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer feedCancel()
+	result, feedErr := s.checkGitHubReleaseFeed(feedCtx)
+	if feedErr == nil {
+		return result, nil
+	}
+	return UpdateCheckResult{}, fmt.Errorf("%v；GitHub 备用更新通道失败：%v", apiErr, feedErr)
+}
+
+func (s *UpdaterService) checkGitHubAPI(ctx context.Context) (UpdateCheckResult, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, latestReleaseAPI, nil)
 	if err != nil {
 		return UpdateCheckResult{}, err
@@ -140,6 +164,101 @@ func (s *UpdaterService) Check() (UpdateCheckResult, error) {
 		}, nil
 	}
 	return UpdateCheckResult{}, errors.New("GitHub 最新发布未找到 HypoMux 安装包")
+}
+
+func (s *UpdaterService) checkGitHubReleaseFeed(ctx context.Context) (UpdateCheckResult, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, releasesFeedURL, nil)
+	if err != nil {
+		return UpdateCheckResult{}, err
+	}
+	request.Header.Set("Accept", "application/atom+xml, application/xml;q=0.9")
+	request.Header.Set("User-Agent", "HypoMux-Updater")
+	response, err := s.client.Do(request)
+	if err != nil {
+		return UpdateCheckResult{}, errors.New("无法连接 GitHub 发布订阅")
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return UpdateCheckResult{}, fmt.Errorf("GitHub 发布订阅 HTTP %d", response.StatusCode)
+	}
+	var feed struct {
+		Entries []struct {
+			Title string `xml:"title"`
+			Links []struct {
+				Rel  string `xml:"rel,attr"`
+				Href string `xml:"href,attr"`
+			} `xml:"link"`
+		} `xml:"entry"`
+	}
+	decoder := xml.NewDecoder(io.LimitReader(response.Body, 2<<20))
+	if err := decoder.Decode(&feed); err != nil {
+		return UpdateCheckResult{}, errors.New("GitHub 返回了无效的发布订阅")
+	}
+	if len(feed.Entries) == 0 {
+		return UpdateCheckResult{}, errors.New("GitHub 发布订阅中没有版本")
+	}
+	entry := feed.Entries[0]
+	pageURL := ""
+	for _, link := range entry.Links {
+		if strings.TrimSpace(link.Rel) == "" || strings.EqualFold(strings.TrimSpace(link.Rel), "alternate") {
+			pageURL = strings.TrimSpace(link.Href)
+			if pageURL != "" {
+				break
+			}
+		}
+	}
+	if err := validateGitHubURL(pageURL); err != nil {
+		return UpdateCheckResult{}, errors.New("GitHub 发布订阅中的发布页地址无效")
+	}
+	parsedPage, _ := url.Parse(pageURL)
+	tagName, unescapeErr := url.PathUnescape(strings.TrimPrefix(
+		strings.TrimSpace(parsedPage.Path), "/Hypostasis-Cat/HypoMux/releases/tag/",
+	))
+	if unescapeErr != nil || tagName == "" || strings.Contains(tagName, "/") || versionKey(tagName) == nil {
+		return UpdateCheckResult{}, errors.New("GitHub 发布订阅中的版本号无效")
+	}
+	version := strings.TrimPrefix(strings.TrimPrefix(tagName, "v"), "V")
+	installerName := "HypoMux_Setup_" + version + ".exe"
+	if !installerNamePattern.MatchString(installerName) {
+		return UpdateCheckResult{}, errors.New("GitHub 发布订阅中的安装包名称无效")
+	}
+	installerURL := releaseDownloadURL + url.PathEscape(tagName) + "/" + url.PathEscape(installerName)
+	if err := validateGitHubURL(installerURL); err != nil {
+		return UpdateCheckResult{}, errors.New("GitHub 发布订阅中的安装包地址无效")
+	}
+	installerSize, err := s.releaseAssetSize(ctx, installerURL)
+	if err != nil {
+		return UpdateCheckResult{}, err
+	}
+	release := ReleaseInfo{
+		TagName: tagName, Name: strings.TrimSpace(entry.Title), PageURL: pageURL,
+		InstallerURL: installerURL, InstallerName: installerName, InstallerSize: installerSize,
+	}
+	return UpdateCheckResult{
+		CurrentVersion: CurrentVersion,
+		Available:      isNewerVersion(tagName, CurrentVersion),
+		Release:        release,
+	}, nil
+}
+
+func (s *UpdaterService) releaseAssetSize(ctx context.Context, installerURL string) (int64, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodHead, installerURL, nil)
+	if err != nil {
+		return 0, err
+	}
+	request.Header.Set("User-Agent", "HypoMux-Updater")
+	response, err := s.client.Do(request)
+	if err != nil {
+		return 0, errors.New("无法验证 GitHub 安装包")
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("GitHub 安装包验证失败（HTTP %d）", response.StatusCode)
+	}
+	if response.ContentLength <= 0 {
+		return 0, errors.New("GitHub 安装包未提供有效大小")
+	}
+	return response.ContentLength, nil
 }
 
 func (s *UpdaterService) Download(release ReleaseInfo) (string, error) {

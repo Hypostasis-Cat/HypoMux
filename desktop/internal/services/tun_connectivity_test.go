@@ -209,12 +209,51 @@ func TestAggregationConnectivityUsesSOCKSDataChannel(t *testing.T) {
 	defer server.Close()
 	socksEndpoint := startTestSOCKS5(t)
 	endpoint := strings.Replace(server.URL, "127.0.0.1", "localhost", 1)
-	check := probeHTTPURL(context.Background(), endpoint, &socksEndpoint, "aggregation")
+	requestEndpoint, originalHost, supported, err := resolveAggregationTarget(
+		endpoint,
+		dnsResolveResult{Domain: "localhost", Address: "127.0.0.1"},
+	)
+	if err != nil || !supported {
+		t.Fatalf("resolve aggregation target: supported=%t err=%v", supported, err)
+	}
+	check := probeHTTPURLTarget(
+		context.Background(), endpoint, requestEndpoint, originalHost, &socksEndpoint, "aggregation",
+	)
 	if !check.OK || check.Outbound != "aggregation" {
 		t.Fatalf("aggregation SOCKS check = %#v", check)
 	}
 	if host := <-hosts; !strings.HasPrefix(host, "localhost:") {
 		t.Fatalf("aggregation probe lost original HTTP Host header: %q", host)
+	}
+}
+
+func TestResolveAggregationTargetUsesPreTUNDNSAddress(t *testing.T) {
+	endpoint := "http://www.msftconnecttest.com/connecttest.txt"
+	requestEndpoint, originalHost, supported, err := resolveAggregationTarget(
+		endpoint,
+		dnsResolveResult{Domain: "www.msftconnecttest.com", Address: "47.88.58.234"},
+	)
+	if err != nil || !supported {
+		t.Fatalf("resolve aggregation target: supported=%t err=%v", supported, err)
+	}
+	if requestEndpoint != "http://47.88.58.234/connecttest.txt" {
+		t.Fatalf("request endpoint = %q", requestEndpoint)
+	}
+	if originalHost != "www.msftconnecttest.com" {
+		t.Fatalf("original host = %q", originalHost)
+	}
+}
+
+func TestResolveAggregationTargetSkipsUnrelatedPreTUNDNSResult(t *testing.T) {
+	requestEndpoint, originalHost, supported, err := resolveAggregationTarget(
+		"https://www.baidu.com/",
+		dnsResolveResult{Domain: "www.msftconnecttest.com", Address: "47.88.58.234"},
+	)
+	if err != nil || supported || requestEndpoint != "" || originalHost != "" {
+		t.Fatalf(
+			"unrelated target must be skipped: endpoint=%q host=%q supported=%t err=%v",
+			requestEndpoint, originalHost, supported, err,
+		)
 	}
 }
 

@@ -77,6 +77,25 @@ func TestTunPreflightCanBecomeReadyWithIndependentCore(t *testing.T) {
 	}
 }
 
+func TestTunPreflightTreatsSharedGatewayAsInformational(t *testing.T) {
+	service := testTunService(t, tunPlatformSnapshot{
+		PrivilegeBrokerAvailable: true,
+		WFPReady:                 true,
+	})
+	snapshot, err := service.Preflight([]string{"ethernet", "wlan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !snapshot.Ready {
+		t.Fatalf("shared LAN topology must not block TUN startup: %+v", snapshot)
+	}
+	for _, issue := range snapshot.Issues {
+		if issue.Code == "shared_lan_gateway" && issue.Level != "info" {
+			t.Fatalf("shared gateway issue = %+v; want informational", issue)
+		}
+	}
+}
+
 func TestTunPreflightElevatedHostWarnsWithoutBlocking(t *testing.T) {
 	service := testTunService(t, tunPlatformSnapshot{
 		HostElevated:             true,

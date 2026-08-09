@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -16,7 +17,12 @@ import (
 
 func TestCorePipeClientAuthenticatesExpectedDesktopHost(t *testing.T) {
 	name, server := createTestPipeServer(t)
-	defer windows.CloseHandle(server)
+	var serverFileOwnsHandle atomic.Bool
+	defer func() {
+		if !serverFileOwnsHandle.Load() {
+			_ = windows.CloseHandle(server)
+		}
+	}()
 	serverResult := make(chan error, 1)
 	go func() {
 		if err := windows.ConnectNamedPipe(server, nil); err != nil && err != windows.ERROR_PIPE_CONNECTED {
@@ -24,6 +30,12 @@ func TestCorePipeClientAuthenticatesExpectedDesktopHost(t *testing.T) {
 			return
 		}
 		file := os.NewFile(uintptr(server), name)
+		if file == nil {
+			serverResult <- fmt.Errorf("create test pipe file")
+			return
+		}
+		serverFileOwnsHandle.Store(true)
+		defer file.Close()
 		line, err := bufio.NewReaderSize(file, maxPipeSessionMessage).ReadBytes('\n')
 		if err != nil {
 			serverResult <- err
@@ -38,11 +50,19 @@ func TestCorePipeClientAuthenticatesExpectedDesktopHost(t *testing.T) {
 			serverResult <- fmt.Errorf("unexpected auth message: %+v", auth)
 			return
 		}
-		serverResult <- writePipeMessage(file, pipeReadyMessage{
+		ready, err := json.Marshal(pipeReadyMessage{
 			Protocol: pipeSessionProtocol,
 			Kind:     pipeSessionReadyKind,
 			OK:       true,
 		})
+		if err != nil {
+			serverResult <- err
+			return
+		}
+		payload := append(ready, '\n')
+		payload = append(payload, []byte("protocol-request\n")...)
+		_, err = file.Write(payload)
+		serverResult <- err
 	}()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -54,6 +74,13 @@ func TestCorePipeClientAuthenticatesExpectedDesktopHost(t *testing.T) {
 	defer connection.Close()
 	if err := <-serverResult; err != nil {
 		t.Fatal(err)
+	}
+	line, err := bufio.NewReader(connection).ReadBytes('\n')
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(line) != "protocol-request\n" {
+		t.Fatalf("buffered protocol request = %q", line)
 	}
 }
 

@@ -103,16 +103,6 @@ foreach ($adapter in $adapters) {
     $risks += ('active foreign virtual adapter: ' + $adapter.Name + ' [' + $adapter.InterfaceDescription + ']')
   }
 }
-$routes = @(Get-NetRoute -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' -ErrorAction Stop)
-if ($routes.Count -gt 1) {
-  $aliases = @($routes | ForEach-Object { $_.InterfaceAlias + ' metric=' + $_.RouteMetric })
-  $risks += ('multiple IPv4 default routes: ' + ($aliases -join ', '))
-}
-foreach ($route in $routes) {
-  if ($route.InterfaceAlias -ne 'HypoMux-Tun' -and [int]$route.RouteMetric -le 5) {
-    $risks += ('low-metric IPv4 default route: ' + $route.InterfaceAlias + ' metric=' + $route.RouteMetric)
-  }
-}
 $forwarding = @(Get-NetIPInterface -AddressFamily IPv4 -ErrorAction Stop |
   Where-Object { $_.Forwarding -eq 'Enabled' -and $_.InterfaceAlias -ne 'HypoMux-Tun' })
 foreach ($item in $forwarding) {

@@ -134,13 +134,27 @@ func probeTUNConnectivityThroughChannels(
 ) (tunConnectivityReport, error) {
 	report := tunConnectivityReport{Checks: make([]tunConnectivityCheck, 0, len(tunConnectivityURLs)+2)}
 	report.Checks = append(report.Checks, probeDNSBootstrap(parent, dnsResult))
+	aggregationTargets := 0
 	for _, endpoint := range tunConnectivityURLs {
-		report.Checks = append(report.Checks, probeHTTPURL(parent, endpoint, &aggregationEndpoint, "aggregation"))
+		requestEndpoint, originalHost, supported, err := resolveAggregationTarget(endpoint, dnsResult)
+		if !supported {
+			continue
+		}
+		aggregationTargets++
+		if err != nil {
+			report.Checks = append(report.Checks, tunConnectivityCheck{
+				Stage: "aggregation_data", Endpoint: endpoint, Outbound: "aggregation", Error: err.Error(),
+			})
+			continue
+		}
+		report.Checks = append(report.Checks, probeHTTPURLTarget(
+			parent, endpoint, requestEndpoint, originalHost, &aggregationEndpoint, "aggregation",
+		))
 	}
-	if len(tunConnectivityURLs) == 0 {
+	if aggregationTargets == 0 {
 		report.Checks = append(report.Checks, tunConnectivityCheck{
 			Stage: "aggregation_data", Endpoint: "none", Outbound: "aggregation",
-			Error: "no HTTP connectivity endpoints configured",
+			Error: "no connectivity endpoint matches the pre-TUN DNS result",
 		})
 	}
 	report.Checks = append(report.Checks, tunDataPathProbe(parent))
@@ -348,6 +362,17 @@ func probeHTTPURL(
 	aggregationEndpoint *string,
 	outbound string,
 ) tunConnectivityCheck {
+	return probeHTTPURLTarget(parent, endpoint, endpoint, "", aggregationEndpoint, outbound)
+}
+
+func probeHTTPURLTarget(
+	parent context.Context,
+	endpoint string,
+	requestEndpoint string,
+	originalHost string,
+	aggregationEndpoint *string,
+	outbound string,
+) tunConnectivityCheck {
 	check := tunConnectivityCheck{
 		Stage:    "aggregation_data",
 		Endpoint: endpoint,
@@ -361,15 +386,7 @@ func probeHTTPURL(
 		}).DialContext,
 		DisableKeepAlives: true,
 	}
-	requestEndpoint := endpoint
-	originalHost := ""
 	if aggregationEndpoint != nil {
-		var err error
-		requestEndpoint, originalHost, err = resolveAggregationTarget(parent, endpoint)
-		if err != nil {
-			check.Error = err.Error()
-			return check
-		}
 		if parsed, parseErr := url.Parse(endpoint); parseErr == nil && strings.EqualFold(parsed.Scheme, "https") {
 			transport.TLSClientConfig = &tls.Config{
 				MinVersion: tls.VersionTLS12,
@@ -438,40 +455,35 @@ func probeHTTPURL(
 	return check
 }
 
-// resolveAggregationTarget converts a domain target into a literal IP before
-// it enters an aggregation channel. Channel schedulers deliberately reject
-// domains; the HTTP Host header and TLS SNI retain the original name.
-func resolveAggregationTarget(parent context.Context, endpoint string) (string, string, error) {
+// resolveAggregationTarget converts a target into the literal address resolved
+// before TUN/FakeIP takeover. Channel schedulers deliberately require literal
+// addresses, so resolving again through the system resolver after TUN startup
+// would incorrectly feed a 198.18.0.0/15 FakeIP to a physical adapter.
+func resolveAggregationTarget(
+	endpoint string,
+	dnsResult dnsResolveResult,
+) (string, string, bool, error) {
 	parsed, err := url.Parse(endpoint)
 	if err != nil {
-		return "", "", err
+		return "", "", true, err
 	}
 	if parsed.Scheme == "" || parsed.Host == "" {
-		return "", "", errors.New("aggregation probe endpoint is missing a scheme or host")
+		return "", "", true, errors.New("aggregation probe endpoint is missing a scheme or host")
 	}
 	host := parsed.Hostname()
 	if host == "" {
-		return "", "", errors.New("aggregation probe endpoint has an empty host")
+		return "", "", true, errors.New("aggregation probe endpoint has an empty host")
 	}
 	originalHost := parsed.Host
 	if net.ParseIP(host) != nil {
-		return endpoint, originalHost, nil
+		return endpoint, originalHost, true, nil
 	}
-	lookupContext, cancel := context.WithTimeout(parent, 3*time.Second)
-	defer cancel()
-	addresses, err := net.DefaultResolver.LookupIP(lookupContext, "ip", host)
-	if err != nil {
-		return "", "", fmt.Errorf("aggregation target DNS lookup for %q: %w", host, err)
+	if !strings.EqualFold(strings.TrimSuffix(host, "."), strings.TrimSuffix(strings.TrimSpace(dnsResult.Domain), ".")) {
+		return "", "", false, nil
 	}
-	if len(addresses) == 0 {
-		return "", "", fmt.Errorf("aggregation target DNS lookup for %q returned no addresses", host)
-	}
-	selected := addresses[0]
-	for _, address := range addresses {
-		if address.To4() != nil {
-			selected = address
-			break
-		}
+	selected := net.ParseIP(strings.TrimSpace(dnsResult.Address))
+	if selected == nil {
+		return "", "", true, fmt.Errorf("pre-TUN DNS result for %q has no literal address", host)
 	}
 	if port := parsed.Port(); port != "" {
 		parsed.Host = net.JoinHostPort(selected.String(), port)
@@ -480,7 +492,7 @@ func resolveAggregationTarget(parent context.Context, endpoint string) (string, 
 	} else {
 		parsed.Host = "[" + selected.String() + "]"
 	}
-	return parsed.String(), originalHost, nil
+	return parsed.String(), originalHost, true, nil
 }
 
 func buildConnectivityDNSQuery() []byte {

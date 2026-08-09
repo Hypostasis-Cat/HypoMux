@@ -1,6 +1,11 @@
 package services
 
-import "testing"
+import (
+	"io"
+	"net/http"
+	"strings"
+	"testing"
+)
 
 func TestUpdaterVersionComparison(t *testing.T) {
 	cases := []struct {
@@ -34,4 +39,55 @@ func TestUpdaterRejectsNonGitHubURLs(t *testing.T) {
 	if err := validateGitHubURL("https://github.com/Hypostasis-Cat/HypoMux/releases/download/v2.3.0/HypoMux_Setup_2.3.0.exe"); err != nil {
 		t.Fatalf("official GitHub URL rejected: %v", err)
 	}
+}
+
+func TestUpdaterFallsBackToReleaseFeedWhenAPIIsRateLimited(t *testing.T) {
+	const feed = `<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <title>HypoMux 2.5.4</title>
+    <link rel="alternate" href="https://github.com/Hypostasis-Cat/HypoMux/releases/tag/v2.5.4" />
+  </entry>
+</feed>`
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		response := &http.Response{
+			Request: request,
+			Header:  make(http.Header),
+			Body:    io.NopCloser(strings.NewReader("")),
+		}
+		switch {
+		case request.URL.String() == latestReleaseAPI:
+			response.StatusCode = http.StatusForbidden
+		case request.URL.String() == releasesFeedURL:
+			response.StatusCode = http.StatusOK
+			response.Body = io.NopCloser(strings.NewReader(feed))
+		case request.Method == http.MethodHead && request.URL.String() ==
+			releaseDownloadURL+"v2.5.4/HypoMux_Setup_2.5.4.exe":
+			response.StatusCode = http.StatusOK
+			response.ContentLength = 30_000_000
+		default:
+			response.StatusCode = http.StatusNotFound
+		}
+		return response, nil
+	})}
+	service := NewUpdaterService()
+	service.client = client
+
+	result, err := service.Check()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Available || result.Release.TagName != "v2.5.4" {
+		t.Fatalf("fallback update result = %#v", result)
+	}
+	if result.Release.InstallerName != "HypoMux_Setup_2.5.4.exe" ||
+		result.Release.InstallerSize != 30_000_000 {
+		t.Fatalf("fallback release = %#v", result.Release)
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (function roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return function(request)
 }

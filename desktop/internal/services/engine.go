@@ -766,18 +766,44 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 	}
 	s.recordStartStage("engine_started", nil)
 	rollback := func(cause error) (EngineSnapshot, error) {
+		// Startup may fail because its 75-second transaction has already
+		// expired. Recovery must not reuse that cancelled context or the Core
+		// never receives tun.deactivate/engine.stop, leaving network ownership
+		// behind while the UI claims it was restored.
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 25*time.Second)
+		defer cleanupCancel()
+		cleanupFailures := make([]error, 0, 3)
+		recordCleanupFailure := func(stage string, cleanupErr error) {
+			if cleanupErr == nil {
+				return
+			}
+			var remote *engineclient.RemoteError
+			if errors.As(cleanupErr, &remote) && remote.Code == "invalid_state" {
+				return
+			}
+			cleanupFailures = append(cleanupFailures, fmt.Errorf("%s：%w", stage, cleanupErr))
+		}
 		var ignored any
 		var tunIgnored tunLifecycleResult
-		_ = s.client.Request(ctx, "tun.deactivate", nil, &tunIgnored)
-		_ = s.client.Request(ctx, "engine.stop", nil, &ignored)
+		recordCleanupFailure(
+			"停止虚拟网卡失败",
+			s.client.Request(cleanupCtx, "tun.deactivate", nil, &tunIgnored),
+		)
+		recordCleanupFailure(
+			"停止聚合核心失败",
+			s.client.Request(cleanupCtx, "engine.stop", nil, &ignored),
+		)
 		if restoreErr := restoreSystemProxy(); restoreErr != nil {
-			cause = fmt.Errorf("%w；同时恢复系统代理失败：%v", cause, restoreErr)
+			cleanupFailures = append(cleanupFailures, fmt.Errorf("恢复系统代理失败：%w", restoreErr))
 		}
 		s.mu.Lock()
 		s.clashAPI = clashAPIConfig{}
 		s.tunAggregationEndpoint = ""
 		s.tunDNSBootstrap = dnsResolveResult{}
 		s.mu.Unlock()
+		if len(cleanupFailures) > 0 {
+			cause = fmt.Errorf("%w；启动失败后的网络回滚不完整：%v", cause, errors.Join(cleanupFailures...))
+		}
 		return EngineSnapshot{}, cause
 	}
 	if mode == "proxy" {

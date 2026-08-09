@@ -315,6 +315,7 @@ export function useEngineState(
     operationActive.current = true;
     const operationEpoch = ++snapshotEpoch.current;
     const stopping = phase === "running" || phase === "degraded";
+    let operationFailed = false;
     setPhase(stopping ? "stopping" : "starting");
     try {
       if (!stopping && mode === "tun") {
@@ -325,7 +326,7 @@ export function useEngineState(
         } else {
           preflight = await appServices.tun.preflight(selectedAdapters.map((adapter) => adapter.id));
         }
-        const hasRisks = (preflight.issues?.length ?? 0) > 0;
+        const hasRisks = (preflight.issues ?? []).some((issue) => issue.level !== "info");
         const confirmed = hasRisks && onTunPreflight
           ? await onTunPreflight(preflight)
           : preflight.ready;
@@ -354,6 +355,7 @@ export function useEngineState(
       applySnapshot(next, true, operationEpoch);
       await load(false);
     } catch (error) {
+      operationFailed = true;
       setPhase(stopping ? "running" : "stopped");
       const message = error instanceof Error ? error.message : String(error);
       const elevationCancelled =
@@ -367,6 +369,19 @@ export function useEngineState(
       }
     } finally {
       operationActive.current = false;
+      if (operationFailed && mounted.current) {
+        const recoveryEpoch = ++snapshotEpoch.current;
+        try {
+          const recovered = await withServiceTimeout(
+            appServices.engine.snapshot(),
+            8_000,
+            "Refreshing aggregation state",
+          );
+          applySnapshot(recovered, true, recoveryEpoch);
+        } catch {
+          if (mounted.current) setPhase(stopping ? "running" : "stopped");
+        }
+      }
     }
   }, [adapters, applySnapshot, load, mode, onError, onTunPreflight, phase, transition]);
 

@@ -207,7 +207,7 @@ func (s *TunService) checkSelected(selected []AdapterView) TunPreflightSnapshot 
 		))
 	}
 	for _, detail := range snapshot.SharedGatewayRisks {
-		snapshot.Issues = append(snapshot.Issues, tunWarning(
+		snapshot.Issues = append(snapshot.Issues, tunInfo(
 			"shared_lan_gateway", "所选网卡共用子网和默认网关", detail+"；允许继续，但 Windows 无法保证独立出口或带宽聚合。",
 		))
 	}
@@ -230,6 +230,10 @@ func tunBlocker(code, title, detail string) TunPreflightIssue {
 
 func tunWarning(code, title, detail string) TunPreflightIssue {
 	return TunPreflightIssue{Code: code, Level: "warning", Title: title, Detail: detail}
+}
+
+func tunInfo(code, title, detail string) TunPreflightIssue {
+	return TunPreflightIssue{Code: code, Level: "info", Title: title, Detail: detail}
 }
 
 func errorDetail(err error, fallback string) string {

@@ -35,6 +35,12 @@ type pipeReadyMessage struct {
 	Error    string `json:"error,omitempty"`
 }
 
+type bufferedPipeConnection struct {
+	io.Reader
+	io.Writer
+	io.Closer
+}
+
 func connectAuthenticatedPipe(
 	ctx context.Context,
 	name string,
@@ -56,7 +62,7 @@ func connectAuthenticatedPipe(
 			0,
 			nil,
 			windows.OPEN_EXISTING,
-			0,
+			windows.FILE_FLAG_OVERLAPPED,
 			0,
 		)
 		if err == nil {
@@ -116,7 +122,11 @@ func connectAuthenticatedPipe(
 		}
 		return nil, fmt.Errorf("host rejected core session: %s", ready.Error)
 	}
-	return connection, nil
+	return &bufferedPipeConnection{
+		Reader: reader,
+		Writer: connection,
+		Closer: connection,
+	}, nil
 }
 
 func writePipeMessage(writer io.Writer, value any) error {

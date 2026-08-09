@@ -142,7 +142,7 @@ func createAuthenticatedPipe() (*namedPipeServer, error) {
 	}
 	handle, err := windows.CreateNamedPipe(
 		namePointer,
-		windows.PIPE_ACCESS_DUPLEX|windows.FILE_FLAG_FIRST_PIPE_INSTANCE,
+		windows.PIPE_ACCESS_DUPLEX|windows.FILE_FLAG_FIRST_PIPE_INSTANCE|windows.FILE_FLAG_OVERLAPPED,
 		windows.PIPE_TYPE_BYTE|windows.PIPE_READMODE_BYTE|windows.PIPE_WAIT|windows.PIPE_REJECT_REMOTE_CLIENTS,
 		1,
 		64*1024,
@@ -157,24 +157,8 @@ func createAuthenticatedPipe() (*namedPipeServer, error) {
 }
 
 func (p *namedPipeServer) accept(ctx context.Context, expectedPID int) (*os.File, error) {
-	connected := make(chan error, 1)
-	handle := p.handle
-	go func() {
-		err := windows.ConnectNamedPipe(handle, nil)
-		if errors.Is(err, windows.ERROR_PIPE_CONNECTED) {
-			err = nil
-		}
-		connected <- err
-	}()
-	select {
-	case err := <-connected:
-		if err != nil {
-			return nil, err
-		}
-	case <-ctx.Done():
-		p.close()
-		<-connected
-		return nil, ctx.Err()
+	if err := connectAuthenticatedPipeServer(ctx, p.handle); err != nil {
+		return nil, err
 	}
 
 	var clientPID uint32
@@ -195,6 +179,49 @@ func (p *namedPipeServer) accept(ctx context.Context, expectedPID int) (*os.File
 		return nil, err
 	}
 	return connection, nil
+}
+
+func connectAuthenticatedPipeServer(ctx context.Context, handle windows.Handle) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	event, err := windows.CreateEvent(nil, 1, 0, nil)
+	if err != nil {
+		return fmt.Errorf("创建核心管道连接事件失败：%w", err)
+	}
+	defer windows.CloseHandle(event)
+	overlapped := windows.Overlapped{HEvent: event}
+	err = windows.ConnectNamedPipe(handle, &overlapped)
+	if err == nil || errors.Is(err, windows.ERROR_PIPE_CONNECTED) {
+		return nil
+	}
+	if !errors.Is(err, windows.ERROR_IO_PENDING) {
+		return fmt.Errorf("连接高权限核心管道失败：%w", err)
+	}
+	for {
+		result, waitErr := windows.WaitForSingleObject(event, 50)
+		if waitErr != nil {
+			return fmt.Errorf("等待高权限核心连接失败：%w", waitErr)
+		}
+		switch result {
+		case windows.WAIT_OBJECT_0:
+			var transferred uint32
+			if err := windows.GetOverlappedResult(handle, &overlapped, &transferred, false); err != nil {
+				return fmt.Errorf("完成高权限核心连接失败：%w", err)
+			}
+			return nil
+		case uint32(windows.WAIT_TIMEOUT):
+			if ctx.Err() == nil {
+				continue
+			}
+			_ = windows.CancelIoEx(handle, &overlapped)
+			var transferred uint32
+			_ = windows.GetOverlappedResult(handle, &overlapped, &transferred, true)
+			return ctx.Err()
+		default:
+			return fmt.Errorf("等待高权限核心连接返回 0x%X", result)
+		}
+	}
 }
 
 func authenticateCore(ctx context.Context, connection *os.File, token string) error {
