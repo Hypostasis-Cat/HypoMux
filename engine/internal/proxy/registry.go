@@ -52,6 +52,7 @@ type ConnectionSnapshot struct {
 type TelemetrySnapshot struct {
 	StartedAt         time.Time                   `json:"started_at"`
 	SampledAt         time.Time                   `json:"sampled_at"`
+	TCPProfile        string                      `json:"tcp_profile,omitempty"`
 	Adapters          []AdapterTelemetry          `json:"adapters"`
 	Connections       []ConnectionSnapshot        `json:"active_connections,omitempty"`
 	DomainQuarantines []DomainQuarantineTelemetry `json:"domain_quarantines,omitempty"`
@@ -84,7 +85,8 @@ type connection struct {
 	target    string
 	remote    string
 	adapter   string
-	direct    bool
+	counters  atomic.Pointer[adapterCounters]
+	direct    atomic.Bool
 	bytesUp   atomic.Uint64
 	bytesDown atomic.Uint64
 }
@@ -159,6 +161,7 @@ func (r *registry) beginAddress(
 }
 
 func (r *registry) Attach(session *connection, upstream net.Conn, target string, adapter Adapter) {
+	counters := r.adapters[adapter.Name]
 	session.mu.Lock()
 	session.upstream = upstream
 	session.target = target
@@ -167,7 +170,8 @@ func (r *registry) Attach(session *connection, upstream net.Conn, target string,
 	}
 	session.adapter = adapter.Name
 	session.mu.Unlock()
-	if counters := r.adapters[adapter.Name]; counters != nil {
+	if counters != nil {
+		session.counters.Store(counters)
 		counters.active.Add(1)
 	}
 }
@@ -180,8 +184,8 @@ func (r *registry) AttachDirect(session *connection, upstream net.Conn, target s
 		session.remote = address.String()
 	}
 	session.adapter = ""
-	session.direct = true
 	session.mu.Unlock()
+	session.direct.Store(true)
 	r.directActive.Add(1)
 }
 
@@ -190,13 +194,10 @@ func (r *registry) AddUp(session *connection, amount uint64) {
 		return
 	}
 	session.bytesUp.Add(amount)
-	session.mu.RLock()
-	counters := r.adapters[session.adapter]
-	direct := session.direct
-	session.mu.RUnlock()
+	counters := session.counters.Load()
 	if counters != nil {
 		counters.bytesUp.Add(amount)
-	} else if direct {
+	} else if session.direct.Load() {
 		r.directBytesUp.Add(amount)
 	}
 }
@@ -206,13 +207,10 @@ func (r *registry) AddDown(session *connection, amount uint64) {
 		return
 	}
 	session.bytesDown.Add(amount)
-	session.mu.RLock()
-	counters := r.adapters[session.adapter]
-	direct := session.direct
-	session.mu.RUnlock()
+	counters := session.counters.Load()
 	if counters != nil {
 		counters.bytesDown.Add(amount)
-	} else if direct {
+	} else if session.direct.Load() {
 		r.directBytesDown.Add(amount)
 	}
 }
@@ -222,13 +220,9 @@ func (r *registry) Finish(session *connection) {
 	delete(r.connections, session.id)
 	r.mu.Unlock()
 
-	session.mu.RLock()
-	adapter := session.adapter
-	direct := session.direct
-	session.mu.RUnlock()
-	if counters := r.adapters[adapter]; counters != nil {
+	if counters := session.counters.Load(); counters != nil {
 		counters.active.Add(^uint64(0))
-	} else if direct {
+	} else if session.direct.Load() {
 		r.directActive.Add(^uint64(0))
 	}
 }

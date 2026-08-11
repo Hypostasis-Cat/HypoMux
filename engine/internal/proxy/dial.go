@@ -14,6 +14,7 @@ func (s *Server) dialUpstream(
 	target string,
 	channelScheduler *scheduler,
 	literalIPOnly bool,
+	tuneTCP bool,
 ) (net.Conn, Adapter, error) {
 	host, port, splitErr := net.SplitHostPort(target)
 	if splitErr != nil {
@@ -104,8 +105,14 @@ func (s *Server) dialUpstream(
 			failures = append(failures, fmt.Errorf("%s bind: %w", adapter.Name, err))
 			continue
 		}
+		if tuneTCP {
+			enableTCPDialerTuning(dialer)
+		}
 		connection, err := s.dialTCP(ctx, dialer, dialTarget)
 		if err == nil {
+			if tuneTCP {
+				tuneTCPConnection(connection)
+			}
 			channelScheduler.MarkSuccess(adapter.Name, domain)
 			for _, failedAdapter := range comparativeFailures {
 				channelScheduler.health.recordComparativeDomainFailure(

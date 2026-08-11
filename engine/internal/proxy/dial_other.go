@@ -36,3 +36,5 @@ func boundNetworkDialer(adapter Adapter, timeout time.Duration, network string) 
 	}
 	return dialer, nil
 }
+
+func enableTCPDialerTuning(_ *net.Dialer) {}

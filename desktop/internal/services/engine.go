@@ -74,6 +74,7 @@ type connectionTelemetry struct {
 type telemetryResult struct {
 	StartedAt         time.Time             `json:"started_at"`
 	SampledAt         time.Time             `json:"sampled_at"`
+	TCPProfile        string                `json:"tcp_profile,omitempty"`
 	Adapters          []adapterTelemetry    `json:"adapters"`
 	Connections       []connectionTelemetry `json:"active_connections"`
 	DomainQuarantines []struct {
@@ -111,6 +112,7 @@ type EngineSnapshot struct {
 	UploadBPS     float64          `json:"upload_bps"`
 	Connections   int              `json:"connections"`
 	SessionBytes  int64            `json:"session_bytes"`
+	TCPProfile    string           `json:"tcp_profile,omitempty"`
 	Adapters      []AdapterRuntime `json:"adapters"`
 	SampledAt     time.Time        `json:"sampled_at"`
 }
@@ -147,6 +149,7 @@ type EngineService struct {
 	logs                   *SupportLogStore
 	tun                    *TunService
 	last                   telemetrySample
+	lastPerformanceLog     time.Time
 	lastTUNHealthCheck     time.Time
 	tunHealthFailures      int
 	watchdogStopping       bool
@@ -396,6 +399,7 @@ func (s *EngineService) Snapshot() (EngineSnapshot, error) {
 	}
 	if status.Engine.State != "running" {
 		s.last = telemetrySample{}
+		s.lastPerformanceLog = time.Time{}
 		s.mu.Unlock()
 		return snapshot, nil
 	}
@@ -405,6 +409,7 @@ func (s *EngineService) Snapshot() (EngineSnapshot, error) {
 		return EngineSnapshot{}, fmt.Errorf("读取聚合遥测失败：%w", err)
 	}
 	snapshot.SampledAt = telemetry.SampledAt
+	snapshot.TCPProfile = telemetry.TCPProfile
 	snapshot.Connections = telemetry.Total.Connections
 	snapshot.SessionBytes = telemetry.Total.BytesDown + telemetry.Total.BytesUp
 	s.mu.Lock()
@@ -430,7 +435,32 @@ func (s *EngineService) Snapshot() (EngineSnapshot, error) {
 		snapshot.Adapters = append(snapshot.Adapters, runtime)
 	}
 	s.last = current
+	performanceNow := time.Now()
+	shouldLogPerformance := shouldRecordPerformance(
+		performanceNow,
+		s.lastPerformanceLog,
+		snapshot.DownloadBPS,
+		snapshot.UploadBPS,
+	)
+	if shouldLogPerformance {
+		s.lastPerformanceLog = performanceNow
+	}
 	s.mu.Unlock()
+	if shouldLogPerformance && s.logs != nil {
+		adapters := make([]map[string]any, 0, len(snapshot.Adapters))
+		for _, adapter := range snapshot.Adapters {
+			adapters = append(adapters, map[string]any{
+				"name": adapter.ID, "download_bps": adapter.DownloadBPS,
+				"upload_bps": adapter.UploadBPS, "connections": adapter.Connections,
+				"health": adapter.HealthState,
+			})
+		}
+		s.logs.RecordEvent("performance", "throughput_sample", map[string]any{
+			"tcp_profile": telemetry.TCPProfile, "download_bps": snapshot.DownloadBPS,
+			"upload_bps": snapshot.UploadBPS, "connections": snapshot.Connections,
+			"adapters": adapters,
+		})
+	}
 	if s.blockedDomains != nil && settings.BlockedDomainBypass {
 		runtimeEntries := make([]BlockedDomainEntry, 0, len(telemetry.DomainQuarantines))
 		for _, entry := range telemetry.DomainQuarantines {
@@ -921,6 +951,7 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 	}
 	s.mu.Lock()
 	s.last = telemetrySample{}
+	s.lastPerformanceLog = time.Time{}
 	s.lastTUNHealthCheck = time.Now()
 	s.tunHealthFailures = 0
 	s.mu.Unlock()
@@ -934,6 +965,19 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 		Phase: "running", Mode: mode, Weighted: settings.Weighted, CoreConnected: true,
 		CoreVersion: hello.EngineVersion, CoreElevated: hello.Elevated, SampledAt: time.Now(),
 	}, nil
+}
+
+func shouldRecordPerformance(
+	now time.Time,
+	last time.Time,
+	downloadBPS float64,
+	uploadBPS float64,
+) bool {
+	const minimumThroughput = 10 * 1024 * 1024
+	if downloadBPS+uploadBPS < minimumThroughput {
+		return false
+	}
+	return last.IsZero() || now.Sub(last) >= 5*time.Second
 }
 
 func (s *EngineService) recordStartStage(stage string, fields map[string]any) {
@@ -1008,6 +1052,7 @@ func (s *EngineService) Stop() (EngineSnapshot, error) {
 	}
 	s.mu.Lock()
 	s.last = telemetrySample{}
+	s.lastPerformanceLog = time.Time{}
 	s.clashAPI = clashAPIConfig{}
 	s.tunAggregationEndpoint = ""
 	s.tunDNSBootstrap = dnsResolveResult{}

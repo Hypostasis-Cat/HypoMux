@@ -75,3 +75,23 @@ func boundNetworkDialer(adapter Adapter, timeout time.Duration, network string) 
 	}
 	return dialer, nil
 }
+
+func enableTCPDialerTuning(dialer *net.Dialer) {
+	previous := dialer.Control
+	dialer.Control = func(network, address string, raw syscall.RawConn) error {
+		if previous != nil {
+			if err := previous(network, address, raw); err != nil {
+				return err
+			}
+		}
+		// These options are an optimization only. Preserve connectivity if a
+		// driver or endpoint security policy rejects any of them.
+		_ = raw.Control(func(handle uintptr) {
+			socket := windows.Handle(handle)
+			_ = windows.SetsockoptInt(socket, windows.SOL_SOCKET, windows.SO_RCVBUF, tcpSocketBufferSize)
+			_ = windows.SetsockoptInt(socket, windows.SOL_SOCKET, windows.SO_SNDBUF, tcpSocketBufferSize)
+			_ = windows.SetsockoptInt(socket, windows.IPPROTO_TCP, windows.TCP_NODELAY, 1)
+		})
+		return nil
+	}
+}

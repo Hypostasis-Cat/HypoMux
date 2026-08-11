@@ -16,6 +16,7 @@ import (
 
 type Server struct {
 	config           Config
+	tcpTuningMode    tcpTuningMode
 	scheduler        *scheduler
 	schedulers       map[string]*scheduler
 	health           *healthTable
@@ -51,11 +52,12 @@ func New(config Config) (*Server, error) {
 		normalized.DomainQuarantines,
 	)
 	server := &Server{
-		config:     normalized,
-		scheduler:  newScheduler(normalized.Adapters, normalized.Weighted, health),
-		schedulers: make(map[string]*scheduler, len(normalized.Channels)),
-		health:     health,
-		registry:   newRegistry(normalized.Adapters),
+		config:        normalized,
+		tcpTuningMode: tcpTuningModeFromEnvironment(),
+		scheduler:     newScheduler(normalized.Adapters, normalized.Weighted, health),
+		schedulers:    make(map[string]*scheduler, len(normalized.Channels)),
+		health:        health,
+		registry:      newRegistry(normalized.Adapters),
 	}
 	for _, channel := range normalized.Channels {
 		if channel.Name == ChannelDirect {
@@ -221,6 +223,7 @@ func (s *Server) Endpoints() Endpoints {
 
 func (s *Server) Snapshot(includeConnections bool) TelemetrySnapshot {
 	result := s.registry.Snapshot(includeConnections)
+	result.TCPProfile = s.tcpProfileName()
 	health, quarantines := s.health.snapshot()
 	for index := range result.Adapters {
 		item := health[result.Adapters[index].Name]
@@ -350,6 +353,9 @@ func (s *Server) acceptLoop(listener net.Listener, protocol string, channel stri
 			}
 		}
 		_ = client.SetDeadline(time.Time{})
+		if s.shouldTuneTCP(channel) {
+			tuneTCPConnection(client)
+		}
 		s.mu.RLock()
 		if !s.running {
 			s.mu.RUnlock()
@@ -403,6 +409,7 @@ func (s *Server) connect(session *connection, target string) (net.Conn, Adapter,
 		target,
 		channelScheduler,
 		literalIPOnly,
+		s.shouldTuneTCP(session.channel),
 	)
 	if err != nil {
 		return nil, Adapter{}, err
@@ -420,9 +427,15 @@ func (s *Server) dialDirectTCP(ctx context.Context, target string) (net.Conn, er
 	if ip := net.ParseIP(host); ip != nil && ip.To4() == nil {
 		dialer.LocalAddr = &net.TCPAddr{IP: net.IPv6unspecified}
 	}
+	if s.tcpTuningMode == tcpTuningForce {
+		enableTCPDialerTuning(dialer)
+	}
 	connection, err := s.dialTCP(ctx, dialer, target)
 	if err != nil {
 		return nil, fmt.Errorf("direct connect: %w", err)
+	}
+	if s.tcpTuningMode == tcpTuningForce {
+		tuneTCPConnection(connection)
 	}
 	return connection, nil
 }
@@ -432,18 +445,22 @@ func (s *Server) relay(clientReader io.Reader, client net.Conn, upstream net.Con
 	relay.Add(2)
 	go func() {
 		defer relay.Done()
+		pooled, buffer := acquireTCPRelayBuffer()
+		defer releaseTCPRelayBuffer(pooled)
 		_, _ = io.CopyBuffer(accountingWriter{
 			Writer: upstream,
 			add:    func(amount uint64) { s.registry.AddUp(session, amount) },
-		}, clientReader, make([]byte, 128*1024))
+		}, readerOnly{Reader: clientReader}, buffer)
 		closeWrite(upstream)
 	}()
 	go func() {
 		defer relay.Done()
+		pooled, buffer := acquireTCPRelayBuffer()
+		defer releaseTCPRelayBuffer(pooled)
 		_, _ = io.CopyBuffer(accountingWriter{
 			Writer: client,
 			add:    func(amount uint64) { s.registry.AddDown(session, amount) },
-		}, upstream, make([]byte, 128*1024))
+		}, upstream, buffer)
 		closeWrite(client)
 	}()
 	relay.Wait()

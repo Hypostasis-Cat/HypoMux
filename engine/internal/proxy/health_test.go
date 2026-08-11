@@ -243,6 +243,7 @@ func TestDialLearnsDomainOnlyAfterAlternateAdapterSuccess(t *testing.T) {
 			"Example.COM.:443",
 			server.scheduler,
 			false,
+			false,
 		)
 		if dialErr != nil {
 			t.Fatal(dialErr)
@@ -263,6 +264,7 @@ func TestDialLearnsDomainOnlyAfterAlternateAdapterSuccess(t *testing.T) {
 		context.Background(),
 		"example.com:443",
 		server.scheduler,
+		false,
 		false,
 	)
 	if err != nil {
@@ -320,6 +322,7 @@ func TestDialDoesNotLearnDomainWhenEveryAdapterFails(t *testing.T) {
 			context.Background(),
 			"outage.example:443",
 			server.scheduler,
+			false,
 			false,
 		); err == nil {
 			t.Fatal("all-adapter failure unexpectedly succeeded")

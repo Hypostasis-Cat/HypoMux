@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Version-2.5.3-0078d4?style=flat-square" alt="Version 2.5.3">
+  <img src="https://img.shields.io/badge/Version-2.5.4-0078d4?style=flat-square" alt="Version 2.5.4">
   <img src="https://img.shields.io/badge/Core-Go-00ADD8?style=flat-square&logo=go&logoColor=white" alt="Go">
   <img src="https://img.shields.io/badge/Desktop-Wails%20v3-CB3837?style=flat-square" alt="Wails v3">
   <img src="https://img.shields.io/badge/UI-React%20%2B%20Fluent%20UI-61DAFB?style=flat-square&logo=react&logoColor=black" alt="React and Fluent UI">
@@ -16,6 +16,12 @@
 HypoMux 是一款面向 Windows 的开源多网卡聚合与分流工具。它把多连接下载任务分配到多张活动网卡，让有线网络、Wi-Fi、手机热点或 USB 网络共享能够同时承担流量。
 
 HypoMux 聚合的是多个独立连接，而不是把单条 TCP 连接拆成多路。因此，它尤其适合 Steam、IDM、游戏平台更新器、浏览器大文件下载等高并发场景；单连接任务的速度仍受该连接本身限制。
+
+## 2.5.4 聚合吞吐优化
+
+2.5.4 恢复了 Python 版验证过的高吞吐 TCP 参数，并以保守策略仅应用于双网卡及以上的聚合 TCP 流量：1 MiB TCP 收发缓冲、128 KiB 双向转发缓冲和 TCP_NODELAY。单网卡、独立网卡通道、直连、UDP、QUIC 与 DNS 保持原有行为。
+
+本版同时降低了转发热路径上的遥测锁竞争，并增加不含域名、URL 或远端 IP 的低频吞吐摘要，便于根据用户现场反馈继续定位。遇到兼容问题时，可设置 `HYPOMUX_TCP_TUNING=off` 立即恢复原 TCP 参数。
 
 ## 2.5.3 新版本
 

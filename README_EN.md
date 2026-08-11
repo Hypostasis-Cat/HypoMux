@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Version-2.5.3-0078d4?style=flat-square" alt="Version 2.5.3">
+  <img src="https://img.shields.io/badge/Version-2.5.4-0078d4?style=flat-square" alt="Version 2.5.4">
   <img src="https://img.shields.io/badge/Core-Go-00ADD8?style=flat-square&logo=go&logoColor=white" alt="Go">
   <img src="https://img.shields.io/badge/Desktop-Wails%20v3-CB3837?style=flat-square" alt="Wails v3">
   <img src="https://img.shields.io/badge/UI-React%20%2B%20Fluent%20UI-61DAFB?style=flat-square&logo=react&logoColor=black" alt="React and Fluent UI">
@@ -16,6 +16,12 @@
 HypoMux is an open-source multi-adapter aggregation and split-routing utility for Windows. It distributes multi-connection download workloads across active network adapters, allowing Ethernet, Wi-Fi, mobile hotspots, and USB tethering to carry traffic at the same time.
 
 HypoMux balances independent connections; it does not split one TCP connection across multiple paths. It works best with highly concurrent workloads such as Steam updates, IDM downloads, game launchers, and large browser downloads. A single-connection transfer remains limited by that connection.
+
+## Aggregation throughput improvements in 2.5.4
+
+Version 2.5.4 restores the high-throughput TCP settings validated by the Python implementation, using a conservative policy that applies them only to aggregated TCP traffic with two or more adapters: 1 MiB TCP send/receive buffers, 128 KiB bidirectional relay buffers, and TCP_NODELAY. Single-adapter traffic, dedicated adapter channels, direct traffic, UDP, QUIC, and DNS retain their previous behavior.
+
+This release also reduces telemetry lock contention on the relay hot path and adds low-frequency throughput summaries without domains, URLs, or remote IP addresses. If a compatibility issue appears, set `HYPOMUX_TCP_TUNING=off` to restore the previous TCP settings immediately.
 
 ## What's new in 2.5.3
 
