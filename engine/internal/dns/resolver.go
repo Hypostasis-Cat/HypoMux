@@ -276,6 +276,11 @@ func (r *Resolver) resolveUncached(
 	return r.resolveLegacy(ctx, domain, wireType, binding)
 }
 
+const (
+	// maxDoHRace limits concurrent DoH dials per lookup; see resolveDoH.
+	maxDoHRace = 2
+)
+
 func (r *Resolver) resolveDoH(
 	ctx context.Context,
 	domain string,
@@ -294,9 +299,14 @@ func (r *Resolver) resolveDoH(
 	raceContext, cancel := context.WithCancel(ctx)
 	defer cancel()
 	outcomes := make(chan outcome, len(endpoints))
+	// Cap how many endpoints dial concurrently: racing all five at once
+	// multiplies connections and goroutines while DoH is blocked, for little
+	// latency benefit once the first responder wins.
+	semaphore := make(chan struct{}, maxDoHRace)
 	for _, endpoint := range endpoints {
 		endpoint := endpoint
 		go func() {
+			semaphore <- struct{}{}
 			result, ttl, err := r.queryDoH(
 				raceContext,
 				domain,
@@ -304,6 +314,7 @@ func (r *Resolver) resolveDoH(
 				binding,
 				endpoint,
 			)
+			<-semaphore
 			outcomes <- outcome{result: result, ttl: ttl, err: err}
 		}()
 	}

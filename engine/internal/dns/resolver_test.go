@@ -344,3 +344,41 @@ func answeringConnection(
 	}()
 	return client
 }
+
+func TestDoHRaceIsBounded(t *testing.T) {
+	var concurrent atomic.Int64
+	var peak atomic.Int64
+	dial := func(_ context.Context, _ string, _ string, _ Binding) (net.Conn, error) {
+		now := concurrent.Add(1)
+		defer concurrent.Add(-1)
+		for {
+			prev := peak.Load()
+			if now <= prev || peak.CompareAndSwap(prev, now) {
+				break
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+		return nil, errors.New("simulated DoH outage")
+	}
+	resolver, err := New(context.Background(), Config{
+		Policy:          PolicyAuto,
+		LegacyServers:   []string{"192.0.2.53"},
+		CacheTTL:        time.Minute,
+		QueryTimeout:    2 * time.Second,
+		MaxCacheEntries: 16,
+	}, dial)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = resolver.Resolve(context.Background(), Query{
+		Domain:     "race.example",
+		RecordType: RecordA,
+		Binding:    loopbackBinding,
+	})
+	if err == nil {
+		t.Fatal("expected resolution to fail with simulated DoH and legacy outage")
+	}
+	if peak.Load() > 2 {
+		t.Fatalf("concurrent DoH dials peaked at %d, want <= 2", peak.Load())
+	}
+}
