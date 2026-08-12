@@ -32,6 +32,7 @@ import { GlassSurface } from "../components/material/GlassSurface";
 import { AppToaster } from "../components/AppToaster";
 import { desktopPlatform } from "../platform/desktop";
 import { appServices, type CompleteAppSettings, type ConfigMigrationStatus } from "../platform/services";
+import { SettingsSaveQueue } from "../platform/settingsQueue";
 import { accentColours } from "../theme/appearance.presets";
 import { useAppearance } from "../theme/appearance.store";
 import { backgroundService } from "../theme/background.service";
@@ -120,16 +121,29 @@ export function SettingsPage({ onOpenBlockedDomains }: { onOpenBlockedDomains: (
   const { locale, setLocale, t } = useI18n();
   const text = (zh: string, en: string) => locale === "en" ? en : zh;
   const backgroundInput = useRef<HTMLInputElement>(null);
-  // Serialize settings persistence: concurrent saves would otherwise let an
-  // earlier response overwrite a newer optimistic value, silently dropping
-  // the user's latest change (and mixing full-replace updates with the
-  // partial SetAutostart/SetAutoStartEngine endpoints).
-  const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
+  // Serialize settings persistence and track per-field ownership: concurrent
+  // saves would otherwise let an earlier response overwrite a newer optimistic
+  // value, and a failed operation's recovery must not overwrite a later
+  // operation's success (see settingsQueue).
+  const saveQueue = useRef(new SettingsSaveQueue()).current;
 
-  const enqueueSave = (operation: () => Promise<void>): Promise<void> => {
-    const next = saveQueueRef.current.then(operation);
-    saveQueueRef.current = next.catch(() => undefined);
-    return next;
+  const enqueueSave = <T,>(operation: () => Promise<T>, fields: string[] | null): Promise<T> =>
+    saveQueue.enqueue(operation, fields);
+
+  const applyAuthoritative = (authoritative: CompleteAppSettings) => {
+    setSettings((current) =>
+      saveQueue.mergeAuthoritative({ ...emptySettings, ...authoritative }, current),
+    );
+  };
+
+  const applyRecovery = (ownedFields: string[] | null, authoritative: CompleteAppSettings) => {
+    setSettings((current) =>
+      saveQueue.recoverAuthoritative(
+        ownedFields,
+        { ...emptySettings, ...authoritative },
+        current,
+      ),
+    );
   };
 
   const toasterId = useId("settings-toaster");
@@ -166,28 +180,28 @@ export function SettingsPage({ onOpenBlockedDomains }: { onOpenBlockedDomains: (
       .finally(() => setLoading(false));
   }, []);
 
-  const save = (next: CompleteAppSettings, success?: string): Promise<void> => {
+  const save = (next: CompleteAppSettings, success?: string, fields: string[] | null = null): Promise<void> => {
     setSettings(next);
     return enqueueSave(async () => {
       setSaving(true);
       try {
         const persisted = await appServices.settings.update(next);
-        setSettings((current) => ({ ...emptySettings, ...persisted, ...current }));
+        applyAuthoritative(persisted);
         setLocale(persisted.language);
         notify(t("infobar_success"), success ?? text("设置已保存", "Settings saved"));
       } catch (error) {
         const restored = await appServices.settings.get().catch(() => next);
-        setSettings({ ...emptySettings, ...restored });
+        applyRecovery(fields, restored);
         setLocale(restored.language);
         notify(text("保存失败", "Save failed"), String(error), "error");
       } finally {
         setSaving(false);
       }
-    });
+    }, fields);
   };
 
   const patchAndSave = (patch: Partial<CompleteAppSettings>, success?: string) =>
-    save({ ...settings, ...patch }, success);
+    save({ ...settings, ...patch }, success, Object.keys(patch));
 
   const setAutostart = (enabled: boolean): Promise<void> => {
     // Optimistically mirror the backend semantics: disabling autostart also
@@ -202,7 +216,7 @@ export function SettingsPage({ onOpenBlockedDomains }: { onOpenBlockedDomains: (
       setSaving(true);
       try {
         const persisted = await appServices.settings.setAutostart(enabled);
-        setSettings((current) => ({ ...emptySettings, ...persisted, ...current }));
+        applyAuthoritative(persisted);
         notify(
           enabled ? t("settings_autostart_on") : t("settings_autostart_off"),
           t("settings_autostart_hint"),
@@ -210,13 +224,13 @@ export function SettingsPage({ onOpenBlockedDomains }: { onOpenBlockedDomains: (
       } catch (error) {
         const restored = await appServices.settings.get().catch(() => null);
         if (restored) {
-          setSettings({ ...emptySettings, ...restored });
+          applyRecovery(["autostart", "auto_start_engine"], restored);
         }
         notify(t("settings_autostart_failed"), String(error), "error");
       } finally {
         setSaving(false);
       }
-    });
+    }, ["autostart", "auto_start_engine"]);
   };
 
   const setAutoStartEngine = (enabled: boolean): Promise<void> => {
@@ -225,7 +239,7 @@ export function SettingsPage({ onOpenBlockedDomains }: { onOpenBlockedDomains: (
       setSaving(true);
       try {
         const persisted = await appServices.settings.setAutoStartEngine(enabled);
-        setSettings((current) => ({ ...emptySettings, ...persisted, ...current }));
+        applyAuthoritative(persisted);
         notify(
           enabled ? t("settings_auto_start_engine_on") : t("settings_auto_start_engine_off"),
           t("settings_auto_start_engine_hint"),
@@ -233,13 +247,13 @@ export function SettingsPage({ onOpenBlockedDomains }: { onOpenBlockedDomains: (
       } catch (error) {
         const restored = await appServices.settings.get().catch(() => null);
         if (restored) {
-          setSettings({ ...emptySettings, ...restored });
+          applyRecovery(["auto_start_engine"], restored);
         }
         notify(t("settings_auto_start_engine_failed"), String(error), "error");
       } finally {
         setSaving(false);
       }
-    });
+    }, ["auto_start_engine"]);
   };
 
   const inspectWfp = async () => {
@@ -302,7 +316,7 @@ export function SettingsPage({ onOpenBlockedDomains }: { onOpenBlockedDomains: (
         const next = migrationDialog === "migrate"
           ? await appServices.settings.migrateLegacy()
           : await appServices.settings.rollbackLegacy();
-        setSettings({ ...emptySettings, ...next });
+        applyAuthoritative(next);
         setLocale(next.language);
         setMigration(await appServices.settings.migrationStatus());
         notify(
@@ -320,7 +334,7 @@ export function SettingsPage({ onOpenBlockedDomains }: { onOpenBlockedDomains: (
       } finally {
         setSaving(false);
       }
-    });
+    }, null);
   };
 
   return (

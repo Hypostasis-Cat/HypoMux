@@ -7,7 +7,8 @@
     "dev": "vite",
     "build:dev": "tsc && vite build --minify false --mode development",
     "build": "tsc && vite build --mode production",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run"
   },
   "dependencies": {
     "@fluentui/react-components": "9.74.4",
@@ -23,6 +24,7 @@
     "@types/react-dom": "^18.2.17",
     "@vitejs/plugin-react": "^6.0.0",
     "typescript": "^5.2.2",
-    "vite": "^8.0.5"
+    "vite": "^8.0.5",
+    "vitest": "^4.1.10"
   }
 }
