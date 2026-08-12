@@ -50,15 +50,24 @@ func killProcess(ctx context.Context, processName string) error {
 	// Suppress window creation on Windows
 	hideWindow(cmd)
 
-	// taskkill returns error if process not found, which is acceptable
-	output, _ := cmd.CombinedOutput()
-
-	// Check if process was not found (acceptable) vs actual error
-	outputStr := string(output)
-	if strings.Contains(outputStr, "not found") || strings.Contains(outputStr, "未找到") {
-		return nil
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		outputStr := string(output)
+		// taskkill reports "no matching task" via exit code 128 regardless of
+		// UI language; text matching alone would miss localized variants
+		// (e.g. zh-CN prints the message in CP936). A missing process is the
+		// expected steady state and must not surface as a startup error.
+		var exitErr *exec.ExitError
+		if (errors.As(err, &exitErr) && exitErr.ExitCode() == 128) ||
+			strings.Contains(outputStr, "not found") {
+			return nil
+		}
+		if strings.TrimSpace(outputStr) == "" {
+			// A context deadline can kill taskkill before it writes anything.
+			outputStr = err.Error()
+		}
+		return fmt.Errorf("kill %s: %s", processName, strings.TrimSpace(outputStr))
 	}
-
 	return nil
 }
 
