@@ -280,8 +280,11 @@ func buildRules(adapters []Adapter) []dnsRule {
 			}
 			seen[key] = struct{}{}
 			result = append(result, dnsRule{
-				adapter:  adapter.Name,
-				sourceIP: binary.LittleEndian.Uint32(ip),
+				adapter: adapter.Name,
+				// WFP requires FWPM_CONDITION_IP_LOCAL_ADDRESS in host byte order
+				// (ntohl of the network-order bytes); BigEndian.Uint32 yields that
+				// value on any machine. Do NOT switch back to LittleEndian.
+				sourceIP: binary.BigEndian.Uint32(ip),
 				ifIndex:  adapter.IfIndex,
 				protocol: protocol,
 			})
