@@ -32,6 +32,7 @@ import { GlassSurface } from "../components/material/GlassSurface";
 import { AppToaster } from "../components/AppToaster";
 import { desktopPlatform } from "../platform/desktop";
 import { appServices, type CompleteAppSettings, type ConfigMigrationStatus } from "../platform/services";
+import { SettingsSaveQueue, type SaveOutcome } from "../platform/settingsQueue";
 import { accentColours } from "../theme/appearance.presets";
 import { useAppearance } from "../theme/appearance.store";
 import { backgroundService } from "../theme/background.service";
@@ -120,6 +121,25 @@ export function SettingsPage({ onOpenBlockedDomains }: { onOpenBlockedDomains: (
   const { locale, setLocale, t } = useI18n();
   const text = (zh: string, en: string) => locale === "en" ? en : zh;
   const backgroundInput = useRef<HTMLInputElement>(null);
+  // Serialize settings persistence and track per-field ownership: concurrent
+  // saves would otherwise let an earlier response overwrite a newer optimistic
+  // value, and a failed operation's recovery must not overwrite a later
+  // operation's success. Operations return SaveOutcome; the queue releases
+  // their ownership and merges authoritative values (see settingsQueue).
+  const saveQueue = useRef(new SettingsSaveQueue<CompleteAppSettings>()).current;
+
+  useEffect(() => {
+    saveQueue.attach((updater) => setSettings(updater));
+  }, [saveQueue]);
+
+  const enqueueSave = <T,>(operation: () => Promise<SaveOutcome<T, CompleteAppSettings>>, fields: string[] | null): Promise<T> =>
+    saveQueue.enqueue(operation, fields).catch((error) => {
+      // Errors are already surfaced via notify inside the operation; the
+      // queue's rejection is only a control-flow signal. Swallow it here so
+      // callers (React event handlers) never see an unhandled rejection.
+      console.error("settings save failed:", error);
+      return undefined as T;
+    });
 
   const toasterId = useId("settings-toaster");
   const { dispatchToast } = useToastController(toasterId);
@@ -155,57 +175,88 @@ export function SettingsPage({ onOpenBlockedDomains }: { onOpenBlockedDomains: (
       .finally(() => setLoading(false));
   }, []);
 
-  const save = async (next: CompleteAppSettings, success?: string) => {
+  const save = (next: CompleteAppSettings, success?: string, fields: string[] | null = null): Promise<void> => {
     setSettings(next);
-    setSaving(true);
-    try {
-      const persisted = await appServices.settings.update(next);
-      setSettings({ ...emptySettings, ...persisted });
-      setLocale(persisted.language);
-      notify(t("infobar_success"), success ?? text("设置已保存", "Settings saved"));
-    } catch (error) {
-      const restored = await appServices.settings.get().catch(() => settings);
-      setSettings({ ...emptySettings, ...restored });
-      setLocale(restored.language);
-      notify(text("保存失败", "Save failed"), String(error), "error");
-    } finally {
-      setSaving(false);
-    }
+    return enqueueSave(async () => {
+      setSaving(true);
+      try {
+        const persisted = await appServices.settings.update(next);
+        setLocale(persisted.language);
+        notify(t("infobar_success"), success ?? text("设置已保存", "Settings saved"));
+        return { ok: true as const, value: undefined, authoritative: persisted };
+      } catch (error) {
+        const restored = await appServices.settings.get().catch(() => next);
+        setLocale(restored.language);
+        notify(text("保存失败", "Save failed"), String(error), "error");
+        return {
+          ok: false as const,
+          error: error instanceof Error ? error : new Error(String(error)),
+          restore: restored,
+        };
+      } finally {
+        setSaving(false);
+      }
+    }, fields);
   };
 
   const patchAndSave = (patch: Partial<CompleteAppSettings>, success?: string) =>
-    save({ ...settings, ...patch }, success);
+    save({ ...settings, ...patch }, success, Object.keys(patch));
 
-  const setAutostart = async (enabled: boolean) => {
-    setSaving(true);
-    try {
-      const persisted = await appServices.settings.setAutostart(enabled);
-      setSettings({ ...emptySettings, ...persisted });
-      notify(
-        enabled ? t("settings_autostart_on") : t("settings_autostart_off"),
-        t("settings_autostart_hint"),
-      );
-    } catch (error) {
-      notify(t("settings_autostart_failed"), String(error), "error");
-    } finally {
-      setSaving(false);
-    }
+  const setAutostart = (enabled: boolean): Promise<void> => {
+    // Optimistically mirror the backend semantics: disabling autostart also
+    // clears auto_start_engine, so later full-replace payloads built from
+    // this state can never revert the just-persisted autostart flag.
+    setSettings((current) => ({
+      ...current,
+      autostart: enabled,
+      auto_start_engine: enabled ? current.auto_start_engine : false,
+    }));
+    return enqueueSave(async () => {
+      setSaving(true);
+      try {
+        const persisted = await appServices.settings.setAutostart(enabled);
+        notify(
+          enabled ? t("settings_autostart_on") : t("settings_autostart_off"),
+          t("settings_autostart_hint"),
+        );
+        return { ok: true as const, value: undefined, authoritative: persisted };
+      } catch (error) {
+        const restored = await appServices.settings.get().catch(() => null);
+        notify(t("settings_autostart_failed"), String(error), "error");
+        return {
+          ok: false as const,
+          error: error instanceof Error ? error : new Error(String(error)),
+          restore: restored,
+        };
+      } finally {
+        setSaving(false);
+      }
+    }, ["autostart", "auto_start_engine"]);
   };
 
-  const setAutoStartEngine = async (enabled: boolean) => {
-    setSaving(true);
-    try {
-      const persisted = await appServices.settings.setAutoStartEngine(enabled);
-      setSettings({ ...emptySettings, ...persisted });
-      notify(
-        enabled ? t("settings_auto_start_engine_on") : t("settings_auto_start_engine_off"),
-        t("settings_auto_start_engine_hint"),
-      );
-    } catch (error) {
-      notify(t("settings_auto_start_engine_failed"), String(error), "error");
-    } finally {
-      setSaving(false);
-    }
+  const setAutoStartEngine = (enabled: boolean): Promise<void> => {
+    setSettings((current) => ({ ...current, auto_start_engine: enabled }));
+    return enqueueSave(async () => {
+      setSaving(true);
+      try {
+        const persisted = await appServices.settings.setAutoStartEngine(enabled);
+        notify(
+          enabled ? t("settings_auto_start_engine_on") : t("settings_auto_start_engine_off"),
+          t("settings_auto_start_engine_hint"),
+        );
+        return { ok: true as const, value: undefined, authoritative: persisted };
+      } catch (error) {
+        const restored = await appServices.settings.get().catch(() => null);
+        notify(t("settings_auto_start_engine_failed"), String(error), "error");
+        return {
+          ok: false as const,
+          error: error instanceof Error ? error : new Error(String(error)),
+          restore: restored,
+        };
+      } finally {
+        setSaving(false);
+      }
+    }, ["auto_start_engine"]);
   };
 
   const inspectWfp = async () => {
@@ -257,31 +308,41 @@ export function SettingsPage({ onOpenBlockedDomains }: { onOpenBlockedDomains: (
     }
   };
 
-  const runMigrationAction = async () => {
-    if (!migrationDialog) return;
-    setSaving(true);
-    try {
-      const next = migrationDialog === "migrate"
-        ? await appServices.settings.migrateLegacy()
-        : await appServices.settings.rollbackLegacy();
-      setSettings({ ...emptySettings, ...next });
-      setLocale(next.language);
-      setMigration(await appServices.settings.migrationStatus());
-      notify(
-        migrationDialog === "migrate"
-          ? text("旧版配置迁移完成", "Legacy settings migrated")
-          : text("迁移结果已回滚", "Migration rolled back"),
-        text(
-          "旧版配置原文件始终保留，未执行删除。",
-          "The original legacy configuration remains intact and was not deleted.",
-        ),
-      );
-      setMigrationDialogOpen(false);
-    } catch (error) {
-      notify(text("配置迁移操作失败", "Configuration migration failed"), String(error), "error");
-    } finally {
-      setSaving(false);
-    }
+  const runMigrationAction = (): Promise<void> => {
+    if (!migrationDialog) return Promise.resolve();
+    // Route through the save queue: a migration must not interleave with a
+    // queued full-replace save, or the migration result could be overwritten
+    // by an older payload.
+    return enqueueSave(async () => {
+      setSaving(true);
+      try {
+        const next = migrationDialog === "migrate"
+          ? await appServices.settings.migrateLegacy()
+          : await appServices.settings.rollbackLegacy();
+        setLocale(next.language);
+        setMigration(await appServices.settings.migrationStatus());
+        notify(
+          migrationDialog === "migrate"
+            ? text("旧版配置迁移完成", "Legacy settings migrated")
+            : text("迁移结果已回滚", "Migration rolled back"),
+          text(
+            "旧版配置原文件始终保留，未执行删除。",
+            "The original legacy configuration remains intact and was not deleted.",
+          ),
+        );
+        setMigrationDialogOpen(false);
+        return { ok: true as const, value: undefined, authoritative: next };
+      } catch (error) {
+        notify(text("配置迁移操作失败", "Configuration migration failed"), String(error), "error");
+        return {
+          ok: false as const,
+          error: error instanceof Error ? error : new Error(String(error)),
+          restore: null,
+        };
+      } finally {
+        setSaving(false);
+      }
+    }, null);
   };
 
   return (
@@ -635,7 +696,7 @@ export function SettingsPage({ onOpenBlockedDomains }: { onOpenBlockedDomains: (
             </DialogContent>
             <DialogActions>
               <DialogTrigger disableButtonEnhancement><Button>{t("routing_dialog_cancel")}</Button></DialogTrigger>
-              <Button appearance="primary" onClick={runMigrationAction}>
+              <Button appearance="primary" disabled={saving} onClick={runMigrationAction}>
                 {migrationDialog === "migrate"
                   ? text("确认迁移", "Confirm migration")
                   : text("确认回滚", "Confirm rollback")}

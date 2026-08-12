@@ -276,6 +276,11 @@ func (r *Resolver) resolveUncached(
 	return r.resolveLegacy(ctx, domain, wireType, binding)
 }
 
+const (
+	// maxDoHRace limits concurrent DoH dials per batch; see resolveDoH.
+	maxDoHRace = 2
+)
+
 func (r *Resolver) resolveDoH(
 	ctx context.Context,
 	domain string,
@@ -286,19 +291,57 @@ func (r *Resolver) resolveDoH(
 	if len(endpoints) == 0 {
 		return Result{}, 0, fmt.Errorf("no DoH endpoint configured")
 	}
+	// Race endpoints in small batches, each with its own bounded time budget.
+	// A single shared deadline would let the first endpoints consume the whole
+	// budget while blocked, starving later (possibly healthy) endpoints of any
+	// attempt; per-batch budgets guarantee every batch gets a real chance.
+	batchCount := (len(endpoints) + maxDoHRace - 1) / maxDoHRace
+	batchBudget := r.config.QueryTimeout / time.Duration(batchCount)
+	var failures []error
+	for start := 0; start < len(endpoints); start += maxDoHRace {
+		end := start + maxDoHRace
+		if end > len(endpoints) {
+			end = len(endpoints)
+		}
+		batch := endpoints[start:end]
+		batchCtx, cancel := context.WithTimeout(ctx, batchBudget)
+		result, ttl, err := r.raceDoHBatch(
+			batchCtx,
+			batch,
+			domain,
+			recordType,
+			binding,
+		)
+		cancel()
+		if err == nil {
+			return result, ttl, nil
+		}
+		failures = append(failures, err)
+		if ctx.Err() != nil {
+			break
+		}
+	}
+	return Result{}, 0, errors.Join(failures...)
+}
+
+func (r *Resolver) raceDoHBatch(
+	ctx context.Context,
+	batch []Endpoint,
+	domain string,
+	recordType uint16,
+	binding Binding,
+) (Result, time.Duration, error) {
 	type outcome struct {
 		result Result
 		ttl    time.Duration
 		err    error
 	}
-	raceContext, cancel := context.WithCancel(ctx)
-	defer cancel()
-	outcomes := make(chan outcome, len(endpoints))
-	for _, endpoint := range endpoints {
+	outcomes := make(chan outcome, len(batch))
+	for _, endpoint := range batch {
 		endpoint := endpoint
 		go func() {
 			result, ttl, err := r.queryDoH(
-				raceContext,
+				ctx,
 				domain,
 				recordType,
 				binding,
@@ -308,11 +351,10 @@ func (r *Resolver) resolveDoH(
 		}()
 	}
 	var failures []error
-	for range endpoints {
+	for range batch {
 		select {
 		case outcome := <-outcomes:
 			if outcome.err == nil {
-				cancel()
 				r.dohSuccesses.Add(1)
 				return outcome.result, outcome.ttl, nil
 			}

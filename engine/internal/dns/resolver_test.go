@@ -344,3 +344,101 @@ func answeringConnection(
 	}()
 	return client
 }
+
+func TestDoHRaceIsBounded(t *testing.T) {
+	var concurrent atomic.Int64
+	var peak atomic.Int64
+	dial := func(_ context.Context, _ string, _ string, _ Binding) (net.Conn, error) {
+		now := concurrent.Add(1)
+		defer concurrent.Add(-1)
+		for {
+			prev := peak.Load()
+			if now <= prev || peak.CompareAndSwap(prev, now) {
+				break
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+		return nil, errors.New("simulated DoH outage")
+	}
+	resolver, err := New(context.Background(), Config{
+		Policy:          PolicyAuto,
+		LegacyServers:   []string{"192.0.2.53"},
+		CacheTTL:        time.Minute,
+		QueryTimeout:    2 * time.Second,
+		MaxCacheEntries: 16,
+	}, dial)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = resolver.Resolve(context.Background(), Query{
+		Domain:     "race.example",
+		RecordType: RecordA,
+		Binding:    loopbackBinding,
+	})
+	if err == nil {
+		t.Fatal("expected resolution to fail with simulated DoH and legacy outage")
+	}
+	if peak.Load() > 2 {
+		t.Fatalf("concurrent DoH dials peaked at %d, want <= 2", peak.Load())
+	}
+}
+
+func TestDoHRaceAdvancesToLaterEndpoints(t *testing.T) {
+	endpoints := Endpoints(PolicyAuto)
+	if len(endpoints) < 3 {
+		t.Skip("PolicyAuto no longer provides at least three endpoints")
+	}
+	blocked := map[string]bool{
+		net.JoinHostPort(endpoints[0].IP, "443"): true,
+		net.JoinHostPort(endpoints[1].IP, "443"): true,
+	}
+	var laterAttempts atomic.Int64
+	var laterCtxAlive atomic.Bool
+	laterCtxAlive.Store(true)
+	// Barrier: later endpoints must only dial after both blocked endpoints have
+	// already started dialing, so the test is deterministic regardless of
+	// goroutine scheduling order.
+	blockedStarted := make(chan struct{})
+	var blockedCount atomic.Int64
+	const blockedTotal = 2
+	dial := func(ctx context.Context, _ string, address string, _ Binding) (net.Conn, error) {
+		if blocked[address] {
+			if blockedCount.Add(1) == blockedTotal {
+				close(blockedStarted)
+			}
+			<-ctx.Done()
+			return nil, ctx.Err()
+		}
+		<-blockedStarted
+		if strings.HasSuffix(address, ":443") {
+			if laterAttempts.Add(1) == 1 && ctx.Err() != nil {
+				laterCtxAlive.Store(false)
+			}
+		}
+		return nil, errors.New("simulated TLS failure")
+	}
+	resolver, err := New(context.Background(), Config{
+		Policy:          PolicyAuto,
+		LegacyServers:   []string{"192.0.2.53"},
+		CacheTTL:        time.Minute,
+		QueryTimeout:    3 * time.Second,
+		MaxCacheEntries: 16,
+	}, dial)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = resolver.Resolve(context.Background(), Query{
+		Domain:     "later.example",
+		RecordType: RecordA,
+		Binding:    loopbackBinding,
+	})
+	if err == nil {
+		t.Fatal("expected resolution to fail (DoH and legacy all fail)")
+	}
+	if laterAttempts.Load() == 0 {
+		t.Fatal("endpoints after the first batch were never dialed")
+	}
+	if !laterCtxAlive.Load() {
+		t.Fatal("later endpoint was dialed with an already-canceled context; it never got a chance to answer")
+	}
+}
