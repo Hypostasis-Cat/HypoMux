@@ -20,6 +20,7 @@ const (
 	pipeSessionAuthKind   = "hypomux.core.authenticate"
 	pipeSessionReadyKind  = "hypomux.host.ready"
 	maxPipeSessionMessage = 4096
+	pipeAuthTimeout       = 10 * time.Second
 )
 
 type pipeAuthMessage struct {
@@ -100,15 +101,28 @@ func connectAuthenticatedPipe(
 		_ = connection.Close()
 		return nil, err
 	}
-	reader := bufio.NewReaderSize(connection, maxPipeSessionMessage)
-	line, err := reader.ReadBytes('\n')
-	if err != nil {
+	// The host is trusted to reply quickly; without a deadline a silent peer
+	// would leave serve-pipe hanging forever.
+	if err := connection.SetReadDeadline(time.Now().Add(pipeAuthTimeout)); err != nil {
 		_ = connection.Close()
 		return nil, err
 	}
-	if len(line) > maxPipeSessionMessage {
+	reader := bufio.NewReaderSize(connection, maxPipeSessionMessage)
+	// ReadSlice caps the line at the buffer size: an overlong line without a
+	// newline returns ErrBufferFull instead of growing an unbounded buffer.
+	line, err := reader.ReadSlice('\n')
+	if err != nil {
 		_ = connection.Close()
-		return nil, errors.New("host authentication response is too large")
+		if errors.Is(err, bufio.ErrBufferFull) {
+			return nil, errors.New("host authentication response is too large")
+		}
+		return nil, err
+	}
+	// Clear the handshake deadline: the same connection carries the long-lived
+	// session afterwards and must not be bound by the auth timeout.
+	if err := connection.SetReadDeadline(time.Time{}); err != nil {
+		_ = connection.Close()
+		return nil, err
 	}
 	var ready pipeReadyMessage
 	if err := json.Unmarshal(line, &ready); err != nil {
