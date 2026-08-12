@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"sync"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -27,6 +28,9 @@ const (
 	sessionReadyKind       = "hypomux.host.ready"
 	seeMaskNoCloseProcess  = 0x00000040
 	maxSessionMessageBytes = 4096
+	// coreTerminateWait bounds how long a failed launch waits for the core
+	// process to exit before giving up (see privilegedLauncher.Launch).
+	coreTerminateWait = 5 * time.Second
 )
 
 var ErrElevationCancelled = errors.New("用户取消了管理员权限请求")
@@ -101,8 +105,12 @@ func (privilegedLauncher) Launch(ctx context.Context, path string) (*coreSession
 	}
 	connection, err := pipe.accept(ctx, process.pid)
 	if err != nil {
+		// The desktop cannot terminate an elevated process (ACCESS_DENIED) and
+		// a wedged core may never exit on its own. Never wait indefinitely
+		// here: the startGate slot would stay occupied and every future Ensure
+		// call would time out until the desktop restarts.
 		_ = process.Kill()
-		_ = process.Wait()
+		_ = process.waitTimeout(coreTerminateWait)
 		return nil, fmt.Errorf("验证高权限核心通信失败：%w", err)
 	}
 	return &coreSession{
@@ -363,9 +371,37 @@ func (p *windowsCoreProcess) Kill() error {
 	}
 	err := windows.TerminateProcess(p.handle, 1)
 	if errors.Is(err, windows.ERROR_ACCESS_DENIED) {
-		return nil
+		// The desktop UI runs unelevated and can never terminate an elevated
+		// core; pretending success let callers wait forever for a process that
+		// is still running.
+		return fmt.Errorf("终止管理员核心：%w", err)
 	}
 	return err
+}
+
+// waitTimeout waits for the process to exit up to timeout, then releases the
+// handle. It is used on launch-failure paths where the caller gives up on the
+// process; the session watcher keeps using the unbounded Wait instead.
+func (p *windowsCoreProcess) waitTimeout(timeout time.Duration) error {
+	p.mu.Lock()
+	handle := p.handle
+	p.mu.Unlock()
+	if handle == 0 || handle == windows.InvalidHandle {
+		return nil
+	}
+	event, err := windows.WaitForSingleObject(handle, uint32(timeout/time.Millisecond))
+	p.release()
+	if err != nil {
+		return err
+	}
+	switch event {
+	case windows.WAIT_OBJECT_0:
+		return nil
+	case uint32(windows.WAIT_TIMEOUT):
+		return fmt.Errorf("等待管理员核心退出超时（%v）", timeout)
+	default:
+		return fmt.Errorf("等待管理员核心退出返回状态 0x%X", event)
+	}
 }
 
 func (p *windowsCoreProcess) PID() int {
