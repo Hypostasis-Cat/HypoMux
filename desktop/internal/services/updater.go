@@ -324,8 +324,7 @@ func (s *UpdaterService) Download(release ReleaseInfo) (string, error) {
 		_ = os.Remove(partial)
 		return "", fmt.Errorf("安装包大小校验失败（预期 %d，实际 %d）", release.InstallerSize, written)
 	}
-	if expected := strings.TrimPrefix(strings.ToLower(release.InstallerDigest), "sha256:"); expected != "" &&
-		expected != strings.ToLower(release.InstallerDigest) {
+	if expected := strings.TrimPrefix(strings.ToLower(release.InstallerDigest), "sha256:"); expected != "" {
 		if actual := hex.EncodeToString(hash.Sum(nil)); actual != expected {
 			_ = os.Remove(partial)
 			return "", errors.New("安装包 SHA-256 校验失败")

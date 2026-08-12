@@ -86,6 +86,32 @@ func TestUpdaterFallsBackToReleaseFeedWhenAPIIsRateLimited(t *testing.T) {
 	}
 }
 
+func TestUpdaterRejectsMismatchedDigestWithoutPrefix(t *testing.T) {
+	const payload = "hypomux-installer-payload"
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		response := &http.Response{
+			Request: request, Header: make(http.Header), StatusCode: http.StatusOK,
+			Body: io.NopCloser(strings.NewReader(payload)),
+		}
+		response.ContentLength = int64(len(payload))
+		return response, nil
+	})}
+	service := NewUpdaterService()
+	service.client = client
+
+	// Digest intentionally carries no "sha256:" prefix while being wrong:
+	// verification must still run and fail the download.
+	_, err := service.Download(ReleaseInfo{
+		InstallerName:   "HypoMux_Setup_2.5.5.exe",
+		InstallerSize:   int64(len(payload)),
+		InstallerURL:    "https://github.com/Hypostasis-Cat/HypoMux/releases/download/v2.5.5/HypoMux_Setup_2.5.5.exe",
+		InstallerDigest: strings.Repeat("0", 64),
+	})
+	if err == nil {
+		t.Fatal("Download accepted a mismatched digest; SHA-256 verification was skipped")
+	}
+}
+
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (function roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
