@@ -32,7 +32,7 @@ import { GlassSurface } from "../components/material/GlassSurface";
 import { AppToaster } from "../components/AppToaster";
 import { desktopPlatform } from "../platform/desktop";
 import { appServices, type CompleteAppSettings, type ConfigMigrationStatus } from "../platform/services";
-import { SettingsSaveQueue } from "../platform/settingsQueue";
+import { SettingsSaveQueue, type SaveOutcome } from "../platform/settingsQueue";
 import { accentColours } from "../theme/appearance.presets";
 import { useAppearance } from "../theme/appearance.store";
 import { backgroundService } from "../theme/background.service";
@@ -124,27 +124,22 @@ export function SettingsPage({ onOpenBlockedDomains }: { onOpenBlockedDomains: (
   // Serialize settings persistence and track per-field ownership: concurrent
   // saves would otherwise let an earlier response overwrite a newer optimistic
   // value, and a failed operation's recovery must not overwrite a later
-  // operation's success (see settingsQueue).
-  const saveQueue = useRef(new SettingsSaveQueue()).current;
+  // operation's success. Operations return SaveOutcome; the queue releases
+  // their ownership and merges authoritative values (see settingsQueue).
+  const saveQueue = useRef(new SettingsSaveQueue<CompleteAppSettings>()).current;
 
-  const enqueueSave = <T,>(operation: () => Promise<T>, fields: string[] | null): Promise<T> =>
-    saveQueue.enqueue(operation, fields);
+  useEffect(() => {
+    saveQueue.attach((updater) => setSettings(updater));
+  }, [saveQueue]);
 
-  const applyAuthoritative = (authoritative: CompleteAppSettings) => {
-    setSettings((current) =>
-      saveQueue.mergeAuthoritative({ ...emptySettings, ...authoritative }, current),
-    );
-  };
-
-  const applyRecovery = (ownedFields: string[] | null, authoritative: CompleteAppSettings) => {
-    setSettings((current) =>
-      saveQueue.recoverAuthoritative(
-        ownedFields,
-        { ...emptySettings, ...authoritative },
-        current,
-      ),
-    );
-  };
+  const enqueueSave = <T,>(operation: () => Promise<SaveOutcome<T, CompleteAppSettings>>, fields: string[] | null): Promise<T> =>
+    saveQueue.enqueue(operation, fields).catch((error) => {
+      // Errors are already surfaced via notify inside the operation; the
+      // queue's rejection is only a control-flow signal. Swallow it here so
+      // callers (React event handlers) never see an unhandled rejection.
+      console.error("settings save failed:", error);
+      return undefined as T;
+    });
 
   const toasterId = useId("settings-toaster");
   const { dispatchToast } = useToastController(toasterId);
@@ -186,14 +181,18 @@ export function SettingsPage({ onOpenBlockedDomains }: { onOpenBlockedDomains: (
       setSaving(true);
       try {
         const persisted = await appServices.settings.update(next);
-        applyAuthoritative(persisted);
         setLocale(persisted.language);
         notify(t("infobar_success"), success ?? text("设置已保存", "Settings saved"));
+        return { ok: true as const, value: undefined, authoritative: persisted };
       } catch (error) {
         const restored = await appServices.settings.get().catch(() => next);
-        applyRecovery(fields, restored);
         setLocale(restored.language);
         notify(text("保存失败", "Save failed"), String(error), "error");
+        return {
+          ok: false as const,
+          error: error instanceof Error ? error : new Error(String(error)),
+          restore: restored,
+        };
       } finally {
         setSaving(false);
       }
@@ -216,17 +215,19 @@ export function SettingsPage({ onOpenBlockedDomains }: { onOpenBlockedDomains: (
       setSaving(true);
       try {
         const persisted = await appServices.settings.setAutostart(enabled);
-        applyAuthoritative(persisted);
         notify(
           enabled ? t("settings_autostart_on") : t("settings_autostart_off"),
           t("settings_autostart_hint"),
         );
+        return { ok: true as const, value: undefined, authoritative: persisted };
       } catch (error) {
         const restored = await appServices.settings.get().catch(() => null);
-        if (restored) {
-          applyRecovery(["autostart", "auto_start_engine"], restored);
-        }
         notify(t("settings_autostart_failed"), String(error), "error");
+        return {
+          ok: false as const,
+          error: error instanceof Error ? error : new Error(String(error)),
+          restore: restored,
+        };
       } finally {
         setSaving(false);
       }
@@ -239,17 +240,19 @@ export function SettingsPage({ onOpenBlockedDomains }: { onOpenBlockedDomains: (
       setSaving(true);
       try {
         const persisted = await appServices.settings.setAutoStartEngine(enabled);
-        applyAuthoritative(persisted);
         notify(
           enabled ? t("settings_auto_start_engine_on") : t("settings_auto_start_engine_off"),
           t("settings_auto_start_engine_hint"),
         );
+        return { ok: true as const, value: undefined, authoritative: persisted };
       } catch (error) {
         const restored = await appServices.settings.get().catch(() => null);
-        if (restored) {
-          applyRecovery(["auto_start_engine"], restored);
-        }
         notify(t("settings_auto_start_engine_failed"), String(error), "error");
+        return {
+          ok: false as const,
+          error: error instanceof Error ? error : new Error(String(error)),
+          restore: restored,
+        };
       } finally {
         setSaving(false);
       }
@@ -316,7 +319,6 @@ export function SettingsPage({ onOpenBlockedDomains }: { onOpenBlockedDomains: (
         const next = migrationDialog === "migrate"
           ? await appServices.settings.migrateLegacy()
           : await appServices.settings.rollbackLegacy();
-        applyAuthoritative(next);
         setLocale(next.language);
         setMigration(await appServices.settings.migrationStatus());
         notify(
@@ -329,8 +331,14 @@ export function SettingsPage({ onOpenBlockedDomains }: { onOpenBlockedDomains: (
           ),
         );
         setMigrationDialogOpen(false);
+        return { ok: true as const, value: undefined, authoritative: next };
       } catch (error) {
         notify(text("配置迁移操作失败", "Configuration migration failed"), String(error), "error");
+        return {
+          ok: false as const,
+          error: error instanceof Error ? error : new Error(String(error)),
+          restore: null,
+        };
       } finally {
         setSaving(false);
       }

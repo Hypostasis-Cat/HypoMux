@@ -100,6 +100,10 @@ jobs:
         shell: pwsh
         run: wails3 generate bindings -clean=true -ts -i
 
+      - name: Run frontend tests
+        shell: pwsh
+        run: pnpm --dir desktop/frontend test
+
       - name: Build frontend assets for Go validation
         shell: pwsh
         run: pnpm --dir desktop/frontend build
