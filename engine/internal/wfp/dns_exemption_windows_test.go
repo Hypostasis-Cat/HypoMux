@@ -38,3 +38,18 @@ func TestBuildDNSRulesIsNarrowAndDeduplicated(t *testing.T) {
 		t.Fatalf("protocols = %#v", rules)
 	}
 }
+
+func TestBuildDNSRulesUsesHostOrderIP(t *testing.T) {
+	rules := buildRules([]Adapter{
+		{Name: "Ethernet", SourceIP: "192.168.10.24", IfIndex: 12},
+	})
+	if len(rules) == 0 {
+		t.Fatal("buildRules returned no rules")
+	}
+	// WFP expects FWPM_CONDITION_IP_LOCAL_ADDRESS values in host byte order
+	// (ntohl of the network-order bytes), so 192.168.10.24 must be 0xC0A80A18.
+	const want = uint32(0xC0A80A18)
+	if rules[0].sourceIP != want {
+		t.Fatalf("sourceIP = 0x%08X, want 0x%08X (host byte order)", rules[0].sourceIP, want)
+	}
+}
