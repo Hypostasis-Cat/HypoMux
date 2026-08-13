@@ -10,6 +10,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/Hypostasis-Cat/HypoMux/engine/internal/fileintegrity"
 )
 
 type testContainment struct {
@@ -195,6 +197,9 @@ func testSupervisor(
 		return containment, nil
 	}
 	supervisor.configure = func(*exec.Cmd) {}
+	supervisor.stageConfig = func(config Config) (string, func(), error) {
+		return config.ConfigPath, func() {}, nil
+	}
 	if mode == "stable" {
 		supervisor.startupReady = func() bool { return true }
 		supervisor.readyStableFor = 10 * time.Millisecond
@@ -236,6 +241,55 @@ func testConfig(t *testing.T) Config {
 		Executable:     executable,
 		ConfigPath:     configPath,
 		StartupTimeout: 120 * time.Millisecond,
+	}
+}
+
+func TestNormalizeConfigEnforcesPinnedExecutableDigest(t *testing.T) {
+	directory := t.TempDir()
+	executable := directory + string(os.PathSeparator) + "sing-box.exe"
+	configPath := directory + string(os.PathSeparator) + "config.json"
+	if err := os.WriteFile(executable, []byte("trusted-sidecar"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configPath, []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	digest, err := fileintegrity.SHA256(executable)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := Config{
+		Executable:       executable,
+		ExecutableSHA256: digest,
+		ConfigPath:       configPath,
+		StartupTimeout:   time.Second,
+	}
+	if _, err := normalizeConfig(config); err != nil {
+		t.Fatalf("trusted executable was rejected: %v", err)
+	}
+	if err := os.WriteFile(executable, []byte("mutated-sidecar"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := normalizeConfig(config); err == nil {
+		t.Fatal("modified executable passed its pinned digest")
+	}
+}
+
+func TestNormalizeConfigEnforcesPinnedConfigurationDigest(t *testing.T) {
+	config := testConfig(t)
+	digest, err := fileintegrity.SHA256(config.ConfigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config.ConfigSHA256 = digest
+	if _, err := normalizeConfig(config); err != nil {
+		t.Fatalf("trusted configuration was rejected: %v", err)
+	}
+	if err := os.WriteFile(config.ConfigPath, []byte(`{"tampered":true}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := normalizeConfig(config); err == nil {
+		t.Fatal("modified configuration passed its pinned digest")
 	}
 }
 

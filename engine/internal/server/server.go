@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -24,9 +25,11 @@ import (
 )
 
 type Metadata struct {
-	Name    string
-	Version string
-	Commit  string
+	Name                string
+	Version             string
+	Commit              string
+	TunExecutable       string
+	TunExecutableSHA256 string
 }
 
 type tunController interface {
@@ -507,6 +510,27 @@ func (s *Server) activateTun(
 			nil,
 		)
 	}
+	primaryConfig, err := s.authorizeTunConfig(params.Config())
+	if err != nil {
+		return protocol.Failure(
+			request.ID,
+			"security_policy_rejected",
+			"TUN executable is not authorized by the Core security policy",
+			map[string]any{"message": err.Error()},
+		)
+	}
+	var fallbackConfig tun.Config
+	if strings.TrimSpace(params.IPv4FallbackConfigPath) != "" {
+		fallbackConfig, err = s.authorizeTunConfig(params.IPv4FallbackConfig())
+		if err != nil {
+			return protocol.Failure(
+				request.ID,
+				"security_policy_rejected",
+				"TUN fallback executable is not authorized by the Core security policy",
+				map[string]any{"message": err.Error()},
+			)
+		}
+	}
 	if params.StrictRoute {
 		if !s.identity.Elevated {
 			return protocol.Failure(
@@ -536,14 +560,14 @@ func (s *Server) activateTun(
 		}
 		s.dnsExemption = exemption
 	}
-	status, err := s.tun.Activate(ctx, params.Config())
+	status, err := s.tun.Activate(ctx, primaryConfig)
 	recoveredStaleAdapter := false
 	if err != nil && isStaleTunAdapterError(err) {
 		stopCtx, stopCancel := context.WithTimeout(context.Background(), 20*time.Second)
 		_, cleanupErr := s.tun.Stop(stopCtx)
 		stopCancel()
 		if cleanupErr == nil {
-			status, err = s.tun.Activate(ctx, params.Config())
+			status, err = s.tun.Activate(ctx, primaryConfig)
 			if err == nil {
 				recoveredStaleAdapter = true
 			} else {
@@ -561,7 +585,7 @@ func (s *Server) activateTun(
 		_, cleanupErr := s.tun.Stop(stopCtx)
 		stopCancel()
 		if cleanupErr == nil {
-			status, err = s.tun.Activate(ctx, params.IPv4FallbackConfig())
+			status, err = s.tun.Activate(ctx, fallbackConfig)
 			if err == nil {
 				ipv4OnlyFallback = true
 			} else {
@@ -607,6 +631,34 @@ func (s *Server) activateTun(
 			"message": errors.Join(err, tunStopErr, wfpErr, proxyStopErr).Error(),
 		},
 	)
+}
+
+func (s *Server) authorizeTunConfig(config tun.Config) (tun.Config, error) {
+	trusted := strings.TrimSpace(s.metadata.TunExecutable)
+	if trusted == "" {
+		return tun.Config{}, errors.New("trusted sing-box executable policy is unavailable")
+	}
+	trusted, err := filepath.Abs(trusted)
+	if err != nil {
+		return tun.Config{}, fmt.Errorf("resolve trusted sing-box executable: %w", err)
+	}
+	asserted := strings.TrimSpace(config.Executable)
+	if asserted != "" {
+		asserted, err = filepath.Abs(asserted)
+		if err != nil {
+			return tun.Config{}, fmt.Errorf("resolve requested sing-box executable: %w", err)
+		}
+		if !strings.EqualFold(filepath.Clean(asserted), filepath.Clean(trusted)) {
+			return tun.Config{}, errors.New("requested sing-box executable does not match the trusted policy")
+		}
+	}
+	config.Executable = filepath.Clean(trusted)
+	config.ExecutableSHA256 = strings.TrimSpace(s.metadata.TunExecutableSHA256)
+	config.RequireProtectedConfig = config.ExecutableSHA256 != ""
+	if config.ExecutableSHA256 != "" && strings.TrimSpace(config.ConfigSHA256) == "" {
+		return tun.Config{}, errors.New("pinned sing-box requires a pinned configuration digest")
+	}
+	return config, nil
 }
 
 func isIPv6AddressSetupError(err error) bool {

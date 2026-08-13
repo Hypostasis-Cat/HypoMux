@@ -236,7 +236,9 @@ type EngineTelemetryParams struct {
 type TunActivateParams struct {
 	Executable             string `json:"executable"`
 	ConfigPath             string `json:"config_path"`
+	ConfigSHA256           string `json:"config_sha256,omitempty"`
 	IPv4FallbackConfigPath string `json:"ipv4_fallback_config_path,omitempty"`
+	IPv4FallbackSHA256     string `json:"ipv4_fallback_sha256,omitempty"`
 	StartupTimeoutMS       int    `json:"startup_timeout_ms"`
 	StrictRoute            bool   `json:"strict_route"`
 }
@@ -245,6 +247,7 @@ func (p TunActivateParams) Config() tun.Config {
 	return tun.Config{
 		Executable:     p.Executable,
 		ConfigPath:     p.ConfigPath,
+		ConfigSHA256:   p.ConfigSHA256,
 		StartupTimeout: time.Duration(p.StartupTimeoutMS) * time.Millisecond,
 	}
 }
@@ -253,6 +256,7 @@ func (p TunActivateParams) IPv4FallbackConfig() tun.Config {
 	return tun.Config{
 		Executable:     p.Executable,
 		ConfigPath:     p.IPv4FallbackConfigPath,
+		ConfigSHA256:   p.IPv4FallbackSHA256,
 		StartupTimeout: time.Duration(p.StartupTimeoutMS) * time.Millisecond,
 	}
 }

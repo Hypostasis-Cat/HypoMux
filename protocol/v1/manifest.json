@@ -136,6 +136,7 @@
     "stop_failed",
     "dns_failed",
     "tun_failed",
+    "security_policy_rejected",
     "wfp_unavailable",
     "elevation_required"
   ]

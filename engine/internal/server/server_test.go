@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -142,6 +143,20 @@ type fakeTunController struct {
 	nextGeneration  uint64
 }
 
+const testTunExecutable = `C:\HypoMux\bin\sing-box.exe`
+
+func testTunMetadata() Metadata {
+	return Metadata{Name: "test", TunExecutable: testTunExecutable}
+}
+
+func testPinnedTunMetadata() Metadata {
+	return Metadata{
+		Name:                "test",
+		TunExecutable:       testTunExecutable,
+		TunExecutableSHA256: strings.Repeat("a", 64),
+	}
+}
+
 func (f *fakeTunController) Activate(
 	_ context.Context,
 	config tun.Config,
@@ -209,7 +224,7 @@ func TestManagedTunLifecycleRequiresPreparedPoolAndStopsInOrder(t *testing.T) {
 	engineServer := New(
 		strings.NewReader(""),
 		&output,
-		Metadata{Name: "test"},
+		testTunMetadata(),
 	)
 	controller := &fakeTunController{
 		status: tun.Status{State: tun.StateStopped},
@@ -241,6 +256,10 @@ func TestManagedTunLifecycleRequiresPreparedPoolAndStopsInOrder(t *testing.T) {
 	if controller.Status().State != tun.StateRunning {
 		t.Fatalf("TUN status = %#v", controller.Status())
 	}
+	if len(controller.activateConfigs) != 1 ||
+		controller.activateConfigs[0].Executable != testTunExecutable {
+		t.Fatalf("Core did not pin the TUN executable: %#v", controller.activateConfigs)
+	}
 
 	stopResponse := engineServer.stopProxy("engine-stop")
 	if stopResponse.Error != nil {
@@ -262,7 +281,7 @@ func TestManagedTunActivationFailureRollsBackPreparedPool(t *testing.T) {
 	engineServer := New(
 		strings.NewReader(""),
 		&bytes.Buffer{},
-		Metadata{Name: "test"},
+		testTunMetadata(),
 	)
 	controller := &fakeTunController{
 		status:      tun.Status{State: tun.StateStopped},
@@ -277,7 +296,7 @@ func TestManagedTunActivationFailureRollsBackPreparedPool(t *testing.T) {
 			"protocol":1,
 			"id":"tun-activate",
 			"method":"tun.activate",
-			"params":{"executable":"x","config_path":"y"}
+			"params":{"executable":"C:\\HypoMux\\bin\\sing-box.exe","config_path":"y"}
 		}`),
 	)
 	if response.Error == nil || response.Error.Code != "tun_failed" {
@@ -296,11 +315,109 @@ func TestManagedTunActivationFailureRollsBackPreparedPool(t *testing.T) {
 	_ = engineServer.stopProxy("clear-failed")
 }
 
+func TestTunActivateRejectsExecutableOutsideCorePolicy(t *testing.T) {
+	engineServer := New(
+		strings.NewReader(""),
+		&bytes.Buffer{},
+		testTunMetadata(),
+	)
+	controller := &fakeTunController{status: tun.Status{State: tun.StateStopped}}
+	engineServer.tun = controller
+	startTUNPoolForLifecycleTest(t, engineServer)
+
+	response, _ := engineServer.handle(
+		context.Background(),
+		[]byte(`{
+			"protocol":1,
+			"id":"tun-policy-reject",
+			"method":"tun.activate",
+			"params":{
+				"executable":"C:\\Users\\Example\\payload.exe",
+				"config_path":"C:\\Users\\Example\\payload.json"
+			}
+		}`),
+	)
+	if response.Error == nil || response.Error.Code != "security_policy_rejected" {
+		t.Fatalf("untrusted executable response = %#v", response)
+	}
+	if len(controller.activateConfigs) != 0 {
+		t.Fatalf("untrusted executable reached the privileged supervisor: %#v", controller.activateConfigs)
+	}
+	if engineServer.proxy == nil || !engineServer.proxy.Running() ||
+		engineServer.runtime.Snapshot().State != engineRuntime.StateRunning {
+		t.Fatalf("policy rejection mutated the prepared engine state: %#v", engineServer.runtime.Snapshot())
+	}
+	_ = engineServer.stopProxy("clear-policy-rejection")
+}
+
+func TestTunActivateRequiresConfigDigestForInstalledServicePolicy(t *testing.T) {
+	engineServer := New(
+		strings.NewReader(""),
+		&bytes.Buffer{},
+		testPinnedTunMetadata(),
+	)
+	controller := &fakeTunController{status: tun.Status{State: tun.StateStopped}}
+	engineServer.tun = controller
+	startTUNPoolForLifecycleTest(t, engineServer)
+	response, _ := engineServer.handle(
+		context.Background(),
+		[]byte(`{
+			"protocol":1,
+			"id":"tun-config-pin",
+			"method":"tun.activate",
+			"params":{
+				"executable":"C:\\HypoMux\\bin\\sing-box.exe",
+				"config_path":"C:\\Users\\Example\\sing-box.json"
+			}
+		}`),
+	)
+	if response.Error == nil || response.Error.Code != "security_policy_rejected" {
+		t.Fatalf("unpinned configuration response = %#v", response)
+	}
+	if len(controller.activateConfigs) != 0 {
+		t.Fatalf("unpinned configuration reached the privileged supervisor: %#v", controller.activateConfigs)
+	}
+	_ = engineServer.stopProxy("clear-config-pin-rejection")
+}
+
+func TestTunActivatePinsConfigDigestForInstalledServicePolicy(t *testing.T) {
+	engineServer := New(
+		strings.NewReader(""),
+		&bytes.Buffer{},
+		testPinnedTunMetadata(),
+	)
+	controller := &fakeTunController{status: tun.Status{State: tun.StateStopped}}
+	engineServer.tun = controller
+	startTUNPoolForLifecycleTest(t, engineServer)
+	digest := strings.Repeat("b", 64)
+	request := fmt.Sprintf(`{
+		"protocol":1,
+		"id":"tun-config-pinned",
+		"method":"tun.activate",
+		"params":{
+			"executable":"C:\\HypoMux\\bin\\sing-box.exe",
+			"config_path":"C:\\Users\\Example\\sing-box.json",
+			"config_sha256":"%s"
+		}
+	}`, digest)
+	response, _ := engineServer.handle(context.Background(), []byte(request))
+	if response.Error != nil {
+		t.Fatalf("pinned configuration was rejected: %#v", response.Error)
+	}
+	if len(controller.activateConfigs) != 1 ||
+		controller.activateConfigs[0].ConfigSHA256 != digest ||
+		controller.activateConfigs[0].ExecutableSHA256 != engineServer.metadata.TunExecutableSHA256 ||
+		!controller.activateConfigs[0].RequireProtectedConfig {
+		t.Fatalf("security pins were not passed to the supervisor: %#v", controller.activateConfigs)
+	}
+	_ = engineServer.stopProxy("clear-config-pin")
+}
+
 func TestTunActivateRetriesWithIPv4OnlyConfigAfterIPv6SetupFailure(t *testing.T) {
 	engineServer := New(
 		strings.NewReader(""),
 		&bytes.Buffer{},
-		Metadata{Name: "test"},
+		testTunMetadata(),
 	)
 	controller := &fakeTunController{
 		status:       tun.Status{State: tun.StateStopped},
@@ -345,7 +462,7 @@ func TestTunActivateRecoversStaleWintunAdapterOnce(t *testing.T) {
 	engineServer := New(
 		strings.NewReader(""),
 		&bytes.Buffer{},
-		Metadata{Name: "test"},
+		testTunMetadata(),
 	)
 	controller := &fakeTunController{
 		status: tun.Status{State: tun.StateStopped},

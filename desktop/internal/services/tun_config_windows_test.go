@@ -3,6 +3,8 @@
 package services
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -105,6 +107,7 @@ func TestGeneratedTunConfigProtectsLiteralDNSBootstrapAndOmitsIPv6WhenUnavailabl
 		"nic_wifi":     "127.0.0.1:19302",
 		"aggregation":  "127.0.0.1:19303",
 	}
+	configDigest := ""
 	_, configPath, _, err := writeSingBoxConfigWithOptions(
 		endpoints,
 		AdapterView{Name: "以太网", Address: "192.0.2.10"},
@@ -112,7 +115,7 @@ func TestGeneratedTunConfigProtectsLiteralDNSBootstrapAndOmitsIPv6WhenUnavailabl
 		nil,
 		normalizedCompatibilityPlan(nil, nil),
 		true,
-		tunConfigOptions{DNSPolicy: "auto", IPv6Available: false},
+		tunConfigOptions{DNSPolicy: "auto", IPv6Available: false, ConfigSHA256: &configDigest},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -120,6 +123,10 @@ func TestGeneratedTunConfigProtectsLiteralDNSBootstrapAndOmitsIPv6WhenUnavailabl
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		t.Fatal(err)
+	}
+	expectedDigest := sha256.Sum256(data)
+	if configDigest != hex.EncodeToString(expectedDigest[:]) {
+		t.Fatalf("in-memory config digest = %q", configDigest)
 	}
 	var config struct {
 		DNS struct {

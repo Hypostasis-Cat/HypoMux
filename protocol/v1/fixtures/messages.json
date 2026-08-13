@@ -308,6 +308,7 @@
       "params": {
         "executable": "C:\\Program Files\\HypoMux\\bin\\sing-box.exe",
         "config_path": "C:\\Users\\Example\\.hypomux\\singbox-config.json",
+        "config_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
         "startup_timeout_ms": 1500,
         "strict_route": true
       }

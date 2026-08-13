@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/Hypostasis-Cat/HypoMux/engine/internal/diagnostic"
@@ -38,11 +39,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	case "serve":
 		return runServer(stdin, stdout, stderr)
 	case "service":
-		return runWindowsService(stderr, server.Metadata{
-			Name:    "hypomux-engine",
-			Version: version,
-			Commit:  commit,
-		})
+		return runWindowsService(stderr, baseServerMetadata())
 	case "install-service":
 		if err := installServiceCommand(); err != nil {
 			fmt.Fprintf(stderr, "install HypoMux Core Service: %v\n", err)
@@ -120,14 +117,32 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 }
 
 func runServer(input io.Reader, output, stderr io.Writer) int {
-	engineServer := server.New(input, output, server.Metadata{
-		Name:    "hypomux-engine",
-		Version: version,
-		Commit:  commit,
-	})
+	engineServer := server.New(input, output, runtimeServerMetadata())
 	if err := engineServer.Run(context.Background()); err != nil {
 		fmt.Fprintf(stderr, "hypomux-engine: %v\n", err)
 		return 1
 	}
 	return 0
+}
+
+func baseServerMetadata() server.Metadata {
+	return server.Metadata{
+		Name:    "hypomux-engine",
+		Version: version,
+		Commit:  commit,
+	}
+}
+
+func runtimeServerMetadata() server.Metadata {
+	metadata := baseServerMetadata()
+	executable, err := os.Executable()
+	if err != nil {
+		return metadata
+	}
+	executable, err = filepath.Abs(executable)
+	if err != nil {
+		return metadata
+	}
+	metadata.TunExecutable = filepath.Join(filepath.Dir(executable), "sing-box.exe")
+	return metadata
 }

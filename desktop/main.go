@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"embed"
 	"log"
 	"net/http"
@@ -40,16 +39,6 @@ func main() {
 			launchSecurity.Detail,
 		)
 	}
-	// Clean up zombie processes and stale network state from previous crashed sessions.
-	// This prevents "port already in use" and TUN adapter conflicts.
-	// Equivalent to Python version's force_evict_zombie_backends from main.py:83-108.
-	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 20*time.Second)
-	if err := startup.CleanupZombieProcesses(cleanupCtx); err != nil {
-		log.Printf("startup cleanup: %v", err)
-		// Non-fatal: continue startup even if cleanup fails
-	}
-	cleanupCancel()
-
 	if !desktopplatform.WebView2Available() {
 		desktopplatform.ShowWebView2MissingMessage()
 		return

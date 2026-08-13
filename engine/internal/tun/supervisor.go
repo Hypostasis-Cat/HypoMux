@@ -14,6 +14,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/Hypostasis-Cat/HypoMux/engine/internal/fileintegrity"
 )
 
 const (
@@ -37,9 +39,12 @@ const (
 )
 
 type Config struct {
-	Executable     string
-	ConfigPath     string
-	StartupTimeout time.Duration
+	Executable             string
+	ExecutableSHA256       string
+	ConfigPath             string
+	ConfigSHA256           string
+	RequireProtectedConfig bool
+	StartupTimeout         time.Duration
 }
 
 type Status struct {
@@ -64,15 +69,16 @@ type processContainment interface {
 }
 
 type sidecarRun struct {
-	command     *exec.Cmd
-	done        chan struct{}
-	intentional atomic.Bool
-	containment processContainment
-	generation  uint64
-	configPath  string
-	startedAt   time.Time
-	stderrMu    sync.Mutex
-	lastStderr  string
+	command      *exec.Cmd
+	done         chan struct{}
+	intentional  atomic.Bool
+	containment  processContainment
+	removeConfig func()
+	generation   uint64
+	configPath   string
+	startedAt    time.Time
+	stderrMu     sync.Mutex
+	lastStderr   string
 
 	cleanupOnce sync.Once
 	cleanupDone chan struct{}
@@ -89,6 +95,7 @@ type Supervisor struct {
 	cleanup        func(context.Context) error
 	contain        func(*os.Process) (processContainment, error)
 	configure      func(*exec.Cmd)
+	stageConfig    func(Config) (string, func(), error)
 	onLog          func(string)
 	onUnexpected   func(Status)
 	startupReady   func() bool
@@ -103,6 +110,7 @@ func NewSupervisor() *Supervisor {
 		cleanup:        cleanupPlatform,
 		contain:        containProcess,
 		configure:      configureProcess,
+		stageConfig:    stageTrustedConfig,
 		startupReady:   tunPlatformReady,
 		readyStableFor: defaultReadyStableFor,
 	}
@@ -138,6 +146,20 @@ func (s *Supervisor) Activate(ctx context.Context, config Config) (Status, error
 		s.mu.Unlock()
 		return s.Status(), fmt.Errorf("TUN sidecar cannot start from %s", state)
 	}
+	s.mu.Unlock()
+
+	stagedConfigPath, removeStagedConfig, err := s.stageConfig(normalized)
+	if err != nil {
+		return s.Status(), err
+	}
+	configOwnedByRun := false
+	defer func() {
+		if !configOwnedByRun && removeStagedConfig != nil {
+			removeStagedConfig()
+		}
+	}()
+	normalized.ConfigPath = stagedConfigPath
+	s.mu.Lock()
 	s.nextGeneration++
 	generation := s.nextGeneration
 	s.status = Status{
@@ -191,14 +213,16 @@ func (s *Supervisor) Activate(ctx context.Context, config Config) (Status, error
 
 	startedAt := time.Now().UTC()
 	run := &sidecarRun{
-		command:     command,
-		done:        make(chan struct{}),
-		containment: containment,
-		cleanupDone: make(chan struct{}),
-		generation:  generation,
-		configPath:  normalized.ConfigPath,
-		startedAt:   startedAt,
+		command:      command,
+		done:         make(chan struct{}),
+		containment:  containment,
+		removeConfig: removeStagedConfig,
+		cleanupDone:  make(chan struct{}),
+		generation:   generation,
+		configPath:   normalized.ConfigPath,
+		startedAt:    startedAt,
 	}
+	configOwnedByRun = true
 	s.mu.Lock()
 	s.run = run
 	s.status.PID = command.Process.Pid
@@ -458,6 +482,9 @@ func (s *Supervisor) cleanupRun(
 ) error {
 	run.cleanupOnce.Do(func() {
 		defer close(run.cleanupDone)
+		if run.removeConfig != nil {
+			run.removeConfig()
+		}
 		cleanupCtx, cancel := context.WithTimeout(
 			context.Background(),
 			cleanupTimeout,
@@ -549,6 +576,18 @@ func normalizeConfig(config Config) (Config, error) {
 	if err := requireRegularFile(configPath, "sing-box config"); err != nil {
 		return Config{}, err
 	}
+	executableDigest := strings.TrimSpace(config.ExecutableSHA256)
+	if executableDigest != "" {
+		if err := fileintegrity.VerifySHA256(executable, executableDigest); err != nil {
+			return Config{}, fmt.Errorf("verify trusted sing-box executable: %w", err)
+		}
+	}
+	configDigest := strings.TrimSpace(config.ConfigSHA256)
+	if configDigest != "" {
+		if err := fileintegrity.VerifySHA256(configPath, configDigest); err != nil {
+			return Config{}, fmt.Errorf("verify requested sing-box config: %w", err)
+		}
+	}
 	timeout := config.StartupTimeout
 	if timeout <= 0 {
 		timeout = defaultStartupTimeout
@@ -557,9 +596,12 @@ func normalizeConfig(config Config) (Config, error) {
 		return Config{}, errors.New("startup timeout must be between 100ms and 60s")
 	}
 	return Config{
-		Executable:     filepath.Clean(executable),
-		ConfigPath:     filepath.Clean(configPath),
-		StartupTimeout: timeout,
+		Executable:             filepath.Clean(executable),
+		ExecutableSHA256:       executableDigest,
+		ConfigPath:             filepath.Clean(configPath),
+		ConfigSHA256:           configDigest,
+		RequireProtectedConfig: config.RequireProtectedConfig,
+		StartupTimeout:         timeout,
 	}, nil
 }
 

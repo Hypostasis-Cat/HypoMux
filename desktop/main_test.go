@@ -20,7 +20,6 @@ func TestPrivilegeNormalizationPrecedesDesktopSideEffects(t *testing.T) {
 		t.Fatal("desktop entry point does not exit after a successful standard-permission relaunch")
 	}
 	for _, sideEffect := range []string{
-		"startup.CleanupZombieProcesses",
 		"desktopplatform.WebView2Available",
 		"application.New(",
 	} {
@@ -28,6 +27,28 @@ func TestPrivilegeNormalizationPrecedesDesktopSideEffects(t *testing.T) {
 		if sideEffectAt < 0 || prepareAt >= sideEffectAt {
 			t.Fatalf("privilege normalization must precede %s: prepare=%d side-effect=%d", sideEffect, prepareAt, sideEffectAt)
 		}
+	}
+}
+
+func TestOrdinaryStartupDoesNotRunDestructiveRecovery(t *testing.T) {
+	sourceBytes, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(sourceBytes)
+	for _, forbidden := range []string{
+		"CleanupZombieProcesses",
+		"cleanupTunAndRoutes",
+		"taskkill",
+		"Remove-NetRoute",
+		"Disable-PnpDevice",
+	} {
+		if strings.Contains(source, forbidden) {
+			t.Fatalf("ordinary desktop startup still contains destructive recovery %q", forbidden)
+		}
+	}
+	if !strings.Contains(source, "SingleInstance:") {
+		t.Fatal("desktop startup lost its single-instance boundary")
 	}
 }
 

@@ -38,6 +38,14 @@ mutation, owns the exact sing-box process tree, and guarantees that
 `engine.stop` deactivates TUN before stopping the pool. `tun.status` is
 read-only and `tun.deactivate` is safe to retry.
 
+For a privileged Core, `tun.activate.executable` is only a compatibility
+assertion: the Core launches the sing-box path pinned by installation policy
+and rejects any different path. The desktop also sends `config_sha256` and,
+when present, `ipv4_fallback_sha256`. The Core verifies those digests and
+stages the exact bytes under a SYSTEM/Administrators-only directory before
+sing-box reads them. Installed service policy failures use the additive
+`security_policy_rejected` error code.
+
 `dns.resolve` and `dns.status` are available while either `proxy` or
 `tun_tcp_pool` is running. In TUN mode they are the authoritative
 selected-adapter DNS preflight used to build the sing-box upstream plan; the

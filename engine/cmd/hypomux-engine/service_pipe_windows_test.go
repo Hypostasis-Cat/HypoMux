@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -61,6 +62,9 @@ func TestConnectServicePipeAcceptsClient(t *testing.T) {
 		0,
 	)
 	if err != nil {
+		if errors.Is(err, windows.ERROR_ACCESS_DENIED) {
+			t.Skip("test token is not an interactive user allowed by the production pipe ACL")
+		}
 		t.Fatal(err)
 	}
 	defer windows.CloseHandle(client)
@@ -71,5 +75,14 @@ func TestConnectServicePipeAcceptsClient(t *testing.T) {
 		}
 	case <-ctx.Done():
 		t.Fatal("overlapped Core Service pipe did not accept a client")
+	}
+}
+
+func TestCoreServicePipeACLExcludesGenericAuthenticatedUsers(t *testing.T) {
+	if strings.Contains(coreServicePipeSDDL, ";;;AU)") {
+		t.Fatalf("Core Service pipe grants access to every authenticated user: %s", coreServicePipeSDDL)
+	}
+	if !strings.Contains(coreServicePipeSDDL, ";;;IU)") {
+		t.Fatalf("Core Service pipe does not grant the interactive UI access: %s", coreServicePipeSDDL)
 	}
 }

@@ -14,6 +14,7 @@ import (
 	"unsafe"
 
 	"github.com/Hypostasis-Cat/HypoMux/engine/internal/server"
+	"github.com/Hypostasis-Cat/HypoMux/engine/internal/tun"
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/mgr"
@@ -25,6 +26,7 @@ const (
 	servicePipeBuffer   = 64 * 1024
 	serviceDisplayName  = "HypoMux Core Service"
 	serviceDescription  = "Privileged TUN, WFP, route, DNS and network recovery host for HypoMux."
+	coreServicePipeSDDL = "D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;IU)"
 )
 
 var errServiceClientRejected = errors.New("Core Service client rejected")
@@ -37,6 +39,16 @@ func installWindowsService() error {
 	executable, err = filepath.Abs(executable)
 	if err != nil {
 		return fmt.Errorf("resolve absolute executable path: %w", err)
+	}
+	if err := requireMachineInstallLocation(executable); err != nil {
+		return err
+	}
+	policy, err := buildCoreServicePolicy(executable)
+	if err != nil {
+		return fmt.Errorf("build Core Service security policy: %w", err)
+	}
+	if err := tun.PrepareTrustedConfigStorage(); err != nil {
+		return fmt.Errorf("prepare Core Service config storage: %w", err)
 	}
 
 	manager, err := mgr.Connect()
@@ -59,6 +71,12 @@ func installWindowsService() error {
 	} else if err != nil {
 		return fmt.Errorf("open service: %w", err)
 	} else {
+		// An in-place update must never leave the previous (possibly vulnerable)
+		// service process running against newly installed files or policy.
+		if stopErr := stopWindowsService(service, 20*time.Second); stopErr != nil {
+			service.Close()
+			return fmt.Errorf("stop existing service before update: %w", stopErr)
+		}
 		config, configErr := service.Config()
 		if configErr != nil {
 			service.Close()
@@ -76,6 +94,9 @@ func installWindowsService() error {
 	}
 	defer service.Close()
 
+	if err := writeCoreServicePolicy(policy); err != nil {
+		return fmt.Errorf("persist Core Service security policy: %w", err)
+	}
 	if err := service.SetRecoveryActions([]mgr.RecoveryAction{
 		{Type: mgr.ServiceRestart, Delay: 3 * time.Second},
 		{Type: mgr.ServiceRestart, Delay: 10 * time.Second},
@@ -98,7 +119,7 @@ func removeWindowsService() error {
 
 	service, err := manager.OpenService(coreServiceName)
 	if errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
-		return nil
+		return deleteCoreServicePolicy()
 	}
 	if err != nil {
 		return fmt.Errorf("open service: %w", err)
@@ -111,7 +132,7 @@ func removeWindowsService() error {
 	if err := service.Delete(); err != nil && !errors.Is(err, windows.ERROR_SERVICE_MARKED_FOR_DELETE) {
 		return fmt.Errorf("delete service: %w", err)
 	}
-	return nil
+	return deleteCoreServicePolicy()
 }
 
 func stopWindowsService(service *mgr.Service, timeout time.Duration) error {
@@ -219,7 +240,11 @@ func (service *coreWindowsService) Execute(
 
 func serveCoreServicePipe(ctx context.Context, metadata server.Metadata) error {
 	for {
-		connection, err := acceptServicePipe(ctx)
+		policy, err := loadCoreServicePolicy()
+		if err != nil {
+			return fmt.Errorf("load Core Service security policy: %w", err)
+		}
+		connection, err := acceptServicePipe(ctx, policy)
 		if err != nil {
 			if errors.Is(err, errServiceClientRejected) {
 				fmt.Fprintf(os.Stderr, "%v\n", err)
@@ -227,7 +252,10 @@ func serveCoreServicePipe(ctx context.Context, metadata server.Metadata) error {
 			}
 			return err
 		}
-		engineServer := server.New(connection, connection, metadata)
+		sessionMetadata := metadata
+		sessionMetadata.TunExecutable = policy.TunExecutable
+		sessionMetadata.TunExecutableSHA256 = policy.TunExecutableSHA256
+		engineServer := server.New(connection, connection, sessionMetadata)
 		sessionDone := make(chan error, 1)
 		go func() {
 			sessionDone <- engineServer.Run(ctx)
@@ -253,7 +281,7 @@ func serveCoreServicePipe(ctx context.Context, metadata server.Metadata) error {
 	}
 }
 
-func acceptServicePipe(ctx context.Context) (*os.File, error) {
+func acceptServicePipe(ctx context.Context, policy coreServicePolicy) (*os.File, error) {
 	handle, err := createServicePipe()
 	if err != nil {
 		return nil, err
@@ -262,7 +290,7 @@ func acceptServicePipe(ctx context.Context) (*os.File, error) {
 		_ = windows.CloseHandle(handle)
 		return nil, err
 	}
-	if err := validateServicePipeClient(handle); err != nil {
+	if err := validateServicePipeClient(handle, policy); err != nil {
 		_ = windows.DisconnectNamedPipe(handle)
 		_ = windows.CloseHandle(handle)
 		return nil, fmt.Errorf("%w: %v", errServiceClientRejected, err)
@@ -323,8 +351,12 @@ func createServicePipe() (windows.Handle, error) {
 }
 
 func createServicePipeNamed(pipeName string) (windows.Handle, error) {
+	return createServicePipeNamedWithSDDL(pipeName, coreServicePipeSDDL)
+}
+
+func createServicePipeNamedWithSDDL(pipeName string, sddl string) (windows.Handle, error) {
 	descriptor, err := windows.SecurityDescriptorFromString(
-		"D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;AU)",
+		sddl,
 	)
 	if err != nil {
 		return 0, fmt.Errorf("build Core Service pipe ACL: %w", err)
@@ -353,7 +385,7 @@ func createServicePipeNamed(pipeName string) (windows.Handle, error) {
 	return handle, nil
 }
 
-func validateServicePipeClient(handle windows.Handle) error {
+func validateServicePipeClient(handle windows.Handle, policy coreServicePolicy) error {
 	var clientPID uint32
 	if err := windows.GetNamedPipeClientProcessId(handle, &clientPID); err != nil {
 		return fmt.Errorf("read Core Service client PID: %w", err)
@@ -373,9 +405,8 @@ func validateServicePipeClient(handle windows.Handle) error {
 			clientSession,
 		)
 	}
-	// The desktop normally connects with a standard token, but an explicitly
-	// elevated or legacy-scheduled UI is also a supported compatibility client.
-	// Integrity level is not an authentication boundary: the pipe ACL, local-only
-	// transport, concrete client PID and active console session remain enforced.
+	if err := validateServiceClientExecutable(clientPID, policy); err != nil {
+		return err
+	}
 	return nil
 }

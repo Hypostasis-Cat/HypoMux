@@ -854,6 +854,8 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 			IPv6Available: selectedAdaptersHaveIPv6(selected),
 			ConfigName:    "sing-box.json",
 		}
+		configDigest := ""
+		configOptions.ConfigSHA256 = &configDigest
 		singBox, configPath, clashAPI, configErr := writeSingBoxConfigWithOptions(
 			started.Endpoints.Channels, selected[0], dnsResult, routingRules, compatibility,
 			effectiveStrictRoute, configOptions,
@@ -861,18 +863,26 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 		if configErr != nil {
 			return rollback(configErr)
 		}
+		if configDigest == "" {
+			return rollback(errors.New("固定 TUN 配置摘要失败"))
+		}
 		ipv4FallbackPath := ""
+		ipv4FallbackDigest := ""
 		if configOptions.IPv6Available {
 			fallbackOptions := configOptions
 			fallbackOptions.IPv6Available = false
 			fallbackOptions.ConfigName = "sing-box-ipv4.json"
 			fallbackOptions.ClashAPI = &clashAPI
+			fallbackOptions.ConfigSHA256 = &ipv4FallbackDigest
 			_, ipv4FallbackPath, _, configErr = writeSingBoxConfigWithOptions(
 				started.Endpoints.Channels, selected[0], dnsResult, routingRules, compatibility,
 				effectiveStrictRoute, fallbackOptions,
 			)
 			if configErr != nil {
 				return rollback(configErr)
+			}
+			if ipv4FallbackDigest == "" {
+				return rollback(errors.New("固定 IPv4 TUN 配置摘要失败"))
 			}
 		}
 		if s.logs != nil {
@@ -890,7 +900,9 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 		if err := s.client.Request(ctx, "tun.activate", map[string]any{
 			"executable":                singBox,
 			"config_path":               configPath,
+			"config_sha256":             configDigest,
 			"ipv4_fallback_config_path": ipv4FallbackPath,
+			"ipv4_fallback_sha256":      ipv4FallbackDigest,
 			"startup_timeout_ms":        20000,
 			"strict_route":              effectiveStrictRoute,
 		}, &activated); err != nil {

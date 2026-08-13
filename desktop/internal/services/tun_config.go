@@ -2,6 +2,7 @@ package services
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -35,6 +36,7 @@ type tunConfigOptions struct {
 	IPv6Available bool
 	ConfigName    string
 	ClashAPI      *clashAPIConfig
+	ConfigSHA256  *string
 }
 
 func writeSingBoxConfig(
@@ -220,6 +222,10 @@ func writeSingBoxConfigWithOptions(
 	data, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {
 		return "", "", clashAPIConfig{}, fmt.Errorf("生成 TUN 配置失败：%w", err)
+	}
+	if options.ConfigSHA256 != nil {
+		digest := sha256.Sum256(data)
+		*options.ConfigSHA256 = hex.EncodeToString(digest[:])
 	}
 	directory := filepath.Join(settingsDirectory(), "runtime")
 	if err := os.MkdirAll(directory, 0o755); err != nil {
