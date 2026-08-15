@@ -15,6 +15,8 @@ const settings = (patch: Record<string, unknown>): Settings => ({
   auto_start_engine: false,
   dns_server: "223.5.5.5",
   dns_policy: "auto",
+  dns_egress_mode: "auto",
+  dns_adapter_id: "",
   ...patch,
 });
 

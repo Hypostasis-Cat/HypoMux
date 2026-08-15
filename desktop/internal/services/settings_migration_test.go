@@ -40,7 +40,7 @@ func TestMigrateLegacySettingsPreservesSemantics(t *testing.T) {
 		t.Fatalf("boolean semantics not migrated: %#v", settings)
 	}
 	if settings.DNSServer != "1.1.1.1" || settings.DNSPolicy != "google" ||
-		settings.AdapterWeights["WLAN"] != 3 {
+		settings.DNSEgressMode != DNSEgressAuto || settings.AdapterWeights["WLAN"] != 3 {
 		t.Fatalf("network settings not migrated: %#v", settings)
 	}
 	if len(settings.RoutingRules) != 2 || settings.RoutingRules[0].Value != "a.exe" || settings.RoutingRules[1].Value != "b.exe" {
@@ -82,5 +82,19 @@ func TestLegacyMigrationRollbackRestoresNewSettings(t *testing.T) {
 	}
 	if restored.SOCKSPort != 14080 || restored.HTTPPort != 14081 {
 		t.Fatalf("rollback did not restore current settings: %#v", restored)
+	}
+}
+
+func TestSettingsUpdateDefaultsMissingDNSEgressMode(t *testing.T) {
+	t.Setenv("HYPOMUX_DATA_DIR", t.TempDir())
+	service := NewSettingsService()
+	next := service.Get()
+	next.DNSEgressMode = ""
+	updated, err := service.Update(next)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.DNSEgressMode != DNSEgressAuto {
+		t.Fatalf("missing DNS egress mode was not migrated to auto: %#v", updated)
 	}
 }

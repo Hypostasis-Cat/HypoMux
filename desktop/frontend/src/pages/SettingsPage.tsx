@@ -31,7 +31,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { GlassSurface } from "../components/material/GlassSurface";
 import { AppToaster } from "../components/AppToaster";
 import { desktopPlatform } from "../platform/desktop";
-import { appServices, type CompleteAppSettings, type ConfigMigrationStatus } from "../platform/services";
+import { appServices, type AdapterView, type CompleteAppSettings, type ConfigMigrationStatus } from "../platform/services";
 import { SettingsSaveQueue, type SaveOutcome } from "../platform/settingsQueue";
 import { accentColours } from "../theme/appearance.presets";
 import { useAppearance } from "../theme/appearance.store";
@@ -54,6 +54,8 @@ const emptySettings: CompleteAppSettings = {
   auto_start_engine: false,
   dns_server: "223.5.5.5",
   dns_policy: "auto",
+  dns_egress_mode: "auto",
+  dns_adapter_id: "",
   selected_adapter_ids: [],
   adapter_weights: {},
   routing_rules: [],
@@ -110,6 +112,7 @@ function SettingDropdown({
 
 export function SettingsPage({ onOpenBlockedDomains }: { onOpenBlockedDomains: () => void }) {
   const [settings, setSettings] = useState<CompleteAppSettings>(emptySettings);
+  const [adapters, setAdapters] = useState<AdapterView[]>([]);
   const [configPath, setConfigPath] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -165,11 +168,13 @@ export function SettingsPage({ onOpenBlockedDomains }: { onOpenBlockedDomains: (
       appServices.settings.get(),
       appServices.settings.configPath(),
       appServices.settings.migrationStatus(),
+      appServices.adapters.list().catch(() => []),
     ])
-      .then(([loaded, path, migrationStatus]) => {
+      .then(([loaded, path, migrationStatus, loadedAdapters]) => {
         setSettings({ ...emptySettings, ...loaded });
         setConfigPath(path);
         setMigration(migrationStatus);
+        setAdapters(loadedAdapters ?? []);
       })
       .catch((error) => notify(text("设置读取失败", "Failed to load settings"), String(error), "error"))
       .finally(() => setLoading(false));
@@ -592,6 +597,25 @@ export function SettingsPage({ onOpenBlockedDomains }: { onOpenBlockedDomains: (
                 { value: "google", label: "Google DNS" },
               ]}
               onChange={(value) => setSettings((current) => ({ ...current, dns_policy: value }))}
+            />
+          </SettingRow>
+          <SettingRow title={t("settings_dns_egress")} description={t("settings_dns_egress_hint")}>
+            <SettingDropdown
+              value={settings.dns_egress_mode === "adapter" ? `adapter:${settings.dns_adapter_id ?? ""}` : settings.dns_egress_mode}
+              disabled={loading || saving}
+              options={[
+                { value: "auto", label: t("settings_dns_egress_auto") },
+                { value: "system", label: t("settings_dns_egress_system") },
+                ...adapters
+                  .filter((adapter) => adapter.selected && adapter.operational)
+                  .map((adapter) => ({
+                    value: `adapter:${adapter.id}`,
+                    label: `${t("settings_dns_egress_adapter_prefix")} · ${adapter.name}`,
+                  })),
+              ]}
+              onChange={(value) => setSettings((current) => value.startsWith("adapter:")
+                ? { ...current, dns_egress_mode: "adapter", dns_adapter_id: value.slice("adapter:".length) }
+                : { ...current, dns_egress_mode: value, dns_adapter_id: "" })}
             />
           </SettingRow>
           <div className="settings-actions">

@@ -658,12 +658,20 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 	settings := s.settings.Get()
 	routingRules := []RoutingRule{}
 	compatibility := compatibilityPlan{}
+	dnsEgress := tunDNSEgressDecision{}
 	if mode == "tun" {
 		routingRules, err = normalizeRulesStrict(settings.RoutingRules)
 		if err != nil {
 			return EngineSnapshot{}, err
 		}
 		if err = validateRoutingOutbounds(routingRules, selected); err != nil {
+			return EngineSnapshot{}, err
+		}
+		systemDefaultID, systemDefaultErr := systemDefaultDNSAdapterID()
+		dnsEgress, err = resolveTUNDNSEgress(
+			settings, selected, routingRules, systemDefaultID, systemDefaultErr,
+		)
+		if err != nil {
 			return EngineSnapshot{}, err
 		}
 		compatibility = detectCompatibilityPlan()
@@ -680,10 +688,11 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 			names = append(names, adapter.Name)
 		}
 		logOwned = s.logs.Start(mode, names, map[string]any{
-			"socks_port": settings.SOCKSPort,
-			"http_port":  settings.HTTPPort,
-			"weighted":   settings.Weighted,
-			"dns_policy": settings.DNSPolicy,
+			"socks_port":      settings.SOCKSPort,
+			"http_port":       settings.HTTPPort,
+			"weighted":        settings.Weighted,
+			"dns_policy":      settings.DNSPolicy,
+			"dns_egress_mode": settings.DNSEgressMode,
 		})
 		s.logs.RecordEvent("engine", "start_requested", map[string]any{
 			"mode": mode, "adapters": names,
@@ -699,6 +708,16 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 		}()
 	}
 	if mode == "tun" {
+		if s.logs != nil {
+			s.logs.RecordEvent("tun_dns", "egress_resolved", map[string]any{
+				"mode":       dnsEgress.Mode,
+				"source":     dnsEgress.Source,
+				"adapter_id": dnsEgress.Adapter.ID,
+				"adapter":    dnsEgress.Adapter.Name,
+				"ambiguous":  dnsEgress.Ambiguous,
+				"detail":     dnsEgress.Detail,
+			})
+		}
 		if s.tun == nil {
 			return EngineSnapshot{}, errors.New("TUN 启动前检查服务未注册；系统网络未修改")
 		}
@@ -844,7 +863,7 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 		var dnsResult dnsResolveResult
 		s.recordStartStage("dns_validating", nil)
 		if err := s.client.Request(ctx, "dns.resolve", map[string]any{
-			"domain": "www.msftconnecttest.com", "adapter": selected[0].Name, "record_type": "A",
+			"domain": "www.msftconnecttest.com", "adapter": dnsEgress.Adapter.Name, "record_type": "A",
 		}, &dnsResult); err != nil {
 			return rollback(fmt.Errorf("TUN 启动前 DNS 验证失败：%w", err))
 		}
@@ -857,7 +876,7 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 		configDigest := ""
 		configOptions.ConfigSHA256 = &configDigest
 		singBox, configPath, clashAPI, configErr := writeSingBoxConfigWithOptions(
-			started.Endpoints.Channels, selected[0], dnsResult, routingRules, compatibility,
+			started.Endpoints.Channels, dnsEgress.Adapter, dnsResult, routingRules, compatibility,
 			effectiveStrictRoute, configOptions,
 		)
 		if configErr != nil {
@@ -875,7 +894,7 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 			fallbackOptions.ClashAPI = &clashAPI
 			fallbackOptions.ConfigSHA256 = &ipv4FallbackDigest
 			_, ipv4FallbackPath, _, configErr = writeSingBoxConfigWithOptions(
-				started.Endpoints.Channels, selected[0], dnsResult, routingRules, compatibility,
+				started.Endpoints.Channels, dnsEgress.Adapter, dnsResult, routingRules, compatibility,
 				effectiveStrictRoute, fallbackOptions,
 			)
 			if configErr != nil {
@@ -888,6 +907,10 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 		if s.logs != nil {
 			s.logs.RecordEvent("tun_dns", "upstream_selected", map[string]any{
 				"policy":             effectiveDNSPolicy,
+				"egress_mode":        dnsEgress.Mode,
+				"egress_source":      dnsEgress.Source,
+				"adapter_id":         dnsEgress.Adapter.ID,
+				"adapter":            dnsEgress.Adapter.Name,
 				"transport":          dnsResult.Transport,
 				"server":             dnsResult.Server,
 				"route_exclusions":   dnsBootstrapRouteExclusions(dnsResult),

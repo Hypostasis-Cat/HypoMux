@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	desktopplatform "github.com/Hypostasis-Cat/HypoMux/desktop/internal/platform"
@@ -35,6 +36,8 @@ type AppSettings struct {
 	AutoStartEngine     bool                  `json:"auto_start_engine"`
 	DNSServer           string                `json:"dns_server"`
 	DNSPolicy           string                `json:"dns_policy"`
+	DNSEgressMode       string                `json:"dns_egress_mode"`
+	DNSAdapterID        string                `json:"dns_adapter_id,omitempty"`
 	SelectedAdapterIDs  []string              `json:"selected_adapter_ids"`
 	AdapterWeights      map[string]int        `json:"adapter_weights"`
 	RoutingRules        []RoutingRule         `json:"routing_rules"`
@@ -57,6 +60,7 @@ func DefaultSettings() AppSettings {
 		CloseToTray:         false,
 		DNSServer:           "223.5.5.5",
 		DNSPolicy:           "auto",
+		DNSEgressMode:       DNSEgressAuto,
 		AdapterWeights:      map[string]int{},
 		RoutingRules:        []RoutingRule{},
 	}
@@ -173,6 +177,9 @@ func (s *SettingsService) RollbackLegacyMigration() (AppSettings, error) {
 		if err := json.Unmarshal(data, &restored); err != nil {
 			return AppSettings{}, fmt.Errorf("迁移前备份格式无效：%w", err)
 		}
+		if restored.DNSEgressMode == "" {
+			restored.DNSEgressMode = DNSEgressAuto
+		}
 		s.settings = restored
 	} else {
 		s.settings = DefaultSettings()
@@ -192,6 +199,10 @@ func (s *SettingsService) Update(next AppSettings) (AppSettings, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// Keep full-replace writes from older UI bindings backward-compatible.
+	if next.DNSEgressMode == "" {
+		next.DNSEgressMode = DNSEgressAuto
+	}
 	if err := validateSettings(next); err != nil {
 		return AppSettings{}, err
 	}
@@ -202,6 +213,7 @@ func (s *SettingsService) Update(next AppSettings) (AppSettings, error) {
 		next.WFPCompatibility = WFPCompatibilityState{}
 	}
 	next.SelectedAdapterIDs = uniqueNonEmpty(next.SelectedAdapterIDs)
+	next.DNSAdapterID = strings.TrimSpace(next.DNSAdapterID)
 	next.AdapterWeights = cloneWeights(next.AdapterWeights)
 	next.RoutingRules = append([]RoutingRule(nil), next.RoutingRules...)
 	if next.AdapterWeights == nil {
@@ -337,6 +349,10 @@ func (s *SettingsService) reload() error {
 	if loaded.DNSPolicy == "" {
 		loaded.DNSPolicy = defaults.DNSPolicy
 	}
+	if loaded.DNSEgressMode == "" {
+		loaded.DNSEgressMode = defaults.DNSEgressMode
+	}
+	loaded.DNSAdapterID = strings.TrimSpace(loaded.DNSAdapterID)
 	if loaded.Language != "zh" && loaded.Language != "en" {
 		loaded.Language = defaults.Language
 	}
@@ -488,6 +504,18 @@ func validateSettings(value AppSettings) error {
 	case "auto", "off", "system", "alidns", "dnspod", "google":
 	default:
 		return fmt.Errorf("不支持的 DoH 解析策略：%s", value.DNSPolicy)
+	}
+	switch value.DNSEgressMode {
+	case DNSEgressAuto, DNSEgressSystem:
+	case DNSEgressAdapter:
+		if strings.TrimSpace(value.DNSAdapterID) == "" {
+			return errors.New("指定 DNS 出口网卡时必须选择一张网卡")
+		}
+	default:
+		return fmt.Errorf("不支持的 DNS 出口模式：%s", value.DNSEgressMode)
+	}
+	if len(value.DNSAdapterID) > 256 || strings.ContainsRune(value.DNSAdapterID, '\x00') {
+		return errors.New("DNS 出口网卡标识无效")
 	}
 	for id, weight := range value.AdapterWeights {
 		if weight < AdapterWeightMin || weight > AdapterWeightMax {
