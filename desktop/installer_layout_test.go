@@ -351,6 +351,32 @@ func TestFrontendUsesWailsV3RuntimeDetection(t *testing.T) {
 	}
 }
 
+func TestHomeEngineStatePersistsAcrossPageNavigation(t *testing.T) {
+	appData, err := os.ReadFile("frontend/src/App.tsx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	shellData, err := os.ReadFile("frontend/src/components/shell/AppShell.tsx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	appSource := string(appData)
+	shellSource := string(shellData)
+	for _, required := range []string{
+		`persistentPage="home"`,
+		`persistentChildren={<HomePage onNavigate={navigate} />}`,
+		`hidden={page !== persistentPage}`,
+		`page !== persistentPage ? (`,
+	} {
+		if !strings.Contains(appSource+shellSource, required) {
+			t.Fatalf("persistent home-page state wiring is missing %q", required)
+		}
+	}
+	if strings.Contains(appSource, `: <HomePage onNavigate={navigate} />}`) {
+		t.Fatal("HomePage is still conditionally mounted and will lose an in-flight engine transition")
+	}
+}
+
 func TestFrontendFreshInstallAppearanceDefaults(t *testing.T) {
 	mainData, err := os.ReadFile("main.go")
 	if err != nil {

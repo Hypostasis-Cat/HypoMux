@@ -81,6 +81,8 @@ function HypoMuxWindow() {
         onPageChange={navigate}
         pageDirection={pageDirection}
         animatePage={navigationRevision > 0}
+        persistentPage="home"
+        persistentChildren={<HomePage onNavigate={navigate} />}
       >
         <Suspense fallback={<div className="page-loading"><Spinner /></div>}>
           {page === "appearance" && import.meta.env.DEV
@@ -97,7 +99,7 @@ function HypoMuxWindow() {
                 ? <ConnectionsPage />
             : page === "routing"
               ? <RoutingPage />
-              : <HomePage onNavigate={navigate} />}
+              : null}
         </Suspense>
       </AppShell>
     </FluentProvider>
