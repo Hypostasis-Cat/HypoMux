@@ -83,8 +83,10 @@ type windowsCoreProcess struct {
 
 func newPrivilegedLauncher() coreLauncher {
 	return serviceFirstLauncher{
-		service:  windowsServiceLauncher{},
-		fallback: privilegedLauncher{},
+		service:                    windowsServiceLauncher{},
+		fallback:                   privilegedLauncher{},
+		allowAutomaticFallbackPath: allowAutomaticCoreFallbackPath,
+		allowPostHandshakeFallback: allowServicePostHandshakeFallback,
 	}
 }
 
@@ -119,6 +121,7 @@ func (privilegedLauncher) Launch(ctx context.Context, path string) (*coreSession
 		close:   connection.Close,
 		process: process,
 		path:    path,
+		source:  coreSourceRunAs,
 	}, nil
 }
 

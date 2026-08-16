@@ -19,6 +19,8 @@ const (
 	MaxMessageBytes = 1024 * 1024
 )
 
+var ErrCoreProtocolIncompatible = errors.New("聚合核心协议版本不兼容")
+
 type RemoteError struct {
 	Code    string         `json:"code"`
 	Message string         `json:"message"`
@@ -62,6 +64,23 @@ type Event struct {
 	Data     json.RawMessage
 }
 
+type LaunchAttempt struct {
+	Source         string  `json:"source"`
+	Stage          string  `json:"stage"`
+	Result         string  `json:"result"`
+	PID            int     `json:"pid,omitempty"`
+	ServicePID     int     `json:"service_pid,omitempty"`
+	DesktopSession *uint32 `json:"desktop_session,omitempty"`
+	ConsoleSession *uint32 `json:"console_session,omitempty"`
+	Fallback       string  `json:"fallback,omitempty"`
+	Message        string  `json:"message,omitempty"`
+}
+
+type LaunchReport struct {
+	Attempts []LaunchAttempt `json:"attempts"`
+	Fallback bool            `json:"fallback"`
+}
+
 type Client struct {
 	mu               sync.Mutex
 	startGate        chan struct{}
@@ -74,6 +93,7 @@ type Client struct {
 	normalLauncher   coreLauncher
 	elevatedLauncher coreLauncher
 	events           chan Event
+	lastLaunch       LaunchReport
 }
 
 type Hello struct {
@@ -86,6 +106,8 @@ type Hello struct {
 	ModeFeatures    map[string][]string `json:"mode_features"`
 	Elevated        bool                `json:"elevated"`
 	PID             int                 `json:"pid"`
+	Launcher        string              `json:"-"`
+	Fallback        bool                `json:"-"`
 }
 
 func New() *Client {
@@ -119,6 +141,14 @@ func (c *Client) Hello() Hello {
 	return c.hello
 }
 
+func (c *Client) LastLaunchReport() LaunchReport {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	report := c.lastLaunch
+	report.Attempts = append([]LaunchAttempt(nil), report.Attempts...)
+	return report
+}
+
 func (c *Client) Ensure(ctx context.Context) (Hello, error) {
 	return c.ensure(ctx, false)
 }
@@ -147,9 +177,11 @@ func (c *Client) ensure(ctx context.Context, requireElevated bool) (Hello, error
 	if active {
 		c.killCurrent(errors.New("正在切换聚合核心权限级别"))
 	}
+	c.resetLaunchReport()
 
 	path, err := ResolveExecutable()
 	if err != nil {
+		c.recordLaunchAttempt(LaunchAttempt{Source: "resolver", Stage: "resolve", Result: "failed", Message: err.Error()})
 		return Hello{}, err
 	}
 	launcher := c.normalLauncher
@@ -158,7 +190,57 @@ func (c *Client) ensure(ctx context.Context, requireElevated bool) (Hello, error
 	}
 	session, err := launcher.Launch(ctx, path)
 	if err != nil {
+		c.recordLaunchAttempt(LaunchAttempt{
+			Source: string(launcherSource(launcher)), Stage: "launch", Result: "failed", Message: err.Error(),
+		})
 		return Hello{}, err
+	}
+	c.recordSessionAttempt(session, "transport", "connected", "")
+
+	negotiated, negotiateErr := c.negotiateSession(ctx, path, session, requireElevated)
+	if negotiateErr == nil {
+		c.recordSessionAttempt(session, "handshake", "connected", "")
+		return negotiated, nil
+	}
+	c.recordSessionAttempt(session, "handshake", "failed", negotiateErr.Error())
+
+	if requireElevated && ctx.Err() == nil {
+		if fallbackLauncher, ok := launcher.(postHandshakeFallbackLauncher); ok {
+			fallbackSession, attempted, fallbackErr := fallbackLauncher.FallbackAfterHandshake(
+				ctx, path, session, negotiateErr,
+			)
+			if attempted {
+				c.markLaunchFallback()
+				if fallbackErr != nil {
+					c.recordLaunchAttempt(LaunchAttempt{
+						Source: string(coreSourceRunAs), Stage: "launch", Result: "failed", Message: fallbackErr.Error(),
+					})
+					return Hello{}, fmt.Errorf("%v；UAC 兼容启动失败：%w", negotiateErr, fallbackErr)
+				}
+				c.recordSessionAttempt(fallbackSession, "transport", "connected", "")
+				fallbackHello, fallbackNegotiateErr := c.negotiateSession(
+					ctx, path, fallbackSession, requireElevated,
+				)
+				if fallbackNegotiateErr != nil {
+					c.recordSessionAttempt(fallbackSession, "handshake", "failed", fallbackNegotiateErr.Error())
+					return Hello{}, fmt.Errorf("%v；UAC 兼容核心协议协商失败：%w", negotiateErr, fallbackNegotiateErr)
+				}
+				c.recordSessionAttempt(fallbackSession, "handshake", "connected", "")
+				return fallbackHello, nil
+			}
+		}
+	}
+	return Hello{}, negotiateErr
+}
+
+func (c *Client) negotiateSession(
+	ctx context.Context,
+	path string,
+	session *coreSession,
+	requireElevated bool,
+) (Hello, error) {
+	if session == nil || session.reader == nil || session.writer == nil || session.process == nil {
+		return Hello{}, errors.New("聚合核心启动器返回了无效通信会话")
 	}
 
 	c.mu.Lock()
@@ -189,7 +271,7 @@ func (c *Client) ensure(ctx context.Context, requireElevated bool) (Hello, error
 	}
 	if negotiated.ProtocolVersion != ProtocolVersion {
 		c.killCurrent(errors.New("聚合核心协议版本不兼容"))
-		return Hello{}, fmt.Errorf("不兼容的聚合核心协议版本：%d", negotiated.ProtocolVersion)
+		return Hello{}, fmt.Errorf("%w：%d", ErrCoreProtocolIncompatible, negotiated.ProtocolVersion)
 	}
 	if requireElevated && !negotiated.Elevated {
 		c.killCurrent(errors.New("独立聚合核心未获得管理员权限"))
@@ -197,10 +279,60 @@ func (c *Client) ensure(ctx context.Context, requireElevated bool) (Hello, error
 	}
 	c.mu.Lock()
 	if c.session == session {
+		negotiated.Launcher = string(session.source)
+		negotiated.Fallback = session.fallback != ""
 		c.hello = negotiated
 	}
 	c.mu.Unlock()
 	return negotiated, nil
+}
+
+func launcherSource(launcher coreLauncher) coreSessionSource {
+	switch launcher.(type) {
+	case stdioLauncher, *stdioLauncher:
+		return coreSourceStdio
+	case serviceFirstLauncher, *serviceFirstLauncher:
+		return coreSourceService
+	default:
+		return coreSourceUnknown
+	}
+}
+
+func (c *Client) resetLaunchReport() {
+	c.mu.Lock()
+	c.lastLaunch = LaunchReport{}
+	c.mu.Unlock()
+}
+
+func (c *Client) markLaunchFallback() {
+	c.mu.Lock()
+	c.lastLaunch.Fallback = true
+	c.mu.Unlock()
+}
+
+func (c *Client) recordSessionAttempt(session *coreSession, stage, result, message string) {
+	if session == nil {
+		return
+	}
+	pid := 0
+	if session.process != nil {
+		pid = session.process.PID()
+	}
+	c.recordLaunchAttempt(LaunchAttempt{
+		Source: string(session.source), Stage: stage, Result: result,
+		PID: pid, ServicePID: session.details.ServicePID,
+		DesktopSession: session.details.DesktopSession, ConsoleSession: session.details.ConsoleSession,
+		Fallback: session.fallback, Message: message,
+	})
+	if session.fallback != "" {
+		c.markLaunchFallback()
+	}
+}
+
+func (c *Client) recordLaunchAttempt(attempt LaunchAttempt) {
+	c.mu.Lock()
+	c.lastLaunch.Attempts = append(c.lastLaunch.Attempts, attempt)
+	c.mu.Unlock()
 }
 
 func (c *Client) Request(ctx context.Context, method string, params any, target any) error {

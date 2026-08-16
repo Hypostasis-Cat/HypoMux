@@ -10,7 +10,19 @@ import (
 	"sync"
 )
 
-var ErrCoreServiceUnavailable = errors.New("HypoMux Core Service 未安装")
+var (
+	ErrCoreServiceUnavailable = errors.New("HypoMux Core Service 未安装")
+	ErrCoreServiceNotRunning  = errors.New("HypoMux Core Service 已安装但未运行")
+)
+
+type coreSessionSource string
+
+const (
+	coreSourceUnknown coreSessionSource = "unknown"
+	coreSourceStdio   coreSessionSource = "stdio"
+	coreSourceService coreSessionSource = "service"
+	coreSourceRunAs   coreSessionSource = "runas"
+)
 
 type coreProcess interface {
 	Wait() error
@@ -24,8 +36,17 @@ type coreSession struct {
 	close    func() error
 	process  coreProcess
 	path     string
+	source   coreSessionSource
+	fallback string
+	details  launchSessionDetails
 	closeMu  sync.Once
 	closeErr error
+}
+
+type launchSessionDetails struct {
+	ServicePID     int
+	DesktopSession *uint32
+	ConsoleSession *uint32
 }
 
 type coreLauncher interface {
@@ -35,8 +56,14 @@ type coreLauncher interface {
 type stdioLauncher struct{}
 
 type serviceFirstLauncher struct {
-	service  coreLauncher
-	fallback coreLauncher
+	service                    coreLauncher
+	fallback                   coreLauncher
+	allowAutomaticFallbackPath func(string) error
+	allowPostHandshakeFallback func(*coreSession, error) bool
+}
+
+type postHandshakeFallbackLauncher interface {
+	FallbackAfterHandshake(context.Context, string, *coreSession, error) (*coreSession, bool, error)
 }
 
 type execCoreProcess struct {
@@ -48,10 +75,53 @@ func (launcher serviceFirstLauncher) Launch(ctx context.Context, path string) (*
 	if err == nil {
 		return session, nil
 	}
-	if !errors.Is(err, ErrCoreServiceUnavailable) {
+	if !errors.Is(err, ErrCoreServiceUnavailable) && !errors.Is(err, ErrCoreServiceNotRunning) {
 		return nil, err
 	}
-	return launcher.fallback.Launch(ctx, path)
+	if errors.Is(err, ErrCoreServiceNotRunning) && launcher.allowAutomaticFallbackPath != nil {
+		if trustErr := launcher.allowAutomaticFallbackPath(path); trustErr != nil {
+			return nil, fmt.Errorf("%w；自动兼容启动已取消：%v", err, trustErr)
+		}
+	}
+	fallbackSession, fallbackErr := launcher.fallback.Launch(ctx, path)
+	if fallbackErr != nil {
+		return nil, fallbackErr
+	}
+	if fallbackSession != nil {
+		if errors.Is(err, ErrCoreServiceUnavailable) {
+			fallbackSession.fallback = "service_unavailable"
+		} else {
+			fallbackSession.fallback = "service_not_running"
+		}
+	}
+	return fallbackSession, nil
+}
+
+func (launcher serviceFirstLauncher) FallbackAfterHandshake(
+	ctx context.Context,
+	path string,
+	failed *coreSession,
+	cause error,
+) (*coreSession, bool, error) {
+	if failed == nil || failed.source != coreSourceService ||
+		launcher.allowPostHandshakeFallback == nil ||
+		!launcher.allowPostHandshakeFallback(failed, cause) {
+		return nil, false, nil
+	}
+	if launcher.allowAutomaticFallbackPath == nil {
+		return nil, true, errors.New("自动兼容启动缺少正式 Core 路径校验")
+	}
+	if err := launcher.allowAutomaticFallbackPath(path); err != nil {
+		return nil, true, fmt.Errorf("自动兼容启动已取消：%w", err)
+	}
+	session, err := launcher.fallback.Launch(ctx, path)
+	if err != nil {
+		return nil, true, err
+	}
+	if session != nil {
+		session.fallback = "service_handshake_failed"
+	}
+	return session, true, nil
 }
 
 func (stdioLauncher) Launch(_ context.Context, path string) (*coreSession, error) {
@@ -83,6 +153,7 @@ func (stdioLauncher) Launch(_ context.Context, path string) (*coreSession, error
 		close:   stdin.Close,
 		process: &execCoreProcess{command: command},
 		path:    path,
+		source:  coreSourceStdio,
 	}, nil
 }
 

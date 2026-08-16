@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 	"unsafe"
@@ -36,7 +37,7 @@ func (windowsServiceLauncher) Launch(ctx context.Context, _ string) (*coreSessio
 		return nil, ErrCoreServiceUnavailable
 	}
 	if pid == 0 {
-		return nil, errors.New("HypoMux Core Service 已安装但未运行")
+		return nil, ErrCoreServiceNotRunning
 	}
 	connectCtx, cancel := context.WithTimeout(ctx, 1500*time.Millisecond)
 	defer cancel()
@@ -45,6 +46,15 @@ func (windowsServiceLauncher) Launch(ctx context.Context, _ string) (*coreSessio
 		return nil, err
 	}
 	process := &serviceCoreProcess{pid: pid, done: make(chan struct{})}
+	details := launchSessionDetails{ServicePID: pid}
+	var desktopSession uint32
+	if windows.ProcessIdToSessionId(uint32(os.Getpid()), &desktopSession) == nil {
+		details.DesktopSession = &desktopSession
+	}
+	consoleSession := windows.WTSGetActiveConsoleSessionId()
+	if consoleSession != ^uint32(0) {
+		details.ConsoleSession = &consoleSession
+	}
 	return &coreSession{
 		reader: connection,
 		writer: connection,
@@ -55,7 +65,46 @@ func (windowsServiceLauncher) Launch(ctx context.Context, _ string) (*coreSessio
 		},
 		process: process,
 		path:    CoreServicePipeName,
+		source:  coreSourceService,
+		details: details,
 	}, nil
+}
+
+func allowAutomaticCoreFallbackPath(path string) error {
+	desktopPath, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("读取 HypoMux 安装路径失败：%w", err)
+	}
+	expected := filepath.Join(filepath.Dir(desktopPath), "bin", "hypomux-engine.exe")
+	expectedInfo, err := os.Stat(expected)
+	if err != nil {
+		return fmt.Errorf("正式安装目录中的 Core 不可用：%w", err)
+	}
+	actualInfo, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("待启动 Core 不可用：%w", err)
+	}
+	if !expectedInfo.Mode().IsRegular() || !actualInfo.Mode().IsRegular() || !os.SameFile(expectedInfo, actualInfo) {
+		return errors.New("待启动 Core 不是当前 HypoMux 安装目录中的 bin\\hypomux-engine.exe")
+	}
+	return nil
+}
+
+func allowServicePostHandshakeFallback(session *coreSession, cause error) bool {
+	if errors.Is(cause, ErrCoreProtocolIncompatible) {
+		return true
+	}
+	if session == nil || session.process == nil {
+		return false
+	}
+	pid, installed, err := queryCoreService()
+	if err != nil {
+		return false
+	}
+	// A rejection from the same live service can be an intentional path/hash
+	// policy decision and must fail closed. Retry only after the service has
+	// actually disappeared, stopped, or restarted under a different PID.
+	return !installed || pid == 0 || pid != session.process.PID()
 }
 
 func queryCoreService() (pid int, installed bool, err error) {

@@ -754,10 +754,15 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 		hello, err = s.client.Ensure(ctx)
 	}
 	if err != nil {
+		s.recordStartStage("core_connect_failed", map[string]any{
+			"message": err.Error(), "launch": s.client.LastLaunchReport(),
+		})
 		return EngineSnapshot{}, err
 	}
 	s.recordStartStage("core_connected", map[string]any{
 		"version": hello.EngineVersion, "elevated": hello.Elevated,
+		"launcher": hello.Launcher, "fallback": hello.Fallback,
+		"launch": s.client.LastLaunchReport(),
 	})
 	if settings.Mode != mode {
 		settings.Mode = mode

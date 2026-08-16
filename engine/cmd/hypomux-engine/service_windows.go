@@ -393,20 +393,27 @@ func validateServicePipeClient(handle windows.Handle, policy coreServicePolicy) 
 	if clientPID == 0 {
 		return errors.New("reject Core Service client without process identity")
 	}
+	// Authenticate the exact installed desktop binary before evaluating session
+	// compatibility. Session state broadens console-only support to active RDP
+	// users, but never replaces the pinned path and digest security boundary.
+	if err := validateServiceClientExecutable(clientPID, policy); err != nil {
+		return err
+	}
 	var clientSession uint32
 	if err := windows.ProcessIdToSessionId(clientPID, &clientSession); err != nil {
 		return fmt.Errorf("read Core Service client session: %w", err)
 	}
-	activeSession := windows.WTSGetActiveConsoleSessionId()
-	if activeSession == ^uint32(0) || clientSession != activeSession {
+	state, err := queryServiceSessionState(clientSession)
+	if err != nil {
+		return err
+	}
+	if !serviceSessionIsActive(state) {
 		return fmt.Errorf(
-			"reject Core Service client outside active console session (PID %d, session %d)",
+			"reject Core Service client outside an active interactive session (PID %d, session %d, state %s)",
 			clientPID,
 			clientSession,
+			state,
 		)
-	}
-	if err := validateServiceClientExecutable(clientPID, policy); err != nil {
-		return err
 	}
 	return nil
 }
