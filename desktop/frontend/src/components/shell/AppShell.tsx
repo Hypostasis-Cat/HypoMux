@@ -1,4 +1,5 @@
 import type { PropsWithChildren } from "react";
+import { useCardGlowField } from "../material/useCardGlowField";
 import { CompactNavigation, type AppPage } from "./CompactNavigation";
 import { TitleBar } from "./TitleBar";
 
@@ -14,6 +15,8 @@ export function AppShell({
   pageDirection: "forward" | "backward";
   animatePage: boolean;
 }>) {
+  useCardGlowField();
+
   return (
     <div className="app-shell">
       <TitleBar />

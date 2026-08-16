@@ -496,15 +496,15 @@ export function RoutingPage() {
           <p>{t("routing_hint")}</p>
         </div>
         <div className="routing-save-state">
-          <span>{saving
+          <span key={saving ? "saving" : pendingSave ? "pending" : savedAt ? "saved" : "loading"} className="motion-inline-swap">{saving
             ? text("正在保存…", "Saving…")
             : pendingSave
               ? text("有未保存更改", "Unsaved changes")
             : savedAt
               ? text(`已保存 ${savedAt}`, `Saved ${savedAt}`)
               : text("读取当前配置", "Loading current configuration")}</span>
-          <Button appearance="primary" icon={saving ? <Spinner size="tiny" /> : <Save20Regular />} disabled={saving} onClick={() => void saveRules(true)}>
-            {text("立即保存", "Save now")}
+          <Button appearance={pendingSave ? "primary" : "secondary"} icon={saving ? <Spinner size="tiny" /> : <Save20Regular />} disabled={saving || !pendingSave} onClick={() => void saveRules(true)}>
+            {text("保存更改", "Save changes")}
           </Button>
         </div>
       </header>
@@ -571,11 +571,11 @@ export function RoutingPage() {
         </Toolbar>
       </GlassSurface>
 
-      <GlassSurface className="routing-grid-surface">
+      <GlassSurface className={`routing-grid-surface${loading || activeRules.length === 0 ? " is-empty" : ""}`}>
         {loading ? (
-          <div className="routing-empty"><Spinner label={text("正在读取真实规则配置", "Loading routing configuration")} /></div>
+          <div key="routing-loading" className="routing-empty motion-state-content"><Spinner label={text("正在读取真实规则配置", "Loading routing configuration")} /></div>
         ) : activeRules.length === 0 ? (
-          <div className="routing-empty">
+          <div key={`routing-empty-${activeType}-${filter ? "filtered" : "plain"}`} className="routing-empty motion-state-content">
             <strong>{filter
               ? text("没有匹配筛选条件的规则", "No rules match the filter")
               : text(`尚未添加${matchLabels[activeType]}`, `No ${matchLabels[activeType]} have been added`)}</strong>

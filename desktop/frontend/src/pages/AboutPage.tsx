@@ -126,7 +126,7 @@ export function AboutPage() {
       <AppToaster toasterId={toasterId} position="top-end" />
       <header className="page-heading">
         <div>
-          <span className="section-kicker">Open-source multi-link accelerator</span>
+          <span className="section-kicker">{text("开源多链路加速器", "Open-source multi-link accelerator")}</span>
           <h1>{text("关于 HypoMux", "About HypoMux")}</h1>
           <p>{t("about_intro")}</p>
         </div>
@@ -144,7 +144,7 @@ export function AboutPage() {
           </div>
           <p>{t("about_intro")}</p>
           <div className="about-actions">
-            <Button appearance="primary" icon={<Code20Regular />} onClick={() => desktopPlatform.openURL(productInfo.repository)}>
+            <Button appearance="secondary" icon={<Code20Regular />} onClick={() => desktopPlatform.openURL(productInfo.repository)}>
               GitHub
             </Button>
             <Button appearance="primary" icon={checking ? <Spinner size="tiny" /> : <ArrowSync20Regular />} disabled={checking} onClick={checkForUpdates}>

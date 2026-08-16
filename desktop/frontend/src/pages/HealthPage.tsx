@@ -420,11 +420,11 @@ export function HealthPage() {
         )}
       </GlassSurface>
 
-      <section className="health-results" aria-live="polite">
+      <section className={`health-results${results.length === 0 ? " is-empty" : ""}`} aria-live="polite">
         <div className="health-results-heading">
           <div>
             <strong>{text("链路体检报告", "Link diagnostic report")}</strong>
-            <span>{running
+            <span key={`${snapshot.state}-${snapshot.completed}-${results.length}`} className="motion-inline-swap">{running
               ? text(`正在检查 ${snapshot.completed + 1} / ${snapshot.total}`, `Checking ${snapshot.completed + 1} / ${snapshot.total}`)
               : text(`${results.length} 项结果`, `${results.length} results`)}</span>
           </div>
@@ -433,7 +433,7 @@ export function HealthPage() {
         </div>
         <div className="health-result-list">
           {running && results.length === 0 ? (
-            <GlassSurface className="health-empty-result" tone="secondary">
+            <GlassSurface key="health-running-empty" className="health-empty-result motion-state-content" tone="secondary">
               <Spinner size="medium" />
               <strong>{text("正在建立第一条绑定探测", "Starting the first bound probe")}</strong>
               <span>{text(
@@ -442,13 +442,21 @@ export function HealthPage() {
               )}</span>
             </GlassSurface>
           ) : results.length === 0 ? (
-            <GlassSurface className="health-empty-result" tone="secondary">
+            <GlassSurface key="health-idle-empty" className="health-empty-result motion-state-content" tone="secondary">
               <HeartPulse20Regular />
               <strong>{text("尚无体检结果", "No diagnostic results")}</strong>
               <span>{text(
                 "选择网卡后开始体检；结果会同步回首页的健康状态、延迟与丢包。",
                 "Select adapters and start diagnostics. Health, latency, and loss results are also shown on Home.",
               )}</span>
+              <Button
+                appearance="primary"
+                icon={<HeartPulse20Regular />}
+                disabled={loading || selectedCount === 0}
+                onClick={start}
+              >
+                {text("开始体检", "Start diagnostics")}
+              </Button>
             </GlassSurface>
           ) : results.map((result) => {
             const meta = statusMeta[result.status as keyof typeof statusMeta] ?? statusMeta.unavailable;

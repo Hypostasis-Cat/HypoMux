@@ -232,10 +232,46 @@ export function SettingsPage({ onOpenBlockedDomains }: { onOpenBlockedDomains: (
   const [migration, setMigration] = useState<ConfigMigrationStatus | null>(null);
   const [migrationDialog, setMigrationDialog] = useState<"migrate" | "rollback" | null>(null);
   const [migrationDialogOpen, setMigrationDialogOpen] = useState(false);
+  const [sectionIndexFloating, setSectionIndexFloating] = useState(false);
   const { settings: appearance, update: updateAppearance, persistenceError: appearancePersistenceError } = useAppearance();
   const { locale, setLocale, t } = useI18n();
   const text = (zh: string, en: string) => locale === "en" ? en : zh;
   const backgroundInput = useRef<HTMLInputElement>(null);
+  const settingsPageRef = useRef<HTMLElement>(null);
+  const sectionIndexSentinelRef = useRef<HTMLSpanElement>(null);
+  const sectionIndexShellRef = useRef<HTMLDivElement>(null);
+  const sectionIndexRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    const root = settingsPageRef.current;
+    const sentinel = sectionIndexSentinelRef.current;
+    const shell = sectionIndexShellRef.current;
+    const index = sectionIndexRef.current;
+    if (!root || !sentinel || !shell || !index) return;
+
+    const updateCenterShift = () => {
+      const shift = Math.max(0, (shell.clientWidth - index.offsetWidth) / 2);
+      index.style.setProperty("--hm-settings-index-center-shift", `${shift}px`);
+    };
+
+    updateCenterShift();
+    const resizeObserver = new ResizeObserver(updateCenterShift);
+    resizeObserver.observe(shell);
+    resizeObserver.observe(index);
+
+    const observer = new IntersectionObserver(([entry]) => {
+      setSectionIndexFloating(!entry.isIntersecting && root.scrollTop > 0);
+    }, {
+      root,
+      threshold: 0,
+      rootMargin: "-18px 0px 0px 0px",
+    });
+    observer.observe(sentinel);
+    return () => {
+      observer.disconnect();
+      resizeObserver.disconnect();
+    };
+  }, []);
   // Serialize settings persistence and track per-field ownership: concurrent
   // saves would otherwise let an earlier response overwrite a newer optimistic
   // value, and a failed operation's recovery must not overwrite a later
@@ -463,26 +499,43 @@ export function SettingsPage({ onOpenBlockedDomains }: { onOpenBlockedDomains: (
   };
 
   return (
-    <main className="settings-page" aria-busy={loading || saving}>
+    <main ref={settingsPageRef} className="settings-page" aria-busy={loading || saving}>
       <AppToaster toasterId={toasterId} position="top-end" />
       <header className="page-heading">
         <div>
-          <span className="section-kicker">HypoMux preferences</span>
+          <span className="section-kicker">{text("偏好设置", "HypoMux preferences")}</span>
           <h1>{t("settings_title")}</h1>
           <p>{text(
             "更改会写入当前用户配置；网络相关选项在引擎运行期间由独立 Core 应用。",
             "Changes are saved to the current user profile. Network options are applied by the independent Core while the engine runs.",
           )}</p>
         </div>
-        <span className="save-state" role="status" aria-live="polite">{loading
+        <span key={loading ? "loading" : saving ? "saving" : "synced"} className="save-state motion-inline-swap" role="status" aria-live="polite">{loading
           ? text("正在读取…", "Loading…")
           : saving
             ? text("正在保存…", "Saving…")
-            : text("配置已就绪", "Settings ready")}</span>
+            : text("配置已同步", "Settings synced")}</span>
       </header>
 
+      <span ref={sectionIndexSentinelRef} className="settings-section-index-sentinel" aria-hidden="true" />
+      <div ref={sectionIndexShellRef} className={`settings-section-index-shell${sectionIndexFloating ? " is-floating" : ""}`}>
+        <nav ref={sectionIndexRef} className="settings-section-index" aria-label={text("设置分区", "Settings sections")}>
+          {[
+            ["settings-personalization", t("settings_personalization")],
+            ["settings-global", t("settings_global")],
+            ["settings-network", t("settings_network_dns")],
+            ["settings-advanced", t("settings_advanced_network")],
+            ["settings-config", t("settings_config_group")],
+          ].map(([id, label]) => (
+            <button key={id} type="button" onClick={() => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" })}>
+              {label}
+            </button>
+          ))}
+        </nav>
+      </div>
+
       <div className="settings-layout">
-        <GlassSurface className="settings-section">
+        <GlassSurface className="settings-section" id="settings-personalization">
           <h2>{t("settings_personalization")}</h2>
           <SettingRow title={t("settings_theme")} description={t("settings_theme_hint")}>
             <SettingTabs
@@ -649,7 +702,7 @@ export function SettingsPage({ onOpenBlockedDomains }: { onOpenBlockedDomains: (
           </SettingRow>
         </GlassSurface>
 
-        <GlassSurface className="settings-section">
+        <GlassSurface className="settings-section" id="settings-global">
           <h2>{t("settings_global")}</h2>
           <SettingRow title={t("settings_language")} description={text("保存界面语言偏好", "Save the interface language preference")}>
             <SettingDropdown
@@ -691,7 +744,7 @@ export function SettingsPage({ onOpenBlockedDomains }: { onOpenBlockedDomains: (
           </SettingRow>
         </GlassSurface>
 
-        <GlassSurface className="settings-section">
+        <GlassSurface className="settings-section" id="settings-network">
           <h2>{t("settings_network_dns")}</h2>
           <SettingRow title={t("settings_dns_server")} description={t("settings_dns_fallback_hint")}>
             <SettingInput
@@ -739,7 +792,7 @@ export function SettingsPage({ onOpenBlockedDomains }: { onOpenBlockedDomains: (
           </div>
         </GlassSurface>
 
-        <GlassSurface className="settings-section">
+        <GlassSurface className="settings-section" id="settings-advanced">
           <h2>{t("settings_advanced_network")}</h2>
           <SettingRow
             title={t("settings_force_tun")}
@@ -765,7 +818,7 @@ export function SettingsPage({ onOpenBlockedDomains }: { onOpenBlockedDomains: (
           </SettingRow>
         </GlassSurface>
 
-        <GlassSurface className="settings-section">
+        <GlassSurface className="settings-section" id="settings-config">
           <h2>{t("settings_config_group")}</h2>
           <SettingRow title={t("settings_autostart")} description={t("settings_autostart_hint")}>
             <SettingSwitch checked={settings.autostart} disabled={saving} onChange={(checked) => setAutostart(checked)} />

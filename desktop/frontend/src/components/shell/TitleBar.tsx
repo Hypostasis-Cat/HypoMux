@@ -49,7 +49,7 @@ export function TitleBar() {
       <div className="titlebar-identity">
         <ProductMark />
         <strong>HypoMux</strong>
-        <span>{productInfo.version} · Desktop</span>
+        <span>v{productInfo.version} · Desktop</span>
       </div>
       <div className="titlebar-drag" />
       <div className="titlebar-actions">

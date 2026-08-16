@@ -8,6 +8,8 @@
   --hm-motion-ease-out: cubic-bezier(0, 0, 0.2, 1);
   --hm-motion-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
   --hm-motion-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --hm-motion-rise-distance: 6px;
+  --hm-motion-row-distance: 7px;
 }
 
 [data-motion="reduced"] {
@@ -16,6 +18,8 @@
   --hm-motion-normal: 100ms;
   --hm-motion-page: 120ms;
   --hm-motion-background: 150ms;
+  --hm-motion-rise-distance: 2px;
+  --hm-motion-row-distance: 2px;
 }
 
 [data-motion="off"] *,
@@ -23,5 +27,7 @@
 [data-motion="off"] *::after {
   scroll-behavior: auto !important;
   transition-duration: 0ms !important;
+  transition-delay: 0ms !important;
   animation-duration: 0ms !important;
+  animation-delay: 0ms !important;
 }

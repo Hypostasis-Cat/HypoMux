@@ -61,14 +61,14 @@ export function EngineHero({
         ? text("正在停止", "Stopping")
         : phase === "failed"
           ? text("启动失败", "Failed")
-          : text("核心待命", "Core ready");
+          : text("未运行", "Not running");
   return (
     <GlassSurface className={`engine-hero phase-${phase}`} aria-label={t("home_engine_control")}>
       <div className="engine-copy">
         <div className="engine-heading">
           <div className="engine-state">
             <span className="section-kicker">{t("home_engine_title")}</span>
-            <Badge className="engine-state-badge" appearance="outline">
+            <Badge key={phase} className="engine-state-badge motion-status-swap" appearance="outline">
               <i className="state-dot" />
               {phaseLabel}
             </Badge>
@@ -87,9 +87,9 @@ export function EngineHero({
           disabled={transitioning || phase === "running" || phase === "degraded"}
         >
           <Tab value="proxy" icon={<PlugConnected20Regular />}>{t("mode_proxy")}</Tab>
-          <Tab value="tun" icon={<Navigation20Regular />}>{t("mode_tun")} TUN</Tab>
+          <Tab value="tun" icon={<Navigation20Regular />}>{text("TUN 模式", "TUN mode")}</Tab>
         </TabList>
-        <span className="engine-mode-note">
+        <span key={mode} className="engine-mode-note motion-inline-swap">
           {mode === "proxy"
             ? text(
               `接管遵循 Windows 系统代理的应用流量 · HTTP ${httpPort} · SOCKS5 ${socksPort}`,
@@ -108,7 +108,7 @@ export function EngineHero({
             disabled={transitioning || (!active && selectedCount === 0)}
             onClick={onToggle}
           >
-            {actionLabel}
+            <span key={phase} className="engine-action-label motion-inline-swap">{actionLabel}</span>
           </Button>
           <Switch
             className="weighted-switch"
@@ -119,7 +119,7 @@ export function EngineHero({
           />
         </div>
       </div>
-      <ThroughputDisplay download={download} upload={upload} connections={connections} history={history} />
+      <ThroughputDisplay download={download} upload={upload} connections={connections} history={history} active={active} />
     </GlassSurface>
   );
 }

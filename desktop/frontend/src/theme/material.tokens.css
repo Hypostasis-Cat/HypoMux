@@ -15,8 +15,14 @@
   --hm-gradient-background: linear-gradient(135deg, #cbd8e2 0%, #e9e3da 52%, #c7d9e4 100%);
   --hm-solid-background: #dce4ea;
   --hm-card-glow-border: color-mix(in srgb, var(--hm-accent) 62%, transparent);
-  --hm-card-glow-near: color-mix(in srgb, var(--hm-accent) 34%, transparent);
-  --hm-card-glow-far: color-mix(in srgb, var(--hm-accent) 18%, transparent);
+  --hm-card-glow-near: color-mix(in srgb, var(--hm-accent) 46%, transparent);
+  --hm-card-glow-far: color-mix(in srgb, var(--hm-accent) 26%, transparent);
+  --hm-card-glow-spot: color-mix(in srgb, var(--hm-accent) 78%, white);
+  --hm-card-glow-rest: color-mix(in srgb, var(--hm-accent) 6%, transparent);
+  --hm-card-glow-edge-opacity: 0.9;
+  --hm-card-glow-halo-opacity: 0.62;
+  --hm-card-glow-radius: 220px;
+  --hm-card-glow-halo-radius: 270px;
 }
 
 [data-appearance="light"] {
@@ -33,6 +39,9 @@
   --hm-inner-highlight: rgba(255, 255, 255, calc(0.76 * var(--hm-border-brightness)));
   --hm-outer-border: rgba(0, 0, 0, 0.075);
   --hm-shadow-colour: 0, 0, 0;
+  --hm-card-glow-spot: color-mix(in srgb, var(--hm-accent) 74%, white);
+  --hm-card-glow-edge-opacity: 0.82;
+  --hm-card-glow-halo-opacity: 0.5;
 }
 
 [data-appearance="light"][data-background-source="local"] {
@@ -43,6 +52,8 @@
   --hm-inner-highlight: rgba(255, 255, 255, calc(0.72 * var(--hm-border-brightness)));
   --hm-outer-border: rgba(32, 48, 59, 0.13);
   --hm-shadow-colour: 25, 40, 51;
+  --hm-card-glow-edge-opacity: 0.94;
+  --hm-card-glow-halo-opacity: 0.66;
 }
 
 [data-appearance="dark"] {
@@ -59,6 +70,9 @@
   --hm-inner-highlight: rgba(255, 255, 255, calc(0.16 * var(--hm-border-brightness)));
   --hm-outer-border: rgba(255, 255, 255, 0.083);
   --hm-shadow-colour: 0, 0, 0;
+  --hm-card-glow-spot: color-mix(in srgb, var(--hm-accent) 80%, white);
+  --hm-card-glow-edge-opacity: 1;
+  --hm-card-glow-halo-opacity: 0.74;
 }
 
 .glass-surface {

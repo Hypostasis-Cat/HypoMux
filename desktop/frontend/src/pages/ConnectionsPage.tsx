@@ -170,7 +170,7 @@ export function ConnectionsPage() {
             onChange={(_, data) => setLive(data.checked)}
           />
           <Button
-            appearance="primary"
+            appearance="secondary"
             icon={refreshing ? <Spinner size="tiny" /> : <ArrowSync20Regular />}
             disabled={refreshing}
             onClick={() => void load(true)}
@@ -182,7 +182,7 @@ export function ConnectionsPage() {
 
       <GlassSurface className="connection-summary" tone="secondary">
         <span>
-          <Badge appearance="tint" color={engineRunning ? "success" : "informative"}>
+          <Badge key={engineRunning ? "running" : "stopped"} className="motion-status-swap" appearance="tint" color={engineRunning ? "success" : "informative"}>
             {engineRunning ? text("聚合运行中", "Engine running") : text("聚合未运行", "Engine stopped")}
           </Badge>
         </span>
@@ -194,7 +194,7 @@ export function ConnectionsPage() {
           : text("等待 Core 遥测", "Waiting for Core telemetry")}</small>
       </GlassSurface>
 
-      <GlassSurface className="connections-surface">
+      <GlassSurface className={`connections-surface${loading || filtered.length === 0 ? " is-empty" : ""}`}>
         <div className="connection-table-head" role="row">
           <span>{text("进程", "Process")}</span>
           <span>{text("目标", "Destination")}</span>
@@ -204,15 +204,15 @@ export function ConnectionsPage() {
         </div>
         <div className="connection-list">
           {loading ? (
-            <div className="connections-empty"><Spinner label={text("正在读取实时连接", "Loading live connections")} /></div>
+            <div key="connections-loading" className="connections-empty motion-state-content"><Spinner label={text("正在读取实时连接", "Loading live connections")} /></div>
           ) : !engineRunning ? (
-            <div className="connections-empty">
+            <div key="connections-stopped" className="connections-empty motion-state-content">
               <AppsListDetail24Regular />
               <strong>{text("聚合引擎尚未运行", "The aggregation engine is not running")}</strong>
               <span>{text("启动聚合后，这里会实时显示本次会话正在处理的连接。", "Start aggregation to see the connections handled in this session.")}</span>
             </div>
           ) : filtered.length === 0 ? (
-            <div className="connections-empty">
+            <div key={query ? "connections-no-match" : "connections-idle"} className="connections-empty motion-state-content">
               <Globe20Regular />
               <strong>{query ? text("没有匹配的连接", "No matching connections") : text("当前没有活动连接", "No active connections")}</strong>
               <span>{text("短连接可能只会短暂出现；实时刷新会保留最新状态。", "Short-lived flows may appear briefly; live refresh keeps the view current.")}</span>
