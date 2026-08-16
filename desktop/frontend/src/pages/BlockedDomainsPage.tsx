@@ -19,11 +19,12 @@ import {
   Delete20Regular,
   Dismiss20Regular,
 } from "@fluentui/react-icons";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { GlassSurface } from "../components/material/GlassSurface";
 import { AppToaster } from "../components/AppToaster";
 import { appServices, type BlockedDomainSnapshot } from "../platform/services";
 import { useI18n } from "../i18n/i18n";
+import { startSerialPoll } from "../platform/serialPoll";
 
 const emptySnapshot: BlockedDomainSnapshot = { enabled: false, use_expiry: true, entries: [] };
 
@@ -38,24 +39,33 @@ export function BlockedDomainsPage({ onBack }: { onBack: () => void }) {
   const [snapshot, setSnapshot] = useState(emptySnapshot);
   const [loading, setLoading] = useState(true);
   const [clearOpen, setClearOpen] = useState(false);
+  const requestSequence = useRef(0);
+  const mounted = useRef(true);
   const toasterId = useId("blocked-domains-toaster");
   const { dispatchToast } = useToastController(toasterId);
 
   const refresh = useCallback(async () => {
+    const sequence = ++requestSequence.current;
     setLoading(true);
     try {
-      setSnapshot(await appServices.blockedDomains.list());
+      const next = await appServices.blockedDomains.list();
+      if (mounted.current && sequence === requestSequence.current) setSnapshot(next);
     } catch (error) {
       dispatchToast(<Toast><ToastTitle>{text("读取域名记录失败", "Failed to load domain records")}: {String(error)}</ToastTitle></Toast>, { intent: "error" });
     } finally {
-      setLoading(false);
+      if (mounted.current && sequence === requestSequence.current) setLoading(false);
     }
   }, [dispatchToast, locale]);
 
   useEffect(() => {
-    refresh();
-    const timer = window.setInterval(refresh, 3000);
-    return () => window.clearInterval(timer);
+    mounted.current = true;
+    void refresh();
+    const stop = startSerialPoll(refresh, 3000);
+    return () => {
+      mounted.current = false;
+      requestSequence.current += 1;
+      stop();
+    };
   }, [refresh]);
 
   const remove = async (adapter: string, domain: string) => {

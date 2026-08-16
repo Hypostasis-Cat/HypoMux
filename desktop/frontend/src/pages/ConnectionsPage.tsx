@@ -28,6 +28,7 @@ import {
   type ConnectionView,
   withServiceTimeout,
 } from "../platform/services";
+import { startSerialPoll } from "../platform/serialPoll";
 
 const emptySnapshot: ConnectionListSnapshot = {
   phase: "stopped",
@@ -99,8 +100,7 @@ export function ConnectionsPage() {
 
   useEffect(() => {
     if (!live) return;
-    const timer = window.setInterval(() => void load(), 1500);
-    return () => window.clearInterval(timer);
+    return startSerialPoll(() => load(), 1500);
   }, [live, load]);
 
   useEffect(() => {

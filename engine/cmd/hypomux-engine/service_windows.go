@@ -21,12 +21,13 @@ import (
 )
 
 const (
-	coreServiceName     = "HypoMuxCore"
-	coreServicePipeName = `\\.\pipe\HypoMux-Core-Service`
-	servicePipeBuffer   = 64 * 1024
-	serviceDisplayName  = "HypoMux Core Service"
-	serviceDescription  = "Privileged TUN, WFP, route, DNS and network recovery host for HypoMux."
-	coreServicePipeSDDL = "D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;IU)"
+	coreServiceName            = "HypoMuxCore"
+	coreServicePipeName        = `\\.\pipe\HypoMux-Core-Service`
+	servicePipeBuffer          = 64 * 1024
+	serviceDisplayName         = "HypoMux Core Service"
+	serviceDescription         = "Privileged TUN, WFP, route, DNS and network recovery host for HypoMux."
+	coreServicePipeSDDL        = "D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;IU)"
+	coreServiceShutdownTimeout = 15 * time.Second
 )
 
 var errServiceClientRejected = errors.New("Core Service client rejected")
@@ -167,8 +168,10 @@ func stopWindowsService(service *mgr.Service, timeout time.Duration) error {
 }
 
 type coreWindowsService struct {
-	metadata server.Metadata
-	stderr   io.Writer
+	metadata        server.Metadata
+	stderr          io.Writer
+	serve           func(context.Context, server.Metadata) error
+	shutdownTimeout time.Duration
 }
 
 func runWindowsService(stderr io.Writer, metadata server.Metadata) int {
@@ -181,7 +184,13 @@ func runWindowsService(stderr io.Writer, metadata server.Metadata) int {
 		fmt.Fprintln(stderr, "service mode must be started by Windows Service Control Manager")
 		return 2
 	}
-	if err := svc.Run(coreServiceName, &coreWindowsService{metadata: metadata, stderr: stderr}); err != nil {
+	host := &coreWindowsService{
+		metadata:        metadata,
+		stderr:          stderr,
+		serve:           serveCoreServicePipe,
+		shutdownTimeout: coreServiceShutdownTimeout,
+	}
+	if err := svc.Run(coreServiceName, host); err != nil {
 		fmt.Fprintf(stderr, "run %s: %v\n", coreServiceName, err)
 		return 1
 	}
@@ -196,9 +205,14 @@ func (service *coreWindowsService) Execute(
 	const accepted = svc.AcceptStop | svc.AcceptShutdown
 	status <- svc.Status{State: svc.StartPending}
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	done := make(chan error, 1)
+	serve := service.serve
+	if serve == nil {
+		serve = serveCoreServicePipe
+	}
 	go func() {
-		done <- serveCoreServicePipe(ctx, service.metadata)
+		done <- serve(ctx, service.metadata)
 	}()
 	status <- svc.Status{State: svc.Running, Accepts: accepted}
 
@@ -206,26 +220,13 @@ func (service *coreWindowsService) Execute(
 		select {
 		case request, ok := <-requests:
 			if !ok {
-				status <- svc.Status{State: svc.StopPending}
-				cancel()
-				err := <-done
-				if err != nil && !errors.Is(err, context.Canceled) {
-					return false, 1
-				}
-				return false, 0
+				return service.stop(cancel, done, status)
 			}
 			switch request.Cmd {
 			case svc.Interrogate:
 				status <- request.CurrentStatus
 			case svc.Stop, svc.Shutdown:
-				status <- svc.Status{State: svc.StopPending}
-				cancel()
-				err := <-done
-				if err != nil && !errors.Is(err, context.Canceled) {
-					fmt.Fprintf(service.stderr, "stop service pipe: %v\n", err)
-					return false, 1
-				}
-				return false, 0
+				return service.stop(cancel, done, status)
 			}
 		case err := <-done:
 			cancel()
@@ -235,6 +236,38 @@ func (service *coreWindowsService) Execute(
 			}
 			return false, 0
 		}
+	}
+}
+
+func (service *coreWindowsService) stop(
+	cancel context.CancelFunc,
+	done <-chan error,
+	status chan<- svc.Status,
+) (bool, uint32) {
+	timeout := service.shutdownTimeout
+	if timeout <= 0 {
+		timeout = coreServiceShutdownTimeout
+	}
+	status <- svc.Status{
+		State:    svc.StopPending,
+		WaitHint: uint32(timeout / time.Millisecond),
+	}
+	cancel()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case err := <-done:
+		if err != nil && !errors.Is(err, context.Canceled) {
+			fmt.Fprintf(service.stderr, "stop service pipe: %v\n", err)
+			return false, 1
+		}
+		return false, 0
+	case <-timer.C:
+		// Execute returning lets the service process exit even if a Windows pipe
+		// operation or a cleanup hook failed to observe cancellation. Without this
+		// guard SCM can remain in STOP_PENDING forever and block upgrades/removal.
+		fmt.Fprintf(service.stderr, "Core Service shutdown exceeded %s; exiting service host\n", timeout)
+		return false, 0
 	}
 }
 
@@ -265,9 +298,10 @@ func serveCoreServicePipe(ctx context.Context, metadata server.Metadata) error {
 		case runErr = <-sessionDone:
 			_ = connection.Close()
 		case <-ctx.Done():
-			// Closing the pipe interrupts a client that is idle in Read so the
-			// SCM stop deadline is not held hostage by an attached UI.
-			_ = connection.Close()
+			// Cancel and disconnect the server handle before Close. os.File.Close
+			// alone is not guaranteed to interrupt an overlapped named-pipe read on
+			// every supported Windows build.
+			interruptServicePipeConnection(connection)
 			runErr = <-sessionDone
 		}
 		if ctx.Err() != nil {
@@ -279,6 +313,16 @@ func serveCoreServicePipe(ctx context.Context, metadata server.Metadata) error {
 			fmt.Fprintf(os.Stderr, "Core Service client session ended: %v\n", runErr)
 		}
 	}
+}
+
+func interruptServicePipeConnection(connection *os.File) {
+	if connection == nil {
+		return
+	}
+	handle := windows.Handle(connection.Fd())
+	_ = windows.CancelIoEx(handle, nil)
+	_ = windows.DisconnectNamedPipe(handle)
+	_ = connection.Close()
 }
 
 func acceptServicePipe(ctx context.Context, policy coreServicePolicy) (*os.File, error) {

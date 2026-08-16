@@ -1,11 +1,63 @@
 package services
 
 import (
+	"errors"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
 )
+
+func TestInstallAndQuitUsesLifecycleCallbackAfterLauncherStarts(t *testing.T) {
+	quitCalled := false
+	service := NewUpdaterService(func() { quitCalled = true })
+	launchCalled := false
+	service.launchInstaller = func(path string, processID int) error {
+		launchCalled = true
+		if path != "installer.exe" || processID <= 0 {
+			t.Fatalf("unexpected launcher arguments: path=%q pid=%d", path, processID)
+		}
+		return nil
+	}
+
+	if err := service.InstallAndQuit("installer.exe"); err != nil {
+		t.Fatal(err)
+	}
+	if !launchCalled || !quitCalled {
+		t.Fatalf("launch=%t quit=%t", launchCalled, quitCalled)
+	}
+	if progress := service.Progress(); progress.State != "installing" {
+		t.Fatalf("progress = %#v", progress)
+	}
+}
+
+func TestInstallAndQuitDoesNotQuitWhenLauncherFails(t *testing.T) {
+	quitCalled := false
+	service := NewUpdaterService(func() { quitCalled = true })
+	service.launchInstaller = func(string, int) error { return errors.New("launcher failed") }
+
+	if err := service.InstallAndQuit("installer.exe"); err == nil {
+		t.Fatal("launcher failure was ignored")
+	}
+	if quitCalled {
+		t.Fatal("application quit after launcher failure")
+	}
+	if progress := service.Progress(); progress.State != "failed" {
+		t.Fatalf("progress = %#v", progress)
+	}
+}
+
+func TestInstallAndQuitRequiresLifecycleCallback(t *testing.T) {
+	service := NewUpdaterService()
+	service.launchInstaller = func(string, int) error {
+		t.Fatal("launcher should not run without lifecycle callback")
+		return nil
+	}
+
+	if err := service.InstallAndQuit("installer.exe"); err == nil {
+		t.Fatal("missing lifecycle callback was accepted")
+	}
+}
 
 func TestUpdaterVersionComparison(t *testing.T) {
 	cases := []struct {

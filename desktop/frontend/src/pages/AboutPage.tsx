@@ -28,6 +28,7 @@ import { appServices, type UpdateCheckResult } from "../platform/services";
 import { productInfo } from "../product";
 import { useState } from "react";
 import { useI18n } from "../i18n/i18n";
+import { startSerialPoll } from "../platform/serialPoll";
 
 function ReleaseNotes({ notes, emptyText }: { notes?: string; emptyText: string }) {
   const value = notes?.trim() || emptyText;
@@ -101,24 +102,22 @@ export function AboutPage() {
     if (!update) return;
     setDownloading(true);
     setDownloadPercent(0);
-    const progressTimer = window.setInterval(() => {
-      void appServices.updater.progress().then((progress) => {
+    const stopProgressPoll = startSerialPoll(() =>
+      appServices.updater.progress().then((progress) => {
         if (progress.total > 0) {
           setDownloadPercent(Math.min(99, Math.floor(progress.downloaded * 100 / progress.total)));
         }
-      }).catch(() => undefined);
-    }, 250);
+      }), 250, { immediate: true });
     try {
       const path = await appServices.updater.download(update.release);
       setDownloadPercent(100);
-      await appServices.updater.launchInstaller(path);
+      await appServices.updater.installAndQuit(path);
       notify(text("下载完成", "Download complete"), t("about_update_installing"), "success");
-      window.setTimeout(() => desktopPlatform.quit(), 250);
     } catch (error) {
       notify(text("下载安装包失败", "Installer download failed"), String(error), "error");
       setDownloading(false);
     } finally {
-      window.clearInterval(progressTimer);
+      stopProgressPoll();
     }
   };
 

@@ -10,21 +10,26 @@ func TestRealProxyStartStopAndNetworkRestore(t *testing.T) {
 	if os.Getenv("HYPOMUX_RUN_NETWORK_TEST") != "1" {
 		t.Skip("set HYPOMUX_RUN_NETWORK_TEST=1 for the explicit Windows network lifecycle check")
 	}
-	enginePath := filepath.Clean(filepath.Join("..", "..", "..", "..", "hypomux-engine.exe"))
+	enginePath := os.Getenv("HYPOMUX_NETWORK_TEST_ENGINE")
+	if enginePath == "" {
+		enginePath = filepath.Clean(filepath.Join("..", "..", "..", "..", "hypomux-engine.exe"))
+	}
+	enginePath, err := filepath.Abs(enginePath)
+	if err != nil {
+		t.Fatalf("resolve real Core path: %v", err)
+	}
 	if _, err := os.Stat(enginePath); err != nil {
 		t.Skip("real hypomux-engine.exe is not available")
 	}
 	t.Setenv("HYPOMUX_ENGINE_PATH", enginePath)
 	t.Setenv("HYPOMUX_DATA_DIR", t.TempDir())
 	settings := NewSettingsService()
-	settings.mu.Lock()
-	settings.settings.SOCKSPort = 18080
-	settings.settings.HTTPPort = 18081
-	if err := settings.saveLocked(); err != nil {
-		settings.mu.Unlock()
+	nextSettings := settings.Get()
+	nextSettings.SOCKSPort = 18080
+	nextSettings.HTTPPort = 18081
+	if _, err := settings.Update(nextSettings); err != nil {
 		t.Fatal(err)
 	}
-	settings.mu.Unlock()
 
 	adapters := NewAdapterService(settings)
 	available, err := adapters.List()

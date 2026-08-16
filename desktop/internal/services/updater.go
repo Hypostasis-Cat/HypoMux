@@ -50,16 +50,23 @@ type UpdateCheckResult struct {
 }
 
 type UpdaterService struct {
-	client   *http.Client
-	mu       sync.RWMutex
-	progress UpdateProgress
+	client          *http.Client
+	launchInstaller func(string, int) error
+	quit            func()
+	mu              sync.RWMutex
+	progress        UpdateProgress
 }
 
-func NewUpdaterService() *UpdaterService {
-	return &UpdaterService{
-		client:   &http.Client{},
-		progress: UpdateProgress{State: "idle"},
+func NewUpdaterService(quit ...func()) *UpdaterService {
+	service := &UpdaterService{
+		client:          &http.Client{},
+		launchInstaller: launchInstallerAfterExit,
+		progress:        UpdateProgress{State: "idle"},
 	}
+	if len(quit) > 0 {
+		service.quit = quit[0]
+	}
+	return service
 }
 
 type UpdateProgress struct {
@@ -339,12 +346,21 @@ func (s *UpdaterService) Download(release ReleaseInfo) (string, error) {
 	return target, nil
 }
 
-func (s *UpdaterService) LaunchInstaller(installerPath string) error {
-	if err := launchInstallerAfterExit(installerPath, os.Getpid()); err != nil {
+// InstallAndQuit launches the verified update helper and then leaves the
+// application through its normal lifecycle path. The lifecycle callback is
+// responsible for stopping the engine and restoring system networking before
+// the process exits. Keeping both actions behind one backend call prevents the
+// web layer from bypassing cleanup with a raw application quit.
+func (s *UpdaterService) InstallAndQuit(installerPath string) error {
+	if s.quit == nil {
+		return errors.New("应用退出清理尚未初始化")
+	}
+	if err := s.launchInstaller(installerPath, os.Getpid()); err != nil {
 		s.setProgress(UpdateProgress{State: "failed", Message: err.Error()})
 		return err
 	}
 	s.setProgress(UpdateProgress{State: "installing"})
+	s.quit()
 	return nil
 }
 

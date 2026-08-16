@@ -67,10 +67,13 @@ func DefaultSettings() AppSettings {
 }
 
 type SettingsService struct {
-	mu        sync.RWMutex
-	path      string
-	settings  AppSettings
-	migration ConfigMigrationStatus
+	mu               sync.RWMutex
+	path             string
+	settings         AppSettings
+	migration        ConfigMigrationStatus
+	loadErr          error
+	setAutostart     func(bool) error
+	autostartEnabled func() (bool, error)
 }
 
 type ConfigMigrationStatus struct {
@@ -83,11 +86,26 @@ type ConfigMigrationStatus struct {
 
 func NewSettingsService() *SettingsService {
 	directory := settingsDirectory()
-	service := &SettingsService{path: filepath.Join(directory, "settings.json")}
+	service := &SettingsService{
+		path:             filepath.Join(directory, "settings.json"),
+		setAutostart:     desktopplatform.SetAutostart,
+		autostartEnabled: desktopplatform.AutostartEnabled,
+	}
 	service.settings = DefaultSettings()
-	_ = service.reload()
+	if err := service.reload(); err != nil {
+		service.loadErr = err
+	}
 	service.inspectLegacyConfig()
 	return service
+}
+
+// StartupError reports a settings load failure without replacing the unreadable
+// file with defaults. The desktop entry point treats this as fatal so the user
+// can repair or back up the original configuration safely.
+func (s *SettingsService) StartupError() error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.loadErr
 }
 
 func settingsDirectory() string {
@@ -110,7 +128,7 @@ func (s *SettingsService) Get() AppSettings {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	result := cloneSettings(s.settings)
-	if enabled, err := desktopplatform.AutostartEnabled(); err == nil {
+	if enabled, err := s.autostartEnabled(); err == nil {
 		result.Autostart = enabled
 		if !enabled {
 			result.AutoStartEngine = false
@@ -151,8 +169,7 @@ func (s *SettingsService) MigrateLegacy() (AppSettings, error) {
 		}
 		s.migration.BackupPath = backup
 	}
-	s.settings = migrated
-	if err := s.saveLocked(); err != nil {
+	if err := s.commitLocked(migrated); err != nil {
 		return AppSettings{}, err
 	}
 	s.migration.LegacyFound = true
@@ -168,23 +185,22 @@ func (s *SettingsService) RollbackLegacyMigration() (AppSettings, error) {
 	if !s.migration.Applied {
 		return AppSettings{}, errors.New("当前没有可回滚的旧配置迁移")
 	}
+	var restored AppSettings
 	if s.migration.BackupPath != "" {
 		data, err := os.ReadFile(s.migration.BackupPath)
 		if err != nil {
 			return AppSettings{}, fmt.Errorf("读取迁移前备份失败：%w", err)
 		}
-		var restored AppSettings
 		if err := json.Unmarshal(data, &restored); err != nil {
 			return AppSettings{}, fmt.Errorf("迁移前备份格式无效：%w", err)
 		}
 		if restored.DNSEgressMode == "" {
 			restored.DNSEgressMode = DNSEgressAuto
 		}
-		s.settings = restored
 	} else {
-		s.settings = DefaultSettings()
+		restored = DefaultSettings()
 	}
-	if err := s.saveLocked(); err != nil {
+	if err := s.commitLocked(restored); err != nil {
 		return AppSettings{}, err
 	}
 	s.migration.Applied = false
@@ -222,32 +238,41 @@ func (s *SettingsService) Update(next AppSettings) (AppSettings, error) {
 	if next.RoutingRules == nil {
 		next.RoutingRules = []RoutingRule{}
 	}
-	s.settings = next
-	if err := s.saveLocked(); err != nil {
+	if err := s.commitLocked(next); err != nil {
 		return AppSettings{}, err
 	}
 	return cloneSettings(s.settings), nil
 }
 
 func (s *SettingsService) SetAutostart(enabled bool) (AppSettings, error) {
-	if err := desktopplatform.SetAutostart(enabled); err != nil {
-		return AppSettings{}, err
-	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.settings.Autostart = enabled
-	if !enabled {
-		s.settings.AutoStartEngine = false
+	previousEnabled, err := s.autostartEnabled()
+	if err != nil {
+		return AppSettings{}, err
 	}
-	if err := s.saveLocked(); err != nil {
+	if err := s.setAutostart(enabled); err != nil {
+		return AppSettings{}, err
+	}
+	next := cloneSettings(s.settings)
+	next.Autostart = enabled
+	if !enabled {
+		next.AutoStartEngine = false
+	}
+	if err := s.commitLocked(next); err != nil {
+		if rollbackErr := s.setAutostart(previousEnabled); rollbackErr != nil {
+			return AppSettings{}, fmt.Errorf("%w；恢复开机自启状态失败：%v", err, rollbackErr)
+		}
 		return AppSettings{}, err
 	}
 	return cloneSettings(s.settings), nil
 }
 
 func (s *SettingsService) SetAutoStartEngine(enabled bool) (AppSettings, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if enabled {
-		autostartEnabled, err := desktopplatform.AutostartEnabled()
+		autostartEnabled, err := s.autostartEnabled()
 		if err != nil {
 			return AppSettings{}, err
 		}
@@ -255,13 +280,12 @@ func (s *SettingsService) SetAutoStartEngine(enabled bool) (AppSettings, error) 
 			return AppSettings{}, errors.New("请先开启开机自动启动")
 		}
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	next := cloneSettings(s.settings)
 	if enabled {
-		s.settings.Autostart = true
+		next.Autostart = true
 	}
-	s.settings.AutoStartEngine = enabled
-	if err := s.saveLocked(); err != nil {
+	next.AutoStartEngine = enabled
+	if err := s.commitLocked(next); err != nil {
 		return AppSettings{}, err
 	}
 	return cloneSettings(s.settings), nil
@@ -285,11 +309,12 @@ func (s *SettingsService) UpdateHome(
 		}
 		cleanWeights[id] = weight
 	}
-	s.settings.Mode = mode
-	s.settings.Weighted = weighted
-	s.settings.SelectedAdapterIDs = uniqueNonEmpty(selectedIDs)
-	s.settings.AdapterWeights = cleanWeights
-	if err := s.saveLocked(); err != nil {
+	next := cloneSettings(s.settings)
+	next.Mode = mode
+	next.Weighted = weighted
+	next.SelectedAdapterIDs = uniqueNonEmpty(selectedIDs)
+	next.AdapterWeights = cleanWeights
+	if err := s.commitLocked(next); err != nil {
 		return AppSettings{}, err
 	}
 	return cloneSettings(s.settings), nil
@@ -298,8 +323,9 @@ func (s *SettingsService) UpdateHome(
 func (s *SettingsService) saveRoutingRules(rules []RoutingRule) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.settings.RoutingRules = append([]RoutingRule(nil), rules...)
-	return s.saveLocked()
+	next := cloneSettings(s.settings)
+	next.RoutingRules = append([]RoutingRule(nil), rules...)
+	return s.commitLocked(next)
 }
 
 func (s *SettingsService) reload() error {
@@ -319,12 +345,14 @@ func (s *SettingsService) reload() error {
 		if migrationErr != nil {
 			return migrationErr
 		}
-		s.settings = migrated
+		if err := s.commitLocked(migrated); err != nil {
+			return err
+		}
 		s.migration = ConfigMigrationStatus{
 			LegacyFound: true, Applied: true, LegacyPath: legacyPath,
 			Message: "首次启动已迁移旧版网络配置与分流规则；界面偏好按设计恢复默认，原文件保持不变",
 		}
-		return s.saveLocked()
+		return nil
 	}
 	if err != nil {
 		return fmt.Errorf("读取设置失败：%w", err)
@@ -459,22 +487,24 @@ func (s *SettingsService) rememberedWFPCompatibilityFailure() (bool, string) {
 func (s *SettingsService) RememberWFPCompatibilityFailure(detail string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.settings.WFPCompatibility = WFPCompatibilityState{
+	next := cloneSettings(s.settings)
+	next.WFPCompatibility = WFPCompatibilityState{
 		Status:      "failed",
 		Fingerprint: currentWFPFingerprint(),
 		Detail:      limitSettingText(detail, 1024),
 	}
-	return s.saveLocked()
+	return s.commitLocked(next)
 }
 
 func (s *SettingsService) ClearWFPCompatibilityFailure() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.settings.WFPCompatibility = WFPCompatibilityState{
+	next := cloneSettings(s.settings)
+	next.WFPCompatibility = WFPCompatibilityState{
 		Status:      "healthy",
 		Fingerprint: currentWFPFingerprint(),
 	}
-	return s.saveLocked()
+	return s.commitLocked(next)
 }
 
 func validateSettings(value AppSettings) error {
@@ -532,22 +562,53 @@ func limitSettingText(value string, limit int) string {
 	return value[:limit]
 }
 
-func (s *SettingsService) saveLocked() error {
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
+func (s *SettingsService) commitLocked(next AppSettings) error {
+	if s.loadErr != nil {
+		return fmt.Errorf("设置文件尚未成功加载，拒绝覆盖原文件：%w", s.loadErr)
+	}
+	next = cloneSettings(next)
+	if err := writeSettingsFile(s.path, next); err != nil {
+		return err
+	}
+	s.settings = next
+	return nil
+}
+
+func writeSettingsFile(path string, settings AppSettings) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("创建设置目录失败：%w", err)
 	}
-	data, err := json.MarshalIndent(s.settings, "", "  ")
+	data, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
 		return fmt.Errorf("序列化设置失败：%w", err)
 	}
-	temporary := s.path + ".tmp"
-	if err := os.WriteFile(temporary, data, 0o600); err != nil {
+	temporary := path + ".tmp"
+	file, err := os.OpenFile(temporary, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	if err != nil {
 		return fmt.Errorf("写入设置失败：%w", err)
 	}
-	if err := os.Rename(temporary, s.path); err != nil {
+	removeTemporary := true
+	defer func() {
+		if removeTemporary {
+			_ = os.Remove(temporary)
+		}
+	}()
+	if _, err := file.Write(data); err != nil {
+		_ = file.Close()
+		return fmt.Errorf("写入设置失败：%w", err)
+	}
+	if err := file.Sync(); err != nil {
+		_ = file.Close()
+		return fmt.Errorf("同步设置失败：%w", err)
+	}
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("关闭设置文件失败：%w", err)
+	}
+	if err := os.Rename(temporary, path); err != nil {
 		_ = os.Remove(temporary)
 		return fmt.Errorf("提交设置失败：%w", err)
 	}
+	removeTemporary = false
 	return nil
 }
 
