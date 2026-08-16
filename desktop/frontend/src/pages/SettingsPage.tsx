@@ -27,7 +27,7 @@ import {
   Image20Regular,
   Save20Regular,
 } from "@fluentui/react-icons";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { GlassSurface } from "../components/material/GlassSurface";
 import { AppToaster } from "../components/AppToaster";
 import { desktopPlatform } from "../platform/desktop";
@@ -61,6 +61,11 @@ const emptySettings: CompleteAppSettings = {
   routing_rules: [],
 };
 
+type SettingRowA11y = { labelId: string; descriptionId: string };
+const SettingRowA11yContext = createContext<SettingRowA11y | null>(null);
+
+const useSettingRowA11y = () => useContext(SettingRowA11yContext) ?? undefined;
+
 function SettingRow({
   title,
   description,
@@ -72,13 +77,22 @@ function SettingRow({
   children: React.ReactNode;
   danger?: boolean;
 }) {
+  const labelId = useId("setting-label");
+  const descriptionId = useId("setting-description");
   return (
-    <div className={`setting-row${danger ? " is-danger" : ""}`}>
+    <div
+      className={`setting-row${danger ? " is-danger" : ""}`}
+      role="group"
+      aria-labelledby={labelId}
+      aria-describedby={descriptionId}
+    >
       <div className="setting-copy">
-        <strong>{title}</strong>
-        <span>{description}</span>
+        <strong id={labelId}>{title}</strong>
+        <span id={descriptionId} aria-live="polite">{description}</span>
       </div>
-      <div className="setting-control">{children}</div>
+      <SettingRowA11yContext.Provider value={{ labelId, descriptionId }}>
+        <div className="setting-control">{children}</div>
+      </SettingRowA11yContext.Provider>
     </div>
   );
 }
@@ -94,6 +108,7 @@ function SettingDropdown({
   disabled?: boolean;
   onChange: (value: string) => void;
 }) {
+  const accessible = useSettingRowA11y();
   const selected = options.find((option) => option.value === value);
   return (
     <Dropdown
@@ -101,12 +116,109 @@ function SettingDropdown({
       value={selected?.label ?? value}
       selectedOptions={[value]}
       disabled={disabled}
+      aria-labelledby={accessible?.labelId}
+      aria-describedby={accessible?.descriptionId}
       onOptionSelect={(_, data) => data.optionValue && onChange(data.optionValue)}
     >
       {options.map((option) => (
         <Option key={option.value} value={option.value}>{option.label}</Option>
       ))}
     </Dropdown>
+  );
+}
+
+function SettingSwitch({
+  checked,
+  disabled,
+  onChange,
+}: {
+  checked: boolean;
+  disabled?: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  const accessible = useSettingRowA11y();
+  return (
+    <Switch
+      checked={checked}
+      disabled={disabled}
+      aria-labelledby={accessible?.labelId}
+      aria-describedby={accessible?.descriptionId}
+      onChange={(_, data) => onChange(data.checked)}
+    />
+  );
+}
+
+function SettingSlider({
+  min,
+  max,
+  value,
+  disabled,
+  valueText,
+  onChange,
+}: {
+  min: number;
+  max: number;
+  value: number;
+  disabled?: boolean;
+  valueText: string;
+  onChange: (value: number) => void;
+}) {
+  const accessible = useSettingRowA11y();
+  return (
+    <Slider
+      min={min}
+      max={max}
+      value={value}
+      disabled={disabled}
+      aria-labelledby={accessible?.labelId}
+      aria-describedby={accessible?.descriptionId}
+      aria-valuetext={valueText}
+      onChange={(_, data) => onChange(data.value)}
+    />
+  );
+}
+
+function SettingInput({
+  value,
+  placeholder,
+  onChange,
+}: {
+  value: string;
+  placeholder?: string;
+  onChange: (value: string) => void;
+}) {
+  const accessible = useSettingRowA11y();
+  return (
+    <Input
+      value={value}
+      placeholder={placeholder}
+      aria-labelledby={accessible?.labelId}
+      aria-describedby={accessible?.descriptionId}
+      onChange={(_, data) => onChange(data.value)}
+    />
+  );
+}
+
+function SettingTabs({
+  selectedValue,
+  onChange,
+  children,
+}: {
+  selectedValue: string;
+  onChange: (value: string) => void;
+  children: React.ReactNode;
+}) {
+  const accessible = useSettingRowA11y();
+  return (
+    <TabList
+      size="small"
+      selectedValue={selectedValue}
+      aria-labelledby={accessible?.labelId}
+      aria-describedby={accessible?.descriptionId}
+      onTabSelect={(_, data) => onChange(String(data.value))}
+    >
+      {children}
+    </TabList>
   );
 }
 
@@ -351,7 +463,7 @@ export function SettingsPage({ onOpenBlockedDomains }: { onOpenBlockedDomains: (
   };
 
   return (
-    <main className="settings-page">
+    <main className="settings-page" aria-busy={loading || saving}>
       <AppToaster toasterId={toasterId} position="top-end" />
       <header className="page-heading">
         <div>
@@ -362,7 +474,7 @@ export function SettingsPage({ onOpenBlockedDomains }: { onOpenBlockedDomains: (
             "Changes are saved to the current user profile. Network options are applied by the independent Core while the engine runs.",
           )}</p>
         </div>
-        <span className="save-state">{loading
+        <span className="save-state" role="status" aria-live="polite">{loading
           ? text("正在读取…", "Loading…")
           : saving
             ? text("正在保存…", "Saving…")
@@ -373,15 +485,14 @@ export function SettingsPage({ onOpenBlockedDomains }: { onOpenBlockedDomains: (
         <GlassSurface className="settings-section">
           <h2>{t("settings_personalization")}</h2>
           <SettingRow title={t("settings_theme")} description={t("settings_theme_hint")}>
-            <TabList
-              size="small"
+            <SettingTabs
               selectedValue={appearance.mode}
-              onTabSelect={(_, data) => updateAppearance({ mode: data.value as AppearanceMode })}
+              onChange={(value) => updateAppearance({ mode: value as AppearanceMode })}
             >
               <Tab value="system">{t("settings_theme_auto")}</Tab>
               <Tab value="light">{t("settings_theme_light")}</Tab>
               <Tab value="dark">{t("settings_theme_dark")}</Tab>
-            </TabList>
+            </SettingTabs>
           </SettingRow>
           <SettingRow
             title={text("窗口背景材质", "Window background material")}
@@ -467,6 +578,7 @@ export function SettingsPage({ onOpenBlockedDomains }: { onOpenBlockedDomains: (
                 ref={backgroundInput}
                 className="visually-hidden"
                 type="file"
+                aria-label={t("settings_background_image_choose")}
                 accept=".png,.jpg,.jpeg,.bmp,.webp,image/png,image/jpeg,image/bmp,image/webp"
                 onChange={async (event) => {
                   const file = event.target.files?.[0];
@@ -511,24 +623,26 @@ export function SettingsPage({ onOpenBlockedDomains }: { onOpenBlockedDomains: (
             )}
           >
             <div className="slider-value">
-              <Slider
+              <SettingSlider
                 min={0}
                 max={40}
                 value={appearance.panelBlur}
+                valueText={`${appearance.panelBlur}px`}
                 disabled={appearance.backgroundSource !== "local" || appearance.panelMaterial !== "blur"}
-                onChange={(_, data) => updateAppearance({ panelBlur: data.value })}
+                onChange={(value) => updateAppearance({ panelBlur: value })}
               />
               <span>{appearance.panelBlur}px</span>
             </div>
           </SettingRow>
           <SettingRow title={t("settings_content_card_opacity")} description={t("settings_content_card_opacity_hint")}>
             <div className="slider-value">
-              <Slider
+              <SettingSlider
                 min={0}
                 max={100}
                 value={appearance.panelOpacity}
+                valueText={`${appearance.panelOpacity}%`}
                 disabled={appearance.backgroundSource !== "local"}
-                onChange={(_, data) => updateAppearance({ panelOpacity: data.value })}
+                onChange={(value) => updateAppearance({ panelOpacity: value })}
               />
               <span>{appearance.panelOpacity}%</span>
             </div>
@@ -580,10 +694,10 @@ export function SettingsPage({ onOpenBlockedDomains }: { onOpenBlockedDomains: (
         <GlassSurface className="settings-section">
           <h2>{t("settings_network_dns")}</h2>
           <SettingRow title={t("settings_dns_server")} description={t("settings_dns_fallback_hint")}>
-            <Input
+            <SettingInput
               value={settings.dns_server}
               placeholder={t("settings_dns_placeholder")}
-              onChange={(_, data) => setSettings((current) => ({ ...current, dns_server: data.value }))}
+              onChange={(value) => setSettings((current) => ({ ...current, dns_server: value }))}
             />
           </SettingRow>
           <SettingRow title={t("settings_doh_policy")} description={t("settings_doh_hint")}>
@@ -632,19 +746,19 @@ export function SettingsPage({ onOpenBlockedDomains }: { onOpenBlockedDomains: (
             description={t("settings_force_tun_hint")}
             danger
           >
-            <Switch checked={settings.force_tun_connectivity_bypass} onChange={(_, data) => patchAndSave({ force_tun_connectivity_bypass: data.checked })} />
+            <SettingSwitch checked={settings.force_tun_connectivity_bypass} onChange={(checked) => patchAndSave({ force_tun_connectivity_bypass: checked })} />
           </SettingRow>
           <SettingRow title={t("settings_wfp_strict_route")} description={t("settings_wfp_strict_route_hint")}>
-            <Switch checked={settings.strict_route} onChange={(_, data) => patchAndSave({ strict_route: data.checked })} />
+            <SettingSwitch checked={settings.strict_route} onChange={(checked) => patchAndSave({ strict_route: checked })} />
           </SettingRow>
           <SettingRow title={t("settings_wfp_repair")} description={wfpStatus || t("settings_wfp_repair_unknown")}>
             <Button icon={<ArrowSync20Regular />} onClick={inspectWfp}>{t("settings_wfp_repair_button")}</Button>
           </SettingRow>
           <SettingRow title={t("blocked_enable")} description={t("blocked_enable_hint")}>
-            <Switch checked={settings.blocked_domain_bypass} onChange={(_, data) => patchAndSave({ blocked_domain_bypass: data.checked })} />
+            <SettingSwitch checked={settings.blocked_domain_bypass} onChange={(checked) => patchAndSave({ blocked_domain_bypass: checked })} />
           </SettingRow>
           <SettingRow title={t("blocked_expiry_toggle")} description={t("blocked_expiry_hint")}>
-            <Switch checked={settings.blocked_domain_expiry} onChange={(_, data) => patchAndSave({ blocked_domain_expiry: data.checked })} />
+            <SettingSwitch checked={settings.blocked_domain_expiry} onChange={(checked) => patchAndSave({ blocked_domain_expiry: checked })} />
           </SettingRow>
           <SettingRow title={t("settings_blocked_domains_manage")} description={t("settings_blocked_domains_manage_hint")}>
             <Button onClick={onOpenBlockedDomains}>{t("settings_blocked_domains_open")}</Button>
@@ -654,13 +768,13 @@ export function SettingsPage({ onOpenBlockedDomains }: { onOpenBlockedDomains: (
         <GlassSurface className="settings-section">
           <h2>{t("settings_config_group")}</h2>
           <SettingRow title={t("settings_autostart")} description={t("settings_autostart_hint")}>
-            <Switch checked={settings.autostart} disabled={saving} onChange={(_, data) => setAutostart(data.checked)} />
+            <SettingSwitch checked={settings.autostart} disabled={saving} onChange={(checked) => setAutostart(checked)} />
           </SettingRow>
           <SettingRow title={t("settings_auto_start_engine")} description={t("settings_auto_start_engine_hint")}>
-            <Switch
+            <SettingSwitch
               checked={settings.auto_start_engine}
               disabled={saving || !settings.autostart}
-              onChange={(_, data) => setAutoStartEngine(data.checked)}
+              onChange={(checked) => setAutoStartEngine(checked)}
             />
           </SettingRow>
           <SettingRow title={t("settings_config_path")} description={configPath || text("正在读取配置文件位置…", "Reading configuration path…")}>

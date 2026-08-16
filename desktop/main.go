@@ -1,12 +1,15 @@
 package main
 
 import (
+	"context"
 	"embed"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"time"
 
+	"github.com/Hypostasis-Cat/HypoMux/desktop/internal/engineclient"
 	desktopplatform "github.com/Hypostasis-Cat/HypoMux/desktop/internal/platform"
 	"github.com/Hypostasis-Cat/HypoMux/desktop/internal/platform/wails"
 	"github.com/Hypostasis-Cat/HypoMux/desktop/internal/services"
@@ -22,6 +25,15 @@ var assets embed.FS
 var trayIcon []byte
 
 func main() {
+	if hasArgument(os.Args[1:], "--core-service-self-test") {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		if err := runCoreServiceSelfTest(ctx); err != nil {
+			log.Printf("Core Service self-test failed: %v", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if hasArgument(os.Args[1:], "--recover-network") {
 		if err := services.RecoverSystemProxy(); err != nil {
 			log.Printf("recover HypoMux system proxy: %v", err)
@@ -104,11 +116,21 @@ func main() {
 	})
 
 	settingsService := services.NewSettingsService()
+	if err := settingsService.StartupError(); err != nil {
+		desktopplatform.ShowErrorMessage(
+			"HypoMux - 配置加载失败",
+			fmt.Sprintf(
+				"无法安全加载设置文件：\n%s\n\n%v\n\n为避免覆盖现有配置，HypoMux 已停止启动。请备份并修复或重命名该文件后重试。",
+				settingsService.ConfigPath(),
+				err,
+			),
+		)
+		return
+	}
 	adapterService := services.NewAdapterService(settingsService)
 	supportLogs := services.NewSupportLogStore()
 	tunService := services.NewTunService(settingsService, adapterService)
 	blockedDomainService := services.NewBlockedDomainService(settingsService)
-	updaterService := services.NewUpdaterService()
 	engineService := services.NewEngineServiceWithDomainsAndHostPrivilege(
 		settingsService,
 		adapterService,
@@ -129,6 +151,7 @@ func main() {
 	}, func() bool {
 		return settingsService.Get().CloseToTray
 	})
+	updaterService := services.NewUpdaterService(desktop.Quit)
 	diagnosticsService = services.NewDiagnosticsService(
 		settingsService, adapterService, desktop, supportLogs,
 	)
@@ -170,6 +193,28 @@ func main() {
 	if err := app.Run(); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func runCoreServiceSelfTest(ctx context.Context) error {
+	client := engineclient.New()
+	defer client.Kill()
+	hello, err := client.EnsureElevated(ctx)
+	if err != nil {
+		return err
+	}
+	if !hello.Elevated {
+		return fmt.Errorf("Core Service 未报告管理员身份")
+	}
+	if hello.Launcher != "service" || hello.Fallback {
+		return fmt.Errorf("连接未使用已安装 Core Service（launcher=%s fallback=%t）", hello.Launcher, hello.Fallback)
+	}
+	for _, method := range []string{"engine.status", "health.check", "engine.status"} {
+		var response map[string]any
+		if err := client.Request(ctx, method, nil, &response); err != nil {
+			return fmt.Errorf("%s：%w", method, err)
+		}
+	}
+	return nil
 }
 
 func shouldAutoStartAcceleration(startSilent bool, settings services.AppSettings) bool {

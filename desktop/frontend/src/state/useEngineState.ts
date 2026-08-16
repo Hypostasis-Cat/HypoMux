@@ -9,6 +9,8 @@ import {
 } from "../platform/services";
 import { desktopPlatform } from "../platform/desktop";
 import { isDesktopRuntime } from "../platform/runtime";
+import { adapterSaveInput, adapterSaveQueue } from "../platform/adapterSaveQueue";
+import { startSerialPoll } from "../platform/serialPoll";
 
 export type EnginePhase = "stopped" | "starting" | "running" | "degraded" | "stopping" | "failed";
 export type EngineMode = "proxy" | "tun";
@@ -142,11 +144,19 @@ export function useEngineState(
   const [diagnostics, setDiagnostics] = useState<DiagnosticResult[]>([]);
   const mounted = useRef(true);
   const modeRef = useRef<EngineMode>(mode);
+  const weightedRef = useRef(weighted);
+  const adaptersRef = useRef<AdapterView[]>(adapters);
   const lastRuntimeFailure = useRef("");
   const operationActive = useRef(false);
   const snapshotEpoch = useRef(0);
   const transition = phase === "starting" || phase === "stopping";
+  const transitionRef = useRef(transition);
+  const previewRef = useRef(preview);
   modeRef.current = mode;
+  weightedRef.current = weighted;
+  adaptersRef.current = adapters;
+  transitionRef.current = transition;
+  previewRef.current = preview;
 
   const applySnapshot = useCallback((
     next: EngineSnapshot,
@@ -182,6 +192,7 @@ export function useEngineState(
     if (isBrowserPreview()) {
       const fixtures = Array.from({ length: browserFixtureCount() }, (_, index) => previewAdapter(index));
       if (!mounted.current) return;
+      adaptersRef.current = fixtures;
       setAdapters(fixtures);
       setPreview(true);
       applySnapshot(emptySnapshot(modeRef.current));
@@ -213,7 +224,9 @@ export function useEngineState(
       ]);
       if (!mounted.current) return;
       setAdapters(nextAdapters ?? []);
+      adaptersRef.current = nextAdapters ?? [];
       setWeightedState(settings.weighted);
+      weightedRef.current = settings.weighted;
       setPorts({ socks: settings.socks_port, http: settings.http_port });
       setPreview(false);
     } catch (error) {
@@ -229,79 +242,89 @@ export function useEngineState(
   useEffect(() => {
     mounted.current = true;
     void load();
-    const timer = window.setInterval(() => {
-      if (!transition && !preview) {
+    const stopSnapshotPoll = startSerialPoll(async () => {
+      if (!transitionRef.current && !previewRef.current && !adapterSaveQueue.isPending()) {
         const requestEpoch = snapshotEpoch.current;
-        void appServices.engine.snapshot()
-          .then((next) => applySnapshot(next, false, requestEpoch))
-          .catch(() => undefined);
+        const next = await appServices.engine.snapshot();
+        applySnapshot(next, false, requestEpoch);
       }
     }, 1500);
-    return () => {
-      mounted.current = false;
-      window.clearInterval(timer);
-    };
-  }, [applySnapshot, load, preview, transition]);
-
-  useEffect(() => {
-    if (preview) return;
-    const timer = window.setInterval(() => {
-      if (transition) return;
-      void appServices.adapters.list().then((next) => {
-        if (!mounted.current) return;
+    const stopAdapterPoll = startSerialPoll(async () => {
+      if (transitionRef.current || previewRef.current || adapterSaveQueue.isPending()) return;
+      const next = await appServices.adapters.list();
+      if (mounted.current) {
         setAdapters((current) => {
           const currentKey = current.map((item) => `${item.id}:${item.address}:${item.operational}`).join("|");
           const nextKey = (next ?? []).map((item) => `${item.id}:${item.address}:${item.operational}`).join("|");
-          return currentKey === nextKey ? current : (next ?? []);
+          if (currentKey === nextKey) return current;
+          adaptersRef.current = next ?? [];
+          return adaptersRef.current;
         });
-      }).catch(() => undefined);
+      }
     }, 5000);
-    return () => window.clearInterval(timer);
-  }, [preview, transition]);
+    return () => {
+      mounted.current = false;
+      stopSnapshotPoll();
+      stopAdapterPoll();
+    };
+  }, [applySnapshot, load]);
 
-  const persistAdapters = useCallback(async (next: AdapterView[], nextMode = mode, nextWeighted = weighted) => {
+  const persistAdapters = useCallback((next: AdapterView[], nextMode = modeRef.current, nextWeighted = weightedRef.current) => {
+    adaptersRef.current = next;
     setAdapters(next);
-    if (preview) return;
-    try {
-      const saved = await appServices.adapters.save(nextMode, nextWeighted, next);
-      if (mounted.current) setAdapters(saved ?? next);
-    } catch (error) {
+    if (preview) return Promise.resolve(next);
+    const handle = adapterSaveQueue.enqueue(adapterSaveInput(nextMode, nextWeighted, next));
+    void handle.done.then((saved) => {
+      if (!mounted.current || !adapterSaveQueue.isCurrent(handle.revision)) return;
+      const authoritative = saved ?? next;
+      adaptersRef.current = authoritative;
+      setAdapters(authoritative);
+    }).catch((error) => {
+      if (!adapterSaveQueue.isCurrent(handle.revision)) return;
       onError(error instanceof Error ? error.message : String(error), () => void persistAdapters(next, nextMode, nextWeighted));
       void load(false);
-    }
-  }, [load, mode, onError, preview, weighted]);
+    });
+    return handle.done;
+  }, [load, onError, preview]);
 
   const setMode = useCallback((nextMode: EngineMode) => {
     setModeState(nextMode);
-    void persistAdapters(adapters, nextMode, weighted);
-  }, [adapters, persistAdapters, weighted]);
+    modeRef.current = nextMode;
+    void persistAdapters(adaptersRef.current, nextMode, weightedRef.current);
+  }, [persistAdapters]);
 
   const setWeighted = useCallback((value: boolean) => {
     setWeightedState(value);
-    void persistAdapters(adapters, mode, value);
-  }, [adapters, mode, persistAdapters]);
+    weightedRef.current = value;
+    void persistAdapters(adaptersRef.current, modeRef.current, value);
+  }, [persistAdapters]);
 
   const toggleAdapter = useCallback((id: string, checked: boolean) => {
-    void persistAdapters(adapters.map((adapter) => adapter.id === id ? { ...adapter, selected: checked } : adapter));
-  }, [adapters, persistAdapters]);
+    void persistAdapters(adaptersRef.current.map((adapter) => adapter.id === id ? { ...adapter, selected: checked } : adapter));
+  }, [persistAdapters]);
 
   const updateWeight = useCallback((id: string, value: number) => {
     if (!Number.isInteger(value) || value < 1 || value > 100) return;
-    void persistAdapters(adapters.map((adapter) => adapter.id === id ? { ...adapter, weight: value } : adapter));
-  }, [adapters, persistAdapters]);
+    void persistAdapters(adaptersRef.current.map((adapter) => adapter.id === id ? { ...adapter, weight: value } : adapter));
+  }, [persistAdapters]);
 
   const selectAll = useCallback((checked: boolean) => {
-    void persistAdapters(adapters.map((adapter) => ({ ...adapter, selected: checked })));
-  }, [adapters, persistAdapters]);
+    void persistAdapters(adaptersRef.current.map((adapter) => ({ ...adapter, selected: checked })));
+  }, [persistAdapters]);
 
   const refreshAdapters = useCallback(async () => {
     setRefreshing(true);
     try {
       if (preview) {
-        setAdapters(Array.from({ length: browserFixtureCount() }, (_, index) => previewAdapter(index)));
+        const refreshed = Array.from({ length: browserFixtureCount() }, (_, index) => previewAdapter(index));
+        adaptersRef.current = refreshed;
+        setAdapters(refreshed);
       } else {
         const refreshed = await appServices.adapters.refresh();
-        if (mounted.current) setAdapters(refreshed ?? []);
+        if (mounted.current) {
+          adaptersRef.current = refreshed ?? [];
+          setAdapters(refreshed ?? []);
+        }
       }
     } catch (error) {
       onError(error instanceof Error ? error.message : String(error), () => void refreshAdapters());
@@ -318,6 +341,9 @@ export function useEngineState(
     let operationFailed = false;
     setPhase(stopping ? "stopping" : "starting");
     try {
+      if (!stopping && !preview) {
+        await adapterSaveQueue.flush();
+      }
       if (!stopping && mode === "tun") {
         let preflight: TunPreflightSnapshot;
         const selectedAdapters = adapters.filter((adapter) => adapter.selected);
@@ -383,7 +409,7 @@ export function useEngineState(
         }
       }
     }
-  }, [adapters, applySnapshot, load, mode, onError, onTunPreflight, phase, transition]);
+  }, [adapters, applySnapshot, load, mode, onError, onTunPreflight, phase, preview, transition]);
 
   const selected = useMemo(() => adapters.filter((adapter) => adapter.selected), [adapters]);
   const runtimeByID = useMemo(

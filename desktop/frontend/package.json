@@ -13,7 +13,7 @@
   "dependencies": {
     "@fluentui/react-components": "9.74.4",
     "@fluentui/react-icons": "2.0.334",
-    "@wailsio/runtime": "latest",
+    "@wailsio/runtime": "3.0.0-alpha2.119",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-markdown": "^10.1.0",

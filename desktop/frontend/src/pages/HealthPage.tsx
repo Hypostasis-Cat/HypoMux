@@ -34,6 +34,8 @@ import {
 } from "../platform/services";
 import { useI18n } from "../i18n/i18n";
 import { isDesktopRuntime } from "../platform/runtime";
+import { adapterSaveInput, adapterSaveQueue } from "../platform/adapterSaveQueue";
+import { startSerialPoll } from "../platform/serialPoll";
 
 const isBrowserPreview = () => import.meta.env.DEV && !isDesktopRuntime();
 
@@ -116,8 +118,11 @@ export function HealthPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [preview, setPreview] = useState(false);
   const [engineRunning, setEngineRunning] = useState(false);
-  const [homeSettings, setHomeSettings] = useState({ mode: "proxy", weighted: false });
-  const poller = useRef<number>();
+  const adaptersRef = useRef<AdapterView[]>([]);
+  const homeSettingsRef = useRef({ mode: "proxy", weighted: false });
+  const stopPoller = useRef<(() => void)>();
+  const diagnosticEpoch = useRef(0);
+  const mounted = useRef(true);
 
   const notify = useCallback((title: string, message: string, intent: "success" | "error" | "warning" = "error") => {
     dispatchToast(
@@ -152,12 +157,14 @@ export function HealthPage() {
         appServices.settings.get(),
       ]), 10_000, text("读取网络体检数据", "Loading network diagnostics"));
       setAdapters(nextAdapters ?? []);
+      adaptersRef.current = nextAdapters ?? [];
       setSnapshot(latest);
-      setHomeSettings({ mode: settings.mode, weighted: settings.weighted });
+      homeSettingsRef.current = { mode: settings.mode, weighted: settings.weighted };
       setPreview(false);
     } catch (error) {
       if (isBrowserPreview()) {
         const fixtures = previewAdapters();
+        adaptersRef.current = fixtures;
         const showResults = new URLSearchParams(window.location.search).get("diagnostic") !== "empty";
         setAdapters(fixtures);
         setSnapshot(showResults ? {
@@ -181,35 +188,49 @@ export function HealthPage() {
   }, [notify, text]);
 
   useEffect(() => {
+    mounted.current = true;
     void load();
     return () => {
-      if (poller.current !== undefined) window.clearInterval(poller.current);
+      mounted.current = false;
+      diagnosticEpoch.current += 1;
+      stopPoller.current?.();
     };
   }, [load]);
 
-  const persistAdapters = useCallback(async (next: AdapterView[]) => {
+  const persistAdapters = useCallback((next: AdapterView[]) => {
+    adaptersRef.current = next;
     setAdapters(next);
-    if (preview) return;
-    try {
-      const saved = await appServices.adapters.save(homeSettings.mode, homeSettings.weighted, next);
-      setAdapters(saved ?? next);
-    } catch (error) {
+    if (preview) return Promise.resolve(next);
+    const settings = homeSettingsRef.current;
+    const handle = adapterSaveQueue.enqueue(adapterSaveInput(settings.mode, settings.weighted, next));
+    void handle.done.then((saved) => {
+      if (!adapterSaveQueue.isCurrent(handle.revision)) return;
+      const authoritative = saved ?? next;
+      adaptersRef.current = authoritative;
+      setAdapters(authoritative);
+    }).catch((error) => {
+      if (!adapterSaveQueue.isCurrent(handle.revision)) return;
       notify(text("未能同步网卡选择", "Unable to sync adapter selection"), error instanceof Error ? error.message : String(error));
       void load();
-    }
-  }, [homeSettings, load, notify, preview, text]);
+    });
+    return handle.done;
+  }, [load, notify, preview, text]);
 
   const setAll = useCallback((checked: boolean) => {
-    void persistAdapters(adapters.map((adapter) => ({ ...adapter, selected: checked })));
-  }, [adapters, persistAdapters]);
+    void persistAdapters(adaptersRef.current.map((adapter) => ({ ...adapter, selected: checked })));
+  }, [persistAdapters]);
 
   const refresh = useCallback(async () => {
     setRefreshing(true);
     try {
       if (preview) {
-        setAdapters(previewAdapters());
+        const next = previewAdapters();
+        adaptersRef.current = next;
+        setAdapters(next);
       } else {
-        setAdapters(await appServices.adapters.refresh() ?? []);
+        const next = await appServices.adapters.refresh() ?? [];
+        adaptersRef.current = next;
+        setAdapters(next);
       }
     } catch (error) {
       notify(text("重新扫描失败", "Rescan failed"), error instanceof Error ? error.message : String(error));
@@ -219,7 +240,7 @@ export function HealthPage() {
   }, [notify, preview, text]);
 
   const start = useCallback(async () => {
-    const selected = adapters.filter((adapter) => adapter.selected);
+    const selected = adaptersRef.current.filter((adapter) => adapter.selected);
     if (selected.length === 0) {
       notify(
         text("尚未选择网卡", "No adapter selected"),
@@ -241,15 +262,31 @@ export function HealthPage() {
       }), 850);
       return;
     }
+    try {
+      await adapterSaveQueue.flush();
+    } catch (error) {
+      notify(
+        text("网卡选择尚未保存", "Adapter selection is not saved"),
+        error instanceof Error ? error.message : String(error),
+      );
+      return;
+    }
     setSnapshot({
       state: "running", target_ip: "223.5.5.5", total: selected.length,
       completed: 0, results: [], started_at: new Date().toISOString(),
     });
-    poller.current = window.setInterval(() => {
-      void appServices.diagnostics.latest().then(setSnapshot).catch(() => undefined);
+    const runEpoch = ++diagnosticEpoch.current;
+    stopPoller.current?.();
+    stopPoller.current = startSerialPoll(async () => {
+      const latest = await appServices.diagnostics.latest();
+      if (mounted.current && diagnosticEpoch.current === runEpoch) setSnapshot(latest);
     }, 400);
     try {
       const final = await appServices.diagnostics.run(selected.map((adapter) => adapter.id));
+      if (!mounted.current || diagnosticEpoch.current !== runEpoch) return;
+      diagnosticEpoch.current += 1;
+      stopPoller.current?.();
+      stopPoller.current = undefined;
       setSnapshot(final);
       if (final.state === "completed") {
         notify(
@@ -262,15 +299,18 @@ export function HealthPage() {
         );
       }
     } catch (error) {
+      if (!mounted.current || diagnosticEpoch.current !== runEpoch) return;
       notify(text("网络体检失败", "Network diagnostics failed"), error instanceof Error ? error.message : String(error));
-      void appServices.diagnostics.latest().then(setSnapshot).catch(() => undefined);
+      const latest = await appServices.diagnostics.latest().catch(() => undefined);
+      if (latest && mounted.current && diagnosticEpoch.current === runEpoch) setSnapshot(latest);
     } finally {
-      if (poller.current !== undefined) {
-        window.clearInterval(poller.current);
-        poller.current = undefined;
+      if (diagnosticEpoch.current === runEpoch) {
+        diagnosticEpoch.current += 1;
+        stopPoller.current?.();
+        stopPoller.current = undefined;
       }
     }
-  }, [adapters, notify, preview, text]);
+  }, [notify, preview, text]);
 
   const cancel = useCallback(async () => {
     if (preview) {
@@ -352,7 +392,7 @@ export function HealthPage() {
                 <Checkbox
                   checked={adapter.selected}
                   disabled={running || engineRunning}
-                  onChange={(_, data) => void persistAdapters(adapters.map((item) =>
+                  onChange={(_, data) => void persistAdapters(adaptersRef.current.map((item) =>
                     item.id === adapter.id ? { ...item, selected: data.checked === true } : item))}
                   aria-label={text(
                     `${adapter.selected ? "取消" : "选择"} ${adapter.name}`,

@@ -35,11 +35,16 @@ func WebView2Available() bool {
 }
 
 func ShowWebView2MissingMessage() {
-	title, _ := windows.UTF16PtrFromString("HypoMux - 缺少 WebView2 Runtime")
-	message, _ := windows.UTF16PtrFromString(
-		"未检测到 Microsoft Edge WebView2 Runtime，HypoMux 无法显示桌面界面。\n\n" +
+	ShowErrorMessage(
+		"HypoMux - 缺少 WebView2 Runtime",
+		"未检测到 Microsoft Edge WebView2 Runtime，HypoMux 无法显示桌面界面。\n\n"+
 			"请重新运行 HypoMux 安装程序；安装程序会自动安装 WebView2 Runtime。安装完成后再启动 HypoMux。",
 	)
+}
+
+func ShowErrorMessage(titleText string, messageText string) {
+	title, _ := windows.UTF16PtrFromString(titleText)
+	message, _ := windows.UTF16PtrFromString(messageText)
 	user32 := windows.NewLazySystemDLL("user32.dll")
 	messageBox := user32.NewProc("MessageBoxW")
 	_, _, _ = messageBox.Call(

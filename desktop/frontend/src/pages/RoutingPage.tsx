@@ -48,6 +48,7 @@ import { appServices, type RoutingRule, type RoutingSnapshot } from "../platform
 import { GlassSurface } from "../components/material/GlassSurface";
 import { useI18n } from "../i18n/i18n";
 import { isDesktopRuntime } from "../platform/runtime";
+import { LatestSaveQueue } from "../platform/latestSaveQueue";
 
 type MatchType = "process" | "domain" | "ip";
 type DraftRule = RoutingRule & {
@@ -59,8 +60,25 @@ type DraftRule = RoutingRule & {
 
 const newID = () => globalThis.crypto?.randomUUID?.() ?? `rule-${Date.now()}-${Math.random()}`;
 
-const makeDrafts = (rules: RoutingRule[]): DraftRule[] =>
+export const makeDrafts = (rules: RoutingRule[]): DraftRule[] =>
   rules.map((rule) => ({ ...rule, id: newID() }));
+
+const ruleKey = (rule: RoutingRule) => `${rule.match_type}\u0000${rule.value}\u0000${rule.outbound}`;
+
+export const reconcileSavedDrafts = (saved: RoutingRule[], submitted: DraftRule[]): DraftRule[] => {
+  const available = new Map<string, DraftRule[]>();
+  submitted.forEach((draft) => {
+    const key = ruleKey(draft);
+    available.set(key, [...(available.get(key) ?? []), draft]);
+  });
+  return saved.map((rule) => {
+    const matches = available.get(ruleKey(rule)) ?? [];
+    const existing = matches.shift();
+    if (matches.length > 0) available.set(ruleKey(rule), matches);
+    else available.delete(ruleKey(rule));
+    return { ...rule, id: existing?.id ?? newID() };
+  });
+};
 
 const browserRoutingFixture = (): RoutingSnapshot | null => {
   if (!import.meta.env.DEV || isDesktopRuntime()) return null;
@@ -121,7 +139,15 @@ export function RoutingPage() {
   const [importPreview, setImportPreview] = useState<RoutingSnapshot | null>(null);
   const [importPreviewOpen, setImportPreviewOpen] = useState(false);
   const loaded = useRef(false);
+  const rulesRef = useRef<DraftRule[]>([]);
+  const editRevision = useRef(0);
+  const autosaveTimer = useRef<number>();
   const validationSequence = useRef(new Map<string, number>());
+  const validationTimers = useRef(new Map<string, number>());
+  const saveQueue = useRef<LatestSaveQueue<RoutingRule[], RoutingSnapshot>>();
+  if (!saveQueue.current) {
+    saveQueue.current = new LatestSaveQueue((next) => appServices.routing.save(next));
+  }
   const addRuleInputRef = useRef<HTMLInputElement>(null);
   const toasterId = useId("routing-toaster");
   const { dispatchToast } = useToastController(toasterId);
@@ -146,7 +172,7 @@ export function RoutingPage() {
     try {
       const snapshot = await appServices.routing.snapshot();
       const available = new Set((snapshot.outbounds ?? []).map((outbound) => outbound.id));
-      setRules(makeDrafts(snapshot.rules ?? []).map((rule) => available.has(rule.outbound)
+      const nextRules = makeDrafts(snapshot.rules ?? []).map((rule) => available.has(rule.outbound)
         ? rule
         : {
             ...rule,
@@ -154,7 +180,9 @@ export function RoutingPage() {
               `出口 ${rule.outbound.replace(/^nic_/, "")} 未启用或当前不可用`,
               `Outbound ${rule.outbound.replace(/^nic_/, "")} is disabled or unavailable`,
             ),
-          }));
+          });
+      rulesRef.current = nextRules;
+      setRules(nextRules);
       setOutbounds(snapshot.outbounds ?? []);
       setPendingSave(false);
       setSavedAt(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
@@ -162,7 +190,9 @@ export function RoutingPage() {
     } catch (error) {
       const fixture = browserRoutingFixture();
       if (fixture) {
-        setRules(makeDrafts(fixture.rules ?? []));
+        const nextRules = makeDrafts(fixture.rules ?? []);
+        rulesRef.current = nextRules;
+        setRules(nextRules);
         setOutbounds(fixture.outbounds ?? []);
         setSavedAt(text("浏览器容量预览", "Browser capacity preview"));
         loaded.current = true;
@@ -179,44 +209,69 @@ export function RoutingPage() {
     void load();
   }, [load]);
 
+  useEffect(() => () => {
+    if (autosaveTimer.current !== undefined) window.clearTimeout(autosaveTimer.current);
+    validationTimers.current.forEach((timer) => window.clearTimeout(timer));
+  }, []);
+
+  const applyRules = useCallback((next: DraftRule[], markDirty = false) => {
+    rulesRef.current = next;
+    setRules(next);
+    if (markDirty) {
+      editRevision.current += 1;
+      setPendingSave(true);
+    }
+  }, []);
+
   const validateDraft = useCallback(async (draft: DraftRule) => {
     const sequence = (validationSequence.current.get(draft.id) ?? 0) + 1;
     validationSequence.current.set(draft.id, sequence);
-    setRules((current) => current.map((item) =>
-      item.id === draft.id ? { ...item, validating: true, error: undefined, dirty: true } : item));
     try {
-      const currentRules = rules
+      const currentRules = rulesRef.current
         .filter((item) => item.id !== draft.id)
         .map(({ match_type, value, outbound }) => ({ match_type, value, outbound }));
       const result = await appServices.routing.validate(draft, currentRules);
       if (validationSequence.current.get(draft.id) !== sequence) return;
-      setRules((current) => current.map((item) =>
+      const next = rulesRef.current.map((item) =>
         item.id === draft.id
           ? { ...item, ...result.rule, validating: false, error: result.valid ? undefined : result.message, dirty: true }
-          : item));
+          : item);
+      applyRules(next);
     } catch (error) {
-      setRules((current) => current.map((item) =>
+      if (validationSequence.current.get(draft.id) !== sequence) return;
+      const next = rulesRef.current.map((item) =>
         item.id === draft.id
           ? { ...item, validating: false, error: error instanceof Error ? error.message : String(error), dirty: true }
-          : item));
+          : item);
+      applyRules(next);
     }
-  }, [rules]);
+  }, [applyRules]);
 
   const updateRule = useCallback((id: string, patch: Partial<RoutingRule>) => {
-    setPendingSave(true);
     let nextDraft: DraftRule | undefined;
-    setRules((current) => current.map((item) => {
+    const next = rulesRef.current.map((item) => {
       if (item.id !== id) return item;
       nextDraft = { ...item, ...patch, validating: true, error: undefined, dirty: true };
       return nextDraft;
-    }));
-    window.setTimeout(() => {
+    });
+    applyRules(next, true);
+    const existingTimer = validationTimers.current.get(id);
+    if (existingTimer !== undefined) window.clearTimeout(existingTimer);
+    const timer = window.setTimeout(() => {
+      validationTimers.current.delete(id);
       if (nextDraft) void validateDraft(nextDraft);
     }, 180);
-  }, [validateDraft]);
+    validationTimers.current.set(id, timer);
+  }, [applyRules, validateDraft]);
 
   const saveRules = useCallback(async (showToast = false) => {
-    const invalid = rules.find((rule) => rule.validating || rule.error || !rule.value.trim());
+    if (showToast && autosaveTimer.current !== undefined) {
+      window.clearTimeout(autosaveTimer.current);
+      autosaveTimer.current = undefined;
+    }
+    const submitted = rulesRef.current.map((rule) => ({ ...rule }));
+    const submittedEditRevision = editRevision.current;
+    const invalid = submitted.find((rule) => rule.validating || rule.error || !rule.value.trim());
     if (invalid) {
       if (showToast) notify(
         text("尚未保存", "Not saved"),
@@ -226,13 +281,16 @@ export function RoutingPage() {
       return false;
     }
     setSaving(true);
+    const queue = saveQueue.current!;
+    const handle = queue.enqueue(
+      submitted.map(({ match_type, value, outbound }) => ({ match_type, value, outbound })),
+    );
     try {
-      const snapshot = await appServices.routing.save(
-        rules.map(({ match_type, value, outbound }) => ({ match_type, value, outbound })),
-      );
-      setRules(makeDrafts(snapshot.rules ?? []));
+      const snapshot = await handle.done;
+      if (!queue.isCurrent(handle.revision) || submittedEditRevision !== editRevision.current) return true;
+      const savedRules = reconcileSavedDrafts(snapshot.rules ?? [], submitted);
+      applyRules(savedRules);
       setOutbounds(snapshot.outbounds ?? []);
-      setSelected(new Set());
       setSavedAt(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
       setPendingSave(false);
       if (showToast) notify(
@@ -245,19 +303,29 @@ export function RoutingPage() {
       );
       return true;
     } catch (error) {
-      notify(text("保存失败", "Save failed"), error instanceof Error ? error.message : String(error), "error");
+      if (queue.isCurrent(handle.revision)) {
+        notify(text("保存失败", "Save failed"), error instanceof Error ? error.message : String(error), "error");
+      }
       return false;
     } finally {
-      setSaving(false);
+      if (queue.isCurrent(handle.revision)) setSaving(false);
     }
-  }, [notify, rules, text]);
+  }, [applyRules, notify, text]);
 
   useEffect(() => {
     if (!loaded.current || !pendingSave || rules.some((rule) => rule.validating || rule.error)) {
       return;
     }
-    const timer = window.setTimeout(() => void saveRules(false), 700);
-    return () => window.clearTimeout(timer);
+    autosaveTimer.current = window.setTimeout(() => {
+      autosaveTimer.current = undefined;
+      void saveRules(false);
+    }, 700);
+    return () => {
+      if (autosaveTimer.current !== undefined) {
+        window.clearTimeout(autosaveTimer.current);
+        autosaveTimer.current = undefined;
+      }
+    };
   }, [pendingSave, rules, saveRules]);
 
   const addRule = useCallback(async (value = newValue, type: MatchType = activeType) => {
@@ -271,7 +339,7 @@ export function RoutingPage() {
     };
     const result = await appServices.routing.validate(
       candidate,
-      rules.map(({ match_type, value: itemValue, outbound }) => ({ match_type, value: itemValue, outbound })),
+      rulesRef.current.map(({ match_type, value: itemValue, outbound }) => ({ match_type, value: itemValue, outbound })),
     );
     if (!result.valid) {
       notify(
@@ -281,10 +349,9 @@ export function RoutingPage() {
       );
       return;
     }
-    setRules((current) => [...current, { ...candidate, ...result.rule, validating: false }]);
-    setPendingSave(true);
+    applyRules([...rulesRef.current, { ...candidate, ...result.rule, validating: false }], true);
     setNewValue("");
-  }, [activeType, newOutbound, newValue, notify, rules, text]);
+  }, [activeType, applyRules, newOutbound, newValue, notify, text]);
 
   const openProcesses = useCallback(async () => {
     setProcessOpen(true);
@@ -312,9 +379,22 @@ export function RoutingPage() {
 
   const confirmImport = useCallback(async () => {
     if (!importPreview) return;
+    if (autosaveTimer.current !== undefined) {
+      window.clearTimeout(autosaveTimer.current);
+      autosaveTimer.current = undefined;
+    }
+    const previous = rulesRef.current;
+    const imported = makeDrafts(importPreview.rules ?? []);
+    applyRules(imported, true);
+    setPendingSave(false);
+    setSaving(true);
+    const queue = saveQueue.current!;
+    const importedEditRevision = editRevision.current;
+    const handle = queue.enqueue(importPreview.rules ?? []);
     try {
-      const saved = await appServices.routing.save(importPreview.rules ?? []);
-      setRules(makeDrafts(saved.rules ?? []));
+      const saved = await handle.done;
+      if (!queue.isCurrent(handle.revision) || importedEditRevision !== editRevision.current) return;
+      applyRules(reconcileSavedDrafts(saved.rules ?? [], imported));
       setOutbounds(saved.outbounds ?? []);
       setImportPreviewOpen(false);
       setSelected(new Set());
@@ -328,9 +408,14 @@ export function RoutingPage() {
         "success",
       );
     } catch (error) {
-      notify(text("导入失败", "Import failed"), error instanceof Error ? error.message : String(error), "error");
+      if (queue.isCurrent(handle.revision) && importedEditRevision === editRevision.current) {
+        applyRules(previous, true);
+        notify(text("导入失败", "Import failed"), error instanceof Error ? error.message : String(error), "error");
+      }
+    } finally {
+      if (queue.isCurrent(handle.revision)) setSaving(false);
     }
-  }, [importPreview, notify, text]);
+  }, [applyRules, importPreview, notify, text]);
 
   const activeRules = useMemo(() => rules.filter((rule) => {
     if (rule.match_type !== activeType) return false;
@@ -413,6 +498,8 @@ export function RoutingPage() {
         <div className="routing-save-state">
           <span>{saving
             ? text("正在保存…", "Saving…")
+            : pendingSave
+              ? text("有未保存更改", "Unsaved changes")
             : savedAt
               ? text(`已保存 ${savedAt}`, `Saved ${savedAt}`)
               : text("读取当前配置", "Loading current configuration")}</span>
@@ -553,8 +640,12 @@ export function RoutingPage() {
             <DialogActions>
               <Button appearance="secondary" onClick={() => setDeleteOpen(false)}>{t("routing_dialog_cancel")}</Button>
               <Button appearance="primary" onClick={() => {
-                setRules((current) => current.filter((rule) => !selected.has(rule.id)).map((rule) => ({ ...rule, dirty: true })));
-                setPendingSave(true);
+                selected.forEach((id) => {
+                  const timer = validationTimers.current.get(String(id));
+                  if (timer !== undefined) window.clearTimeout(timer);
+                  validationTimers.current.delete(String(id));
+                });
+                applyRules(rulesRef.current.filter((rule) => !selected.has(rule.id)).map((rule) => ({ ...rule, dirty: true })), true);
                 setSelected(new Set());
                 setDeleteOpen(false);
               }}>{text("确认删除", "Delete")}</Button>

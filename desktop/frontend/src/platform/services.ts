@@ -222,8 +222,8 @@ export const appServices = {
     check: () => Call.ByName(updaterMethod("Check")) as Promise<UpdateCheckResult>,
     download: (release: ReleaseInfo) =>
       Call.ByName(updaterMethod("Download"), release) as Promise<string>,
-    launchInstaller: (path: string) =>
-      Call.ByName(updaterMethod("LaunchInstaller"), path) as Promise<void>,
+    installAndQuit: (path: string) =>
+      Call.ByName(updaterMethod("InstallAndQuit"), path) as Promise<void>,
     progress: () => Call.ByName(updaterMethod("Progress")) as Promise<UpdateProgress>,
   },
 };
