@@ -6,13 +6,66 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/Hypostasis-Cat/HypoMux/engine/internal/server"
 	"golang.org/x/sys/windows"
+	"golang.org/x/sys/windows/svc"
 )
+
+func TestCoreServiceStopIsBoundedWhenPipeShutdownStalls(t *testing.T) {
+	release := make(chan struct{})
+	started := make(chan struct{})
+	host := &coreWindowsService{
+		stderr:          io.Discard,
+		shutdownTimeout: 50 * time.Millisecond,
+		serve: func(ctx context.Context, _ server.Metadata) error {
+			close(started)
+			<-release
+			return ctx.Err()
+		},
+	}
+	defer close(release)
+
+	requests := make(chan svc.ChangeRequest, 1)
+	statuses := make(chan svc.Status, 3)
+	result := make(chan struct {
+		serviceSpecific bool
+		exitCode        uint32
+	}, 1)
+	go func() {
+		serviceSpecific, exitCode := host.Execute(nil, requests, statuses)
+		result <- struct {
+			serviceSpecific bool
+			exitCode        uint32
+		}{serviceSpecific: serviceSpecific, exitCode: exitCode}
+	}()
+
+	<-started
+	if state := (<-statuses).State; state != svc.StartPending {
+		t.Fatalf("initial state = %v, want StartPending", state)
+	}
+	if state := (<-statuses).State; state != svc.Running {
+		t.Fatalf("ready state = %v, want Running", state)
+	}
+	requests <- svc.ChangeRequest{Cmd: svc.Stop}
+	if state := (<-statuses).State; state != svc.StopPending {
+		t.Fatalf("stopping state = %v, want StopPending", state)
+	}
+
+	select {
+	case stopped := <-result:
+		if stopped.serviceSpecific || stopped.exitCode != 0 {
+			t.Fatalf("stop result = service-specific %t, exit code %d", stopped.serviceSpecific, stopped.exitCode)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("service remained blocked after its shutdown deadline")
+	}
+}
 
 func TestConnectServicePipeCancellationDoesNotBlockServiceStop(t *testing.T) {
 	pipeName := fmt.Sprintf(`\\.\pipe\HypoMux-Core-Cancel-Test-%d-%d`, os.Getpid(), time.Now().UnixNano())
