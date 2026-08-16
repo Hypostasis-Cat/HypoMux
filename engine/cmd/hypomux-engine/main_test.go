@@ -76,7 +76,11 @@ func TestRecoverCommandReportsCleanupFailure(t *testing.T) {
 func TestServiceManagementCommandsReportResults(t *testing.T) {
 	originalInstallService := installServiceCommand
 	originalRemoveService := removeServiceCommand
-	installServiceCommand = func() error { return nil }
+	var installedDesktop string
+	installServiceCommand = func(desktop string) error {
+		installedDesktop = desktop
+		return nil
+	}
 	removeServiceCommand = func() error { return errors.New("remove failed") }
 	t.Cleanup(func() {
 		installServiceCommand = originalInstallService
@@ -84,8 +88,16 @@ func TestServiceManagementCommandsReportResults(t *testing.T) {
 	})
 
 	var stdout, stderr bytes.Buffer
-	if exitCode := run([]string{"install-service"}, strings.NewReader(""), &stdout, &stderr); exitCode != 0 {
+	if exitCode := run(
+		[]string{"install-service", "--desktop", `D:\Apps\HypoMux\hypomux.exe`},
+		strings.NewReader(""),
+		&stdout,
+		&stderr,
+	); exitCode != 0 {
 		t.Fatalf("install exit code = %d, stderr = %s", exitCode, stderr.String())
+	}
+	if installedDesktop != `D:\Apps\HypoMux\hypomux.exe` {
+		t.Fatalf("desktop path = %q", installedDesktop)
 	}
 	if !strings.Contains(stdout.String(), "installed and started") {
 		t.Fatalf("install output = %q", stdout.String())
@@ -98,5 +110,15 @@ func TestServiceManagementCommandsReportResults(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "remove failed") {
 		t.Fatalf("remove error = %q", stderr.String())
+	}
+}
+
+func TestInstallServiceRequiresDesktopPath(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if exitCode := run([]string{"install-service"}, strings.NewReader(""), &stdout, &stderr); exitCode != 2 {
+		t.Fatalf("exit code = %d, stderr = %s", exitCode, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "--desktop") {
+		t.Fatalf("missing desktop path error: %s", stderr.String())
 	}
 }

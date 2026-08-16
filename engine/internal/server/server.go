@@ -642,18 +642,23 @@ func (s *Server) authorizeTunConfig(config tun.Config) (tun.Config, error) {
 	if err != nil {
 		return tun.Config{}, fmt.Errorf("resolve trusted sing-box executable: %w", err)
 	}
+	pinnedDigest := strings.TrimSpace(s.metadata.TunExecutableSHA256)
 	asserted := strings.TrimSpace(config.Executable)
 	if asserted != "" {
 		asserted, err = filepath.Abs(asserted)
 		if err != nil {
 			return tun.Config{}, fmt.Errorf("resolve requested sing-box executable: %w", err)
 		}
-		if !strings.EqualFold(filepath.Clean(asserted), filepath.Clean(trusted)) {
+		if !strings.EqualFold(filepath.Clean(asserted), filepath.Clean(trusted)) && pinnedDigest == "" {
 			return tun.Config{}, errors.New("requested sing-box executable does not match the trusted policy")
 		}
 	}
+	// A machine service owns the pinned executable location. The desktop keeps
+	// an application-local Core copy for UAC fallback, so its legacy asserted
+	// path can legitimately differ after the protected ProgramData deployment.
+	// Never execute that asserted path: the service policy path and digest win.
 	config.Executable = filepath.Clean(trusted)
-	config.ExecutableSHA256 = strings.TrimSpace(s.metadata.TunExecutableSHA256)
+	config.ExecutableSHA256 = pinnedDigest
 	config.RequireProtectedConfig = config.ExecutableSHA256 != ""
 	if config.ExecutableSHA256 != "" && strings.TrimSpace(config.ConfigSHA256) == "" {
 		return tun.Config{}, errors.New("pinned sing-box requires a pinned configuration digest")

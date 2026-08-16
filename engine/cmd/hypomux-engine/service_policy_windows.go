@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unsafe"
 
 	"github.com/Hypostasis-Cat/HypoMux/engine/internal/fileintegrity"
 	"golang.org/x/sys/windows"
@@ -34,7 +35,7 @@ type coreServicePolicy struct {
 	TunExecutableSHA256 string
 }
 
-func buildCoreServicePolicy(enginePath string) (coreServicePolicy, error) {
+func buildCoreServicePolicy(enginePath string, desktopPath string) (coreServicePolicy, error) {
 	engine, err := canonicalRegularFile(enginePath, "Core Service executable")
 	if err != nil {
 		return coreServicePolicy{}, err
@@ -46,12 +47,11 @@ func buildCoreServicePolicy(enginePath string) (coreServicePolicy, error) {
 		)
 	}
 
-	installRoot := filepath.Dir(filepath.Dir(engine))
-	desktop, err := canonicalRegularFile(
-		filepath.Join(installRoot, "hypomux.exe"),
-		"HypoMux desktop executable",
-	)
+	desktop, err := canonicalRegularFile(desktopPath, "HypoMux desktop executable")
 	if err != nil {
+		return coreServicePolicy{}, err
+	}
+	if err := requireFixedLocalVolume(desktop, "HypoMux desktop executable"); err != nil {
 		return coreServicePolicy{}, err
 	}
 	tunExecutable, err := canonicalRegularFile(
@@ -61,10 +61,9 @@ func buildCoreServicePolicy(enginePath string) (coreServicePolicy, error) {
 	if err != nil {
 		return coreServicePolicy{}, err
 	}
-	if !pathWithin(installRoot, desktop) || !pathWithin(installRoot, tunExecutable) ||
-		!strings.EqualFold(filepath.Dir(desktop), installRoot) ||
+	if !strings.EqualFold(filepath.Base(desktop), "hypomux.exe") ||
 		!strings.EqualFold(filepath.Dir(tunExecutable), filepath.Dir(engine)) {
-		return coreServicePolicy{}, errors.New("installed desktop and sing-box must remain inside the Core install root")
+		return coreServicePolicy{}, errors.New("installed desktop or protected sing-box layout is invalid")
 	}
 	desktopDigest, err := fileintegrity.SHA256(desktop)
 	if err != nil {
@@ -187,12 +186,10 @@ func validateCoreServicePolicy(policy coreServicePolicy) error {
 	}
 	desktop := filepath.Clean(policy.DesktopPath)
 	tunExecutable := filepath.Clean(policy.TunExecutable)
-	installRoot := filepath.Dir(filepath.Dir(tunExecutable))
 	if !filepath.IsAbs(desktop) || !filepath.IsAbs(tunExecutable) ||
 		!strings.EqualFold(filepath.Base(desktop), "hypomux.exe") ||
 		!strings.EqualFold(filepath.Base(tunExecutable), "sing-box.exe") ||
-		!strings.EqualFold(filepath.Base(filepath.Dir(tunExecutable)), "bin") ||
-		!strings.EqualFold(filepath.Dir(desktop), installRoot) {
+		!strings.EqualFold(filepath.Base(filepath.Dir(tunExecutable)), "bin") {
 		return errors.New("Core Service policy does not match the installed HypoMux layout")
 	}
 	if err := validatePinnedSHA256(policy.DesktopSHA256); err != nil {
@@ -303,31 +300,169 @@ func finalPathForHandle(handle windows.Handle) (string, error) {
 }
 
 func requireMachineInstallLocation(enginePath string) error {
-	// Resolve through the opened executable handle so a Program Files reparse
-	// point cannot redirect the SYSTEM service into a user-writable directory.
+	// The service runs as LocalSystem. Keep its executable and sidecars in one
+	// machine-owned ProgramData directory even when the desktop is installed on
+	// another fixed drive.
 	engine, err := canonicalRegularFile(enginePath, "Core Service executable")
 	if err != nil {
 		return err
 	}
-	folderIDs := []*windows.KNOWNFOLDERID{
-		windows.FOLDERID_ProgramFiles,
-		windows.FOLDERID_ProgramFilesX64,
-		windows.FOLDERID_ProgramFilesX86,
+	programData, err := windows.KnownFolderPath(windows.FOLDERID_ProgramData, windows.KF_FLAG_DEFAULT)
+	if err != nil {
+		return fmt.Errorf("resolve ProgramData: %w", err)
 	}
-	for _, folderID := range folderIDs {
-		root, folderErr := windows.KnownFolderPath(folderID, windows.KF_FLAG_DEFAULT)
-		if folderErr != nil || strings.TrimSpace(root) == "" {
+	programData, err = filepath.Abs(programData)
+	if err != nil {
+		return fmt.Errorf("resolve absolute ProgramData path: %w", err)
+	}
+	expected := filepath.Join(programData, "HypoMux", "Core", "bin", "hypomux-engine.exe")
+	if !strings.EqualFold(filepath.Clean(engine), filepath.Clean(expected)) {
+		return fmt.Errorf("Core Service must run from the protected path %s", expected)
+	}
+	if err := requireFixedNTFSVolume(engine); err != nil {
+		return err
+	}
+	paths := []string{
+		filepath.Join(programData, "HypoMux"),
+		filepath.Join(programData, "HypoMux", "Core"),
+		filepath.Join(programData, "HypoMux", "Core", "bin"),
+		engine,
+		filepath.Join(filepath.Dir(engine), "sing-box.exe"),
+		filepath.Join(filepath.Dir(engine), "wintun.dll"),
+	}
+	if _, statErr := os.Stat(filepath.Join(filepath.Dir(engine), "libcronet.dll")); statErr == nil {
+		paths = append(paths, filepath.Join(filepath.Dir(engine), "libcronet.dll"))
+	}
+	for _, path := range paths {
+		if err := requireProtectedCorePath(path); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func requireFixedNTFSVolume(path string) error {
+	root, err := fixedLocalVolumeRoot(path, "Core Service")
+	if err != nil {
+		return err
+	}
+	rootPointer, err := windows.UTF16PtrFromString(root)
+	if err != nil {
+		return err
+	}
+	fileSystem := make([]uint16, 32)
+	var flags uint32
+	if err := windows.GetVolumeInformation(
+		rootPointer,
+		nil,
+		0,
+		nil,
+		nil,
+		&flags,
+		&fileSystem[0],
+		uint32(len(fileSystem)),
+	); err != nil {
+		return fmt.Errorf("inspect Core Service volume: %w", err)
+	}
+	if !strings.EqualFold(windows.UTF16ToString(fileSystem), "NTFS") ||
+		flags&windows.FILE_PERSISTENT_ACLS == 0 {
+		return errors.New("Core Service requires NTFS with persistent ACL support")
+	}
+	return nil
+}
+
+func requireFixedLocalVolume(path string, label string) error {
+	_, err := fixedLocalVolumeRoot(path, label)
+	return err
+}
+
+func fixedLocalVolumeRoot(path string, label string) (string, error) {
+	volume := filepath.VolumeName(filepath.Clean(path))
+	if volume == "" || strings.HasPrefix(volume, `\\`) {
+		return "", fmt.Errorf("%s requires a local fixed volume", label)
+	}
+	root := volume + `\`
+	rootPointer, err := windows.UTF16PtrFromString(root)
+	if err != nil {
+		return "", err
+	}
+	if driveType := windows.GetDriveType(rootPointer); driveType != windows.DRIVE_FIXED {
+		return "", fmt.Errorf("%s volume is not a fixed disk (type %d)", label, driveType)
+	}
+	return root, nil
+}
+
+func requireProtectedCorePath(path string) error {
+	pointer, err := windows.UTF16PtrFromString(filepath.Clean(path))
+	if err != nil {
+		return err
+	}
+	attributes, err := windows.GetFileAttributes(pointer)
+	if err != nil {
+		return fmt.Errorf("inspect protected Core path %s: %w", path, err)
+	}
+	if attributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+		return fmt.Errorf("protected Core path must not be a reparse point: %s", path)
+	}
+	return requireProtectedCoreACL(path)
+}
+
+func requireProtectedCoreACL(path string) error {
+	descriptor, err := windows.GetNamedSecurityInfo(
+		path,
+		windows.SE_FILE_OBJECT,
+		windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION,
+	)
+	if err != nil {
+		return fmt.Errorf("read protected Core ACL for %s: %w", path, err)
+	}
+	owner, _, err := descriptor.Owner()
+	if err != nil {
+		return fmt.Errorf("read protected Core owner for %s: %w", path, err)
+	}
+	administrators, err := windows.StringToSid("S-1-5-32-544")
+	if err != nil {
+		return err
+	}
+	localSystem, err := windows.StringToSid("S-1-5-18")
+	if err != nil {
+		return err
+	}
+	if owner == nil || (!owner.Equals(administrators) && !owner.Equals(localSystem)) {
+		return fmt.Errorf("protected Core path has an untrusted owner: %s", path)
+	}
+	dacl, _, err := descriptor.DACL()
+	if err != nil || dacl == nil {
+		return fmt.Errorf("protected Core path has no trusted DACL: %s", path)
+	}
+	const fileDeleteChild windows.ACCESS_MASK = 0x00000040
+	writeMask := windows.ACCESS_MASK(
+		windows.GENERIC_ALL | windows.GENERIC_WRITE |
+			windows.DELETE | windows.WRITE_DAC | windows.WRITE_OWNER |
+			windows.FILE_WRITE_DATA | windows.FILE_APPEND_DATA |
+			windows.FILE_WRITE_EA | windows.FILE_WRITE_ATTRIBUTES |
+			fileDeleteChild,
+	)
+	for index := uint32(0); index < uint32(dacl.AceCount); index++ {
+		var ace *windows.ACCESS_ALLOWED_ACE
+		if err := windows.GetAce(dacl, index, &ace); err != nil {
+			return fmt.Errorf("read protected Core ACL entry %d for %s: %w", index, path, err)
+		}
+		if ace == nil || ace.Header.AceType == windows.ACCESS_DENIED_ACE_TYPE {
 			continue
 		}
-		root, folderErr = filepath.Abs(root)
-		if folderErr != nil {
+		if ace.Header.AceType != windows.ACCESS_ALLOWED_ACE_TYPE {
+			return fmt.Errorf("protected Core path has an unsupported allow ACL entry: %s", path)
+		}
+		if ace.Mask&writeMask == 0 {
 			continue
 		}
-		if pathWithin(root, engine) {
-			return nil
+		sid := (*windows.SID)(unsafe.Pointer(&ace.SidStart))
+		if !sid.Equals(administrators) && !sid.Equals(localSystem) {
+			return fmt.Errorf("protected Core path grants write access to %s: %s", sid.String(), path)
 		}
 	}
-	return errors.New("Core Service must be installed beneath Windows Program Files")
+	return nil
 }
 
 func pathWithin(root string, candidate string) bool {

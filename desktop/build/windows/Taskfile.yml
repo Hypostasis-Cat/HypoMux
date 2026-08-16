@@ -227,5 +227,6 @@ tasks:
           INSTALL_SCOPE: '{{.INSTALL_SCOPE | default "machine"}}'
     vars:
       INSTALL_SCOPE: '{{.INSTALL_SCOPE | default "machine"}}'
+      ARCH: '{{.ARCH | default ARCH}}'
     cmds:
-      - wails3 tool sign --input "build/windows/nsis/{{.APP_NAME}}-installer.exe" {{if .SIGN_CERTIFICATE}}--certificate "{{.SIGN_CERTIFICATE}}"{{end}} {{if .SIGN_THUMBPRINT}}--thumbprint "{{.SIGN_THUMBPRINT}}"{{end}} {{if .TIMESTAMP_SERVER}}--timestamp "{{.TIMESTAMP_SERVER}}"{{end}}
+      - wails3 tool sign --input "{{.BIN_DIR}}/{{.APP_NAME}}-{{.ARCH}}-installer.exe" {{if .SIGN_CERTIFICATE}}--certificate "{{.SIGN_CERTIFICATE}}"{{end}} {{if .SIGN_THUMBPRINT}}--thumbprint "{{.SIGN_THUMBPRINT}}"{{end}} {{if .TIMESTAMP_SERVER}}--timestamp "{{.TIMESTAMP_SERVER}}"{{end}}

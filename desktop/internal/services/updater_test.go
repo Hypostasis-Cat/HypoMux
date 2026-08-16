@@ -97,8 +97,8 @@ func TestUpdaterFallsBackToReleaseFeedWhenAPIIsRateLimited(t *testing.T) {
 	const feed = `<?xml version="1.0" encoding="UTF-8"?>
 <feed xmlns="http://www.w3.org/2005/Atom">
   <entry>
-    <title>HypoMux 2.5.5</title>
-    <link rel="alternate" href="https://github.com/Hypostasis-Cat/HypoMux/releases/tag/v2.5.5" />
+    <title>HypoMux 2.5.6</title>
+    <link rel="alternate" href="https://github.com/Hypostasis-Cat/HypoMux/releases/tag/v2.5.6" />
   </entry>
 </feed>`
 	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
@@ -114,7 +114,7 @@ func TestUpdaterFallsBackToReleaseFeedWhenAPIIsRateLimited(t *testing.T) {
 			response.StatusCode = http.StatusOK
 			response.Body = io.NopCloser(strings.NewReader(feed))
 		case request.Method == http.MethodHead && request.URL.String() ==
-			releaseDownloadURL+"v2.5.5/HypoMux_Setup_2.5.5.exe":
+			releaseDownloadURL+"v2.5.6/HypoMux_Setup_2.5.6.exe":
 			response.StatusCode = http.StatusOK
 			response.ContentLength = 30_000_000
 		default:
@@ -129,10 +129,10 @@ func TestUpdaterFallsBackToReleaseFeedWhenAPIIsRateLimited(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !result.Available || result.Release.TagName != "v2.5.5" {
+	if !result.Available || result.Release.TagName != "v2.5.6" {
 		t.Fatalf("fallback update result = %#v", result)
 	}
-	if result.Release.InstallerName != "HypoMux_Setup_2.5.5.exe" ||
+	if result.Release.InstallerName != "HypoMux_Setup_2.5.6.exe" ||
 		result.Release.InstallerSize != 30_000_000 {
 		t.Fatalf("fallback release = %#v", result.Release)
 	}

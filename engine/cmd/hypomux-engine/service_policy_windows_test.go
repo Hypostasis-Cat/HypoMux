@@ -12,9 +12,13 @@ import (
 )
 
 func TestBuildCoreServicePolicyPinsInstalledDesktopAndSidecar(t *testing.T) {
-	installRoot := t.TempDir()
-	binDirectory := filepath.Join(installRoot, "bin")
+	temporaryRoot := t.TempDir()
+	installRoot := filepath.Join(temporaryRoot, "D-Apps", "HypoMux")
+	binDirectory := filepath.Join(temporaryRoot, "ProgramData", "HypoMux", "Core", "bin")
 	if err := os.MkdirAll(binDirectory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(installRoot, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	enginePath := filepath.Join(binDirectory, "hypomux-engine.exe")
@@ -30,7 +34,7 @@ func TestBuildCoreServicePolicyPinsInstalledDesktopAndSidecar(t *testing.T) {
 		}
 	}
 
-	policy, err := buildCoreServicePolicy(enginePath)
+	policy, err := buildCoreServicePolicy(enginePath, desktopPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,5 +87,11 @@ func TestPathWithinRejectsSiblingPrefix(t *testing.T) {
 	}
 	if pathWithin(root, filepath.Join(filepath.Dir(root), "HypoMux-Evil", "hypomux-engine.exe")) {
 		t.Fatal("sibling prefix escaped the install root")
+	}
+}
+
+func TestFixedLocalVolumeRejectsUNCDesktopPath(t *testing.T) {
+	if err := requireFixedLocalVolume(`\\server\share\HypoMux\hypomux.exe`, "desktop"); err == nil {
+		t.Fatal("UNC desktop path was accepted for a machine Core policy")
 	}
 }

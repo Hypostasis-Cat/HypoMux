@@ -10,7 +10,7 @@ import (
 	"github.com/Hypostasis-Cat/HypoMux/engine/internal/server"
 )
 
-func installWindowsService() error {
+func installWindowsService(string) error {
 	return errors.New("Windows Service installation is only available on Windows")
 }
 

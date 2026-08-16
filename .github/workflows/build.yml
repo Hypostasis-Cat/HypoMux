@@ -24,7 +24,7 @@ permissions:
 
 env:
   WAILS_VERSION: v3.0.0-alpha2.119
-  INSTALLER_PATH: desktop/bin/HypoMux-amd64-installer.exe
+  INSTALLER_PATH: desktop/bin/hypomux-amd64-installer.exe
 
 jobs:
   build:
@@ -276,7 +276,7 @@ jobs:
         shell: bash
         run: |
           version="${GITHUB_REF_NAME#v}"
-          cp artifacts/HypoMux-amd64-installer.exe "artifacts/HypoMux_Setup_${version}.exe"
+          cp artifacts/hypomux-amd64-installer.exe "artifacts/HypoMux_Setup_${version}.exe"
 
       - name: Upload installer to GitHub Release
         uses: softprops/action-gh-release@v3

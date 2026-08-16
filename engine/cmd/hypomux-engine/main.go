@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/Hypostasis-Cat/HypoMux/engine/internal/diagnostic"
@@ -41,7 +42,17 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	case "service":
 		return runWindowsService(stderr, baseServerMetadata())
 	case "install-service":
-		if err := installServiceCommand(); err != nil {
+		flags := flag.NewFlagSet("install-service", flag.ContinueOnError)
+		flags.SetOutput(stderr)
+		desktopPath := flags.String("desktop", "", "installed HypoMux desktop executable")
+		if err := flags.Parse(args[1:]); err != nil {
+			return 2
+		}
+		if strings.TrimSpace(*desktopPath) == "" {
+			fmt.Fprintln(stderr, "install-service requires --desktop")
+			return 2
+		}
+		if err := installServiceCommand(*desktopPath); err != nil {
 			fmt.Fprintf(stderr, "install HypoMux Core Service: %v\n", err)
 			return 1
 		}
@@ -111,7 +122,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return 0
 	default:
 		fmt.Fprintf(stderr, "unknown command %q\n", command)
-		fmt.Fprintln(stderr, "usage: hypomux-engine [serve|serve-pipe|service|install-service|remove-service|version|recover|diagnose]")
+		fmt.Fprintln(stderr, "usage: hypomux-engine [serve|serve-pipe|service|install-service --desktop PATH|remove-service|version|recover|diagnose]")
 		return 2
 	}
 }

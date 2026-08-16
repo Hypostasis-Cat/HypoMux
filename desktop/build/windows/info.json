@@ -1,11 +1,21 @@
 {
 	"fixed": {
-		"file_version": "2.5.4",
-		"product_version": "2.5.4"
+		"file_version": "2.5.5",
+		"product_version": "2.5.5"
 	},
 	"info": {
+		"0000": {
+			"FileVersion": "2.5.5",
+			"ProductVersion": "2.5.5",
+			"CompanyName": "HypoMux",
+			"FileDescription": "HypoMux",
+			"LegalCopyright": "Copyright 2026 HypoMux contributors",
+			"ProductName": "HypoMux",
+			"Comments": "HypoMux Wails v3 desktop client"
+		},
 		"0409": {
-			"ProductVersion": "2.5.4",
+			"FileVersion": "2.5.5",
+			"ProductVersion": "2.5.5",
 			"CompanyName": "HypoMux",
 			"FileDescription": "HypoMux",
 			"LegalCopyright": "Copyright 2026 HypoMux contributors",

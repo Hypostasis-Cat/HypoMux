@@ -32,7 +32,7 @@ const (
 
 var errServiceClientRejected = errors.New("Core Service client rejected")
 
-func installWindowsService() error {
+func installWindowsService(desktopPath string) error {
 	executable, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("resolve executable: %w", err)
@@ -44,7 +44,7 @@ func installWindowsService() error {
 	if err := requireMachineInstallLocation(executable); err != nil {
 		return err
 	}
-	policy, err := buildCoreServicePolicy(executable)
+	policy, err := buildCoreServicePolicy(executable, desktopPath)
 	if err != nil {
 		return fmt.Errorf("build Core Service security policy: %w", err)
 	}

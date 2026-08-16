@@ -413,6 +413,36 @@ func TestTunActivatePinsConfigDigestForInstalledServicePolicy(t *testing.T) {
 	_ = engineServer.stopProxy("clear-config-pin")
 }
 
+func TestTunActivateUsesProtectedPinnedExecutableWhenDesktopAssertsAppCopy(t *testing.T) {
+	metadata := testPinnedTunMetadata()
+	metadata.TunExecutable = `C:\ProgramData\HypoMux\Core\bin\sing-box.exe`
+	engineServer := New(strings.NewReader(""), &bytes.Buffer{}, metadata)
+	controller := &fakeTunController{status: tun.Status{State: tun.StateStopped}}
+	engineServer.tun = controller
+	startTUNPoolForLifecycleTest(t, engineServer)
+	digest := strings.Repeat("b", 64)
+	request := fmt.Sprintf(`{
+		"protocol":1,
+		"id":"tun-protected-copy",
+		"method":"tun.activate",
+		"params":{
+			"executable":"D:\\Apps\\HypoMux\\bin\\sing-box.exe",
+			"config_path":"C:\\Users\\Example\\sing-box.json",
+			"config_sha256":"%s"
+		}
+	}`, digest)
+	response, _ := engineServer.handle(context.Background(), []byte(request))
+	if response.Error != nil {
+		t.Fatalf("protected executable override was rejected: %#v", response.Error)
+	}
+	if len(controller.activateConfigs) != 1 ||
+		controller.activateConfigs[0].Executable != metadata.TunExecutable ||
+		controller.activateConfigs[0].ExecutableSHA256 != metadata.TunExecutableSHA256 {
+		t.Fatalf("protected executable policy was not enforced: %#v", controller.activateConfigs)
+	}
+	_ = engineServer.stopProxy("clear-protected-copy")
+}
+
 func TestTunActivateRetriesWithIPv4OnlyConfigAfterIPv6SetupFailure(t *testing.T) {
 	engineServer := New(
 		strings.NewReader(""),

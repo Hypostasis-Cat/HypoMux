@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Version-2.5.4-0078d4?style=flat-square" alt="Version 2.5.4">
+  <img src="https://img.shields.io/badge/Version-2.5.5-0078d4?style=flat-square" alt="Version 2.5.5">
   <img src="https://img.shields.io/badge/Core-Go-00ADD8?style=flat-square&logo=go&logoColor=white" alt="Go">
   <img src="https://img.shields.io/badge/Desktop-Wails%20v3-CB3837?style=flat-square" alt="Wails v3">
   <img src="https://img.shields.io/badge/UI-React%20%2B%20Fluent%20UI-61DAFB?style=flat-square&logo=react&logoColor=black" alt="React and Fluent UI">
@@ -16,6 +16,10 @@
 HypoMux is an open-source multi-adapter aggregation and split-routing utility for Windows. It distributes multi-connection download workloads across active network adapters, allowing Ethernet, Wi-Fi, mobile hotspots, and USB tethering to carry traffic at the same time.
 
 HypoMux balances independent connections; it does not split one TCP connection across multiple paths. It works best with highly concurrent workloads such as Steam updates, IDM downloads, game launchers, and large browser downloads. A single-connection transfer remains limited by that connection.
+
+## Installation fixes in 2.5.5
+
+Version 2.5.5 fixes Windows service registration when the installation directory is changed. The desktop can still be installed on a local fixed drive such as C: or D:, while the Core service and its dependencies are deployed to a protected system directory. Upgrade, rollback, and uninstall flows now also handle previous locations and residual files safely.
 
 ## Aggregation throughput improvements in 2.5.4
 

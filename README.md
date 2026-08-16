@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Version-2.5.4-0078d4?style=flat-square" alt="Version 2.5.4">
+  <img src="https://img.shields.io/badge/Version-2.5.5-0078d4?style=flat-square" alt="Version 2.5.5">
   <img src="https://img.shields.io/badge/Core-Go-00ADD8?style=flat-square&logo=go&logoColor=white" alt="Go">
   <img src="https://img.shields.io/badge/Desktop-Wails%20v3-CB3837?style=flat-square" alt="Wails v3">
   <img src="https://img.shields.io/badge/UI-React%20%2B%20Fluent%20UI-61DAFB?style=flat-square&logo=react&logoColor=black" alt="React and Fluent UI">
@@ -16,6 +16,10 @@
 HypoMux 是一款面向 Windows 的开源多网卡聚合与分流工具。它把多连接下载任务分配到多张活动网卡，让有线网络、Wi-Fi、手机热点或 USB 网络共享能够同时承担流量。
 
 HypoMux 聚合的是多个独立连接，而不是把单条 TCP 连接拆成多路。因此，它尤其适合 Steam、IDM、游戏平台更新器、浏览器大文件下载等高并发场景；单连接任务的速度仍受该连接本身限制。
+
+## 2.5.5 安装修复
+
+2.5.5 修复了更换安装目录后 Windows 服务注册失败的问题。桌面程序仍可安装到 C、D 等本地固定磁盘，Core 服务及其依赖会部署到受保护的系统目录；升级、失败回滚和卸载流程也会安全处理旧目录与残留文件。
 
 ## 2.5.4 聚合吞吐优化
 

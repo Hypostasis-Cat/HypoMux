@@ -25,6 +25,23 @@ func TestInstallerMigratesLegacyLayoutsBeforeWritingCorrectedRoot(t *testing.T) 
 		`/Delete /TN "\HypoMuxAutoStart" /F`,
 		`File /oname=legacy-v22-recover.ps1 "legacy-v22-recover.ps1"`,
 		`File /oname=stop-core-for-upgrade.ps1 "stop-core-for-upgrade.ps1"`,
+		`File /oname=compare-install-directories.ps1 "compare-install-directories.ps1"`,
+		`File /oname=protect-core-directory.ps1 "protect-core-directory.ps1"`,
+		`!define HYPOMUX_PROTECTED_CORE_ROOT "$APPDATA\HypoMux\Core"`,
+		`!define HYPOMUX_CORE_POLICY_KEY "Software\HypoMux\CoreServicePolicy"`,
+		`Call PrepareProtectedCoreDirectory`,
+		`Call FinalizeProtectedCoreDirectory`,
+		`Function RollbackFreshMachineInstall`,
+		`Call RollbackFreshMachineInstall`,
+		`ReadRegStr $2 HKLM "${HYPOMUX_NESTED_UNINST_KEY}" "InstallLocation"`,
+		`Var HypoMuxPreviousInstallDir`,
+		`Call DetermineInstallPathChange`,
+		`Call RecoverPreviousWailsInstallation`,
+		`Call RemovePreviousWailsInstallation`,
+		`"${HYPOMUX_PROTECTED_CORE_BIN}\hypomux-engine.exe" install-service --desktop "$INSTDIR\${PRODUCT_EXECUTABLE}"`,
+		`Delete "$APPDATA\HypoMuxCoreRuntime\tun-config-*.json"`,
+		`IfFileExists "$INSTDIR\bin\hypomux-engine.exe" 0 serviceRemoveRaw`,
+		`"$SYSDIR\sc.exe" delete "${HYPOMUX_CORE_SERVICE}"`,
 		`%USERPROFILE%\.hypomux`,
 	} {
 		if !strings.Contains(script, required) {
@@ -64,6 +81,97 @@ func TestInstallerMigratesLegacyLayoutsBeforeWritingCorrectedRoot(t *testing.T) 
 	stopAt := strings.Index(script, `sc.exe" stop "${HYPOMUX_CORE_SERVICE}"`)
 	if disableAt < 0 || stopAt <= disableAt {
 		t.Fatalf("Core service restart must be disabled before stop: disable=%d stop=%d", disableAt, stopAt)
+	}
+}
+
+func TestInstallerMigratesRegisteredWailsInstallWhenDirectoryChanges(t *testing.T) {
+	data, err := os.ReadFile("build/windows/nsis/project.nsi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(data)
+	captureAt := strings.Index(script, `ReadRegStr $HypoMuxPreviousInstallDir HKLM "${UNINST_KEY}" "InstallLocation"`)
+	compareAt := strings.Index(script, `Call DetermineInstallPathChange`)
+	recoverAt := strings.Index(script, `Call RecoverPreviousWailsInstallation`)
+	copyAt := strings.Index(script, `!insertmacro wails.files`)
+	commitAt := strings.Index(script, `!insertmacro wails.writeUninstaller`)
+	removeAt := strings.Index(script, `Call RemovePreviousWailsInstallation`)
+	if captureAt < 0 || compareAt <= captureAt || recoverAt <= compareAt || copyAt <= recoverAt || commitAt <= copyAt || removeAt <= commitAt {
+		t.Fatalf(
+			"changed-directory migration order is unsafe: capture=%d compare=%d recover=%d copy=%d commit=%d remove=%d",
+			captureAt,
+			compareAt,
+			recoverAt,
+			copyAt,
+			commitAt,
+			removeAt,
+		)
+	}
+	comparison, err := os.ReadFile("build/windows/nsis/compare-install-directories.ps1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, required := range []string{
+		`GetFileInformationByHandle`,
+		`VolumeSerialNumber`,
+		`FileIndexHigh`,
+		`FileIndexLow`,
+		`FileFlagBackupSemantics`,
+	} {
+		if !strings.Contains(string(comparison), required) {
+			t.Fatalf("directory identity comparison is missing %q", required)
+		}
+	}
+	for _, unsafe := range []string{
+		`RMDir /r "$HypoMuxPreviousInstallDir"`,
+		`RMDir /r "$2"`,
+	} {
+		if strings.Contains(script, unsafe) {
+			t.Fatalf("changed-directory migration recursively removes the previous path via %q", unsafe)
+		}
+	}
+}
+
+func TestMachineInstallerSeparatesProtectedServiceFromCustomDesktopPath(t *testing.T) {
+	data, err := os.ReadFile("build/windows/nsis/project.nsi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(data)
+	protectedCopyAt := strings.Index(script, `SetOutPath "${HYPOMUX_PROTECTED_CORE_BIN}"`)
+	protectAt := strings.Index(script, `Call FinalizeProtectedCoreDirectory`)
+	installAt := strings.Index(script, `"${HYPOMUX_PROTECTED_CORE_BIN}\hypomux-engine.exe" install-service --desktop "$INSTDIR\${PRODUCT_EXECUTABLE}"`)
+	if protectedCopyAt < 0 || protectAt <= protectedCopyAt || installAt <= protectAt {
+		t.Fatalf(
+			"protected Core order is unsafe: copy=%d protect=%d install=%d",
+			protectedCopyAt,
+			protectAt,
+			installAt,
+		)
+	}
+	if strings.Contains(script, `"$INSTDIR\bin\hypomux-engine.exe" install-service`) {
+		t.Fatal("machine service still runs from the user-selected application directory")
+	}
+	if strings.Contains(script, `RMDir /r $INSTDIR`) || strings.Contains(script, `RMDir /r "$INSTDIR"`) {
+		t.Fatal("uninstaller still recursively removes the user-selected application directory")
+	}
+
+	protection, err := os.ReadFile("build/windows/nsis/protect-core-directory.ps1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	protectionScript := string(protection)
+	for _, required := range []string{
+		`CommonApplicationData`,
+		`BuiltinAdministratorsSid`,
+		`LocalSystemSid`,
+		`BuiltinUsersSid`,
+		`SetAccessRuleProtection($true, $false)`,
+		`ReparsePoint`,
+	} {
+		if !strings.Contains(protectionScript, required) {
+			t.Fatalf("protected Core preparation is missing %q", required)
+		}
 	}
 }
 
@@ -114,10 +222,25 @@ func TestReleasePublishesLegacyUpdaterCompatibleInstallerName(t *testing.T) {
 		!strings.Contains(workflow, `HypoMux_Setup_${version}.exe`) {
 		t.Fatal("release workflow does not publish the installer name recognized by v2.2.0")
 	}
+	for _, required := range []string{
+		`INSTALLER_PATH: desktop/bin/hypomux-amd64-installer.exe`,
+		`cp artifacts/hypomux-amd64-installer.exe "artifacts/HypoMux_Setup_${version}.exe"`,
+	} {
+		if !strings.Contains(workflow, required) {
+			t.Fatalf("release workflow installer casing is inconsistent: missing %q", required)
+		}
+	}
+	taskData, err := os.ReadFile("build/windows/Taskfile.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(taskData), `--input "{{.BIN_DIR}}/{{.APP_NAME}}-{{.ARCH}}-installer.exe"`) {
+		t.Fatal("local installer signing task does not target the packaged NSIS artifact")
+	}
 }
 
 func TestVersionMetadataIsConsistent(t *testing.T) {
-	const version = "2.5.4"
+	const version = "2.5.5"
 	files := []string{
 		"Taskfile.yml",
 		"build/config.yml",
@@ -321,8 +444,13 @@ func TestWindowsTaskManagerUsesProductName(t *testing.T) {
 			t.Fatalf("%s still exposes the tagline as the Task Manager application name", path)
 		}
 	}
-	if !strings.Contains(string(infoData), `"0409"`) {
-		t.Fatal("Windows version strings must use an explicit language so Explorer and Task Manager can read FileDescription")
+	for _, language := range []string{`"0000"`, `"0409"`} {
+		if !strings.Contains(string(infoData), language) {
+			t.Fatalf("Windows version strings are missing language fallback %s", language)
+		}
+	}
+	if strings.Count(string(infoData), `"FileVersion": "2.5.5"`) != 2 {
+		t.Fatal("Windows neutral and en-US version tables must both expose FileVersion")
 	}
 }
 
@@ -334,10 +462,11 @@ func TestCardsUseThemeAccentHoverGlow(t *testing.T) {
 	css := string(cssData)
 	for _, required := range []string{
 		`.hm-card:hover:not(:has(.hm-card:hover))`,
-		`.hm-card:hover:not(:has(.hm-card:hover))::before`,
-		`border-color: var(--hm-card-glow-border)`,
-		`border: 1px solid var(--hm-card-glow-border)`,
-		`0 0 14px var(--hm-card-glow-far)`,
+		`.hm-card::before`,
+		`.hm-card::after`,
+		`--hm-card-light-strength: 0.72`,
+		`var(--hm-card-glow-border) 34%`,
+		`drop-shadow(0 0 20px var(--hm-card-glow-far))`,
 		`@media (hover: hover) and (pointer: fine)`,
 	} {
 		if !strings.Contains(css, required) {
@@ -346,7 +475,6 @@ func TestCardsUseThemeAccentHoverGlow(t *testing.T) {
 	}
 	for _, removed := range []string{
 		`.network-adapter:hover {`,
-		`.health-adapter-choice:hover {`,
 	} {
 		if strings.Contains(css, removed) {
 			t.Fatalf("card hover still changes the surface fill via %q", removed)
