@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -103,7 +104,17 @@ func (s *EngineService) Connections() (ConnectionListSnapshot, error) {
 			StartedAt: item.StartedAt, BytesUp: item.BytesUp, BytesDown: item.BytesDown,
 		})
 	}
+	sortConnectionViews(result.Connections)
 	return result, nil
+}
+
+func sortConnectionViews(connections []ConnectionView) {
+	sort.SliceStable(connections, func(left, right int) bool {
+		if connections[left].StartedAt.Equal(connections[right].StartedAt) {
+			return connections[left].ID < connections[right].ID
+		}
+		return connections[left].StartedAt.Before(connections[right].StartedAt)
+	})
 }
 
 func splitConnectionEndpoint(value string) (string, string) {

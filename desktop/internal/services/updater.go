@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	CurrentVersion     = "2.5.5"
+	CurrentVersion     = "2.5.6"
 	latestReleaseAPI   = "https://api.github.com/repos/Hypostasis-Cat/HypoMux/releases/latest"
 	releasesFeedURL    = "https://github.com/Hypostasis-Cat/HypoMux/releases.atom"
 	releaseDownloadURL = "https://github.com/Hypostasis-Cat/HypoMux/releases/download/"

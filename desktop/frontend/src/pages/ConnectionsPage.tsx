@@ -18,7 +18,7 @@ import {
   Globe20Regular,
   PlugConnected20Regular,
 } from "@fluentui/react-icons";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { GlassSurface } from "../components/material/GlassSurface";
 import { AppToaster } from "../components/AppToaster";
 import { useI18n } from "../i18n/i18n";
@@ -65,6 +65,8 @@ export function ConnectionsPage() {
   const [query, setQuery] = useState("");
   const [now, setNow] = useState(Date.now());
   const requestActive = useRef(false);
+  const connectionListRef = useRef<HTMLDivElement>(null);
+  const pendingScrollTop = useRef<number | null>(null);
   const toasterId = useId("connections-toaster");
   const { dispatchToast } = useToastController(toasterId);
 
@@ -78,6 +80,7 @@ export function ConnectionsPage() {
         8_000,
         text("读取活动连接", "Loading active connections"),
       );
+      pendingScrollTop.current = connectionListRef.current?.scrollTop ?? null;
       setSnapshot({ ...next, connections: next.connections ?? [] });
     } catch (error) {
       dispatchToast(
@@ -107,6 +110,14 @@ export function ConnectionsPage() {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, []);
+
+  useLayoutEffect(() => {
+    const list = connectionListRef.current;
+    const savedScrollTop = pendingScrollTop.current;
+    if (!list || savedScrollTop === null) return;
+    list.scrollTop = Math.min(savedScrollTop, Math.max(0, list.scrollHeight - list.clientHeight));
+    pendingScrollTop.current = null;
+  }, [snapshot]);
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase();
@@ -202,7 +213,7 @@ export function ConnectionsPage() {
           <span>{text("流量", "Traffic")}</span>
           <span>{text("时长", "Duration")}</span>
         </div>
-        <div className="connection-list">
+        <div ref={connectionListRef} className="connection-list">
           {loading ? (
             <div key="connections-loading" className="connections-empty motion-state-content"><Spinner label={text("正在读取实时连接", "Loading live connections")} /></div>
           ) : !engineRunning ? (

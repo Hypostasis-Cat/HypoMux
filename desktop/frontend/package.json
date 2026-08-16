@@ -1,7 +1,7 @@
 {
   "name": "hypomux-desktop",
   "private": true,
-  "version": "2.5.5",
+  "version": "2.5.6",
   "type": "module",
   "scripts": {
     "dev": "vite",

@@ -1,6 +1,26 @@
 package services
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
+
+func TestSortConnectionViewsKeepsTelemetryOrderStable(t *testing.T) {
+	started := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
+	connections := []ConnectionView{
+		{ID: 9, StartedAt: started.Add(time.Second)},
+		{ID: 4, StartedAt: started},
+		{ID: 2, StartedAt: started},
+	}
+
+	sortConnectionViews(connections)
+
+	for index, want := range []uint64{2, 4, 9} {
+		if connections[index].ID != want {
+			t.Fatalf("connection order = %#v, want IDs [2 4 9]", connections)
+		}
+	}
+}
 
 func TestConnectionOutboundClassification(t *testing.T) {
 	tests := []struct {

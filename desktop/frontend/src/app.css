@@ -2261,6 +2261,7 @@ svg {
   min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
+  overflow-anchor: none;
   scrollbar-gutter: stable;
   scrollbar-width: thin;
 }
