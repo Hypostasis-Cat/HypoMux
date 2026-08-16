@@ -35,9 +35,12 @@ func TestInstallerMigratesLegacyLayoutsBeforeWritingCorrectedRoot(t *testing.T) 
 		`Call RollbackFreshMachineInstall`,
 		`ReadRegStr $2 HKLM "${HYPOMUX_NESTED_UNINST_KEY}" "InstallLocation"`,
 		`Var HypoMuxPreviousInstallDir`,
+		`Var HypoMuxAutostartEnabled`,
 		`Call DetermineInstallPathChange`,
 		`Call RecoverPreviousWailsInstallation`,
 		`Call RemovePreviousWailsInstallation`,
+		`Call RestoreAutostart`,
+		`WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "HypoMux" '$\"$INSTDIR\${PRODUCT_EXECUTABLE}$\" --silent'`,
 		`"${HYPOMUX_PROTECTED_CORE_BIN}\hypomux-engine.exe" install-service --desktop "$INSTDIR\${PRODUCT_EXECUTABLE}"`,
 		`Delete "$APPDATA\HypoMuxCoreRuntime\tun-config-*.json"`,
 		`IfFileExists "$INSTDIR\bin\hypomux-engine.exe" 0 serviceRemoveRaw`,
@@ -96,15 +99,17 @@ func TestInstallerMigratesRegisteredWailsInstallWhenDirectoryChanges(t *testing.
 	copyAt := strings.Index(script, `!insertmacro wails.files`)
 	commitAt := strings.Index(script, `!insertmacro wails.writeUninstaller`)
 	removeAt := strings.Index(script, `Call RemovePreviousWailsInstallation`)
-	if captureAt < 0 || compareAt <= captureAt || recoverAt <= compareAt || copyAt <= recoverAt || commitAt <= copyAt || removeAt <= commitAt {
+	restoreAt := strings.Index(script, `Call RestoreAutostart`)
+	if captureAt < 0 || compareAt <= captureAt || recoverAt <= compareAt || copyAt <= recoverAt || commitAt <= copyAt || removeAt <= commitAt || restoreAt <= removeAt {
 		t.Fatalf(
-			"changed-directory migration order is unsafe: capture=%d compare=%d recover=%d copy=%d commit=%d remove=%d",
+			"changed-directory migration order is unsafe: capture=%d compare=%d recover=%d copy=%d commit=%d remove=%d restore-autostart=%d",
 			captureAt,
 			compareAt,
 			recoverAt,
 			copyAt,
 			commitAt,
 			removeAt,
+			restoreAt,
 		)
 	}
 	comparison, err := os.ReadFile("build/windows/nsis/compare-install-directories.ps1")

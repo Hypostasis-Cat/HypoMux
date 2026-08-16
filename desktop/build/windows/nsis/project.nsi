@@ -164,6 +164,7 @@ ShowInstDetails show # This will always show the installation details.
 Var HypoMuxFreshInstall
 Var HypoMuxPreviousInstallDir
 Var HypoMuxInstallPathChanged
+Var HypoMuxAutostartEnabled
 
 Function .onInit
    !insertmacro MUI_LANGDLL_DISPLAY
@@ -171,6 +172,11 @@ Function .onInit
    StrCpy $HypoMuxFreshInstall "1"
    StrCpy $HypoMuxPreviousInstallDir ""
    StrCpy $HypoMuxInstallPathChanged "0"
+   StrCpy $HypoMuxAutostartEnabled "0"
+   ReadRegStr $0 HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "HypoMux"
+   ${If} $0 != ""
+       StrCpy $HypoMuxAutostartEnabled "1"
+   ${EndIf}
    !if "${WAILS_INSTALL_SCOPE}" == "user"
        ReadRegStr $HypoMuxPreviousInstallDir HKCU "${UNINST_KEY}" "InstallLocation"
    !else
@@ -204,6 +210,15 @@ Function un.RemoveLegacyAutostartTask
     nsExec::ExecToStack '"$SYSDIR\schtasks.exe" /Delete /TN "\HypoMuxAutoStart" /F'
     Pop $0
     Pop $1
+FunctionEnd
+
+Function RestoreAutostart
+    ${If} $HypoMuxAutostartEnabled == "1"
+        ; A legacy uninstaller may have removed this value, and a changed
+        ; install directory makes the previous command invalid. Preserve the
+        ; preference while always committing the newly installed executable.
+        WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "HypoMux" '$\"$INSTDIR\${PRODUCT_EXECUTABLE}$\" --silent'
+    ${EndIf}
 FunctionEnd
 
 Function CloseRunningHypoMux
@@ -663,6 +678,7 @@ Section
     ; Commit the new uninstaller registration before removing the previous
     ; exact Wails payload. A late cleanup failure cannot orphan Add/Remove Apps.
     Call RemovePreviousWailsInstallation
+    Call RestoreAutostart
 SectionEnd
 
 Section "uninstall"

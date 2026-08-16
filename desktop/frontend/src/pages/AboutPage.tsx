@@ -26,14 +26,22 @@ import { AppToaster } from "../components/AppToaster";
 import { desktopPlatform } from "../platform/desktop";
 import { appServices, type UpdateCheckResult } from "../platform/services";
 import { productInfo } from "../product";
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { useI18n } from "../i18n/i18n";
 import { startSerialPoll } from "../platform/serialPoll";
 
-function ReleaseNotes({ notes, emptyText }: { notes?: string; emptyText: string }) {
+function ReleaseNotes({
+  notes,
+  emptyText,
+  scrollRef,
+}: {
+  notes?: string;
+  emptyText: string;
+  scrollRef: RefObject<HTMLDivElement>;
+}) {
   const value = notes?.trim() || emptyText;
   return (
-    <div className="update-notes">
+    <div ref={scrollRef} className="update-notes">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         skipHtml
@@ -65,8 +73,29 @@ export function AboutPage() {
   const [downloadPercent, setDownloadPercent] = useState(0);
   const [update, setUpdate] = useState<UpdateCheckResult | null>(null);
   const [updateDialogOpen, setUpdateDialogOpen] = useState(false);
+  const updateDialogTitleRef = useRef<HTMLDivElement>(null);
+  const updateDialogContentRef = useRef<HTMLDivElement>(null);
+  const updateNotesRef = useRef<HTMLDivElement>(null);
   const toasterId = useId("about-toaster");
   const { dispatchToast } = useToastController(toasterId);
+
+  useLayoutEffect(() => {
+    if (!updateDialogOpen) return;
+
+    // Fluent moves focus into a newly opened dialog. When the first focusable
+    // release-note link is far down the Markdown, that focus can scroll both
+    // the dialog content and its nested notes pane to the bottom. Anchor focus
+    // at the title and reset both scroll containers before the frame is shown.
+    updateDialogTitleRef.current?.focus({ preventScroll: true });
+    if (updateDialogContentRef.current) {
+      updateDialogContentRef.current.scrollTop = 0;
+      updateDialogContentRef.current.scrollLeft = 0;
+    }
+    if (updateNotesRef.current) {
+      updateNotesRef.current.scrollTop = 0;
+      updateNotesRef.current.scrollLeft = 0;
+    }
+  }, [updateDialogOpen, update?.release.tag_name]);
 
   const notify = (title: string, body: string, intent: "success" | "error" | "info" = "info") => {
     dispatchToast(
@@ -204,14 +233,14 @@ export function AboutPage() {
       >
         <DialogSurface className="update-dialog">
           <DialogBody>
-            <DialogTitle>{t("about_update_available_title")}</DialogTitle>
-            <DialogContent>
+            <DialogTitle ref={updateDialogTitleRef} tabIndex={-1}>{t("about_update_available_title")}</DialogTitle>
+            <DialogContent ref={updateDialogContentRef}>
               <p className="update-summary">
                 {text("当前版本", "Current version")}: v{update?.current_version}<br />
                 {text("最新版本", "Latest version")}: v{update?.release.tag_name.replace(/^v/i, "")}
               </p>
               <strong>{t("about_update_notes_label")}</strong>
-              <ReleaseNotes notes={update?.release.notes} emptyText={t("about_update_notes_empty")} />
+              <ReleaseNotes notes={update?.release.notes} emptyText={t("about_update_notes_empty")} scrollRef={updateNotesRef} />
               <p>{t("about_update_download_hint")}</p>
             </DialogContent>
             <DialogActions>
