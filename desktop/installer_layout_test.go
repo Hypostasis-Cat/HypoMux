@@ -315,6 +315,45 @@ func TestReleasePublishesOneSignedInstallerThenUpdatesSignedChannel(t *testing.T
 	}
 }
 
+func TestReleaseNotesAreTheSingleSourceForReleaseBodiesAndManifest(t *testing.T) {
+	notesPath := "../.github/release-notes/v2.5.7.md"
+	notes, err := os.ReadFile(notesPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(strings.TrimSpace(string(notes))) == 0 {
+		t.Fatal("versioned release notes must not be empty")
+	}
+
+	data, err := os.ReadFile("../.github/workflows/build.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	workflow := string(data)
+	for _, required := range []string{
+		`release_notes_path=".github/release-notes/${GITHUB_REF_NAME}.md"`,
+		`if [[ ! -f "${release_notes_path}" ]]`,
+		`if [[ ! -s "${release_notes_path}" ]]`,
+		`--rawfile notes "${release_notes_path}"`,
+		`notes: $notes`,
+		`jq -j '.notes' artifacts/latest.json > artifacts/manifest-notes.md`,
+		`cmp --silent "${release_notes_path}" artifacts/manifest-notes.md`,
+		`name: HypoMux ${{ github.ref_name }}`,
+		`body_path: ${{ steps.release_notes.outputs.path }}`,
+		`release_notes_path="${{ steps.release_notes.outputs.path }}"`,
+		`--body "${release_body}" --make-latest true`,
+		`cnb --json release get -t "${tag}" | jq -j '.body' > artifacts/cnb-release-notes.md`,
+		`cmp --silent "${release_notes_path}" artifacts/cnb-release-notes.md`,
+	} {
+		if !strings.Contains(workflow, required) {
+			t.Fatalf("release notes are not wired to every release consumer: missing %q", required)
+		}
+	}
+	if strings.Contains(workflow, `notes: ""`) {
+		t.Fatal("update manifest still publishes empty release notes")
+	}
+}
+
 func TestCreateReleaseTagSynchronizesCNBIdempotently(t *testing.T) {
 	data, err := os.ReadFile("../.github/workflows/create-release-tag.yml")
 	if err != nil {

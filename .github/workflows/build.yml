@@ -290,6 +290,22 @@ jobs:
           name: HypoMux-Windows-${{ github.sha }}-${{ github.run_attempt }}
           path: artifacts
 
+      - name: Validate versioned release notes
+        id: release_notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_notes_path=".github/release-notes/${GITHUB_REF_NAME}.md"
+          if [[ ! -f "${release_notes_path}" ]]; then
+            echo "Missing release notes for ${GITHUB_REF_NAME}: ${release_notes_path}"
+            exit 1
+          fi
+          if [[ ! -s "${release_notes_path}" ]]; then
+            echo "Release notes are empty: ${release_notes_path}"
+            exit 1
+          fi
+          printf 'path=%s\n' "${release_notes_path}" >> "${GITHUB_OUTPUT}"
+
       - name: Stage legacy-updater-compatible installer name
         id: stage_release
         shell: bash
@@ -306,7 +322,9 @@ jobs:
           installer_path="artifacts/${installer_name}"
           installer_size="$(stat -c%s "${installer_path}")"
           installer_sha256="$(sha256sum "${installer_path}" | awk '{print $1}')"
+          release_notes_path="${{ steps.release_notes.outputs.path }}"
           jq -n \
+            --rawfile notes "${release_notes_path}" \
             --arg version "${version}" \
             --arg name "HypoMux ${version}" \
             --arg installer_name "${installer_name}" \
@@ -318,7 +336,7 @@ jobs:
               schema_version: 1,
               version: $version,
               name: $name,
-              notes: "",
+              notes: $notes,
               installer: {
                 name: $installer_name,
                 size: $installer_size,
@@ -327,6 +345,8 @@ jobs:
               }
             }' > artifacts/latest.json
           jq empty artifacts/latest.json
+          jq -j '.notes' artifacts/latest.json > artifacts/manifest-notes.md
+          cmp --silent "${release_notes_path}" artifacts/manifest-notes.md
 
       - name: Sign update manifest
         shell: bash
@@ -374,15 +394,24 @@ jobs:
           set -euo pipefail
           tag="${GITHUB_REF_NAME}"
           version="${tag#v}"
+          release_notes_path="${{ steps.release_notes.outputs.path }}"
+          release_body="$(cat "${release_notes_path}"; printf '\036')"
+          release_body="${release_body%$'\036'}"
           cnb() {
             docker run --rm -e CNB_TOKEN "${CNB_IMAGE}" \
               git-cnb --repo=Hypostasis-Cat/HypoMux "$@"
           }
 
           if ! cnb release get -t "${tag}" >/dev/null 2>&1; then
-            cnb release create -t "${tag}" -n "HypoMux ${version}" --make-latest true
+            cnb release create -t "${tag}" -n "HypoMux ${version}" \
+              --body "${release_body}" --make-latest true
           fi
           cnb release get -t "${tag}" >/dev/null
+          cnb --json release get -t "${tag}" | jq -j '.body' > artifacts/cnb-release-notes.md
+          if ! cmp --silent "${release_notes_path}" artifacts/cnb-release-notes.md; then
+            echo "CNB Release body differs from ${release_notes_path}."
+            exit 1
+          fi
 
           installer="artifacts/${{ steps.stage_release.outputs.installer_name }}"
           asset_url="https://cnb.cool/Hypostasis-Cat/HypoMux/-/releases/download/${tag}/$(basename "${installer}")"
@@ -434,10 +463,21 @@ jobs:
               ;;
           esac
 
+      - name: Create or update GitHub Release metadata
+        if: steps.github_installer.outputs.upload == 'false'
+        uses: softprops/action-gh-release@v3
+        with:
+          name: HypoMux ${{ github.ref_name }}
+          body_path: ${{ steps.release_notes.outputs.path }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Upload installer to GitHub Release
         if: steps.github_installer.outputs.upload == 'true'
         uses: softprops/action-gh-release@v3
         with:
+          name: HypoMux ${{ github.ref_name }}
+          body_path: ${{ steps.release_notes.outputs.path }}
           files: artifacts/${{ steps.stage_release.outputs.installer_name }}
           fail_on_unmatched_files: true
         env:
