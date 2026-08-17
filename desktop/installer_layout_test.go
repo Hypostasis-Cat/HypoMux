@@ -265,7 +265,7 @@ func TestReleasePublishesLegacyUpdaterCompatibleInstallerName(t *testing.T) {
 }
 
 func TestVersionMetadataIsConsistent(t *testing.T) {
-	const version = "2.5.6"
+	const version = "2.5.7"
 	files := []string{
 		"Taskfile.yml",
 		"build/config.yml",
@@ -500,7 +500,7 @@ func TestWindowsTaskManagerUsesProductName(t *testing.T) {
 			t.Fatalf("Windows version strings are missing language fallback %s", language)
 		}
 	}
-	if strings.Count(string(infoData), `"FileVersion": "2.5.6"`) != 2 {
+	if strings.Count(string(infoData), `"FileVersion": "2.5.7"`) != 2 {
 		t.Fatal("Windows neutral and en-US version tables must both expose FileVersion")
 	}
 }

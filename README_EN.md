@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Version-2.5.6-0078d4?style=flat-square" alt="Version 2.5.6">
+  <img src="https://img.shields.io/badge/Version-2.5.7-0078d4?style=flat-square" alt="Version 2.5.7">
   <img src="https://img.shields.io/badge/Core-Go-00ADD8?style=flat-square&logo=go&logoColor=white" alt="Go">
   <img src="https://img.shields.io/badge/Desktop-Wails%20v3-CB3837?style=flat-square" alt="Wails v3">
   <img src="https://img.shields.io/badge/UI-React%20%2B%20Fluent%20UI-61DAFB?style=flat-square&logo=react&logoColor=black" alt="React and Fluent UI">
@@ -16,6 +16,10 @@
 HypoMux is an open-source multi-adapter aggregation and split-routing utility for Windows. It distributes multi-connection download workloads across active network adapters, allowing Ethernet, Wi-Fi, mobile hotspots, and USB tethering to carry traffic at the same time.
 
 HypoMux balances independent connections; it does not split one TCP connection across multiple paths. It works best with highly concurrent workloads such as Steam updates, IDM downloads, game launchers, and large browser downloads. A single-connection transfer remains limited by that connection.
+
+## Installer compatibility fix in 2.5.7
+
+Version 2.5.7 fixes a case where an installer inheriting an invalid `PSModulePath` could prevent Windows PowerShell from loading system modules and configuring the protected Core directory. ACL updates now also work consistently in Windows PowerShell 5.1 and PowerShell 7.
 
 ## Experience fixes in 2.5.6
 

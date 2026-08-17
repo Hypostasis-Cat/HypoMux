@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Version-2.5.6-0078d4?style=flat-square" alt="Version 2.5.6">
+  <img src="https://img.shields.io/badge/Version-2.5.7-0078d4?style=flat-square" alt="Version 2.5.7">
   <img src="https://img.shields.io/badge/Core-Go-00ADD8?style=flat-square&logo=go&logoColor=white" alt="Go">
   <img src="https://img.shields.io/badge/Desktop-Wails%20v3-CB3837?style=flat-square" alt="Wails v3">
   <img src="https://img.shields.io/badge/UI-React%20%2B%20Fluent%20UI-61DAFB?style=flat-square&logo=react&logoColor=black" alt="React and Fluent UI">
@@ -16,6 +16,10 @@
 HypoMux 是一款面向 Windows 的开源多网卡聚合与分流工具。它把多连接下载任务分配到多张活动网卡，让有线网络、Wi-Fi、手机热点或 USB 网络共享能够同时承担流量。
 
 HypoMux 聚合的是多个独立连接，而不是把单条 TCP 连接拆成多路。因此，它尤其适合 Steam、IDM、游戏平台更新器、浏览器大文件下载等高并发场景；单连接任务的速度仍受该连接本身限制。
+
+## 2.5.7 安装兼容性修复
+
+2.5.7 修复了安装器继承异常 `PSModulePath` 时，Windows PowerShell 可能无法加载系统模块并导致 Core 受保护目录配置失败的问题；同时改进 ACL 写入方式，兼容 Windows PowerShell 5.1 与 PowerShell 7。
 
 ## 2.5.6 体验修复
 
