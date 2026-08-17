@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -235,27 +234,31 @@ func TestUpdaterRejectsMissingTamperedOrWrongManifestSignature(t *testing.T) {
 	}
 }
 
-func TestGitHubMetadataCanDownloadFromCNBAfterGitHubAssetFailure(t *testing.T) {
+func TestGitHubTagDiscoveryUsesSignedManifestAndCNBDownloadFallback(t *testing.T) {
 	payload := []byte("signed-installer-placeholder")
-	digest := sha256.Sum256(payload)
+	manifest, signature := signedManifestJSON(t, testManifest("2.5.8", payload))
+	taggedManifestURL := releaseDownloadURL + "v2.5.8/" + updateManifestName
 	apiPayload := `{
   "tag_name":"v2.5.8",
-  "name":"HypoMux 2.5.8",
-  "body":"Release notes",
-  "html_url":"https://github.com/Hypostasis-Cat/HypoMux/releases/tag/v2.5.8",
+  "name":"forged unsigned metadata",
   "assets":[{
     "name":"HypoMux_Setup_2.5.8.exe",
     "browser_download_url":"https://github.com/Hypostasis-Cat/HypoMux/releases/download/v2.5.8/HypoMux_Setup_2.5.8.exe",
-    "size":` + fmt.Sprint(len(payload)) + `,
-    "digest":"sha256:` + hex.EncodeToString(digest[:]) + `"
+    "size":999999,
+    "digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
   }]
 }`
 	service := NewUpdaterService()
+	service.manifestPublicKey = testManifestPublicKey()
 	service.verifyInstaller = func(string) error { return nil }
 	service.client = clientFor(func(request *http.Request) *http.Response {
 		switch request.URL.String() {
 		case latestReleaseAPI:
 			return stringResponse(request, http.StatusOK, apiPayload)
+		case taggedManifestURL:
+			return stringResponse(request, http.StatusOK, manifest)
+		case taggedManifestURL + ".sig":
+			return bytesResponse(request, http.StatusOK, signature)
 		case releaseDownloadURL + "v2.5.8/HypoMux_Setup_2.5.8.exe":
 			return stringResponse(request, http.StatusServiceUnavailable, "")
 		case cnbDownloadURL + "v2.5.8/HypoMux_Setup_2.5.8.exe":
@@ -278,6 +281,33 @@ func TestGitHubMetadataCanDownloadFromCNBAfterGitHubAssetFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(filepath.Dir(installerPath))
+}
+
+func TestGitHubAPICannotBypassSignedManifest(t *testing.T) {
+	const apiPayload = `{
+  "tag_name":"v99.0.0",
+  "name":"forged unsigned release",
+  "body":"must never enter ReleaseInfo",
+  "html_url":"https://github.com/Hypostasis-Cat/HypoMux/releases/tag/v99.0.0",
+  "assets":[{
+    "name":"HypoMux_Setup_99.0.0.exe",
+    "browser_download_url":"https://github.com/Hypostasis-Cat/HypoMux/releases/download/v99.0.0/HypoMux_Setup_99.0.0.exe",
+    "size":1,
+    "digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  }]
+}`
+	service := NewUpdaterService()
+	service.manifestPublicKey = testManifestPublicKey()
+	service.client = clientFor(func(request *http.Request) *http.Response {
+		if request.URL.String() == latestReleaseAPI {
+			return stringResponse(request, http.StatusOK, apiPayload)
+		}
+		return stringResponse(request, http.StatusNotFound, "")
+	})
+
+	if release, err := service.checkGitHubAPI(context.Background()); err == nil {
+		t.Fatalf("unsigned GitHub API metadata entered ReleaseInfo: %#v", release)
+	}
 }
 
 func TestUpdaterFallsBackToTaggedManifestThroughReleaseFeed(t *testing.T) {

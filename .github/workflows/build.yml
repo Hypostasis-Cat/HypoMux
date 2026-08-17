@@ -333,7 +333,8 @@ jobs:
         run: |
           go -C desktop run ./cmd/update-manifest-sign \
             -input ../artifacts/latest.json \
-            -output ../artifacts/latest.json.sig
+            -output ../artifacts/latest.json.sig \
+            -verify-public-key "$(tr -d '\r\n' < desktop/internal/services/update_manifest_ed25519_public_key.txt)"
           test "$(stat -c%s artifacts/latest.json.sig)" -eq 64
 
       - name: Upload installer and signed manifest to GitHub Release

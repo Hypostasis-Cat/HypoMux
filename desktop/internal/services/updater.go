@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/sha256"
+	_ "embed"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -34,7 +35,6 @@ const (
 	cnbDownloadURL           = cnbRepositoryURL + "/-/releases/download/"
 	cnbLatestManifestURL     = cnbRepositoryURL + "/-/releases/latest/download/latest.json"
 	updateManifestName       = "latest.json"
-	updateManifestPublicKey  = "cADpocBrcdxl7Ihmu2SkOZdXy9D8Hpcf5B5FjEYJNys="
 	maxUpdateManifestSize    = 2 << 20
 	maxManifestSignatureSize = 1024
 	maxInstallerMirrorCount  = 4
@@ -46,6 +46,9 @@ var (
 	installerNamePattern = regexp.MustCompile(`(?i)^HypoMux_Setup_[A-Za-z0-9][A-Za-z0-9._+\-]*\.exe$`)
 	versionPattern       = regexp.MustCompile(`(?i)^v?(\d+(?:\.\d+){1,3})$`)
 	sha256Pattern        = regexp.MustCompile(`(?i)^[a-f0-9]{64}$`)
+
+	//go:embed update_manifest_ed25519_public_key.txt
+	updateManifestPublicKey string
 )
 
 type ReleaseInfo struct {
@@ -136,7 +139,7 @@ func (s *UpdaterService) Check() (UpdateCheckResult, error) {
 		{name: "CNB manifest", check: func(ctx context.Context) (ReleaseInfo, error) {
 			return s.checkUpdateManifest(ctx, cnbLatestManifestURL)
 		}},
-		{name: "GitHub API", check: s.checkGitHubAPI},
+		{name: "GitHub API tag discovery", check: s.checkGitHubAPI},
 	}
 	type sourceResult struct {
 		index   int
@@ -170,7 +173,7 @@ func (s *UpdaterService) Check() (UpdateCheckResult, error) {
 		feedRelease, feedErr := s.checkGitHubReleaseFeed(feedCtx)
 		feedCancel()
 		if feedErr != nil {
-			errorsBySource = append(errorsBySource, "GitHub Atom: "+feedErr.Error())
+			errorsBySource = append(errorsBySource, "GitHub Atom tag discovery: "+feedErr.Error())
 			return UpdateCheckResult{}, errors.New(strings.Join(errorsBySource, "；"))
 		}
 		candidates = append(candidates, feedRelease)
@@ -205,15 +208,6 @@ func (s *UpdaterService) checkGitHubAPI(ctx context.Context) (ReleaseInfo, error
 	}
 	var payload struct {
 		TagName string `json:"tag_name"`
-		Name    string `json:"name"`
-		Body    string `json:"body"`
-		HTMLURL string `json:"html_url"`
-		Assets  []struct {
-			Name   string `json:"name"`
-			URL    string `json:"browser_download_url"`
-			Size   int64  `json:"size"`
-			Digest string `json:"digest"`
-		} `json:"assets"`
 	}
 	decoder := json.NewDecoder(io.LimitReader(response.Body, 2<<20))
 	if err := decoder.Decode(&payload); err != nil {
@@ -223,33 +217,7 @@ func (s *UpdaterService) checkGitHubAPI(ctx context.Context) (ReleaseInfo, error
 	if versionKey(tagName) == nil {
 		return ReleaseInfo{}, errors.New("GitHub 最新发布的版本号无效")
 	}
-	expectedPageURL := githubRepositoryURL + "/releases/tag/" + tagName
-	if payload.HTMLURL != expectedPageURL {
-		return ReleaseInfo{}, errors.New("GitHub 发布信息中的发布页地址无效")
-	}
-	for _, asset := range payload.Assets {
-		expectedInstallerName := "HypoMux_Setup_" + strings.TrimPrefix(tagName, "v") + ".exe"
-		if asset.Name != expectedInstallerName || !installerNamePattern.MatchString(asset.Name) {
-			continue
-		}
-		if asset.Size <= 0 {
-			return ReleaseInfo{}, errors.New("GitHub 安装包大小无效")
-		}
-		if err := validateInstallerMirrorURL(asset.URL, tagName, asset.Name); err != nil {
-			return ReleaseInfo{}, errors.New("GitHub 发布信息中的安装包地址无效")
-		}
-		digest, err := normalizeSHA256(asset.Digest)
-		if err != nil {
-			return ReleaseInfo{}, errors.New("GitHub 发布信息缺少有效的安装包 SHA-256")
-		}
-		release := ReleaseInfo{
-			TagName: tagName, Name: payload.Name, Notes: strings.TrimSpace(payload.Body),
-			PageURL: payload.HTMLURL, InstallerURLs: officialInstallerMirrors(tagName, asset.Name),
-			InstallerName: asset.Name, InstallerSize: asset.Size, InstallerDigest: "sha256:" + digest,
-		}
-		return release, nil
-	}
-	return ReleaseInfo{}, errors.New("GitHub 最新发布未找到 HypoMux 安装包")
+	return s.checkTaggedUpdateManifests(ctx, tagName)
 }
 
 func (s *UpdaterService) checkUpdateManifest(ctx context.Context, manifestURL string) (ReleaseInfo, error) {
@@ -321,11 +289,56 @@ func (s *UpdaterService) checkUpdateManifest(ctx context.Context, manifestURL st
 }
 
 func mustUpdateManifestPublicKey() ed25519.PublicKey {
-	key, err := base64.StdEncoding.DecodeString(updateManifestPublicKey)
+	key, err := base64.StdEncoding.DecodeString(strings.TrimSpace(updateManifestPublicKey))
 	if err != nil || len(key) != ed25519.PublicKeySize {
 		panic("invalid embedded update manifest public key")
 	}
 	return ed25519.PublicKey(key)
+}
+
+func (s *UpdaterService) checkTaggedUpdateManifests(ctx context.Context, tagName string) (ReleaseInfo, error) {
+	tagName = normalizeTagName(tagName)
+	if versionKey(tagName) == nil {
+		return ReleaseInfo{}, errors.New("发现的更新标签无效")
+	}
+	manifestURLs := []string{
+		releaseDownloadURL + tagName + "/" + updateManifestName,
+		cnbDownloadURL + tagName + "/" + updateManifestName,
+	}
+	type manifestResult struct {
+		index   int
+		release ReleaseInfo
+		err     error
+	}
+	results := make(chan manifestResult, len(manifestURLs))
+	for index, manifestURL := range manifestURLs {
+		go func(index int, manifestURL string) {
+			release, err := s.checkUpdateManifest(ctx, manifestURL)
+			results <- manifestResult{index: index, release: release, err: err}
+		}(index, manifestURL)
+	}
+	ordered := make([]manifestResult, len(manifestURLs))
+	for range manifestURLs {
+		result := <-results
+		ordered[result.index] = result
+	}
+	candidates := make([]ReleaseInfo, 0, len(manifestURLs))
+	failures := make([]string, 0, len(manifestURLs))
+	for index, result := range ordered {
+		if result.err != nil {
+			failures = append(failures, manifestURLs[index]+": "+result.err.Error())
+			continue
+		}
+		if !sameVersion(result.release.TagName, tagName) {
+			failures = append(failures, manifestURLs[index]+": manifest 版本与发现的标签不一致")
+			continue
+		}
+		candidates = append(candidates, result.release)
+	}
+	if len(candidates) == 0 {
+		return ReleaseInfo{}, errors.New(strings.Join(failures, "；"))
+	}
+	return selectLatestRelease(candidates)
 }
 
 func ensureJSONEOF(decoder *json.Decoder) error {
@@ -437,7 +450,6 @@ func (s *UpdaterService) checkGitHubReleaseFeed(ctx context.Context) (ReleaseInf
 	}
 	var feed struct {
 		Entries []struct {
-			Title string `xml:"title"`
 			Links []struct {
 				Rel  string `xml:"rel,attr"`
 				Href string `xml:"href,attr"`
@@ -469,52 +481,7 @@ func (s *UpdaterService) checkGitHubReleaseFeed(ctx context.Context) (ReleaseInf
 	if tagName == "" || strings.Contains(tagName, "/") || versionKey(tagName) == nil {
 		return ReleaseInfo{}, errors.New("GitHub 发布订阅中的版本号无效")
 	}
-	manifestURLs := []string{
-		releaseDownloadURL + tagName + "/" + updateManifestName,
-		cnbDownloadURL + tagName + "/" + updateManifestName,
-	}
-	type manifestResult struct {
-		index   int
-		release ReleaseInfo
-		err     error
-	}
-	results := make(chan manifestResult, len(manifestURLs))
-	for index, manifestURL := range manifestURLs {
-		go func(index int, manifestURL string) {
-			release, err := s.checkUpdateManifest(ctx, manifestURL)
-			results <- manifestResult{index: index, release: release, err: err}
-		}(index, manifestURL)
-	}
-	ordered := make([]manifestResult, len(manifestURLs))
-	for range manifestURLs {
-		result := <-results
-		ordered[result.index] = result
-	}
-	candidates := make([]ReleaseInfo, 0, len(manifestURLs))
-	failures := make([]string, 0, len(manifestURLs))
-	for index, result := range ordered {
-		if result.err != nil {
-			failures = append(failures, manifestURLs[index]+": "+result.err.Error())
-			continue
-		}
-		if !sameVersion(result.release.TagName, tagName) {
-			failures = append(failures, manifestURLs[index]+": manifest 版本与 Atom 标签不一致")
-			continue
-		}
-		candidates = append(candidates, result.release)
-	}
-	if len(candidates) == 0 {
-		return ReleaseInfo{}, errors.New(strings.Join(failures, "；"))
-	}
-	release, err := selectLatestRelease(candidates)
-	if err != nil {
-		return ReleaseInfo{}, err
-	}
-	if release.Name == "" {
-		release.Name = strings.TrimSpace(entry.Title)
-	}
-	release.PageURL = pageURL
-	return release, nil
+	return s.checkTaggedUpdateManifests(ctx, tagName)
 }
 
 func (s *UpdaterService) Download(release ReleaseInfo) (string, error) {

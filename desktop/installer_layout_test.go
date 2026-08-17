@@ -297,6 +297,37 @@ func TestReleasePublishesOneSignedInstallerAndManifestToBothMirrors(t *testing.T
 	}
 }
 
+func TestReleaseTrustSmokeWorkflowIsReadOnly(t *testing.T) {
+	data, err := os.ReadFile("../.github/workflows/release-smoke.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	workflow := string(data)
+	for _, required := range []string{
+		`UPDATE_MANIFEST_ED25519_PRIVATE_KEY`,
+		`-verify-public-key "${public_key}"`,
+		`git ls-remote "${repository}"`,
+		`github_commit`,
+		`cnb_commit`,
+		`release get -t "${RELEASE_TAG}"`,
+		`secrets.CNB_TOKEN`,
+	} {
+		if !strings.Contains(workflow, required) {
+			t.Fatalf("release trust smoke workflow is missing %q", required)
+		}
+	}
+	for _, forbidden := range []string{
+		`asset-upload`,
+		`release create`,
+		`actions/upload-artifact`,
+		`action-gh-release`,
+	} {
+		if strings.Contains(workflow, forbidden) {
+			t.Fatalf("release trust smoke workflow must be read-only: found %q", forbidden)
+		}
+	}
+}
+
 func TestVersionMetadataIsConsistent(t *testing.T) {
 	const version = "2.5.7"
 	files := []string{

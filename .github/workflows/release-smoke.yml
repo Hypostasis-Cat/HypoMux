@@ -1,0 +1,90 @@
+name: Release Trust Smoke Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to verify without publishing assets
+        required: true
+        type: string
+        default: v2.5.6
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Verify signing key and CNB mirror
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: desktop/go.mod
+          cache: false
+
+      - name: Verify manifest signing secret matches embedded public key
+        shell: bash
+        env:
+          UPDATE_MANIFEST_ED25519_PRIVATE_KEY: ${{ secrets.UPDATE_MANIFEST_ED25519_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p smoke
+          printf '%s\n' '{"schema_version":1,"smoke_test":true}' > smoke/latest.json
+          public_key="$(tr -d '\r\n' < desktop/internal/services/update_manifest_ed25519_public_key.txt)"
+          go -C desktop run ./cmd/update-manifest-sign \
+            -input ../smoke/latest.json \
+            -output ../smoke/latest.json.sig \
+            -verify-public-key "${public_key}"
+          test "$(stat -c%s smoke/latest.json.sig)" -eq 64
+
+      - name: Verify GitHub tag is mirrored to CNB at the same commit
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          if [[ ! "${RELEASE_TAG}" =~ ^v[0-9]+(\.[0-9]+){1,3}$ ]]; then
+            echo "Invalid release tag: ${RELEASE_TAG}"
+            exit 1
+          fi
+          resolve_tag_commit() {
+            local repository="$1"
+            local direct
+            local peeled
+            direct="$(git ls-remote "${repository}" "refs/tags/${RELEASE_TAG}" | awk 'NR == 1 {print $1}')"
+            peeled="$(git ls-remote "${repository}" "refs/tags/${RELEASE_TAG}^{}" | awk 'NR == 1 {print $1}')"
+            if [[ -n "${peeled}" ]]; then
+              printf '%s' "${peeled}"
+            else
+              printf '%s' "${direct}"
+            fi
+          }
+          github_commit="$(resolve_tag_commit https://github.com/Hypostasis-Cat/HypoMux.git)"
+          cnb_commit="$(resolve_tag_commit https://cnb.cool/Hypostasis-Cat/HypoMux.git)"
+          if [[ -z "${github_commit}" || -z "${cnb_commit}" ]]; then
+            echo "Release tag ${RELEASE_TAG} is missing from GitHub or CNB."
+            exit 1
+          fi
+          if [[ "${github_commit}" != "${cnb_commit}" ]]; then
+            echo "Tag mirror mismatch for ${RELEASE_TAG}: GitHub ${github_commit}, CNB ${cnb_commit}."
+            exit 1
+          fi
+          echo "Tag ${RELEASE_TAG} is mirrored at ${github_commit}."
+
+      - name: Verify CNB token can read the existing Release
+        shell: bash
+        env:
+          CNB_TOKEN: ${{ secrets.CNB_TOKEN }}
+          CNB_IMAGE: docker.cnb.cool/looc/git-cnb@sha256:c254172bb9d6025733a0e2991b4a99af8c46aeedcadcb468788ef5a0dc00275c
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          docker run --rm -e CNB_TOKEN "${CNB_IMAGE}" \
+            git-cnb --repo=Hypostasis-Cat/HypoMux \
+            release get -t "${RELEASE_TAG}" >/dev/null
+          echo "CNB Release ${RELEASE_TAG} is readable; no assets were created or uploaded."

@@ -213,6 +213,7 @@ wails3 task windows:package
 ```
 
 完整发布流程以 [`.github/workflows/build.yml`](.github/workflows/build.yml) 为准。
+正式发布前可手动运行 `Release Trust Smoke Test` 工作流，只读核对更新清单私钥与客户端公钥、GitHub/CNB Tag 提交以及 CNB Release 访问权限；该检查不会创建 Release 或上传资产。
 
 ##  特别鸣谢 / Acknowledgments
 
