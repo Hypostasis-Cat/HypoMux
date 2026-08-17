@@ -200,8 +200,8 @@ export function AboutPage() {
             </p>
             <p>
               {text(
-                "HypoMux 的官方 Windows 发布版本均由此仓库的 GitHub Actions 构建，并提交至 SignPath 进行代码签名。请仅从官方 GitHub Releases 页面下载安装包，并确认已签名版本的发布者显示为 SignPath Foundation。",
-                "Official HypoMux Windows releases are built by this repository's GitHub Actions and submitted to SignPath for code signing. Download installers only from the official GitHub Releases page and verify that the signed publisher is SignPath Foundation.",
+                "HypoMux 的官方 Windows 发布版本均由此仓库的 GitHub Actions 构建，并提交至 SignPath 进行代码签名。请仅从官方 GitHub Releases 或 CNB Release 页面下载安装包，并确认已签名版本的发布者显示为 SignPath Foundation。",
+                "Official HypoMux Windows releases are built by this repository's GitHub Actions and submitted to SignPath for code signing. Download installers only from the official GitHub Releases or CNB Release page and verify that the signed publisher is SignPath Foundation.",
               )}
             </p>
           </div>

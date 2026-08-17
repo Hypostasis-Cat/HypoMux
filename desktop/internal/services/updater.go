@@ -1,6 +1,7 @@
 package services
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -25,11 +26,16 @@ const (
 	latestReleaseAPI   = "https://api.github.com/repos/Hypostasis-Cat/HypoMux/releases/latest"
 	releasesFeedURL    = "https://github.com/Hypostasis-Cat/HypoMux/releases.atom"
 	releaseDownloadURL = "https://github.com/Hypostasis-Cat/HypoMux/releases/download/"
+	cnbRepositoryURL   = "https://cnb.cool/Hypostasis-Cat/HypoMux"
+	cnbLatestRelease   = cnbRepositoryURL + "/-/releases/latest"
+	cnbReleasePageURL  = cnbRepositoryURL + "/-/releases/tag/"
+	cnbDownloadURL     = cnbRepositoryURL + "/-/releases/download/"
 )
 
 var (
 	installerNamePattern = regexp.MustCompile(`(?i)^HypoMux_Setup_[A-Za-z0-9][A-Za-z0-9._+\-]*\.exe$`)
 	versionPattern       = regexp.MustCompile(`(?i)^v?(\d+(?:\.\d+){1,3})(?:[-+].*)?$`)
+	sha256Pattern        = regexp.MustCompile(`(?i)^[a-f0-9]{64}$`)
 )
 
 type ReleaseInfo struct {
@@ -96,6 +102,18 @@ func (s *UpdaterService) Check() (UpdateCheckResult, error) {
 		return result, nil
 	}
 
+	// CNB exposes public Release pages and attachment downloads without asking
+	// end users to carry a repository token. Its OpenAPI does require a token,
+	// so read the release metadata embedded by the public Next.js page instead.
+	// This gives users who cannot reach GitHub (or share a rate-limited GitHub
+	// egress address) a geographically independent, integrity-checked source.
+	cnbCtx, cnbCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	result, cnbErr := s.checkCNBReleasePage(cnbCtx)
+	cnbCancel()
+	if cnbErr == nil {
+		return result, nil
+	}
+
 	// GitHub's unauthenticated REST API is limited per public source IP.
 	// Users behind a shared proxy often receive HTTP 403 even though regular
 	// github.com release pages and assets remain reachable. The Atom feed is a
@@ -108,7 +126,10 @@ func (s *UpdaterService) Check() (UpdateCheckResult, error) {
 	if feedErr == nil {
 		return result, nil
 	}
-	return UpdateCheckResult{}, fmt.Errorf("%v；GitHub 备用更新通道失败：%v", apiErr, feedErr)
+	return UpdateCheckResult{}, fmt.Errorf(
+		"%v；CNB 更新源失败：%v；GitHub 备用更新通道失败：%v",
+		apiErr, cnbErr, feedErr,
+	)
 }
 
 func (s *UpdaterService) checkGitHubAPI(ctx context.Context) (UpdateCheckResult, error) {
@@ -146,7 +167,7 @@ func (s *UpdaterService) checkGitHubAPI(ctx context.Context) (UpdateCheckResult,
 	if versionKey(payload.TagName) == nil {
 		return UpdateCheckResult{}, errors.New("GitHub 最新发布的版本号无效")
 	}
-	if err := validateGitHubURL(payload.HTMLURL); err != nil {
+	if err := validateUpdateURL(payload.HTMLURL); err != nil {
 		return UpdateCheckResult{}, errors.New("GitHub 发布信息中的发布页地址无效")
 	}
 	for _, asset := range payload.Assets {
@@ -156,7 +177,7 @@ func (s *UpdaterService) checkGitHubAPI(ctx context.Context) (UpdateCheckResult,
 		if asset.Size <= 0 {
 			return UpdateCheckResult{}, errors.New("GitHub 安装包大小无效")
 		}
-		if err := validateGitHubURL(asset.URL); err != nil {
+		if err := validateUpdateURL(asset.URL); err != nil {
 			return UpdateCheckResult{}, errors.New("GitHub 发布信息中的安装包地址无效")
 		}
 		release := ReleaseInfo{
@@ -171,6 +192,118 @@ func (s *UpdaterService) checkGitHubAPI(ctx context.Context) (UpdateCheckResult,
 		}, nil
 	}
 	return UpdateCheckResult{}, errors.New("GitHub 最新发布未找到 HypoMux 安装包")
+}
+
+func (s *UpdaterService) checkCNBReleasePage(ctx context.Context) (UpdateCheckResult, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, cnbLatestRelease, nil)
+	if err != nil {
+		return UpdateCheckResult{}, err
+	}
+	request.Header.Set("Accept", "text/html,application/xhtml+xml")
+	request.Header.Set("User-Agent", "HypoMux-Updater")
+	response, err := s.client.Do(request)
+	if err != nil {
+		return UpdateCheckResult{}, errors.New("无法连接 CNB，请检查网络后重试")
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return UpdateCheckResult{}, fmt.Errorf("CNB HTTP %d", response.StatusCode)
+	}
+
+	page, err := io.ReadAll(io.LimitReader(response.Body, 4<<20))
+	if err != nil {
+		return UpdateCheckResult{}, errors.New("无法读取 CNB 更新信息")
+	}
+	data, err := nextDataJSON(page)
+	if err != nil {
+		return UpdateCheckResult{}, errors.New("CNB 返回了无效的更新页面")
+	}
+	var payload struct {
+		Props struct {
+			PageProps struct {
+				TagName string `json:"tagName"`
+				Detail  struct {
+					Release struct {
+						Title  string `json:"title"`
+						Body   string `json:"body"`
+						Assets []struct {
+							Path       string `json:"path"`
+							Name       string `json:"name"`
+							HashAlgo   string `json:"hashAlgo"`
+							HashValue  string `json:"hashValue"`
+							SizeInByte int64  `json:"sizeInByte"`
+						} `json:"assets"`
+					} `json:"release"`
+				} `json:"releasesDetailData"`
+			} `json:"pageProps"`
+		} `json:"props"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return UpdateCheckResult{}, errors.New("CNB 返回了无效的更新信息")
+	}
+
+	pageProps := payload.Props.PageProps
+	tagName := strings.TrimSpace(pageProps.TagName)
+	if versionKey(tagName) == nil {
+		return UpdateCheckResult{}, errors.New("CNB 最新发布的版本号无效")
+	}
+	pageURL := cnbReleasePageURL + url.PathEscape(tagName)
+	if err := validateUpdateURL(pageURL); err != nil {
+		return UpdateCheckResult{}, errors.New("CNB 发布页地址无效")
+	}
+	for _, asset := range pageProps.Detail.Release.Assets {
+		if !installerNamePattern.MatchString(asset.Name) {
+			continue
+		}
+		if asset.SizeInByte <= 0 {
+			return UpdateCheckResult{}, errors.New("CNB 安装包大小无效")
+		}
+		expectedPath := "/Hypostasis-Cat/HypoMux/-/releases/download/" +
+			url.PathEscape(tagName) + "/" + url.PathEscape(asset.Name)
+		if asset.Path != expectedPath {
+			return UpdateCheckResult{}, errors.New("CNB 安装包路径无效")
+		}
+		installerURL := cnbDownloadURL + url.PathEscape(tagName) + "/" + url.PathEscape(asset.Name)
+		if err := validateUpdateURL(installerURL); err != nil {
+			return UpdateCheckResult{}, errors.New("CNB 安装包地址无效")
+		}
+		digest := ""
+		if strings.EqualFold(strings.TrimSpace(asset.HashAlgo), "sha256") &&
+			sha256Pattern.MatchString(strings.TrimSpace(asset.HashValue)) {
+			digest = "sha256:" + strings.ToLower(strings.TrimSpace(asset.HashValue))
+		}
+		release := ReleaseInfo{
+			TagName: tagName, Name: strings.TrimSpace(pageProps.Detail.Release.Title),
+			Notes: strings.TrimSpace(pageProps.Detail.Release.Body), PageURL: pageURL,
+			InstallerURL: installerURL, InstallerName: asset.Name,
+			InstallerSize: asset.SizeInByte, InstallerDigest: digest,
+		}
+		return UpdateCheckResult{
+			CurrentVersion: CurrentVersion,
+			Available:      isNewerVersion(tagName, CurrentVersion),
+			Release:        release,
+		}, nil
+	}
+	return UpdateCheckResult{}, errors.New("CNB 最新发布未找到 HypoMux 安装包")
+}
+
+func nextDataJSON(page []byte) ([]byte, error) {
+	marker := []byte(`<script id="__NEXT_DATA__"`)
+	start := bytes.Index(page, marker)
+	if start < 0 {
+		return nil, errors.New("missing __NEXT_DATA__")
+	}
+	page = page[start+len(marker):]
+	open := bytes.IndexByte(page, '>')
+	if open < 0 {
+		return nil, errors.New("invalid __NEXT_DATA__ opening tag")
+	}
+	page = page[open+1:]
+	end := bytes.Index(page, []byte("</script>"))
+	if end < 0 {
+		return nil, errors.New("invalid __NEXT_DATA__ closing tag")
+	}
+	return page[:end], nil
 }
 
 func (s *UpdaterService) checkGitHubReleaseFeed(ctx context.Context) (UpdateCheckResult, error) {
@@ -214,7 +347,7 @@ func (s *UpdaterService) checkGitHubReleaseFeed(ctx context.Context) (UpdateChec
 			}
 		}
 	}
-	if err := validateGitHubURL(pageURL); err != nil {
+	if err := validateUpdateURL(pageURL); err != nil {
 		return UpdateCheckResult{}, errors.New("GitHub 发布订阅中的发布页地址无效")
 	}
 	parsedPage, _ := url.Parse(pageURL)
@@ -230,7 +363,7 @@ func (s *UpdaterService) checkGitHubReleaseFeed(ctx context.Context) (UpdateChec
 		return UpdateCheckResult{}, errors.New("GitHub 发布订阅中的安装包名称无效")
 	}
 	installerURL := releaseDownloadURL + url.PathEscape(tagName) + "/" + url.PathEscape(installerName)
-	if err := validateGitHubURL(installerURL); err != nil {
+	if err := validateUpdateURL(installerURL); err != nil {
 		return UpdateCheckResult{}, errors.New("GitHub 发布订阅中的安装包地址无效")
 	}
 	installerSize, err := s.releaseAssetSize(ctx, installerURL)
@@ -274,7 +407,7 @@ func (s *UpdaterService) Download(release ReleaseInfo) (string, error) {
 		s.setProgress(UpdateProgress{State: "failed", Message: "安装包发布信息无效"})
 		return "", errors.New("安装包发布信息无效")
 	}
-	if err := validateGitHubURL(release.InstallerURL); err != nil {
+	if err := validateUpdateURL(release.InstallerURL); err != nil {
 		return "", errors.New("安装包下载地址无效")
 	}
 	directory, err := os.MkdirTemp("", "HypoMuxUpdate-")
@@ -298,11 +431,11 @@ func (s *UpdaterService) Download(release ReleaseInfo) (string, error) {
 	request.Header.Set("User-Agent", "HypoMux-Updater")
 	response, err := s.client.Do(request)
 	if err != nil {
-		return "", errors.New("无法从 GitHub 下载安装包，请检查网络后重试")
+		return "", errors.New("无法从更新源下载安装包，请检查网络后重试")
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("GitHub 下载失败（HTTP %d）", response.StatusCode)
+		return "", fmt.Errorf("更新源下载失败（HTTP %d）", response.StatusCode)
 	}
 	stream, err := os.OpenFile(partial, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
 	if err != nil {
@@ -379,12 +512,25 @@ func (w *updateProgressWriter) Write(data []byte) (int, error) {
 	return count, err
 }
 
-func validateGitHubURL(value string) error {
+func validateUpdateURL(value string) error {
 	parsed, err := url.Parse(value)
-	if err != nil || parsed.Scheme != "https" || !strings.EqualFold(parsed.Hostname(), "github.com") {
-		return errors.New("必须使用 github.com HTTPS 地址")
+	if err != nil || parsed.Scheme != "https" || parsed.User != nil ||
+		parsed.RawQuery != "" || parsed.Fragment != "" || parsed.RawPath != "" {
+		return errors.New("必须使用官方 HTTPS 更新地址")
 	}
-	return nil
+	path := parsed.EscapedPath()
+	switch {
+	case strings.EqualFold(parsed.Host, "github.com") &&
+		(strings.HasPrefix(path, "/Hypostasis-Cat/HypoMux/releases/tag/") ||
+			strings.HasPrefix(path, "/Hypostasis-Cat/HypoMux/releases/download/")):
+		return nil
+	case strings.EqualFold(parsed.Host, "cnb.cool") &&
+		(strings.HasPrefix(path, "/Hypostasis-Cat/HypoMux/-/releases/tag/") ||
+			strings.HasPrefix(path, "/Hypostasis-Cat/HypoMux/-/releases/download/")):
+		return nil
+	default:
+		return errors.New("必须使用 HypoMux 官方 GitHub 或 CNB Release 地址")
+	}
 }
 
 func versionKey(value string) []int {

@@ -17,30 +17,12 @@ HypoMux 是一款面向 Windows 的开源多网卡聚合与分流工具。它把
 
 HypoMux 聚合的是多个独立连接，而不是把单条 TCP 连接拆成多路。因此，它尤其适合 Steam、IDM、游戏平台更新器、浏览器大文件下载等高并发场景；单连接任务的速度仍受该连接本身限制。
 
-## 2.5.7 安装兼容性修复
+## 近期更新
 
-2.5.7 修复了安装器继承异常 `PSModulePath` 时，Windows PowerShell 可能无法加载系统模块并导致 Core 受保护目录配置失败的问题；同时改进 ACL 写入方式，兼容 Windows PowerShell 5.1 与 PowerShell 7。
-
-## 2.5.6 体验修复
-
-2.5.6 修复了升级或更换安装目录后开机自启失效的问题，并改进活动连接实时列表与软件内更新日志的滚动体验。桌面程序仍可安装到 C、D 等本地固定磁盘，Core 服务及其依赖会部署到受保护的系统目录。
-
-## 2.5.4 聚合吞吐优化
-
-2.5.4 恢复了 Python 版验证过的高吞吐 TCP 参数，并以保守策略仅应用于双网卡及以上的聚合 TCP 流量：1 MiB TCP 收发缓冲、128 KiB 双向转发缓冲和 TCP_NODELAY。单网卡、独立网卡通道、直连、UDP、QUIC 与 DNS 保持原有行为。
-
-本版同时降低了转发热路径上的遥测锁竞争，并增加不含域名、URL 或远端 IP 的低频吞吐摘要，便于根据用户现场反馈继续定位。遇到兼容问题时，可设置 `HYPOMUX_TCP_TUNING=off` 立即恢复原 TCP 参数。
-
-## 2.5.3 新版本
-
-2.5.3 完成了桌面端从 Python/Qt 与过渡期 WPF 实现到 **Go + Wails v3 + React + Fluent UI** 的正式迁移。桌面界面以普通用户权限运行，TUN、WFP、路由、DNS 与网络恢复等高权限操作交给独立的 Go Core/Windows 服务处理。
-
-- **全 Go 后端**：桌面服务与网络引擎统一使用 Go，移除旧版 Python、Qt、asyncio 与 .NET/WPF 运行时依赖。
-- **更安全的 TUN 生命周期**：启动前验证网卡、DNS、权限服务、Wintun、sing-box、WFP 与第三方 TUN；失败时在修改系统网络前阻止启动或自动回滚。
-- **完整分流规则**：支持按进程、域名及子域名、目标 IP/CIDR 选择聚合、直连或指定网卡；旧配置中的多值规则会逐项迁移并保留。
-- **第三方代理兼容**：识别常见本地代理与游戏加速器进程，并按进程路径或监听端口 PID 建立直连旁路，降低回环与相互代理风险。
-- **可靠恢复**：系统代理状态采用原子化快照与恢复；异常退出、启动失败或重启后会继续尝试恢复原有设置。
-- **新版个性化与诊断**：提供 Fluent UI 界面、明暗主题、Mica/材质、自定义背景、网卡体检、连接查看、日志与更新检查。
+- **2.5.7**：修复异常 `PSModulePath` 导致安装器无法配置 Core 受保护目录的问题，并兼容 Windows PowerShell 5.1 与 PowerShell 7 的 ACL 写入。
+- **2.5.6**：修复升级或更换安装目录后的开机自启问题，改进活动连接列表与软件内更新日志的滚动体验。
+- **2.5.4**：优化双网卡及以上聚合 TCP 流量的吞吐与转发开销；如遇兼容问题，可设置 `HYPOMUX_TCP_TUNING=off` 恢复原参数。
+- **2.5.3**：完成 **Go + Wails v3 + React + Fluent UI** 迁移，并完善权限隔离、TUN 生命周期、分流规则、网络恢复与诊断能力。
 
 ## 赞助方
 
@@ -53,7 +35,7 @@ HypoMux 聚合的是多个独立连接，而不是把单条 TCP 连接拆成多�
 
 HypoMux 衷心感谢 SignPath 与 SignPath Foundation 对开源软件的支持，帮助我们为 Windows 用户提供更安全、可信的下载体验。
 
-HypoMux 的官方 Windows 发布版本均由此仓库的 GitHub Actions 构建，并提交至 SignPath 进行代码签名。请仅从[官方 GitHub Releases 页面](https://github.com/Hypostasis-Cat/HypoMux/releases/latest)下载安装包，并确认已签名版本的发布者显示为 **SignPath Foundation**。
+HypoMux 的官方 Windows 发布版本均由此仓库的 GitHub Actions 构建，并提交至 SignPath 进行代码签名。请仅从[官方 GitHub Releases](https://github.com/Hypostasis-Cat/HypoMux/releases/latest)或[官方 CNB Release](https://cnb.cool/Hypostasis-Cat/HypoMux/-/releases/latest) 页面下载安装包，并确认已签名版本的发布者显示为 **SignPath Foundation**。
 
 ### 团队角色
 
@@ -62,15 +44,15 @@ HypoMux 的官方 Windows 发布版本均由此仓库的 GitHub Actions 构建�
 
 ### 隐私政策
 
-HypoMux 不收集、出售或上传个人数据及遥测信息。程序仅会在用户或软件操作者请求相应功能时与其他网络系统通信：转发用户选择的网络流量、从官方 GitHub 仓库检查或下载安装更新，以及在启用虚拟网卡模式后进行网络连通性验证。
+HypoMux 不收集、出售或上传个人数据及遥测信息。程序仅会在用户或软件操作者请求相应功能时与其他网络系统通信：转发用户选择的网络流量、从官方 GitHub 或 CNB Release 源检查及下载安装更新，以及在启用虚拟网卡模式后进行网络连通性验证。
 
 ---
 
 ## 下载
 
-> **Windows 安装包：**[前往 GitHub Releases 下载最新版](https://github.com/Hypostasis-Cat/HypoMux/releases/latest)
+> **Windows 安装包：**[GitHub Releases](https://github.com/Hypostasis-Cat/HypoMux/releases/latest) · [腾讯 CNB Release](https://cnb.cool/Hypostasis-Cat/HypoMux/-/releases/latest)
 >
-> 在最新版本的 **Assets** 中下载 `HypoMux_Setup_*.exe`。正式发布包通过 GitHub Actions 构建并由 SignPath 签名。
+> 下载最新版 `HypoMux_Setup_*.exe`。正式发布包通过 GitHub Actions 构建并由 SignPath 签名。
 
 ## 界面预览
 

@@ -78,18 +78,78 @@ func TestUpdaterVersionComparison(t *testing.T) {
 	}
 }
 
-func TestUpdaterRejectsNonGitHubURLs(t *testing.T) {
+func TestUpdaterAcceptsOnlyOfficialUpdateURLs(t *testing.T) {
 	for _, value := range []string{
 		"http://github.com/Hypostasis-Cat/HypoMux",
 		"https://github.com.example.invalid/HypoMux.exe",
 		"https://example.com/HypoMux.exe",
+		"https://cnb.cool:444/Hypostasis-Cat/HypoMux/-/releases/download/v2.5.8/HypoMux_Setup_2.5.8.exe",
+		"https://github.com/another/repository/releases/download/v2.5.8/HypoMux_Setup_2.5.8.exe",
+		"https://cnb.cool/another/repository/-/releases/download/v2.5.8/HypoMux_Setup_2.5.8.exe",
 	} {
-		if validateGitHubURL(value) == nil {
+		if validateUpdateURL(value) == nil {
 			t.Fatalf("unsafe update URL was accepted: %s", value)
 		}
 	}
-	if err := validateGitHubURL("https://github.com/Hypostasis-Cat/HypoMux/releases/download/v2.3.0/HypoMux_Setup_2.3.0.exe"); err != nil {
-		t.Fatalf("official GitHub URL rejected: %v", err)
+	for _, value := range []string{
+		"https://github.com/Hypostasis-Cat/HypoMux/releases/download/v2.3.0/HypoMux_Setup_2.3.0.exe",
+		"https://cnb.cool/Hypostasis-Cat/HypoMux/-/releases/download/v2.5.8/HypoMux_Setup_2.5.8.exe",
+	} {
+		if err := validateUpdateURL(value); err != nil {
+			t.Fatalf("official update URL rejected: %s: %v", value, err)
+		}
+	}
+}
+
+func TestUpdaterFallsBackToCNBWhenGitHubAPIIsUnavailable(t *testing.T) {
+	const page = `<!doctype html><html><body>
+<script id="__NEXT_DATA__" type="application/json">{
+  "props":{"pageProps":{
+    "tagName":"v2.5.8",
+    "releasesDetailData":{"release":{
+      "title":"HypoMux v2.5.8",
+      "body":"CNB release notes",
+      "assets":[{
+        "path":"/Hypostasis-Cat/HypoMux/-/releases/download/v2.5.8/HypoMux_Setup_2.5.8.exe",
+        "name":"HypoMux_Setup_2.5.8.exe",
+        "hashAlgo":"sha256",
+        "hashValue":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "sizeInByte":31000000
+      }]
+    }}
+  }}
+}</script></body></html>`
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		response := &http.Response{
+			Request: request,
+			Header:  make(http.Header),
+			Body:    io.NopCloser(strings.NewReader("")),
+		}
+		switch request.URL.String() {
+		case latestReleaseAPI:
+			response.StatusCode = http.StatusServiceUnavailable
+		case cnbLatestRelease:
+			response.StatusCode = http.StatusOK
+			response.Body = io.NopCloser(strings.NewReader(page))
+		default:
+			response.StatusCode = http.StatusNotFound
+		}
+		return response, nil
+	})}
+	service := NewUpdaterService()
+	service.client = client
+
+	result, err := service.Check()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Available || result.Release.TagName != "v2.5.8" {
+		t.Fatalf("CNB fallback update result = %#v", result)
+	}
+	if result.Release.InstallerURL != cnbDownloadURL+"v2.5.8/HypoMux_Setup_2.5.8.exe" ||
+		result.Release.InstallerSize != 31_000_000 ||
+		result.Release.InstallerDigest != "sha256:"+strings.Repeat("a", 64) {
+		t.Fatalf("CNB fallback release = %#v", result.Release)
 	}
 }
 
