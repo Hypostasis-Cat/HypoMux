@@ -53,7 +53,7 @@ HypoMux 聚合的是多个独立连接，而不是把单条 TCP 连接拆成多�
 
 HypoMux 衷心感谢 SignPath 与 SignPath Foundation 对开源软件的支持，帮助我们为 Windows 用户提供更安全、可信的下载体验。
 
-HypoMux 的官方 Windows 发布版本均由此仓库的 GitHub Actions 构建，并提交至 SignPath 进行代码签名。[GitHub Releases](https://github.com/Hypostasis-Cat/HypoMux/releases/latest)是权威发布源，[腾讯 CNB Release](https://cnb.cool/Hypostasis-Cat/HypoMux/-/releases/latest)是面向中国大陆的官方镜像；两处发布同一份签名安装包。下载安装后请确认发布者显示为 **SignPath Foundation**。
+HypoMux 的官方 Windows 发布版本均由此仓库的 GitHub Actions 构建，并提交至 SignPath 进行代码签名。[GitHub Releases](https://github.com/Hypostasis-Cat/HypoMux/releases/latest)是权威发布源，[腾讯 CNB Release](https://cnb.cool/Hypostasis-Cat/HypoMux/-/releases/latest)是面向中国大陆的官方镜像；两处发布同一份签名安装包及 Ed25519 签名更新清单。客户端会先验证清单签名、安装包大小与 SHA-256，再验证 Windows Authenticode 签名；下载安装后请确认发布者显示为 **SignPath Foundation**。
 
 ### 团队角色
 

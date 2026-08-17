@@ -275,9 +275,15 @@ func TestReleasePublishesOneSignedInstallerAndManifestToBothMirrors(t *testing.T
 		`schema_version: 1`,
 		`urls: [$cnb_url, $github_url]`,
 		`artifacts/latest.json`,
-		`docker://docker.cnb.cool/looc/git-cnb:1.2.0`,
+		`artifacts/latest.json.sig`,
+		`UPDATE_MANIFEST_ED25519_PRIVATE_KEY`,
+		`go -C desktop run ./cmd/update-manifest-sign`,
+		`docker.cnb.cool/looc/git-cnb@sha256:c254172bb9d6025733a0e2991b4a99af8c46aeedcadcb468788ef5a0dc00275c`,
 		`secrets.CNB_TOKEN`,
-		`release asset-upload -t ${{ github.ref_name }}`,
+		`cnb release get -t "${tag}"`,
+		`cnb release create -t "${tag}"`,
+		`release asset-upload -t "${tag}"`,
+		`HYPOMUX_SIGNED_INSTALLER_TEST`,
 	} {
 		if !strings.Contains(workflow, required) {
 			t.Fatalf("dual-source release workflow is missing %q", required)
@@ -285,6 +291,9 @@ func TestReleasePublishesOneSignedInstallerAndManifestToBothMirrors(t *testing.T
 	}
 	if strings.Count(workflow, `cp artifacts/hypomux-amd64-installer.exe`) != 1 {
 		t.Fatal("release workflow must stage exactly one signed installer for both mirrors")
+	}
+	if strings.Contains(workflow, `docker.cnb.cool/looc/git-cnb:1.2.0`) {
+		t.Fatal("release workflow uses a nonexistent mutable git-cnb image tag")
 	}
 }
 

@@ -246,6 +246,13 @@ jobs:
         shell: pwsh
         run: Copy-Item signed-installer\HypoMux-amd64-installer-unsigned.exe "${{ env.INSTALLER_PATH }}" -Force
 
+      - name: Verify production installer trust policy
+        if: github.event_name == 'workflow_dispatch' && (inputs.signing_mode == 'production' || inputs.signing_mode == 'publish')
+        shell: pwsh
+        run: |
+          $env:HYPOMUX_SIGNED_INSTALLER_TEST = (Resolve-Path "${{ env.INSTALLER_PATH }}").Path
+          go -C desktop test ./internal/services -run TestVerifyDownloadedInstallerAuthenticityAcceptsOfficialSignedInstaller -count=1 -v
+
       - name: Upload build artifacts
         uses: actions/upload-artifact@v7
         with:
@@ -266,6 +273,15 @@ jobs:
       contents: write
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: desktop/go.mod
+          cache: false
+
       - name: Download build artifacts
         uses: actions/download-artifact@v8
         with:
@@ -280,7 +296,7 @@ jobs:
           cp artifacts/hypomux-amd64-installer.exe "artifacts/HypoMux_Setup_${version}.exe"
           echo "installer_name=HypoMux_Setup_${version}.exe" >> "${GITHUB_OUTPUT}"
 
-      - name: Generate signed update manifest
+      - name: Generate update manifest
         shell: bash
         run: |
           version="${GITHUB_REF_NAME#v}"
@@ -310,26 +326,67 @@ jobs:
             }' > artifacts/latest.json
           jq empty artifacts/latest.json
 
-      - name: Upload installer and manifest to GitHub Release
+      - name: Sign update manifest
+        shell: bash
+        env:
+          UPDATE_MANIFEST_ED25519_PRIVATE_KEY: ${{ secrets.UPDATE_MANIFEST_ED25519_PRIVATE_KEY }}
+        run: |
+          go -C desktop run ./cmd/update-manifest-sign \
+            -input ../artifacts/latest.json \
+            -output ../artifacts/latest.json.sig
+          test "$(stat -c%s artifacts/latest.json.sig)" -eq 64
+
+      - name: Upload installer and signed manifest to GitHub Release
         uses: softprops/action-gh-release@v3
         with:
           files: |
             artifacts/HypoMux_Setup_*.exe
             artifacts/latest.json
+            artifacts/latest.json.sig
           fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload signed installer to CNB Release
-        uses: docker://docker.cnb.cool/looc/git-cnb:1.2.0
-        with:
-          args: git-cnb --repo=Hypostasis-Cat/HypoMux release asset-upload -t ${{ github.ref_name }} -f artifacts/${{ steps.stage_release.outputs.installer_name }}
+      - name: Ensure CNB Release and upload signed assets
+        shell: bash
         env:
           CNB_TOKEN: ${{ secrets.CNB_TOKEN }}
+          CNB_IMAGE: docker.cnb.cool/looc/git-cnb@sha256:c254172bb9d6025733a0e2991b4a99af8c46aeedcadcb468788ef5a0dc00275c
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          version="${tag#v}"
+          cnb() {
+            docker run --rm -e CNB_TOKEN "${CNB_IMAGE}" \
+              git-cnb --repo=Hypostasis-Cat/HypoMux "$@"
+          }
 
-      - name: Upload update manifest to CNB Release
-        uses: docker://docker.cnb.cool/looc/git-cnb:1.2.0
-        with:
-          args: git-cnb --repo=Hypostasis-Cat/HypoMux release asset-upload -t ${{ github.ref_name }} -f artifacts/latest.json
-        env:
-          CNB_TOKEN: ${{ secrets.CNB_TOKEN }}
+          release_ready=false
+          for attempt in $(seq 1 20); do
+            if cnb release get -t "${tag}" >/dev/null 2>&1; then
+              release_ready=true
+              break
+            fi
+            if cnb release create -t "${tag}" -n "HypoMux ${version}" --make-latest true; then
+              release_ready=true
+              break
+            fi
+            echo "CNB tag or Release is not ready yet (attempt ${attempt}/20); retrying in 15 seconds."
+            sleep 15
+          done
+          if [[ "${release_ready}" != "true" ]]; then
+            echo "CNB Release ${tag} could not be found or created after waiting for tag mirroring."
+            exit 1
+          fi
+          cnb release get -t "${tag}" >/dev/null
+
+          for asset in \
+            "artifacts/${{ steps.stage_release.outputs.installer_name }}" \
+            artifacts/latest.json \
+            artifacts/latest.json.sig
+          do
+            docker run --rm -e CNB_TOKEN \
+              -v "${PWD}:/workspace:ro" -w /workspace "${CNB_IMAGE}" \
+              git-cnb --repo=Hypostasis-Cat/HypoMux \
+              release asset-upload -t "${tag}" -f "${asset}"
+          done

@@ -1,6 +1,8 @@
 package services
 
 import (
+	"context"
+	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -139,15 +141,20 @@ func TestManifestRequiresSchemaDigestAndExactInstallerMetadata(t *testing.T) {
 }
 
 func TestUpdaterChoosesNewestMetadataSource(t *testing.T) {
-	githubManifest := manifestJSON(t, testManifest("2.5.8", []byte("new")))
-	cnbManifest := manifestJSON(t, testManifest("2.5.7", []byte("old")))
+	githubManifest, githubSignature := signedManifestJSON(t, testManifest("2.5.8", []byte("new")))
+	cnbManifest, cnbSignature := signedManifestJSON(t, testManifest("2.5.7", []byte("old")))
 	service := NewUpdaterService()
+	service.manifestPublicKey = testManifestPublicKey()
 	service.client = clientFor(func(request *http.Request) *http.Response {
 		switch request.URL.String() {
 		case githubLatestManifestURL:
 			return stringResponse(request, http.StatusOK, githubManifest)
+		case githubLatestManifestURL + ".sig":
+			return bytesResponse(request, http.StatusOK, githubSignature)
 		case cnbLatestManifestURL:
 			return stringResponse(request, http.StatusOK, cnbManifest)
+		case cnbLatestManifestURL + ".sig":
+			return bytesResponse(request, http.StatusOK, cnbSignature)
 		default:
 			return stringResponse(request, http.StatusServiceUnavailable, "")
 		}
@@ -171,11 +178,15 @@ func TestUpdaterRejectsConflictingMetadataForSameVersion(t *testing.T) {
 }
 
 func TestUpdaterUsesCNBManifestWhenGitHubMetadataIsUnavailable(t *testing.T) {
-	manifest := manifestJSON(t, testManifest("2.5.8", []byte("payload")))
+	manifest, signature := signedManifestJSON(t, testManifest("2.5.8", []byte("payload")))
 	service := NewUpdaterService()
+	service.manifestPublicKey = testManifestPublicKey()
 	service.client = clientFor(func(request *http.Request) *http.Response {
-		if request.URL.String() == cnbLatestManifestURL {
+		switch request.URL.String() {
+		case cnbLatestManifestURL:
 			return stringResponse(request, http.StatusOK, manifest)
+		case cnbLatestManifestURL + ".sig":
+			return bytesResponse(request, http.StatusOK, signature)
 		}
 		return stringResponse(request, http.StatusServiceUnavailable, "")
 	})
@@ -187,6 +198,40 @@ func TestUpdaterUsesCNBManifestWhenGitHubMetadataIsUnavailable(t *testing.T) {
 	if result.Release.TagName != "v2.5.8" || result.Release.InstallerURLs[0] !=
 		cnbDownloadURL+"v2.5.8/HypoMux_Setup_2.5.8.exe" {
 		t.Fatalf("CNB manifest result = %#v", result.Release)
+	}
+}
+
+func TestUpdaterRejectsMissingTamperedOrWrongManifestSignature(t *testing.T) {
+	manifest, signature := signedManifestJSON(t, testManifest("2.5.8", []byte("payload")))
+	_, wrongSignature := signedManifestJSON(t, testManifest("2.5.9", []byte("other")))
+	tests := []struct {
+		name            string
+		manifest        string
+		signature       []byte
+		signatureStatus int
+	}{
+		{name: "missing", manifest: manifest, signatureStatus: http.StatusNotFound},
+		{name: "tampered manifest", manifest: manifest + " ", signature: signature, signatureStatus: http.StatusOK},
+		{name: "wrong signature", manifest: manifest, signature: wrongSignature, signatureStatus: http.StatusOK},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			service := NewUpdaterService()
+			service.manifestPublicKey = testManifestPublicKey()
+			service.client = clientFor(func(request *http.Request) *http.Response {
+				switch request.URL.String() {
+				case cnbLatestManifestURL:
+					return stringResponse(request, http.StatusOK, testCase.manifest)
+				case cnbLatestManifestURL + ".sig":
+					return bytesResponse(request, testCase.signatureStatus, testCase.signature)
+				default:
+					return stringResponse(request, http.StatusNotFound, "")
+				}
+			})
+			if _, err := service.checkUpdateManifest(context.Background(), cnbLatestManifestURL); err == nil {
+				t.Fatal("untrusted manifest was accepted")
+			}
+		})
 	}
 }
 
@@ -241,15 +286,18 @@ func TestUpdaterFallsBackToTaggedManifestThroughReleaseFeed(t *testing.T) {
   <title>HypoMux 2.5.8</title>
   <link rel="alternate" href="https://github.com/Hypostasis-Cat/HypoMux/releases/tag/v2.5.8" />
 </entry></feed>`
-	manifest := manifestJSON(t, testManifest("2.5.8", []byte("payload")))
+	manifest, signature := signedManifestJSON(t, testManifest("2.5.8", []byte("payload")))
 	taggedManifestURL := releaseDownloadURL + "v2.5.8/" + updateManifestName
 	service := NewUpdaterService()
+	service.manifestPublicKey = testManifestPublicKey()
 	service.client = clientFor(func(request *http.Request) *http.Response {
 		switch request.URL.String() {
 		case releasesFeedURL:
 			return stringResponse(request, http.StatusOK, feed)
 		case taggedManifestURL:
 			return stringResponse(request, http.StatusOK, manifest)
+		case taggedManifestURL + ".sig":
+			return bytesResponse(request, http.StatusOK, signature)
 		default:
 			return stringResponse(request, http.StatusServiceUnavailable, "")
 		}
@@ -426,12 +474,21 @@ func releaseFromTestManifest(t *testing.T, manifest updateManifest) ReleaseInfo 
 	return release
 }
 
-func manifestJSON(t *testing.T, manifest updateManifest) string {
+func signedManifestJSON(t *testing.T, manifest updateManifest) (string, []byte) {
 	payload, err := json.Marshal(manifest)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return string(payload)
+	return string(payload), ed25519.Sign(testManifestPrivateKey(), payload)
+}
+
+func testManifestPrivateKey() ed25519.PrivateKey {
+	seed := sha256.Sum256([]byte("HypoMux updater manifest test key"))
+	return ed25519.NewKeyFromSeed(seed[:])
+}
+
+func testManifestPublicKey() ed25519.PublicKey {
+	return testManifestPrivateKey().Public().(ed25519.PublicKey)
 }
 
 func clientFor(handler func(*http.Request) *http.Response) *http.Client {

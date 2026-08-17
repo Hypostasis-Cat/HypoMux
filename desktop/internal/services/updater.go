@@ -1,8 +1,11 @@
 package services
 
 import (
+	"bytes"
 	"context"
+	"crypto/ed25519"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"encoding/xml"
@@ -31,7 +34,9 @@ const (
 	cnbDownloadURL           = cnbRepositoryURL + "/-/releases/download/"
 	cnbLatestManifestURL     = cnbRepositoryURL + "/-/releases/latest/download/latest.json"
 	updateManifestName       = "latest.json"
+	updateManifestPublicKey  = "cADpocBrcdxl7Ihmu2SkOZdXy9D8Hpcf5B5FjEYJNys="
 	maxUpdateManifestSize    = 2 << 20
+	maxManifestSignatureSize = 1024
 	maxInstallerMirrorCount  = 4
 	updateMetadataTimeout    = 10 * time.Second
 	installerDownloadTimeout = 15 * time.Minute
@@ -74,20 +79,22 @@ type UpdateCheckResult struct {
 }
 
 type UpdaterService struct {
-	client          *http.Client
-	launchInstaller func(string, int) error
-	verifyInstaller func(string) error
-	quit            func()
-	mu              sync.RWMutex
-	progress        UpdateProgress
+	client            *http.Client
+	manifestPublicKey ed25519.PublicKey
+	launchInstaller   func(string, int) error
+	verifyInstaller   func(string) error
+	quit              func()
+	mu                sync.RWMutex
+	progress          UpdateProgress
 }
 
 func NewUpdaterService(quit ...func()) *UpdaterService {
 	service := &UpdaterService{
-		client:          &http.Client{},
-		launchInstaller: launchInstallerAfterExit,
-		verifyInstaller: verifyDownloadedInstallerAuthenticity,
-		progress:        UpdateProgress{State: "idle"},
+		client:            &http.Client{},
+		manifestPublicKey: mustUpdateManifestPublicKey(),
+		launchInstaller:   launchInstallerAfterExit,
+		verifyInstaller:   verifyDownloadedInstallerAuthenticity,
+		progress:          UpdateProgress{State: "idle"},
 	}
 	if len(quit) > 0 {
 		service.quit = quit[0]
@@ -270,7 +277,38 @@ func (s *UpdaterService) checkUpdateManifest(ctx context.Context, manifestURL st
 	if len(body) > maxUpdateManifestSize {
 		return ReleaseInfo{}, errors.New("更新 manifest 超过大小限制")
 	}
-	decoder := json.NewDecoder(strings.NewReader(string(body)))
+	signatureURL := manifestURL + ".sig"
+	if err := validateUpdateURL(signatureURL); err != nil {
+		return ReleaseInfo{}, errors.New("更新 manifest 签名地址无效")
+	}
+	signatureRequest, err := http.NewRequestWithContext(ctx, http.MethodGet, signatureURL, nil)
+	if err != nil {
+		return ReleaseInfo{}, err
+	}
+	signatureRequest.Header.Set("Accept", "application/octet-stream")
+	signatureRequest.Header.Set("User-Agent", "HypoMux-Updater")
+	signatureResponse, err := s.client.Do(signatureRequest)
+	if err != nil {
+		return ReleaseInfo{}, errors.New("无法读取更新 manifest 签名")
+	}
+	defer signatureResponse.Body.Close()
+	if signatureResponse.StatusCode != http.StatusOK {
+		return ReleaseInfo{}, fmt.Errorf("更新 manifest 签名 HTTP %d", signatureResponse.StatusCode)
+	}
+	signature, err := io.ReadAll(io.LimitReader(signatureResponse.Body, maxManifestSignatureSize+1))
+	if err != nil {
+		return ReleaseInfo{}, errors.New("读取更新 manifest 签名失败")
+	}
+	if len(signature) > maxManifestSignatureSize {
+		return ReleaseInfo{}, errors.New("更新 manifest 签名超过大小限制")
+	}
+	if len(s.manifestPublicKey) != ed25519.PublicKeySize ||
+		len(signature) != ed25519.SignatureSize ||
+		!ed25519.Verify(s.manifestPublicKey, body, signature) {
+		return ReleaseInfo{}, errors.New("更新 manifest 的 Ed25519 签名无效")
+	}
+
+	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.DisallowUnknownFields()
 	var manifest updateManifest
 	if err := decoder.Decode(&manifest); err != nil {
@@ -280,6 +318,14 @@ func (s *UpdaterService) checkUpdateManifest(ctx context.Context, manifestURL st
 		return ReleaseInfo{}, errors.New("更新 manifest 包含多余内容")
 	}
 	return releaseFromManifest(manifest)
+}
+
+func mustUpdateManifestPublicKey() ed25519.PublicKey {
+	key, err := base64.StdEncoding.DecodeString(updateManifestPublicKey)
+	if err != nil || len(key) != ed25519.PublicKeySize {
+		panic("invalid embedded update manifest public key")
+	}
+	return ed25519.PublicKey(key)
 }
 
 func ensureJSONEOF(decoder *json.Decoder) error {
@@ -648,12 +694,14 @@ func validateUpdateURL(value string) error {
 	case parsed.Host == "github.com" &&
 		(strings.HasPrefix(path, "/Hypostasis-Cat/HypoMux/releases/tag/") ||
 			strings.HasPrefix(path, "/Hypostasis-Cat/HypoMux/releases/download/") ||
-			path == "/Hypostasis-Cat/HypoMux/releases/latest/download/latest.json"):
+			path == "/Hypostasis-Cat/HypoMux/releases/latest/download/latest.json" ||
+			path == "/Hypostasis-Cat/HypoMux/releases/latest/download/latest.json.sig"):
 		return nil
 	case parsed.Host == "cnb.cool" &&
 		(strings.HasPrefix(path, "/Hypostasis-Cat/HypoMux/-/releases/tag/") ||
 			strings.HasPrefix(path, "/Hypostasis-Cat/HypoMux/-/releases/download/") ||
-			path == "/Hypostasis-Cat/HypoMux/-/releases/latest/download/latest.json"):
+			path == "/Hypostasis-Cat/HypoMux/-/releases/latest/download/latest.json" ||
+			path == "/Hypostasis-Cat/HypoMux/-/releases/latest/download/latest.json.sig"):
 		return nil
 	default:
 		return errors.New("必须使用 HypoMux 官方 GitHub 或 CNB Release 地址")
