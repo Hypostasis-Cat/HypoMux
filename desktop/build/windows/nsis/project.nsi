@@ -166,7 +166,16 @@ Var HypoMuxPreviousInstallDir
 Var HypoMuxInstallPathChanged
 Var HypoMuxAutostartEnabled
 
+!macro HypoMuxClearInheritedPSModulePath
+   ; PowerShell 7 normally substitutes a Windows PowerShell-only module path
+   ; when it launches powershell.exe directly. NSIS breaks that direct parent
+   ; chain, so remove the inherited value in this process and let every Windows
+   ; PowerShell 5.1 child reconstruct its own default PSModulePath.
+   System::Call 'kernel32::SetEnvironmentVariable(t "PSModulePath", p 0)'
+!macroend
+
 Function .onInit
+   !insertmacro HypoMuxClearInheritedPSModulePath
    !insertmacro MUI_LANGDLL_DISPLAY
    !insertmacro wails.checkArchitecture
    StrCpy $HypoMuxFreshInstall "1"
@@ -194,6 +203,7 @@ Function .onInit
 FunctionEnd
 
 Function un.onInit
+   !insertmacro HypoMuxClearInheritedPSModulePath
    !insertmacro MUI_UNGETLANGUAGE
 FunctionEnd
 

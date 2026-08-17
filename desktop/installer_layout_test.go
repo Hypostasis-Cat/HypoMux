@@ -172,11 +172,31 @@ func TestMachineInstallerSeparatesProtectedServiceFromCustomDesktopPath(t *testi
 		`LocalSystemSid`,
 		`BuiltinUsersSid`,
 		`SetAccessRuleProtection($true, $false)`,
+		`[System.IO.DirectoryInfo]::new`,
+		`[System.IO.FileInfo]::new`,
+		`[System.IO.FileSystemAclExtensions]::SetAccessControl`,
 		`ReparsePoint`,
 	} {
 		if !strings.Contains(protectionScript, required) {
 			t.Fatalf("protected Core preparation is missing %q", required)
 		}
+	}
+	if strings.Contains(protectionScript, `Set-Acl -LiteralPath`) {
+		t.Fatal("protected Core preparation must not depend on the Microsoft.PowerShell.Security module")
+	}
+}
+
+func TestInstallerClearsInheritedPowerShellModulePath(t *testing.T) {
+	data, err := os.ReadFile("build/windows/nsis/project.nsi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(data)
+	if !strings.Contains(script, `System::Call 'kernel32::SetEnvironmentVariable(t "PSModulePath", p 0)'`) {
+		t.Fatal("installer does not clear the inherited PowerShell module path")
+	}
+	if count := strings.Count(script, `!insertmacro HypoMuxClearInheritedPSModulePath`); count != 2 {
+		t.Fatalf("installer and uninstaller must both clear the inherited PowerShell module path, got %d calls", count)
 	}
 }
 

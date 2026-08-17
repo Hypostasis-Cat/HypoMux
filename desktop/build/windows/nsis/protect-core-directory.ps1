@@ -98,6 +98,29 @@ function New-ProtectedFileAcl {
     return $acl
 }
 
+# Keep ACL writes independent of Set-Acl as defense in depth. Windows
+# PowerShell exposes SetAccessControl as an instance method, while PowerShell 7
+# exposes it through FileSystemAclExtensions, so support both hosts.
+function Set-ProtectedDirectoryAcl([string]$Path) {
+    $directory = [System.IO.DirectoryInfo]::new($Path)
+    $acl = New-ProtectedDirectoryAcl
+    if ($null -ne $directory.PSObject.Methods['SetAccessControl']) {
+        $directory.SetAccessControl($acl)
+        return
+    }
+    [System.IO.FileSystemAclExtensions]::SetAccessControl($directory, $acl)
+}
+
+function Set-ProtectedFileAcl([string]$Path) {
+    $file = [System.IO.FileInfo]::new($Path)
+    $acl = New-ProtectedFileAcl
+    if ($null -ne $file.PSObject.Methods['SetAccessControl']) {
+        $file.SetAccessControl($acl)
+        return
+    }
+    [System.IO.FileSystemAclExtensions]::SetAccessControl($file, $acl)
+}
+
 $hypomuxRoot = Join-Path $programData 'HypoMux'
 $binRoot = Join-Path $requestedRoot 'bin'
 $directories = @($hypomuxRoot, $requestedRoot, $binRoot)
@@ -109,7 +132,7 @@ if ($Phase -eq 'Prepare') {
             New-Item -ItemType Directory -Path $directory | Out-Null
         }
         Assert-NotReparsePoint $directory
-        Set-Acl -LiteralPath $directory -AclObject (New-ProtectedDirectoryAcl)
+        Set-ProtectedDirectoryAcl $directory
     }
 
     foreach ($name in @('hypomux-engine.exe', 'sing-box.exe', 'wintun.dll', 'libcronet.dll')) {
@@ -124,7 +147,7 @@ if ($Phase -eq 'Prepare') {
 
 foreach ($directory in $directories) {
     Assert-NotReparsePoint $directory
-    Set-Acl -LiteralPath $directory -AclObject (New-ProtectedDirectoryAcl)
+    Set-ProtectedDirectoryAcl $directory
 }
 
 foreach ($name in @('hypomux-engine.exe', 'sing-box.exe', 'wintun.dll')) {
@@ -133,11 +156,11 @@ foreach ($name in @('hypomux-engine.exe', 'sing-box.exe', 'wintun.dll')) {
         throw "Required protected Core payload is missing: $path"
     }
     Assert-NotReparsePoint $path
-    Set-Acl -LiteralPath $path -AclObject (New-ProtectedFileAcl)
+    Set-ProtectedFileAcl $path
 }
 
 $optionalCronet = Join-Path $binRoot 'libcronet.dll'
 if (Test-Path -LiteralPath $optionalCronet -PathType Leaf) {
     Assert-NotReparsePoint $optionalCronet
-    Set-Acl -LiteralPath $optionalCronet -AclObject (New-ProtectedFileAcl)
+    Set-ProtectedFileAcl $optionalCronet
 }
