@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "version": "2.5.7",
+  "name": "HypoMux 2.5.7",
+  "notes": "## v2.5.7 更新日志\n\n> QQ群：1002583295\n\n**安装兼容性与更新安全增强**\n\n- 修复安装器继承异常 `PSModulePath` 时，Windows PowerShell 无法加载系统模块并导致 Core 受保护目录配置失败的问题。\n- 改进受保护目录的 ACL 写入方式，兼容 Windows PowerShell 5.1 与 PowerShell 7。\n- 修复切换页面后，首页引擎状态与实时信息可能被重新初始化的问题。\n- 新增腾讯 CNB 国内更新源，支持 CNB 与 GitHub 双源更新及故障自动回退。\n- 更新清单增加 Ed25519 签名验证；安装前同时校验文件大小、SHA-256 与 Authenticode 签名。\n- 自动更新改用 GitHub 与 CNB 双源签名更新通道，更新元数据必须通过 Ed25519 验证后才会被接受。\n- GitHub 与 CNB 发布相同的 SignPath 签名安装包，进一步提升国内更新的可用性与安全性。\n\n> 感谢 SignPath.io 为 HypoMux 提供 Windows 代码签名服务，并感谢 SignPath Foundation 为本项目颁发开源代码签名证书。\n",
+  "installer": {
+    "name": "HypoMux_Setup_2.5.7.exe",
+    "size": 30806208,
+    "sha256": "becfc6ef863e3864e5d929ce461881ee2fa2bcefb485a6ebea449f8e71cb30b0",
+    "urls": [
+      "https://cnb.cool/Hypostasis-Cat/HypoMux/-/releases/download/v2.5.7/HypoMux_Setup_2.5.7.exe",
+      "https://github.com/Hypostasis-Cat/HypoMux/releases/download/v2.5.7/HypoMux_Setup_2.5.7.exe"
+    ]
+  }
+}
