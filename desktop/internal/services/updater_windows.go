@@ -18,6 +18,11 @@ func launchInstallerAfterExit(installerPath string, processID int) error {
 	if err != nil {
 		return err
 	}
+	// Revalidate immediately before creating the launcher so a file replaced
+	// after Download returned can never cross the execution boundary.
+	if err := verifyDownloadedInstallerAuthenticity(absolute); err != nil {
+		return fmt.Errorf("拒绝启动未通过 Authenticode 验证的安装包：%w", err)
+	}
 	script := filepath.Join(filepath.Dir(absolute), "run-update.cmd")
 	content := "@echo off\r\n" +
 		"set \"target_pid=" + strconv.Itoa(processID) + "\"\r\n" +

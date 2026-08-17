@@ -62,10 +62,10 @@ export type ReleaseInfo = {
   name: string;
   notes: string;
   page_url: string;
-  installer_url: string;
+  installer_urls: string[];
   installer_name: string;
   installer_size: number;
-  installer_digest?: string;
+  installer_digest: string;
 };
 
 export type UpdateCheckResult = {

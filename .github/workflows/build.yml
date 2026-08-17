@@ -273,16 +273,63 @@ jobs:
           path: artifacts
 
       - name: Stage legacy-updater-compatible installer name
+        id: stage_release
         shell: bash
         run: |
           version="${GITHUB_REF_NAME#v}"
           cp artifacts/hypomux-amd64-installer.exe "artifacts/HypoMux_Setup_${version}.exe"
+          echo "installer_name=HypoMux_Setup_${version}.exe" >> "${GITHUB_OUTPUT}"
 
-      - name: Upload installer to GitHub Release
+      - name: Generate signed update manifest
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          installer_name="HypoMux_Setup_${version}.exe"
+          installer_path="artifacts/${installer_name}"
+          installer_size="$(stat -c%s "${installer_path}")"
+          installer_sha256="$(sha256sum "${installer_path}" | awk '{print $1}')"
+          jq -n \
+            --arg version "${version}" \
+            --arg name "HypoMux ${version}" \
+            --arg installer_name "${installer_name}" \
+            --arg installer_sha256 "${installer_sha256}" \
+            --arg github_url "https://github.com/Hypostasis-Cat/HypoMux/releases/download/${GITHUB_REF_NAME}/${installer_name}" \
+            --arg cnb_url "https://cnb.cool/Hypostasis-Cat/HypoMux/-/releases/download/${GITHUB_REF_NAME}/${installer_name}" \
+            --argjson installer_size "${installer_size}" \
+            '{
+              schema_version: 1,
+              version: $version,
+              name: $name,
+              notes: "",
+              installer: {
+                name: $installer_name,
+                size: $installer_size,
+                sha256: $installer_sha256,
+                urls: [$cnb_url, $github_url]
+              }
+            }' > artifacts/latest.json
+          jq empty artifacts/latest.json
+
+      - name: Upload installer and manifest to GitHub Release
         uses: softprops/action-gh-release@v3
         with:
           files: |
             artifacts/HypoMux_Setup_*.exe
+            artifacts/latest.json
           fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload signed installer to CNB Release
+        uses: docker://docker.cnb.cool/looc/git-cnb:1.2.0
+        with:
+          args: git-cnb --repo=Hypostasis-Cat/HypoMux release asset-upload -t ${{ github.ref_name }} -f artifacts/${{ steps.stage_release.outputs.installer_name }}
+        env:
+          CNB_TOKEN: ${{ secrets.CNB_TOKEN }}
+
+      - name: Upload update manifest to CNB Release
+        uses: docker://docker.cnb.cool/looc/git-cnb:1.2.0
+        with:
+          args: git-cnb --repo=Hypostasis-Cat/HypoMux release asset-upload -t ${{ github.ref_name }} -f artifacts/latest.json
+        env:
+          CNB_TOKEN: ${{ secrets.CNB_TOKEN }}

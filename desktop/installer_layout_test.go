@@ -264,6 +264,30 @@ func TestReleasePublishesLegacyUpdaterCompatibleInstallerName(t *testing.T) {
 	}
 }
 
+func TestReleasePublishesOneSignedInstallerAndManifestToBothMirrors(t *testing.T) {
+	data, err := os.ReadFile("../.github/workflows/build.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	workflow := string(data)
+	for _, required := range []string{
+		`installer_sha256="$(sha256sum "${installer_path}" | awk '{print $1}')"`,
+		`schema_version: 1`,
+		`urls: [$cnb_url, $github_url]`,
+		`artifacts/latest.json`,
+		`docker://docker.cnb.cool/looc/git-cnb:1.2.0`,
+		`secrets.CNB_TOKEN`,
+		`release asset-upload -t ${{ github.ref_name }}`,
+	} {
+		if !strings.Contains(workflow, required) {
+			t.Fatalf("dual-source release workflow is missing %q", required)
+		}
+	}
+	if strings.Count(workflow, `cp artifacts/hypomux-amd64-installer.exe`) != 1 {
+		t.Fatal("release workflow must stage exactly one signed installer for both mirrors")
+	}
+}
+
 func TestVersionMetadataIsConsistent(t *testing.T) {
 	const version = "2.5.7"
 	files := []string{

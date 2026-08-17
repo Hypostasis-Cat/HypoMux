@@ -1,10 +1,17 @@
 package services
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -78,150 +85,377 @@ func TestUpdaterVersionComparison(t *testing.T) {
 	}
 }
 
-func TestUpdaterAcceptsOnlyOfficialUpdateURLs(t *testing.T) {
+func TestUpdaterAcceptsOnlyExactOfficialInstallerURLs(t *testing.T) {
+	const tagName = "v2.5.8"
+	const installerName = "HypoMux_Setup_2.5.8.exe"
 	for _, value := range []string{
-		"http://github.com/Hypostasis-Cat/HypoMux",
-		"https://github.com.example.invalid/HypoMux.exe",
-		"https://example.com/HypoMux.exe",
-		"https://cnb.cool:444/Hypostasis-Cat/HypoMux/-/releases/download/v2.5.8/HypoMux_Setup_2.5.8.exe",
-		"https://github.com/another/repository/releases/download/v2.5.8/HypoMux_Setup_2.5.8.exe",
-		"https://cnb.cool/another/repository/-/releases/download/v2.5.8/HypoMux_Setup_2.5.8.exe",
+		"http://github.com/Hypostasis-Cat/HypoMux/releases/download/v2.5.8/" + installerName,
+		"https://user@github.com/Hypostasis-Cat/HypoMux/releases/download/v2.5.8/" + installerName,
+		"https://github.com.example.invalid/Hypostasis-Cat/HypoMux/releases/download/v2.5.8/" + installerName,
+		"https://github.com:443/Hypostasis-Cat/HypoMux/releases/download/v2.5.8/" + installerName,
+		"https://github.com/Hypostasis-Cat/HypoMux/releases/download/v2.5.8/" + installerName + "?download=1",
+		"https://github.com/Hypostasis-Cat/HypoMux/releases/download/v2.5.8/" + installerName + "#fragment",
+		"https://github.com/Hypostasis-Cat/HypoMux/releases/download/v2.5.8/%48ypoMux_Setup_2.5.8.exe",
+		"https://github.com/Hypostasis-Cat/HypoMux/releases/download/v2.5.8/../v2.5.8/" + installerName,
+		"https://github.com/Hypostasis-Cat/HypoMux/releases/download/v2.5.9/" + installerName,
+		"https://github.com/another/repository/releases/download/v2.5.8/" + installerName,
+		"https://cnb.cool/another/repository/-/releases/download/v2.5.8/" + installerName,
 	} {
-		if validateUpdateURL(value) == nil {
-			t.Fatalf("unsafe update URL was accepted: %s", value)
+		if validateInstallerMirrorURL(value, tagName, installerName) == nil {
+			t.Fatalf("unsafe installer URL was accepted: %s", value)
 		}
 	}
-	for _, value := range []string{
-		"https://github.com/Hypostasis-Cat/HypoMux/releases/download/v2.3.0/HypoMux_Setup_2.3.0.exe",
-		"https://cnb.cool/Hypostasis-Cat/HypoMux/-/releases/download/v2.5.8/HypoMux_Setup_2.5.8.exe",
-	} {
-		if err := validateUpdateURL(value); err != nil {
-			t.Fatalf("official update URL rejected: %s: %v", value, err)
+	for _, value := range officialInstallerMirrors(tagName, installerName) {
+		if err := validateInstallerMirrorURL(value, tagName, installerName); err != nil {
+			t.Fatalf("official installer URL rejected: %s: %v", value, err)
 		}
 	}
 }
 
-func TestUpdaterFallsBackToCNBWhenGitHubAPIIsUnavailable(t *testing.T) {
-	const page = `<!doctype html><html><body>
-<script id="__NEXT_DATA__" type="application/json">{
-  "props":{"pageProps":{
-    "tagName":"v2.5.8",
-    "releasesDetailData":{"release":{
-      "title":"HypoMux v2.5.8",
-      "body":"CNB release notes",
-      "assets":[{
-        "path":"/Hypostasis-Cat/HypoMux/-/releases/download/v2.5.8/HypoMux_Setup_2.5.8.exe",
-        "name":"HypoMux_Setup_2.5.8.exe",
-        "hashAlgo":"sha256",
-        "hashValue":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "sizeInByte":31000000
-      }]
-    }}
-  }}
-}</script></body></html>`
-	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
-		response := &http.Response{
-			Request: request,
-			Header:  make(http.Header),
-			Body:    io.NopCloser(strings.NewReader("")),
+func TestManifestRequiresSchemaDigestAndExactInstallerMetadata(t *testing.T) {
+	valid := testManifest("2.5.8", []byte("payload"))
+	if _, err := releaseFromManifest(valid); err != nil {
+		t.Fatalf("valid manifest rejected: %v", err)
+	}
+
+	cases := map[string]func(*updateManifest){
+		"missing schema": func(value *updateManifest) { value.SchemaVersion = 0 },
+		"missing digest": func(value *updateManifest) { value.Installer.SHA256 = "" },
+		"short digest":   func(value *updateManifest) { value.Installer.SHA256 = strings.Repeat("a", 63) },
+		"wrong name":     func(value *updateManifest) { value.Installer.Name = "HypoMux_Setup_2.5.9.exe" },
+		"zero size":      func(value *updateManifest) { value.Installer.Size = 0 },
+		"no mirrors":     func(value *updateManifest) { value.Installer.URLs = nil },
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			candidate := valid
+			candidate.Installer.URLs = append([]string(nil), valid.Installer.URLs...)
+			mutate(&candidate)
+			if _, err := releaseFromManifest(candidate); err == nil {
+				t.Fatal("invalid manifest was accepted")
+			}
+		})
+	}
+}
+
+func TestUpdaterChoosesNewestMetadataSource(t *testing.T) {
+	githubManifest := manifestJSON(t, testManifest("2.5.8", []byte("new")))
+	cnbManifest := manifestJSON(t, testManifest("2.5.7", []byte("old")))
+	service := NewUpdaterService()
+	service.client = clientFor(func(request *http.Request) *http.Response {
+		switch request.URL.String() {
+		case githubLatestManifestURL:
+			return stringResponse(request, http.StatusOK, githubManifest)
+		case cnbLatestManifestURL:
+			return stringResponse(request, http.StatusOK, cnbManifest)
+		default:
+			return stringResponse(request, http.StatusServiceUnavailable, "")
 		}
+	})
+
+	result, err := service.Check()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Available || result.Release.TagName != "v2.5.8" {
+		t.Fatalf("newest update result = %#v", result)
+	}
+}
+
+func TestUpdaterRejectsConflictingMetadataForSameVersion(t *testing.T) {
+	left := releaseFromTestManifest(t, testManifest("2.5.8", []byte("left")))
+	right := releaseFromTestManifest(t, testManifest("2.5.8", []byte("right")))
+	if _, err := selectLatestRelease([]ReleaseInfo{left, right}); err == nil {
+		t.Fatal("conflicting metadata for one version was accepted")
+	}
+}
+
+func TestUpdaterUsesCNBManifestWhenGitHubMetadataIsUnavailable(t *testing.T) {
+	manifest := manifestJSON(t, testManifest("2.5.8", []byte("payload")))
+	service := NewUpdaterService()
+	service.client = clientFor(func(request *http.Request) *http.Response {
+		if request.URL.String() == cnbLatestManifestURL {
+			return stringResponse(request, http.StatusOK, manifest)
+		}
+		return stringResponse(request, http.StatusServiceUnavailable, "")
+	})
+
+	result, err := service.Check()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Release.TagName != "v2.5.8" || result.Release.InstallerURLs[0] !=
+		cnbDownloadURL+"v2.5.8/HypoMux_Setup_2.5.8.exe" {
+		t.Fatalf("CNB manifest result = %#v", result.Release)
+	}
+}
+
+func TestGitHubMetadataCanDownloadFromCNBAfterGitHubAssetFailure(t *testing.T) {
+	payload := []byte("signed-installer-placeholder")
+	digest := sha256.Sum256(payload)
+	apiPayload := `{
+  "tag_name":"v2.5.8",
+  "name":"HypoMux 2.5.8",
+  "body":"Release notes",
+  "html_url":"https://github.com/Hypostasis-Cat/HypoMux/releases/tag/v2.5.8",
+  "assets":[{
+    "name":"HypoMux_Setup_2.5.8.exe",
+    "browser_download_url":"https://github.com/Hypostasis-Cat/HypoMux/releases/download/v2.5.8/HypoMux_Setup_2.5.8.exe",
+    "size":` + fmt.Sprint(len(payload)) + `,
+    "digest":"sha256:` + hex.EncodeToString(digest[:]) + `"
+  }]
+}`
+	service := NewUpdaterService()
+	service.verifyInstaller = func(string) error { return nil }
+	service.client = clientFor(func(request *http.Request) *http.Response {
 		switch request.URL.String() {
 		case latestReleaseAPI:
-			response.StatusCode = http.StatusServiceUnavailable
-		case cnbLatestRelease:
-			response.StatusCode = http.StatusOK
-			response.Body = io.NopCloser(strings.NewReader(page))
+			return stringResponse(request, http.StatusOK, apiPayload)
+		case releaseDownloadURL + "v2.5.8/HypoMux_Setup_2.5.8.exe":
+			return stringResponse(request, http.StatusServiceUnavailable, "")
+		case cnbDownloadURL + "v2.5.8/HypoMux_Setup_2.5.8.exe":
+			return bytesResponse(request, http.StatusOK, payload)
 		default:
-			response.StatusCode = http.StatusNotFound
+			return stringResponse(request, http.StatusNotFound, "")
 		}
-		return response, nil
-	})}
-	service := NewUpdaterService()
-	service.client = client
-
-	result, err := service.Check()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !result.Available || result.Release.TagName != "v2.5.8" {
-		t.Fatalf("CNB fallback update result = %#v", result)
-	}
-	if result.Release.InstallerURL != cnbDownloadURL+"v2.5.8/HypoMux_Setup_2.5.8.exe" ||
-		result.Release.InstallerSize != 31_000_000 ||
-		result.Release.InstallerDigest != "sha256:"+strings.Repeat("a", 64) {
-		t.Fatalf("CNB fallback release = %#v", result.Release)
-	}
-}
-
-func TestUpdaterFallsBackToReleaseFeedWhenAPIIsRateLimited(t *testing.T) {
-	const feed = `<?xml version="1.0" encoding="UTF-8"?>
-<feed xmlns="http://www.w3.org/2005/Atom">
-  <entry>
-    <title>HypoMux 2.5.8</title>
-    <link rel="alternate" href="https://github.com/Hypostasis-Cat/HypoMux/releases/tag/v2.5.8" />
-  </entry>
-</feed>`
-	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
-		response := &http.Response{
-			Request: request,
-			Header:  make(http.Header),
-			Body:    io.NopCloser(strings.NewReader("")),
-		}
-		switch {
-		case request.URL.String() == latestReleaseAPI:
-			response.StatusCode = http.StatusForbidden
-		case request.URL.String() == releasesFeedURL:
-			response.StatusCode = http.StatusOK
-			response.Body = io.NopCloser(strings.NewReader(feed))
-		case request.Method == http.MethodHead && request.URL.String() ==
-			releaseDownloadURL+"v2.5.8/HypoMux_Setup_2.5.8.exe":
-			response.StatusCode = http.StatusOK
-			response.ContentLength = 30_000_000
-		default:
-			response.StatusCode = http.StatusNotFound
-		}
-		return response, nil
-	})}
-	service := NewUpdaterService()
-	service.client = client
-
-	result, err := service.Check()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !result.Available || result.Release.TagName != "v2.5.8" {
-		t.Fatalf("fallback update result = %#v", result)
-	}
-	if result.Release.InstallerName != "HypoMux_Setup_2.5.8.exe" ||
-		result.Release.InstallerSize != 30_000_000 {
-		t.Fatalf("fallback release = %#v", result.Release)
-	}
-}
-
-func TestUpdaterRejectsMismatchedDigestWithoutPrefix(t *testing.T) {
-	const payload = "hypomux-installer-payload"
-	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
-		response := &http.Response{
-			Request: request, Header: make(http.Header), StatusCode: http.StatusOK,
-			Body: io.NopCloser(strings.NewReader(payload)),
-		}
-		response.ContentLength = int64(len(payload))
-		return response, nil
-	})}
-	service := NewUpdaterService()
-	service.client = client
-
-	// Digest intentionally carries no "sha256:" prefix while being wrong:
-	// verification must still run and fail the download.
-	_, err := service.Download(ReleaseInfo{
-		InstallerName:   "HypoMux_Setup_2.5.5.exe",
-		InstallerSize:   int64(len(payload)),
-		InstallerURL:    "https://github.com/Hypostasis-Cat/HypoMux/releases/download/v2.5.5/HypoMux_Setup_2.5.5.exe",
-		InstallerDigest: strings.Repeat("0", 64),
 	})
-	if err == nil {
-		t.Fatal("Download accepted a mismatched digest; SHA-256 verification was skipped")
+
+	result, err := service.Check()
+	if err != nil {
+		t.Fatal(err)
 	}
+	// Mirror lists are generic. Reversing the default CNB-first preference
+	// proves that download fallback is independent from the metadata source.
+	result.Release.InstallerURLs[0], result.Release.InstallerURLs[1] =
+		result.Release.InstallerURLs[1], result.Release.InstallerURLs[0]
+	installerPath, err := service.Download(result.Release)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(filepath.Dir(installerPath))
+}
+
+func TestUpdaterFallsBackToTaggedManifestThroughReleaseFeed(t *testing.T) {
+	const feed = `<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom"><entry>
+  <title>HypoMux 2.5.8</title>
+  <link rel="alternate" href="https://github.com/Hypostasis-Cat/HypoMux/releases/tag/v2.5.8" />
+</entry></feed>`
+	manifest := manifestJSON(t, testManifest("2.5.8", []byte("payload")))
+	taggedManifestURL := releaseDownloadURL + "v2.5.8/" + updateManifestName
+	service := NewUpdaterService()
+	service.client = clientFor(func(request *http.Request) *http.Response {
+		switch request.URL.String() {
+		case releasesFeedURL:
+			return stringResponse(request, http.StatusOK, feed)
+		case taggedManifestURL:
+			return stringResponse(request, http.StatusOK, manifest)
+		default:
+			return stringResponse(request, http.StatusServiceUnavailable, "")
+		}
+	})
+
+	result, err := service.Check()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Release.TagName != "v2.5.8" || result.Release.InstallerSize != int64(len("payload")) {
+		t.Fatalf("Atom fallback result = %#v", result.Release)
+	}
+}
+
+func TestUpdaterDownloadFallsBackBetweenMirrorsInBothDirections(t *testing.T) {
+	for _, testCase := range []struct {
+		name string
+		urls func(string, string) []string
+	}{
+		{name: "CNB to GitHub", urls: officialInstallerMirrors},
+		{name: "GitHub to CNB", urls: func(tagName, installerName string) []string {
+			values := officialInstallerMirrors(tagName, installerName)
+			return []string{values[1], values[0]}
+		}},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			payload := []byte("signed-installer-placeholder")
+			release := testRelease("2.5.8", payload)
+			release.InstallerURLs = testCase.urls(release.TagName, release.InstallerName)
+			var mu sync.Mutex
+			attempted := make([]string, 0, 2)
+			service := NewUpdaterService()
+			service.verifyInstaller = func(string) error { return nil }
+			service.client = clientFor(func(request *http.Request) *http.Response {
+				mu.Lock()
+				attempted = append(attempted, request.URL.String())
+				attempt := len(attempted)
+				mu.Unlock()
+				if attempt == 1 {
+					return stringResponse(request, http.StatusServiceUnavailable, "")
+				}
+				return bytesResponse(request, http.StatusOK, payload)
+			})
+
+			installerPath, err := service.Download(release)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer os.RemoveAll(filepath.Dir(installerPath))
+			if len(attempted) != 2 || attempted[0] != release.InstallerURLs[0] || attempted[1] != release.InstallerURLs[1] {
+				t.Fatalf("mirror attempts = %#v", attempted)
+			}
+		})
+	}
+}
+
+func TestUpdaterDownloadFailsWhenAllMirrorsFail(t *testing.T) {
+	release := testRelease("2.5.8", []byte("payload"))
+	service := NewUpdaterService()
+	service.verifyInstaller = func(string) error { return nil }
+	service.client = clientFor(func(request *http.Request) *http.Response {
+		return stringResponse(request, http.StatusBadGateway, "")
+	})
+
+	if installerPath, err := service.Download(release); err == nil || installerPath != "" {
+		t.Fatalf("all-mirror failure returned path=%q err=%v", installerPath, err)
+	}
+}
+
+func TestUpdaterDigestMismatchIsFailClosedAcrossMirrors(t *testing.T) {
+	goodPayload := []byte("expected-payload")
+	release := testRelease("2.5.8", goodPayload)
+	release.InstallerURLs[0], release.InstallerURLs[1] = release.InstallerURLs[1], release.InstallerURLs[0]
+	verifyCalls := 0
+	attempt := 0
+	service := NewUpdaterService()
+	service.verifyInstaller = func(string) error { verifyCalls++; return nil }
+	service.client = clientFor(func(request *http.Request) *http.Response {
+		attempt++
+		if attempt == 1 {
+			return bytesResponse(request, http.StatusOK, []byte("tampered-payload"))
+		}
+		return bytesResponse(request, http.StatusOK, goodPayload)
+	})
+
+	if installerPath, err := service.Download(release); err == nil || installerPath != "" {
+		t.Fatalf("digest inconsistency returned path=%q err=%v", installerPath, err)
+	}
+	if attempt != 2 || verifyCalls != 1 {
+		t.Fatalf("attempts=%d verifyCalls=%d", attempt, verifyCalls)
+	}
+}
+
+func TestUpdaterRejectsMissingDigestBeforeNetwork(t *testing.T) {
+	release := testRelease("2.5.8", []byte("payload"))
+	release.InstallerDigest = ""
+	requests := 0
+	service := NewUpdaterService()
+	service.client = clientFor(func(request *http.Request) *http.Response {
+		requests++
+		return stringResponse(request, http.StatusOK, "")
+	})
+
+	if _, err := service.Download(release); err == nil {
+		t.Fatal("missing digest was accepted")
+	}
+	if requests != 0 {
+		t.Fatalf("made %d network requests before validating digest", requests)
+	}
+}
+
+func TestUpdaterRejectsSizeMismatchBeforeSignatureCheck(t *testing.T) {
+	payload := []byte("payload")
+	release := testRelease("2.5.8", payload)
+	verifyCalls := 0
+	service := NewUpdaterService()
+	service.verifyInstaller = func(string) error { verifyCalls++; return nil }
+	service.client = clientFor(func(request *http.Request) *http.Response {
+		return bytesResponse(request, http.StatusOK, append(payload, '!'))
+	})
+
+	if _, err := service.Download(release); err == nil {
+		t.Fatal("size mismatch was accepted")
+	}
+	if verifyCalls != 0 {
+		t.Fatalf("signature check ran %d times on wrong-sized data", verifyCalls)
+	}
+}
+
+func TestUpdaterRejectsUntrustedAuthenticodePublisher(t *testing.T) {
+	payload := []byte("payload")
+	release := testRelease("2.5.8", payload)
+	service := NewUpdaterService()
+	service.verifyInstaller = func(string) error { return errors.New("unexpected publisher") }
+	service.client = clientFor(func(request *http.Request) *http.Response {
+		return bytesResponse(request, http.StatusOK, payload)
+	})
+
+	if installerPath, err := service.Download(release); err == nil || installerPath != "" {
+		t.Fatalf("untrusted signature returned path=%q err=%v", installerPath, err)
+	}
+}
+
+func testManifest(version string, payload []byte) updateManifest {
+	digest := sha256.Sum256(payload)
+	tagName := normalizeTagName(version)
+	version = strings.TrimPrefix(tagName, "v")
+	installerName := "HypoMux_Setup_" + version + ".exe"
+	manifest := updateManifest{
+		SchemaVersion: 1,
+		Version:       version,
+		Name:          "HypoMux " + version,
+		Notes:         "Release notes",
+	}
+	manifest.Installer.Name = installerName
+	manifest.Installer.Size = int64(len(payload))
+	manifest.Installer.SHA256 = hex.EncodeToString(digest[:])
+	manifest.Installer.URLs = officialInstallerMirrors(tagName, installerName)
+	return manifest
+}
+
+func testRelease(version string, payload []byte) ReleaseInfo {
+	return releaseFromTestManifest(nil, testManifest(version, payload))
+}
+
+func releaseFromTestManifest(t *testing.T, manifest updateManifest) ReleaseInfo {
+	release, err := releaseFromManifest(manifest)
+	if err != nil {
+		if t != nil {
+			t.Fatal(err)
+		}
+		panic(err)
+	}
+	return release
+}
+
+func manifestJSON(t *testing.T, manifest updateManifest) string {
+	payload, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(payload)
+}
+
+func clientFor(handler func(*http.Request) *http.Response) *http.Client {
+	return &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		return handler(request), nil
+	})}
+}
+
+func stringResponse(request *http.Request, status int, body string) *http.Response {
+	return bytesResponse(request, status, []byte(body))
+}
+
+func bytesResponse(request *http.Request, status int, body []byte) *http.Response {
+	response := &http.Response{
+		Request:       request,
+		Header:        make(http.Header),
+		StatusCode:    status,
+		Body:          io.NopCloser(strings.NewReader(string(body))),
+		ContentLength: int64(len(body)),
+	}
+	if status != http.StatusOK {
+		response.ContentLength = 0
+	}
+	return response
 }
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
