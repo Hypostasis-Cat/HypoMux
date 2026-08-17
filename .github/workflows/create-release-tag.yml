@@ -23,10 +23,11 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Validate and create tag
+      - name: Validate and synchronize release tag
         shell: bash
         env:
           RELEASE_TAG: ${{ inputs.tag }}
+          CNB_TOKEN: ${{ secrets.CNB_TOKEN }}
         run: |
           set -euo pipefail
 
@@ -35,12 +36,83 @@ jobs:
             exit 1
           fi
 
-          if git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null 2>&1; then
-            echo "Tag $RELEASE_TAG already exists and will not be moved."
+          expected_commit="$(git rev-parse HEAD^{commit})"
+          credential_file="$(mktemp)"
+          cleanup() {
+            git config --local --unset-all credential.helper >/dev/null 2>&1 || true
+            rm -f "${credential_file}"
+          }
+          trap cleanup EXIT
+          chmod 600 "${credential_file}"
+          git config --local credential.helper "store --file=${credential_file}"
+          printf 'protocol=https\nhost=cnb.cool\nusername=cnb\npassword=%s\n\n' "${CNB_TOKEN}" |
+            git credential approve
+
+          if git remote get-url cnb >/dev/null 2>&1; then
+            git remote set-url cnb https://cnb.cool/Hypostasis-Cat/HypoMux
+          else
+            git remote add cnb https://cnb.cool/Hypostasis-Cat/HypoMux
+          fi
+
+          resolve_remote_tag_commit() {
+            local remote="$1"
+            local refs
+            local direct
+            local peeled
+            refs="$(git ls-remote "${remote}" "refs/tags/${RELEASE_TAG}" "refs/tags/${RELEASE_TAG}^{}" || true)"
+            direct="$(awk -v ref="refs/tags/${RELEASE_TAG}" '$2 == ref {print $1; exit}' <<<"${refs}")"
+            peeled="$(awk -v ref="refs/tags/${RELEASE_TAG}^{}" '$2 == ref {print $1; exit}' <<<"${refs}")"
+            if [[ -n "${peeled}" ]]; then
+              printf '%s' "${peeled}"
+            else
+              printf '%s' "${direct}"
+            fi
+          }
+
+          github_commit="$(resolve_remote_tag_commit origin)"
+          if [[ -z "${github_commit}" ]]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            if git rev-parse --verify "refs/tags/${RELEASE_TAG}" >/dev/null 2>&1; then
+              local_commit="$(git rev-parse "refs/tags/${RELEASE_TAG}^{commit}")"
+              if [[ "${local_commit}" != "${expected_commit}" ]]; then
+                echo "Local tag ${RELEASE_TAG} points to ${local_commit}, expected ${expected_commit}; refusing to move it."
+                exit 1
+              fi
+            else
+              git tag --annotate "${RELEASE_TAG}" "${expected_commit}" --message "Release ${RELEASE_TAG}"
+            fi
+            git push origin "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
+            github_commit="$(resolve_remote_tag_commit origin)"
+          elif [[ "${github_commit}" != "${expected_commit}" ]]; then
+            echo "GitHub tag ${RELEASE_TAG} points to ${github_commit}, expected ${expected_commit}; refusing to move it."
             exit 1
           fi
 
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag --annotate "$RELEASE_TAG" --message "Release $RELEASE_TAG"
-          git push origin "refs/tags/$RELEASE_TAG"
+          if ! git rev-parse --verify "refs/tags/${RELEASE_TAG}" >/dev/null 2>&1; then
+            git fetch origin "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
+          fi
+          local_commit="$(git rev-parse "refs/tags/${RELEASE_TAG}^{commit}")"
+          if [[ "${local_commit}" != "${expected_commit}" ]]; then
+            echo "Fetched GitHub tag ${RELEASE_TAG} points to ${local_commit}, expected ${expected_commit}."
+            exit 1
+          fi
+
+          cnb_commit="$(resolve_remote_tag_commit cnb)"
+          if [[ -z "${cnb_commit}" ]]; then
+            git push cnb "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
+            cnb_commit="$(resolve_remote_tag_commit cnb)"
+          elif [[ "${cnb_commit}" != "${expected_commit}" ]]; then
+            echo "CNB tag ${RELEASE_TAG} points to ${cnb_commit}, expected ${expected_commit}; refusing to move it."
+            exit 1
+          fi
+
+          github_commit="$(resolve_remote_tag_commit origin)"
+          cnb_commit="$(resolve_remote_tag_commit cnb)"
+          if [[ "${github_commit}" != "${expected_commit}" ||
+                "${cnb_commit}" != "${expected_commit}" ||
+                "${github_commit}" != "${cnb_commit}" ]]; then
+            echo "Release tag verification failed: expected=${expected_commit} GitHub=${github_commit:-missing} CNB=${cnb_commit:-missing}."
+            exit 1
+          fi
+          echo "Release tag ${RELEASE_TAG} is synchronized at ${expected_commit}."

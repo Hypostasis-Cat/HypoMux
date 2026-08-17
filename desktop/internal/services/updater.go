@@ -9,7 +9,6 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
@@ -26,14 +25,12 @@ import (
 
 const (
 	CurrentVersion           = "2.5.7"
-	latestReleaseAPI         = "https://api.github.com/repos/Hypostasis-Cat/HypoMux/releases/latest"
-	releasesFeedURL          = "https://github.com/Hypostasis-Cat/HypoMux/releases.atom"
 	githubRepositoryURL      = "https://github.com/Hypostasis-Cat/HypoMux"
 	releaseDownloadURL       = githubRepositoryURL + "/releases/download/"
-	githubLatestManifestURL  = githubRepositoryURL + "/releases/latest/download/latest.json"
+	githubLatestManifestURL  = "https://raw.githubusercontent.com/Hypostasis-Cat/HypoMux/update-channel/latest.json"
 	cnbRepositoryURL         = "https://cnb.cool/Hypostasis-Cat/HypoMux"
 	cnbDownloadURL           = cnbRepositoryURL + "/-/releases/download/"
-	cnbLatestManifestURL     = cnbRepositoryURL + "/-/releases/latest/download/latest.json"
+	cnbLatestManifestURL     = cnbRepositoryURL + "/-/git/raw/update-channel/latest.json"
 	updateManifestName       = "latest.json"
 	maxUpdateManifestSize    = 2 << 20
 	maxManifestSignatureSize = 1024
@@ -133,13 +130,12 @@ func (s *UpdaterService) Check() (UpdateCheckResult, error) {
 		check func(context.Context) (ReleaseInfo, error)
 	}
 	sources := []metadataSource{
-		{name: "GitHub manifest", check: func(ctx context.Context) (ReleaseInfo, error) {
-			return s.checkUpdateManifest(ctx, githubLatestManifestURL)
-		}},
 		{name: "CNB manifest", check: func(ctx context.Context) (ReleaseInfo, error) {
 			return s.checkUpdateManifest(ctx, cnbLatestManifestURL)
 		}},
-		{name: "GitHub API tag discovery", check: s.checkGitHubAPI},
+		{name: "GitHub manifest", check: func(ctx context.Context) (ReleaseInfo, error) {
+			return s.checkUpdateManifest(ctx, githubLatestManifestURL)
+		}},
 	}
 	type sourceResult struct {
 		index   int
@@ -160,7 +156,7 @@ func (s *UpdaterService) Check() (UpdateCheckResult, error) {
 		ordered[result.index] = result
 	}
 	candidates := make([]ReleaseInfo, 0, len(sources))
-	errorsBySource := make([]string, 0, len(sources)+1)
+	errorsBySource := make([]string, 0, len(sources))
 	for index, result := range ordered {
 		if result.err != nil {
 			errorsBySource = append(errorsBySource, sources[index].name+": "+result.err.Error())
@@ -169,14 +165,7 @@ func (s *UpdaterService) Check() (UpdateCheckResult, error) {
 		candidates = append(candidates, result.release)
 	}
 	if len(candidates) == 0 {
-		feedCtx, feedCancel := context.WithTimeout(context.Background(), updateMetadataTimeout)
-		feedRelease, feedErr := s.checkGitHubReleaseFeed(feedCtx)
-		feedCancel()
-		if feedErr != nil {
-			errorsBySource = append(errorsBySource, "GitHub Atom tag discovery: "+feedErr.Error())
-			return UpdateCheckResult{}, errors.New(strings.Join(errorsBySource, "；"))
-		}
-		candidates = append(candidates, feedRelease)
+		return UpdateCheckResult{}, errors.New(strings.Join(errorsBySource, "；"))
 	}
 
 	release, err := selectLatestRelease(candidates)
@@ -190,38 +179,8 @@ func (s *UpdaterService) Check() (UpdateCheckResult, error) {
 	}, nil
 }
 
-func (s *UpdaterService) checkGitHubAPI(ctx context.Context) (ReleaseInfo, error) {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, latestReleaseAPI, nil)
-	if err != nil {
-		return ReleaseInfo{}, err
-	}
-	request.Header.Set("Accept", "application/vnd.github+json")
-	request.Header.Set("User-Agent", "HypoMux-Updater")
-	request.Header.Set("X-GitHub-Api-Version", "2022-11-28")
-	response, err := s.client.Do(request)
-	if err != nil {
-		return ReleaseInfo{}, errors.New("无法连接 GitHub，请检查网络后重试")
-	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		return ReleaseInfo{}, fmt.Errorf("GitHub HTTP %d", response.StatusCode)
-	}
-	var payload struct {
-		TagName string `json:"tag_name"`
-	}
-	decoder := json.NewDecoder(io.LimitReader(response.Body, 2<<20))
-	if err := decoder.Decode(&payload); err != nil {
-		return ReleaseInfo{}, errors.New("GitHub 返回了无效的更新信息")
-	}
-	tagName := normalizeTagName(payload.TagName)
-	if versionKey(tagName) == nil {
-		return ReleaseInfo{}, errors.New("GitHub 最新发布的版本号无效")
-	}
-	return s.checkTaggedUpdateManifests(ctx, tagName)
-}
-
 func (s *UpdaterService) checkUpdateManifest(ctx context.Context, manifestURL string) (ReleaseInfo, error) {
-	if err := validateUpdateURL(manifestURL); err != nil {
+	if err := validateUpdateMetadataURL(manifestURL); err != nil {
 		return ReleaseInfo{}, errors.New("更新 manifest 地址无效")
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, manifestURL, nil)
@@ -246,7 +205,7 @@ func (s *UpdaterService) checkUpdateManifest(ctx context.Context, manifestURL st
 		return ReleaseInfo{}, errors.New("更新 manifest 超过大小限制")
 	}
 	signatureURL := manifestURL + ".sig"
-	if err := validateUpdateURL(signatureURL); err != nil {
+	if err := validateUpdateMetadataURL(signatureURL); err != nil {
 		return ReleaseInfo{}, errors.New("更新 manifest 签名地址无效")
 	}
 	signatureRequest, err := http.NewRequestWithContext(ctx, http.MethodGet, signatureURL, nil)
@@ -294,51 +253,6 @@ func mustUpdateManifestPublicKey() ed25519.PublicKey {
 		panic("invalid embedded update manifest public key")
 	}
 	return ed25519.PublicKey(key)
-}
-
-func (s *UpdaterService) checkTaggedUpdateManifests(ctx context.Context, tagName string) (ReleaseInfo, error) {
-	tagName = normalizeTagName(tagName)
-	if versionKey(tagName) == nil {
-		return ReleaseInfo{}, errors.New("发现的更新标签无效")
-	}
-	manifestURLs := []string{
-		releaseDownloadURL + tagName + "/" + updateManifestName,
-		cnbDownloadURL + tagName + "/" + updateManifestName,
-	}
-	type manifestResult struct {
-		index   int
-		release ReleaseInfo
-		err     error
-	}
-	results := make(chan manifestResult, len(manifestURLs))
-	for index, manifestURL := range manifestURLs {
-		go func(index int, manifestURL string) {
-			release, err := s.checkUpdateManifest(ctx, manifestURL)
-			results <- manifestResult{index: index, release: release, err: err}
-		}(index, manifestURL)
-	}
-	ordered := make([]manifestResult, len(manifestURLs))
-	for range manifestURLs {
-		result := <-results
-		ordered[result.index] = result
-	}
-	candidates := make([]ReleaseInfo, 0, len(manifestURLs))
-	failures := make([]string, 0, len(manifestURLs))
-	for index, result := range ordered {
-		if result.err != nil {
-			failures = append(failures, manifestURLs[index]+": "+result.err.Error())
-			continue
-		}
-		if !sameVersion(result.release.TagName, tagName) {
-			failures = append(failures, manifestURLs[index]+": manifest 版本与发现的标签不一致")
-			continue
-		}
-		candidates = append(candidates, result.release)
-	}
-	if len(candidates) == 0 {
-		return ReleaseInfo{}, errors.New(strings.Join(failures, "；"))
-	}
-	return selectLatestRelease(candidates)
 }
 
 func ensureJSONEOF(decoder *json.Decoder) error {
@@ -412,19 +326,8 @@ func selectLatestRelease(candidates []ReleaseInfo) (ReleaseInfo, error) {
 		if !sameVersion(candidate.TagName, latest.TagName) {
 			continue
 		}
-		candidateDigest, candidateDigestErr := normalizeSHA256(candidate.InstallerDigest)
-		latestDigest, latestDigestErr := normalizeSHA256(latest.InstallerDigest)
-		if candidate.InstallerName != latest.InstallerName ||
-			candidate.InstallerSize != latest.InstallerSize ||
-			candidateDigestErr != nil || latestDigestErr != nil || candidateDigest != latestDigest {
-			return ReleaseInfo{}, errors.New("官方更新源对同一版本返回了不一致的安装包元数据")
-		}
-		merged.InstallerURLs = mergeMirrorURLs(merged.InstallerURLs, candidate.InstallerURLs)
-		if merged.Name == "" {
-			merged.Name = candidate.Name
-		}
-		if merged.Notes == "" {
-			merged.Notes = candidate.Notes
+		if !sameReleaseMetadata(candidate, latest) {
+			return ReleaseInfo{}, errors.New("官方更新源对同一版本返回了不一致的元数据")
 		}
 	}
 	if err := validateReleaseInfo(merged); err != nil {
@@ -433,55 +336,19 @@ func selectLatestRelease(candidates []ReleaseInfo) (ReleaseInfo, error) {
 	return merged, nil
 }
 
-func (s *UpdaterService) checkGitHubReleaseFeed(ctx context.Context) (ReleaseInfo, error) {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, releasesFeedURL, nil)
-	if err != nil {
-		return ReleaseInfo{}, err
+func sameReleaseMetadata(left ReleaseInfo, right ReleaseInfo) bool {
+	if left.TagName != right.TagName || left.Name != right.Name || left.Notes != right.Notes ||
+		left.PageURL != right.PageURL || left.InstallerName != right.InstallerName ||
+		left.InstallerSize != right.InstallerSize || left.InstallerDigest != right.InstallerDigest ||
+		len(left.InstallerURLs) != len(right.InstallerURLs) {
+		return false
 	}
-	request.Header.Set("Accept", "application/atom+xml, application/xml;q=0.9")
-	request.Header.Set("User-Agent", "HypoMux-Updater")
-	response, err := s.client.Do(request)
-	if err != nil {
-		return ReleaseInfo{}, errors.New("无法连接 GitHub 发布订阅")
-	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		return ReleaseInfo{}, fmt.Errorf("GitHub 发布订阅 HTTP %d", response.StatusCode)
-	}
-	var feed struct {
-		Entries []struct {
-			Links []struct {
-				Rel  string `xml:"rel,attr"`
-				Href string `xml:"href,attr"`
-			} `xml:"link"`
-		} `xml:"entry"`
-	}
-	decoder := xml.NewDecoder(io.LimitReader(response.Body, 2<<20))
-	if err := decoder.Decode(&feed); err != nil {
-		return ReleaseInfo{}, errors.New("GitHub 返回了无效的发布订阅")
-	}
-	if len(feed.Entries) == 0 {
-		return ReleaseInfo{}, errors.New("GitHub 发布订阅中没有版本")
-	}
-	entry := feed.Entries[0]
-	pageURL := ""
-	for _, link := range entry.Links {
-		if strings.TrimSpace(link.Rel) == "" || strings.EqualFold(strings.TrimSpace(link.Rel), "alternate") {
-			pageURL = strings.TrimSpace(link.Href)
-			if pageURL != "" {
-				break
-			}
+	for index := range left.InstallerURLs {
+		if left.InstallerURLs[index] != right.InstallerURLs[index] {
+			return false
 		}
 	}
-	if err := validateUpdateURL(pageURL); err != nil {
-		return ReleaseInfo{}, errors.New("GitHub 发布订阅中的发布页地址无效")
-	}
-	parsedPage, _ := url.Parse(pageURL)
-	tagName := strings.TrimPrefix(strings.TrimSpace(parsedPage.Path), "/Hypostasis-Cat/HypoMux/releases/tag/")
-	if tagName == "" || strings.Contains(tagName, "/") || versionKey(tagName) == nil {
-		return ReleaseInfo{}, errors.New("GitHub 发布订阅中的版本号无效")
-	}
-	return s.checkTaggedUpdateManifests(ctx, tagName)
+	return true
 }
 
 func (s *UpdaterService) Download(release ReleaseInfo) (string, error) {
@@ -646,38 +513,20 @@ func (w *updateProgressWriter) Write(data []byte) (int, error) {
 	return count, err
 }
 
-func validateUpdateURL(value string) error {
+func validateUpdateMetadataURL(value string) error {
+	if value == githubLatestManifestURL || value == githubLatestManifestURL+".sig" ||
+		value == cnbLatestManifestURL || value == cnbLatestManifestURL+".sig" {
+		return nil
+	}
+	return errors.New("必须使用 HypoMux 官方 signed update channel 地址")
+}
+
+func validateInstallerMirrorURL(value string, tagName string, installerName string) error {
 	parsed, err := url.Parse(value)
 	if err != nil || parsed.Scheme != "https" || parsed.User != nil || parsed.Opaque != "" ||
 		parsed.RawQuery != "" || parsed.Fragment != "" || parsed.RawPath != "" ||
 		parsed.ForceQuery || parsed.Path == "" {
-		return errors.New("必须使用官方 HTTPS 更新地址")
-	}
-	if parsed.Host != "github.com" && parsed.Host != "cnb.cool" {
-		return errors.New("必须使用 HypoMux 官方 GitHub 或 CNB Release 地址")
-	}
-	path := parsed.Path
-	switch {
-	case parsed.Host == "github.com" &&
-		(strings.HasPrefix(path, "/Hypostasis-Cat/HypoMux/releases/tag/") ||
-			strings.HasPrefix(path, "/Hypostasis-Cat/HypoMux/releases/download/") ||
-			path == "/Hypostasis-Cat/HypoMux/releases/latest/download/latest.json" ||
-			path == "/Hypostasis-Cat/HypoMux/releases/latest/download/latest.json.sig"):
-		return nil
-	case parsed.Host == "cnb.cool" &&
-		(strings.HasPrefix(path, "/Hypostasis-Cat/HypoMux/-/releases/tag/") ||
-			strings.HasPrefix(path, "/Hypostasis-Cat/HypoMux/-/releases/download/") ||
-			path == "/Hypostasis-Cat/HypoMux/-/releases/latest/download/latest.json" ||
-			path == "/Hypostasis-Cat/HypoMux/-/releases/latest/download/latest.json.sig"):
-		return nil
-	default:
-		return errors.New("必须使用 HypoMux 官方 GitHub 或 CNB Release 地址")
-	}
-}
-
-func validateInstallerMirrorURL(value string, tagName string, installerName string) error {
-	if err := validateUpdateURL(value); err != nil {
-		return err
+		return errors.New("安装包必须使用官方 HTTPS Release 地址")
 	}
 	canonicalTag := normalizeTagName(tagName)
 	if versionKey(canonicalTag) == nil || installerName == "" {
@@ -785,21 +634,6 @@ func preferCNBMirror(values []string) []string {
 		}
 	}
 	return result
-}
-
-func mergeMirrorURLs(groups ...[]string) []string {
-	seen := make(map[string]struct{})
-	merged := make([]string, 0, maxInstallerMirrorCount)
-	for _, group := range groups {
-		for _, value := range group {
-			if _, exists := seen[value]; exists || len(merged) >= maxInstallerMirrorCount {
-				continue
-			}
-			seen[value] = struct{}{}
-			merged = append(merged, value)
-		}
-	}
-	return preferCNBMirror(merged)
 }
 
 func updateMirrorLabel(value string) string {

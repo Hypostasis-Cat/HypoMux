@@ -264,7 +264,7 @@ func TestReleasePublishesLegacyUpdaterCompatibleInstallerName(t *testing.T) {
 	}
 }
 
-func TestReleasePublishesOneSignedInstallerAndManifestToBothMirrors(t *testing.T) {
+func TestReleasePublishesOneSignedInstallerThenUpdatesSignedChannel(t *testing.T) {
 	data, err := os.ReadFile("../.github/workflows/build.yml")
 	if err != nil {
 		t.Fatal(err)
@@ -282,8 +282,13 @@ func TestReleasePublishesOneSignedInstallerAndManifestToBothMirrors(t *testing.T
 		`secrets.CNB_TOKEN`,
 		`cnb release get -t "${tag}"`,
 		`cnb release create -t "${tag}"`,
-		`release asset-upload -t "${tag}"`,
+		`release asset-upload -t "${tag}" -f "${installer}"`,
 		`HYPOMUX_SIGNED_INSTALLER_TEST`,
+		`git push origin "${channel_commit}:${channel_ref}"`,
+		`git push cnb "${channel_commit}:${channel_ref}"`,
+		`https://raw.githubusercontent.com/Hypostasis-Cat/HypoMux/update-channel/latest.json`,
+		`https://cnb.cool/Hypostasis-Cat/HypoMux/-/git/raw/update-channel/latest.json`,
+		`-verify-only`,
 	} {
 		if !strings.Contains(workflow, required) {
 			t.Fatalf("dual-source release workflow is missing %q", required)
@@ -294,6 +299,53 @@ func TestReleasePublishesOneSignedInstallerAndManifestToBothMirrors(t *testing.T
 	}
 	if strings.Contains(workflow, `docker.cnb.cool/looc/git-cnb:1.2.0`) {
 		t.Fatal("release workflow uses a nonexistent mutable git-cnb image tag")
+	}
+	if strings.Contains(workflow, `files: artifacts/latest.json`) ||
+		strings.Contains(workflow, `release asset-upload -t "${tag}" -f artifacts/latest.json`) {
+		t.Fatal("release workflow exposes update metadata as Release assets")
+	}
+	if strings.Contains(workflow, `for attempt in $(seq 1 20)`) ||
+		strings.Contains(workflow, `retrying in 15 seconds`) {
+		t.Fatal("release workflow still waits for asynchronous CNB tag mirroring")
+	}
+	verifyAssets := strings.Index(workflow, `- name: Verify both Release installers are byte-identical`)
+	publishChannel := strings.Index(workflow, `- name: Publish signed update channel to GitHub and CNB`)
+	if verifyAssets < 0 || publishChannel < 0 || publishChannel < verifyAssets {
+		t.Fatal("update-channel must be published only after both Release installers are verified")
+	}
+}
+
+func TestCreateReleaseTagSynchronizesCNBIdempotently(t *testing.T) {
+	data, err := os.ReadFile("../.github/workflows/create-release-tag.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	workflow := string(data)
+	for _, required := range []string{
+		`CNB_TOKEN: ${{ secrets.CNB_TOKEN }}`,
+		`username=cnb`,
+		`git credential approve`,
+		`git remote add cnb https://cnb.cool/Hypostasis-Cat/HypoMux`,
+		`github_commit="$(resolve_remote_tag_commit origin)"`,
+		`cnb_commit="$(resolve_remote_tag_commit cnb)"`,
+		`git push cnb "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"`,
+		`if [[ -z "${github_commit}" ]]`,
+		`elif [[ "${github_commit}" != "${expected_commit}" ]]`,
+		`elif [[ "${cnb_commit}" != "${expected_commit}" ]]`,
+		`"${github_commit}" != "${cnb_commit}"`,
+	} {
+		if !strings.Contains(workflow, required) {
+			t.Fatalf("release tag workflow is missing %q", required)
+		}
+	}
+	for _, forbidden := range []string{
+		`https://cnb:${CNB_TOKEN}@`,
+		`${CNB_TOKEN}@cnb.cool`,
+		`already exists and will not be moved`,
+	} {
+		if strings.Contains(workflow, forbidden) {
+			t.Fatalf("release tag workflow is not safely rerunnable: found %q", forbidden)
+		}
 	}
 }
 
@@ -311,6 +363,11 @@ func TestReleaseTrustSmokeWorkflowIsReadOnly(t *testing.T) {
 		`cnb_commit`,
 		`release get -t "${RELEASE_TAG}"`,
 		`secrets.CNB_TOKEN`,
+		`docker.cnb.cool/looc/git-cnb@sha256:c254172bb9d6025733a0e2991b4a99af8c46aeedcadcb468788ef5a0dc00275c`,
+		`refs/heads/update-channel`,
+		`https://raw.githubusercontent.com/Hypostasis-Cat/HypoMux/update-channel/latest.json`,
+		`https://cnb.cool/Hypostasis-Cat/HypoMux/-/git/raw/update-channel/latest.json`,
+		`-verify-only`,
 	} {
 		if !strings.Contains(workflow, required) {
 			t.Fatalf("release trust smoke workflow is missing %q", required)
@@ -321,6 +378,8 @@ func TestReleaseTrustSmokeWorkflowIsReadOnly(t *testing.T) {
 		`release create`,
 		`actions/upload-artifact`,
 		`action-gh-release`,
+		`git push`,
+		`git commit-tree`,
 	} {
 		if strings.Contains(workflow, forbidden) {
 			t.Fatalf("release trust smoke workflow must be read-only: found %q", forbidden)

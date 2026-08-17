@@ -53,7 +53,7 @@ Version 2.5.3 completes the desktop migration from the former Python/Qt and tran
 
 HypoMux is sincerely grateful to SignPath and the SignPath Foundation for supporting open-source software and helping us deliver a safer Windows download experience.
 
-The official Windows releases of HypoMux are built from this repository through GitHub Actions and submitted to SignPath for code signing. [GitHub Releases](https://github.com/Hypostasis-Cat/HypoMux/releases/latest) is the authoritative release source, while [Tencent CNB Release](https://cnb.cool/Hypostasis-Cat/HypoMux/-/releases/latest) is the official mainland China mirror; both distribute the same signed installer. Verify that signed releases show **SignPath Foundation** as the publisher.
+The official Windows releases of HypoMux are built from this repository through GitHub Actions and submitted to SignPath for code signing. [GitHub Releases](https://github.com/Hypostasis-Cat/HypoMux/releases/latest) is the authoritative public release page, while [Tencent CNB Release](https://cnb.cool/Hypostasis-Cat/HypoMux/-/releases/latest) is the official mainland China mirror; both distribute only the same SignPath-signed installer. Automatic update metadata is delivered through a separate signed update channel and verified with Ed25519, followed by installer size, SHA-256, and Windows Authenticode verification. Signed installers should show **SignPath Foundation** as the publisher.
 
 ### Team roles
 
@@ -62,7 +62,7 @@ The official Windows releases of HypoMux are built from this repository through 
 
 ### Privacy policy
 
-HypoMux does not collect, sell, or upload personal data or telemetry. The program contacts other networked systems only to perform functionality requested by the user or the person operating it: forwarding the user's selected network traffic, checking or downloading updates from the official GitHub or CNB Release source, and validating connectivity after Virtual NIC mode has been enabled.
+HypoMux does not collect, sell, or upload personal data or telemetry. The program contacts other networked systems only to perform functionality requested by the user or the person operating it: forwarding selected network traffic, checking the official signed update channel, downloading installers from GitHub or CNB Release, and validating connectivity after Virtual NIC mode has been enabled.
 
 ---
 
@@ -213,6 +213,7 @@ wails3 task windows:package
 ```
 
 See [`.github/workflows/build.yml`](.github/workflows/build.yml) for the complete release pipeline.
+Before a production release, the read-only `Release Trust Smoke Test` workflow can validate the update signing key, synchronized GitHub/CNB tags, CNB Release access, and any existing signed update channel without creating a Release, uploading assets, or modifying the channel.
 
 ##  Acknowledgments & Contributors
 

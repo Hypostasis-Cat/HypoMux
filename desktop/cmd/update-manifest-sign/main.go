@@ -16,7 +16,19 @@ func main() {
 	inputPath := flag.String("input", "", "path to the exact manifest bytes to sign")
 	outputPath := flag.String("output", "", "path for the raw Ed25519 signature")
 	verificationKey := flag.String("verify-public-key", "", "optional base64 Ed25519 public key that must verify the signature")
+	verifyOnly := flag.Bool("verify-only", false, "verify an existing signature without reading the private key")
 	flag.Parse()
+	if *verifyOnly {
+		if *verificationKey == "" {
+			fmt.Fprintln(os.Stderr, "verify update manifest signature: -verify-public-key is required with -verify-only")
+			os.Exit(1)
+		}
+		if err := verifyManifestSignature(*inputPath, *outputPath, *verificationKey); err != nil {
+			fmt.Fprintln(os.Stderr, "verify update manifest signature:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if err := signManifest(*inputPath, *outputPath, os.Getenv(privateKeyEnvironment)); err != nil {
 		fmt.Fprintln(os.Stderr, "sign update manifest:", err)
 		os.Exit(1)

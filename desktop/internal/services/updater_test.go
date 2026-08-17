@@ -101,6 +101,10 @@ func TestUpdaterAcceptsOnlyExactOfficialInstallerURLs(t *testing.T) {
 		"https://github.com/Hypostasis-Cat/HypoMux/releases/download/v2.5.9/" + installerName,
 		"https://github.com/another/repository/releases/download/v2.5.8/" + installerName,
 		"https://cnb.cool/another/repository/-/releases/download/v2.5.8/" + installerName,
+		githubLatestManifestURL,
+		githubLatestManifestURL + ".sig",
+		cnbLatestManifestURL,
+		cnbLatestManifestURL + ".sig",
 	} {
 		if validateInstallerMirrorURL(value, tagName, installerName) == nil {
 			t.Fatalf("unsafe installer URL was accepted: %s", value)
@@ -109,6 +113,35 @@ func TestUpdaterAcceptsOnlyExactOfficialInstallerURLs(t *testing.T) {
 	for _, value := range officialInstallerMirrors(tagName, installerName) {
 		if err := validateInstallerMirrorURL(value, tagName, installerName); err != nil {
 			t.Fatalf("official installer URL rejected: %s: %v", value, err)
+		}
+	}
+}
+
+func TestUpdaterAcceptsOnlyExactSignedUpdateChannelURLs(t *testing.T) {
+	for _, value := range []string{
+		githubLatestManifestURL,
+		githubLatestManifestURL + ".sig",
+		cnbLatestManifestURL,
+		cnbLatestManifestURL + ".sig",
+	} {
+		if err := validateUpdateMetadataURL(value); err != nil {
+			t.Fatalf("official metadata URL rejected: %s: %v", value, err)
+		}
+	}
+	for _, value := range []string{
+		"http://raw.githubusercontent.com/Hypostasis-Cat/HypoMux/update-channel/latest.json",
+		"https://user@raw.githubusercontent.com/Hypostasis-Cat/HypoMux/update-channel/latest.json",
+		"https://raw.githubusercontent.com.example.invalid/Hypostasis-Cat/HypoMux/update-channel/latest.json",
+		"https://raw.githubusercontent.com:443/Hypostasis-Cat/HypoMux/update-channel/latest.json",
+		githubLatestManifestURL + "?cache=off",
+		githubLatestManifestURL + "#fragment",
+		"https://raw.githubusercontent.com/Hypostasis-Cat/HypoMux/main/latest.json",
+		"https://cnb.cool/Hypostasis-Cat/HypoMux/-/git/raw/main/latest.json",
+		"https://cnb.cool/another/repository/-/git/raw/update-channel/latest.json",
+		releaseDownloadURL + "v2.5.8/HypoMux_Setup_2.5.8.exe",
+	} {
+		if validateUpdateMetadataURL(value) == nil {
+			t.Fatalf("unsafe metadata URL was accepted: %s", value)
 		}
 	}
 }
@@ -176,6 +209,15 @@ func TestUpdaterRejectsConflictingMetadataForSameVersion(t *testing.T) {
 	}
 }
 
+func TestUpdaterRejectsNonInstallerMetadataConflictForSameVersion(t *testing.T) {
+	left := releaseFromTestManifest(t, testManifest("2.5.8", []byte("payload")))
+	right := left
+	right.Notes = "different signed release notes"
+	if _, err := selectLatestRelease([]ReleaseInfo{left, right}); err == nil {
+		t.Fatal("conflicting non-installer metadata for one version was accepted")
+	}
+}
+
 func TestUpdaterUsesCNBManifestWhenGitHubMetadataIsUnavailable(t *testing.T) {
 	manifest, signature := signedManifestJSON(t, testManifest("2.5.8", []byte("payload")))
 	service := NewUpdaterService()
@@ -197,6 +239,104 @@ func TestUpdaterUsesCNBManifestWhenGitHubMetadataIsUnavailable(t *testing.T) {
 	if result.Release.TagName != "v2.5.8" || result.Release.InstallerURLs[0] !=
 		cnbDownloadURL+"v2.5.8/HypoMux_Setup_2.5.8.exe" {
 		t.Fatalf("CNB manifest result = %#v", result.Release)
+	}
+}
+
+func TestUpdaterUsesGitHubManifestWhenCNBMetadataIsUnavailable(t *testing.T) {
+	manifest, signature := signedManifestJSON(t, testManifest("2.5.8", []byte("payload")))
+	service := NewUpdaterService()
+	service.manifestPublicKey = testManifestPublicKey()
+	service.client = clientFor(func(request *http.Request) *http.Response {
+		switch request.URL.String() {
+		case githubLatestManifestURL:
+			return stringResponse(request, http.StatusOK, manifest)
+		case githubLatestManifestURL + ".sig":
+			return bytesResponse(request, http.StatusOK, signature)
+		default:
+			return stringResponse(request, http.StatusServiceUnavailable, "")
+		}
+	})
+
+	result, err := service.Check()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Release.TagName != "v2.5.8" {
+		t.Fatalf("GitHub fallback result = %#v", result.Release)
+	}
+}
+
+func TestUpdaterFailsClosedWhenSignedChannelsConflictForSameVersion(t *testing.T) {
+	githubManifest, githubSignature := signedManifestJSON(t, testManifest("2.5.8", []byte("github")))
+	cnbManifest, cnbSignature := signedManifestJSON(t, testManifest("2.5.8", []byte("cnb")))
+	service := NewUpdaterService()
+	service.manifestPublicKey = testManifestPublicKey()
+	service.client = clientFor(func(request *http.Request) *http.Response {
+		switch request.URL.String() {
+		case githubLatestManifestURL:
+			return stringResponse(request, http.StatusOK, githubManifest)
+		case githubLatestManifestURL + ".sig":
+			return bytesResponse(request, http.StatusOK, githubSignature)
+		case cnbLatestManifestURL:
+			return stringResponse(request, http.StatusOK, cnbManifest)
+		case cnbLatestManifestURL + ".sig":
+			return bytesResponse(request, http.StatusOK, cnbSignature)
+		default:
+			return stringResponse(request, http.StatusNotFound, "")
+		}
+	})
+
+	if result, err := service.Check(); err == nil {
+		t.Fatalf("conflicting signed channels were accepted: %#v", result)
+	}
+}
+
+func TestUpdaterIgnoresTamperedChannelWhenOtherChannelIsTrusted(t *testing.T) {
+	manifest, signature := signedManifestJSON(t, testManifest("2.5.8", []byte("payload")))
+	service := NewUpdaterService()
+	service.manifestPublicKey = testManifestPublicKey()
+	service.client = clientFor(func(request *http.Request) *http.Response {
+		switch request.URL.String() {
+		case cnbLatestManifestURL:
+			return stringResponse(request, http.StatusOK, manifest+" ")
+		case cnbLatestManifestURL + ".sig":
+			return bytesResponse(request, http.StatusOK, signature)
+		case githubLatestManifestURL:
+			return stringResponse(request, http.StatusOK, manifest)
+		case githubLatestManifestURL + ".sig":
+			return bytesResponse(request, http.StatusOK, signature)
+		default:
+			return stringResponse(request, http.StatusNotFound, "")
+		}
+	})
+
+	result, err := service.Check()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Release.TagName != "v2.5.8" {
+		t.Fatalf("trusted fallback result = %#v", result.Release)
+	}
+}
+
+func TestUpdaterFailsWhenBothChannelSignaturesAreInvalid(t *testing.T) {
+	manifest, _ := signedManifestJSON(t, testManifest("2.5.8", []byte("payload")))
+	invalidSignature := make([]byte, ed25519.SignatureSize)
+	service := NewUpdaterService()
+	service.manifestPublicKey = testManifestPublicKey()
+	service.client = clientFor(func(request *http.Request) *http.Response {
+		switch request.URL.String() {
+		case cnbLatestManifestURL, githubLatestManifestURL:
+			return stringResponse(request, http.StatusOK, manifest)
+		case cnbLatestManifestURL + ".sig", githubLatestManifestURL + ".sig":
+			return bytesResponse(request, http.StatusOK, invalidSignature)
+		default:
+			return stringResponse(request, http.StatusNotFound, "")
+		}
+	})
+
+	if result, err := service.Check(); err == nil {
+		t.Fatalf("invalid signed channels were accepted: %#v", result)
 	}
 }
 
@@ -231,114 +371,6 @@ func TestUpdaterRejectsMissingTamperedOrWrongManifestSignature(t *testing.T) {
 				t.Fatal("untrusted manifest was accepted")
 			}
 		})
-	}
-}
-
-func TestGitHubTagDiscoveryUsesSignedManifestAndCNBDownloadFallback(t *testing.T) {
-	payload := []byte("signed-installer-placeholder")
-	manifest, signature := signedManifestJSON(t, testManifest("2.5.8", payload))
-	taggedManifestURL := releaseDownloadURL + "v2.5.8/" + updateManifestName
-	apiPayload := `{
-  "tag_name":"v2.5.8",
-  "name":"forged unsigned metadata",
-  "assets":[{
-    "name":"HypoMux_Setup_2.5.8.exe",
-    "browser_download_url":"https://github.com/Hypostasis-Cat/HypoMux/releases/download/v2.5.8/HypoMux_Setup_2.5.8.exe",
-    "size":999999,
-    "digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-  }]
-}`
-	service := NewUpdaterService()
-	service.manifestPublicKey = testManifestPublicKey()
-	service.verifyInstaller = func(string) error { return nil }
-	service.client = clientFor(func(request *http.Request) *http.Response {
-		switch request.URL.String() {
-		case latestReleaseAPI:
-			return stringResponse(request, http.StatusOK, apiPayload)
-		case taggedManifestURL:
-			return stringResponse(request, http.StatusOK, manifest)
-		case taggedManifestURL + ".sig":
-			return bytesResponse(request, http.StatusOK, signature)
-		case releaseDownloadURL + "v2.5.8/HypoMux_Setup_2.5.8.exe":
-			return stringResponse(request, http.StatusServiceUnavailable, "")
-		case cnbDownloadURL + "v2.5.8/HypoMux_Setup_2.5.8.exe":
-			return bytesResponse(request, http.StatusOK, payload)
-		default:
-			return stringResponse(request, http.StatusNotFound, "")
-		}
-	})
-
-	result, err := service.Check()
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Mirror lists are generic. Reversing the default CNB-first preference
-	// proves that download fallback is independent from the metadata source.
-	result.Release.InstallerURLs[0], result.Release.InstallerURLs[1] =
-		result.Release.InstallerURLs[1], result.Release.InstallerURLs[0]
-	installerPath, err := service.Download(result.Release)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(filepath.Dir(installerPath))
-}
-
-func TestGitHubAPICannotBypassSignedManifest(t *testing.T) {
-	const apiPayload = `{
-  "tag_name":"v99.0.0",
-  "name":"forged unsigned release",
-  "body":"must never enter ReleaseInfo",
-  "html_url":"https://github.com/Hypostasis-Cat/HypoMux/releases/tag/v99.0.0",
-  "assets":[{
-    "name":"HypoMux_Setup_99.0.0.exe",
-    "browser_download_url":"https://github.com/Hypostasis-Cat/HypoMux/releases/download/v99.0.0/HypoMux_Setup_99.0.0.exe",
-    "size":1,
-    "digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-  }]
-}`
-	service := NewUpdaterService()
-	service.manifestPublicKey = testManifestPublicKey()
-	service.client = clientFor(func(request *http.Request) *http.Response {
-		if request.URL.String() == latestReleaseAPI {
-			return stringResponse(request, http.StatusOK, apiPayload)
-		}
-		return stringResponse(request, http.StatusNotFound, "")
-	})
-
-	if release, err := service.checkGitHubAPI(context.Background()); err == nil {
-		t.Fatalf("unsigned GitHub API metadata entered ReleaseInfo: %#v", release)
-	}
-}
-
-func TestUpdaterFallsBackToTaggedManifestThroughReleaseFeed(t *testing.T) {
-	const feed = `<?xml version="1.0" encoding="UTF-8"?>
-<feed xmlns="http://www.w3.org/2005/Atom"><entry>
-  <title>HypoMux 2.5.8</title>
-  <link rel="alternate" href="https://github.com/Hypostasis-Cat/HypoMux/releases/tag/v2.5.8" />
-</entry></feed>`
-	manifest, signature := signedManifestJSON(t, testManifest("2.5.8", []byte("payload")))
-	taggedManifestURL := releaseDownloadURL + "v2.5.8/" + updateManifestName
-	service := NewUpdaterService()
-	service.manifestPublicKey = testManifestPublicKey()
-	service.client = clientFor(func(request *http.Request) *http.Response {
-		switch request.URL.String() {
-		case releasesFeedURL:
-			return stringResponse(request, http.StatusOK, feed)
-		case taggedManifestURL:
-			return stringResponse(request, http.StatusOK, manifest)
-		case taggedManifestURL + ".sig":
-			return bytesResponse(request, http.StatusOK, signature)
-		default:
-			return stringResponse(request, http.StatusServiceUnavailable, "")
-		}
-	})
-
-	result, err := service.Check()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.Release.TagName != "v2.5.8" || result.Release.InstallerSize != int64(len("payload")) {
-		t.Fatalf("Atom fallback result = %#v", result.Release)
 	}
 }
 

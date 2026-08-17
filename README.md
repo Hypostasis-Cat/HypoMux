@@ -53,7 +53,7 @@ HypoMux 聚合的是多个独立连接，而不是把单条 TCP 连接拆成多�
 
 HypoMux 衷心感谢 SignPath 与 SignPath Foundation 对开源软件的支持，帮助我们为 Windows 用户提供更安全、可信的下载体验。
 
-HypoMux 的官方 Windows 发布版本均由此仓库的 GitHub Actions 构建，并提交至 SignPath 进行代码签名。[GitHub Releases](https://github.com/Hypostasis-Cat/HypoMux/releases/latest)是权威发布源，[腾讯 CNB Release](https://cnb.cool/Hypostasis-Cat/HypoMux/-/releases/latest)是面向中国大陆的官方镜像；两处发布同一份签名安装包及 Ed25519 签名更新清单。客户端会先验证清单签名、安装包大小与 SHA-256，再验证 Windows Authenticode 签名；下载安装后请确认发布者显示为 **SignPath Foundation**。
+HypoMux 的官方 Windows 发布版本均由此仓库的 GitHub Actions 构建，并提交至 SignPath 进行代码签名。[GitHub Releases](https://github.com/Hypostasis-Cat/HypoMux/releases/latest)是权威公开发布页，[腾讯 CNB Release](https://cnb.cool/Hypostasis-Cat/HypoMux/-/releases/latest)是面向中国大陆的官方镜像；两处只分发同一份 SignPath 签名安装包。自动更新元数据通过独立的 signed update channel 分发并使用 Ed25519 验证，客户端随后校验安装包大小、SHA-256 与 Windows Authenticode 签名。下载安装后请确认发布者显示为 **SignPath Foundation**。
 
 ### 团队角色
 
@@ -62,7 +62,7 @@ HypoMux 的官方 Windows 发布版本均由此仓库的 GitHub Actions 构建�
 
 ### 隐私政策
 
-HypoMux 不收集、出售或上传个人数据及遥测信息。程序仅会在用户或软件操作者请求相应功能时与其他网络系统通信：转发用户选择的网络流量、从官方 GitHub 或 CNB Release 源检查及下载安装更新，以及在启用虚拟网卡模式后进行网络连通性验证。
+HypoMux 不收集、出售或上传个人数据及遥测信息。程序仅会在用户或软件操作者请求相应功能时与其他网络系统通信：转发用户选择的网络流量、从官方 signed update channel 检查更新、从 GitHub 或 CNB Release 下载安装包，以及在启用虚拟网卡模式后进行网络连通性验证。
 
 ---
 
@@ -213,7 +213,7 @@ wails3 task windows:package
 ```
 
 完整发布流程以 [`.github/workflows/build.yml`](.github/workflows/build.yml) 为准。
-正式发布前可手动运行 `Release Trust Smoke Test` 工作流，只读核对更新清单私钥与客户端公钥、GitHub/CNB Tag 提交以及 CNB Release 访问权限；该检查不会创建 Release 或上传资产。
+正式发布前可手动运行 `Release Trust Smoke Test` 工作流，只读核对更新清单密钥、GitHub/CNB Tag、CNB Release 访问权限及已有 signed update channel；该检查不会创建 Release、上传资产或修改更新通道。
 
 ##  特别鸣谢 / Acknowledgments
 

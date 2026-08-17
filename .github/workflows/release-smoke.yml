@@ -65,7 +65,7 @@ jobs:
             fi
           }
           github_commit="$(resolve_tag_commit https://github.com/Hypostasis-Cat/HypoMux.git)"
-          cnb_commit="$(resolve_tag_commit https://cnb.cool/Hypostasis-Cat/HypoMux.git)"
+          cnb_commit="$(resolve_tag_commit https://cnb.cool/Hypostasis-Cat/HypoMux)"
           if [[ -z "${github_commit}" || -z "${cnb_commit}" ]]; then
             echo "Release tag ${RELEASE_TAG} is missing from GitHub or CNB."
             exit 1
@@ -84,7 +84,58 @@ jobs:
           RELEASE_TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
+          credential_file="$(mktemp)"
+          cleanup() {
+            git config --local --unset-all credential.helper >/dev/null 2>&1 || true
+            rm -f "${credential_file}"
+          }
+          trap cleanup EXIT
+          chmod 600 "${credential_file}"
+          git config --local credential.helper "store --file=${credential_file}"
+          printf 'protocol=https\nhost=cnb.cool\nusername=cnb\npassword=%s\n\n' "${CNB_TOKEN}" |
+            git credential approve
+          git ls-remote https://cnb.cool/Hypostasis-Cat/HypoMux refs/heads/main >/dev/null
           docker run --rm -e CNB_TOKEN "${CNB_IMAGE}" \
             git-cnb --repo=Hypostasis-Cat/HypoMux \
             release get -t "${RELEASE_TAG}" >/dev/null
           echo "CNB Release ${RELEASE_TAG} is readable; no assets were created or uploaded."
+
+      - name: Verify existing signed update channel is readable and identical
+        shell: bash
+        run: |
+          set -euo pipefail
+          channel_ref=refs/heads/update-channel
+          github_channel="$(git ls-remote https://github.com/Hypostasis-Cat/HypoMux.git "${channel_ref}" | awk 'NR == 1 {print $1}')"
+          cnb_channel="$(git ls-remote https://cnb.cool/Hypostasis-Cat/HypoMux "${channel_ref}" | awk 'NR == 1 {print $1}')"
+          if [[ -z "${github_channel}" && -z "${cnb_channel}" ]]; then
+            echo "update-channel does not exist yet; raw endpoint verification is not applicable."
+            exit 0
+          fi
+          if [[ -z "${github_channel}" || -z "${cnb_channel}" || "${github_channel}" != "${cnb_channel}" ]]; then
+            echo "update-channel refs differ: GitHub=${github_channel:-missing} CNB=${cnb_channel:-missing}."
+            exit 1
+          fi
+
+          mkdir -p smoke/channel
+          curl --fail --silent --show-error --location \
+            --output smoke/channel/github-latest.json \
+            https://raw.githubusercontent.com/Hypostasis-Cat/HypoMux/update-channel/latest.json
+          curl --fail --silent --show-error --location \
+            --output smoke/channel/github-latest.json.sig \
+            https://raw.githubusercontent.com/Hypostasis-Cat/HypoMux/update-channel/latest.json.sig
+          curl --fail --silent --show-error --location \
+            --output smoke/channel/cnb-latest.json \
+            https://cnb.cool/Hypostasis-Cat/HypoMux/-/git/raw/update-channel/latest.json
+          curl --fail --silent --show-error --location \
+            --output smoke/channel/cnb-latest.json.sig \
+            https://cnb.cool/Hypostasis-Cat/HypoMux/-/git/raw/update-channel/latest.json.sig
+          cmp --silent smoke/channel/github-latest.json smoke/channel/cnb-latest.json
+          cmp --silent smoke/channel/github-latest.json.sig smoke/channel/cnb-latest.json.sig
+
+          public_key="$(tr -d '\r\n' < desktop/internal/services/update_manifest_ed25519_public_key.txt)"
+          go -C desktop run ./cmd/update-manifest-sign \
+            -verify-only \
+            -input ../smoke/channel/github-latest.json \
+            -output ../smoke/channel/github-latest.json.sig \
+            -verify-public-key "${public_key}"
+          echo "Both raw update channels are byte-identical and the Ed25519 signature is valid."
