@@ -17,23 +17,9 @@ HypoMux is an open-source multi-adapter aggregation and split-routing utility fo
 
 HypoMux balances independent connections; it does not split one TCP connection across multiple paths. It works best with highly concurrent workloads such as Steam updates, IDM downloads, game launchers, and large browser downloads. A single-connection transfer remains limited by that connection.
 
-## Installer compatibility fix in 2.5.7
+## What's new in 2.5.0
 
-Version 2.5.7 fixes a case where an installer inheriting an invalid `PSModulePath` could prevent Windows PowerShell from loading system modules and configuring the protected Core directory. ACL updates now also work consistently in Windows PowerShell 5.1 and PowerShell 7.
-
-## Experience fixes in 2.5.6
-
-Version 2.5.6 fixes launch-at-startup after an upgrade or installation-directory change, and improves scrolling in the live connections list and in-app release notes. The desktop can still be installed on a local fixed drive such as C: or D:, while the Core service and its dependencies are deployed to a protected system directory.
-
-## Aggregation throughput improvements in 2.5.4
-
-Version 2.5.4 restores the high-throughput TCP settings validated by the Python implementation, using a conservative policy that applies them only to aggregated TCP traffic with two or more adapters: 1 MiB TCP send/receive buffers, 128 KiB bidirectional relay buffers, and TCP_NODELAY. Single-adapter traffic, dedicated adapter channels, direct traffic, UDP, QUIC, and DNS retain their previous behavior.
-
-This release also reduces telemetry lock contention on the relay hot path and adds low-frequency throughput summaries without domains, URLs, or remote IP addresses. If a compatibility issue appears, set `HYPOMUX_TCP_TUNING=off` to restore the previous TCP settings immediately.
-
-## What's new in 2.5.3
-
-Version 2.5.3 completes the desktop migration from the former Python/Qt and transitional WPF implementations to **Go + Wails v3 + React + Fluent UI**. The desktop runs as a standard user, while an independent Go Core/Windows service owns privileged TUN, WFP, routing, DNS, and network-recovery operations.
+Version 2.5.0 completes the desktop migration from the former Python/Qt and transitional WPF implementations to **Go + Wails v3 + React + Fluent UI**. The desktop runs as a standard user, while an independent Go Core/Windows service owns privileged TUN, WFP, routing, DNS, and network-recovery operations.
 
 - **All-Go backend**: Desktop services and the network engine now use Go, with no Python, Qt, asyncio, or .NET/WPF runtime dependency.
 - **Safer TUN lifecycle**: Adapters, DNS, the privileged service, Wintun, sing-box, WFP, and foreign TUNs are checked before startup. Failures are blocked before network changes or rolled back automatically.
