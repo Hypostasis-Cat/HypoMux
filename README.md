@@ -17,23 +17,9 @@ HypoMux 是一款面向 Windows 的开源多网卡聚合与分流工具。它把
 
 HypoMux 聚合的是多个独立连接，而不是把单条 TCP 连接拆成多路。因此，它尤其适合 Steam、IDM、游戏平台更新器、浏览器大文件下载等高并发场景；单连接任务的速度仍受该连接本身限制。
 
-## 2.5.7 安装兼容性修复
+## 2.5.0 新版本
 
-2.5.7 修复了安装器继承异常 `PSModulePath` 时，Windows PowerShell 可能无法加载系统模块并导致 Core 受保护目录配置失败的问题；同时改进 ACL 写入方式，兼容 Windows PowerShell 5.1 与 PowerShell 7。
-
-## 2.5.6 体验修复
-
-2.5.6 修复了升级或更换安装目录后开机自启失效的问题，并改进活动连接实时列表与软件内更新日志的滚动体验。桌面程序仍可安装到 C、D 等本地固定磁盘，Core 服务及其依赖会部署到受保护的系统目录。
-
-## 2.5.4 聚合吞吐优化
-
-2.5.4 恢复了 Python 版验证过的高吞吐 TCP 参数，并以保守策略仅应用于双网卡及以上的聚合 TCP 流量：1 MiB TCP 收发缓冲、128 KiB 双向转发缓冲和 TCP_NODELAY。单网卡、独立网卡通道、直连、UDP、QUIC 与 DNS 保持原有行为。
-
-本版同时降低了转发热路径上的遥测锁竞争，并增加不含域名、URL 或远端 IP 的低频吞吐摘要，便于根据用户现场反馈继续定位。遇到兼容问题时，可设置 `HYPOMUX_TCP_TUNING=off` 立即恢复原 TCP 参数。
-
-## 2.5.3 新版本
-
-2.5.3 完成了桌面端从 Python/Qt 与过渡期 WPF 实现到 **Go + Wails v3 + React + Fluent UI** 的正式迁移。桌面界面以普通用户权限运行，TUN、WFP、路由、DNS 与网络恢复等高权限操作交给独立的 Go Core/Windows 服务处理。
+2.5.0 完成了桌面端从 Python/Qt 与过渡期 WPF 实现到 **Go + Wails v3 + React + Fluent UI** 的正式迁移。桌面界面以普通用户权限运行，TUN、WFP、路由、DNS 与网络恢复等高权限操作交给独立的 Go Core/Windows 服务处理。
 
 - **全 Go 后端**：桌面服务与网络引擎统一使用 Go，移除旧版 Python、Qt、asyncio 与 .NET/WPF 运行时依赖。
 - **更安全的 TUN 生命周期**：启动前验证网卡、DNS、权限服务、Wintun、sing-box、WFP 与第三方 TUN；失败时在修改系统网络前阻止启动或自动回滚。
@@ -284,6 +270,7 @@ HypoMux 是一个完全出于技术热情、由作者在业余时间独立开发
   <a href="https://github.com/Hypostasis-Cat/HypoMux"><img alt="匿名，咖啡支持" src="https://img.shields.io/badge/%E5%8C%BF%E5%90%8D-%E8%AF%B7%E5%96%9D%E5%92%96%E5%95%A1-orange?style=for-the-badge&logo=coffeescript&logoColor=white" /></a>
   <a href="https://github.com/Hypostasis-Cat/HypoMux"><img alt="HEDE WANG，咖啡支持" src="https://img.shields.io/static/v1?label=HEDE%20WANG&message=%E8%AF%B7%E5%96%9D%E5%92%96%E5%95%A1&color=orange&style=for-the-badge&logo=coffeescript&logoColor=white" /></a>
 </p>
+  <a href="https://github.com/Hypostasis-Cat/HypoMux"><img alt="匿名，咖啡支持" src="https://img.shields.io/badge/%E5%8C%BF%E5%90%8D-%E8%AF%B7%E5%96%9D%E5%92%96%E5%95%A1-orange?style=for-the-badge&logo=coffeescript&logoColor=white" /></a>
 
 ##  Star 历史趋势 / Star History
 
