@@ -269,6 +269,7 @@ HypoMux 是一个完全出于技术热情、由作者在业余时间独立开发
   <a href="https://github.com/Hypostasis-Cat/HypoMux"><img alt="匿名，特别鸣谢" src="https://img.shields.io/badge/%E5%8C%BF%E5%90%8D-%E7%BB%99%E7%8C%AB%E5%92%AA%E5%8F%91%E7%94%B5-DCD0FF?style=for-the-badge&logo=github-sponsors&logoColor=6A5ACD&labelColor=E6E6FA" /></a>
   <a href="https://github.com/Hypostasis-Cat/HypoMux"><img alt="匿名，咖啡支持" src="https://img.shields.io/badge/%E5%8C%BF%E5%90%8D-%E8%AF%B7%E5%96%9D%E5%92%96%E5%95%A1-orange?style=for-the-badge&logo=coffeescript&logoColor=white" /></a>
   <a href="https://github.com/Hypostasis-Cat/HypoMux"><img alt="HEDE WANG，咖啡支持" src="https://img.shields.io/static/v1?label=HEDE%20WANG&message=%E8%AF%B7%E5%96%9D%E5%92%96%E5%95%A1&color=orange&style=for-the-badge&logo=coffeescript&logoColor=white" /></a>
+  <a href="https://github.com/Hypostasis-Cat/HypoMux"><img alt="画船倾雨，咖啡支持" src="https://img.shields.io/static/v1?label=%E7%94%BB%E8%88%B9%E5%80%BE%E9%9B%A8&message=%E8%AF%B7%E5%96%9D%E5%92%96%E5%95%A1&color=orange&style=for-the-badge&logo=coffeescript&logoColor=white" /></a>
 </p>
   <a href="https://github.com/Hypostasis-Cat/HypoMux"><img alt="匿名，咖啡支持" src="https://img.shields.io/badge/%E5%8C%BF%E5%90%8D-%E8%AF%B7%E5%96%9D%E5%92%96%E5%95%A1-orange?style=for-the-badge&logo=coffeescript&logoColor=white" /></a>
 
