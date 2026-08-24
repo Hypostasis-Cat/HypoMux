@@ -542,11 +542,25 @@ func TestHomeEngineStatePersistsAcrossPageNavigation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	homeData, err := os.ReadFile("frontend/src/pages/HomePage.tsx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	connectionsData, err := os.ReadFile("frontend/src/pages/ConnectionsPage.tsx")
+	if err != nil {
+		t.Fatal(err)
+	}
 	appSource := string(appData)
 	shellSource := string(shellData)
+	homeSource := string(homeData)
+	connectionsSource := string(connectionsData)
 	for _, required := range []string{
 		`persistentPage="home"`,
-		`persistentChildren={<HomePage onNavigate={navigate} />}`,
+		`persistentChildren={(`,
+		`<HomePage`,
+		`onNavigate={navigate}`,
+		`onAdapterRuntimeChange={setConnectionAdapters}`,
+		`adapterRuntime={connectionAdapters}`,
 		`hidden={page !== persistentPage}`,
 		`page !== persistentPage ? (`,
 	} {
@@ -556,6 +570,13 @@ func TestHomeEngineStatePersistsAcrossPageNavigation(t *testing.T) {
 	}
 	if strings.Contains(appSource, `: <HomePage onNavigate={navigate} />}`) {
 		t.Fatal("HomePage is still conditionally mounted and will lose an in-flight engine transition")
+	}
+	if !strings.Contains(homeSource, `onAdapterRuntimeChange?.(engine.adapters)`) {
+		t.Fatal("HomePage does not propagate its existing adapter telemetry")
+	}
+	if strings.Contains(connectionsSource, `appServices.engine.snapshot()`) ||
+		strings.Contains(connectionsSource, `setAdapterRuntime`) {
+		t.Fatal("ConnectionsPage must reuse HomePage telemetry instead of sampling engine state")
 	}
 }
 

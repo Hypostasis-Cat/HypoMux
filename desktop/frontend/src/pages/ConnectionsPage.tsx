@@ -29,10 +29,10 @@ import {
   appServices,
   type ConnectionListSnapshot,
   type ConnectionView,
-  type EngineSnapshot,
   withServiceTimeout,
 } from "../platform/services";
 import { startSerialPoll } from "../platform/serialPoll";
+import type { HomeAdapter } from "../state/useEngineState";
 import { groupConnectionsByAdapter } from "./connectionGroups";
 import {
   selectConnections,
@@ -71,9 +71,11 @@ const formatDuration = (startedAt: string, now: number) => {
 export function ConnectionsPage({
   initialAdapter = "",
   adapterRevision = 0,
+  adapterRuntime = [],
 }: {
   initialAdapter?: string;
   adapterRevision?: number;
+  adapterRuntime?: readonly HomeAdapter[];
 }) {
   const { locale } = useI18n();
   const text = useCallback((zh: string, en: string) => locale === "en" ? en : zh, [locale]);
@@ -84,7 +86,6 @@ export function ConnectionsPage({
   const [query, setQuery] = useState("");
   const [outboundFilter, setOutboundFilter] = useState<ConnectionOutboundFilter>("all");
   const [sort, setSort] = useState<ConnectionSort>({ key: "duration", direction: "descending" });
-  const [adapterRuntime, setAdapterRuntime] = useState<NonNullable<EngineSnapshot["adapters"]>>([]);
   const [now, setNow] = useState(Date.now());
   const requestActive = useRef(false);
   const connectionListRef = useRef<HTMLDivElement>(null);
@@ -97,7 +98,6 @@ export function ConnectionsPage({
   useEffect(() => {
     setQuery("");
     setOutboundFilter("all");
-    if (!initialAdapter.trim()) setAdapterRuntime([]);
   }, [adapterRevision, initialAdapter]);
 
   const load = useCallback(async (manual = false) => {
@@ -105,13 +105,6 @@ export function ConnectionsPage({
     requestActive.current = true;
     if (manual) setRefreshing(true);
     try {
-      const runtimeRequest = groupedByAdapter
-        ? withServiceTimeout(
-          appServices.engine.snapshot(),
-          2_000,
-          text("读取网卡实时速度", "Loading adapter throughput"),
-        ).catch(() => null)
-        : Promise.resolve(null);
       const next = await withServiceTimeout(
         appServices.engine.connections(),
         8_000,
@@ -119,9 +112,6 @@ export function ConnectionsPage({
       );
       pendingScrollTop.current = connectionListRef.current?.scrollTop ?? null;
       setSnapshot({ ...next, connections: next.connections ?? [] });
-      void runtimeRequest.then((runtime) => {
-        if (runtime) setAdapterRuntime(runtime.adapters ?? []);
-      });
     } catch (error) {
       dispatchToast(
         <Toast>
@@ -135,7 +125,7 @@ export function ConnectionsPage({
       setLoading(false);
       setRefreshing(false);
     }
-  }, [dispatchToast, groupedByAdapter, text]);
+  }, [dispatchToast, text]);
 
   useEffect(() => {
     void load();

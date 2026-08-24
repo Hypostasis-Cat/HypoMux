@@ -11,6 +11,7 @@ import { AppShell } from "./components/shell/AppShell";
 import type { AppPage } from "./components/shell/CompactNavigation";
 import { HomePage } from "./pages/HomePage";
 import { advanceConnectionsNavigation } from "./pages/connectionNavigation";
+import type { HomeAdapter } from "./state/useEngineState";
 import { AppearanceProvider, useAppearance } from "./theme/appearance.store";
 import { LanguageProvider } from "./i18n/i18n";
 import { desktopPlatform } from "./platform/desktop";
@@ -38,6 +39,7 @@ function HypoMuxWindow() {
   const [pageDirection, setPageDirection] = useState<"forward" | "backward">("forward");
   const [navigationRevision, setNavigationRevision] = useState(0);
   const [connectionsNavigation, setConnectionsNavigation] = useState({ adapter: "", revision: 0 });
+  const [connectionAdapters, setConnectionAdapters] = useState<HomeAdapter[]>([]);
   const [startupRevealed, setStartupRevealed] = useState(false);
   const { fluentTheme } = useAppearance();
   const pageOrder: AppPage[] = [
@@ -87,7 +89,12 @@ function HypoMuxWindow() {
         pageDirection={pageDirection}
         animatePage={navigationRevision > 0}
         persistentPage="home"
-        persistentChildren={<HomePage onNavigate={navigate} />}
+        persistentChildren={(
+          <HomePage
+            onNavigate={navigate}
+            onAdapterRuntimeChange={setConnectionAdapters}
+          />
+        )}
       >
         <Suspense fallback={<div className="page-loading"><Spinner /></div>}>
           {page === "appearance" && import.meta.env.DEV
@@ -104,6 +111,7 @@ function HypoMuxWindow() {
                 ? <ConnectionsPage
                   initialAdapter={connectionsNavigation.adapter}
                   adapterRevision={connectionsNavigation.revision}
+                  adapterRuntime={connectionAdapters}
                 />
             : page === "routing"
               ? <RoutingPage />

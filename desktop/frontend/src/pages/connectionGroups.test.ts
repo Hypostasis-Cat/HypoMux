@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { groupConnectionsByAdapter } from "./connectionGroups";
 
 describe("groupConnectionsByAdapter", () => {
-  it("groups connections and orders adapters by combined live throughput", () => {
+  it("groups connections using the shared home adapter throughput", () => {
     const groups = groupConnectionsByAdapter(
       [
         { id: 1, adapter: "Ethernet" },
@@ -10,8 +10,8 @@ describe("groupConnectionsByAdapter", () => {
         { id: 3, adapter: "Ethernet" },
       ],
       [
-        { id: "Ethernet", download_bps: 100, upload_bps: 50 },
-        { id: "Wi-Fi", download_bps: 600, upload_bps: 50 },
+        { name: "Ethernet", downloadBPS: 100, uploadBPS: 50 },
+        { name: "Wi-Fi", downloadBPS: 600, uploadBPS: 50 },
       ],
     );
 
