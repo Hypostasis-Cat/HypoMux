@@ -134,16 +134,24 @@ export type NATDetectionResult = {
   public_endpoint?: string;
   server?: string;
   detail?: string;
+  host_firewall_limited?: boolean;
   attempts?: NATProbeAttempt[];
   duration_ms?: number;
   started_at?: string;
   completed_at?: string;
 };
 
+export type NATFirewallState = {
+  supported: boolean;
+  enabled: boolean;
+  allowed: boolean;
+  detail?: string;
+};
+
 export type NATProbeAttempt = {
   server: string;
   resolved?: string;
-  code: "success" | "timeout" | "unsupported" | "fake_ip" | "resolve_failed" | "invalid_response" | "network_error";
+  code: "success" | "timeout" | "unsupported" | "fake_ip" | "resolve_failed" | "invalid_response" | "network_error" | "host_firewall";
   detail: string;
   duration_ms: number;
 };
@@ -241,7 +249,10 @@ export const appServices = {
       Call.ByName(diagnosticsMethod("AddNATServer"), name, address) as Promise<NATServerSnapshot>,
     removeNATServer: (id: string) =>
       Call.ByName(diagnosticsMethod("RemoveNATServer"), id) as Promise<NATServerSnapshot>,
-    resetNATServers: () => Call.ByName(diagnosticsMethod("ResetNATServers")) as Promise<NATServerSnapshot>,
+      resetNATServers: () => Call.ByName(diagnosticsMethod("ResetNATServers")) as Promise<NATServerSnapshot>,
+      natFirewallState: () => Call.ByName(diagnosticsMethod("NATFirewallState")) as Promise<NATFirewallState>,
+      allowNATFirewallTraffic: () =>
+        Call.ByName(diagnosticsMethod("AllowNATFirewallTraffic")) as Promise<NATFirewallState>,
   },
   tun: {
     latest: () => TunService.Latest(),

@@ -28,6 +28,24 @@ func TestClassifyNAT(t *testing.T) {
 	}
 }
 
+func TestHostFirewallMakesRestrictiveFilteringInconclusive(t *testing.T) {
+	result := NATDetectionResult{
+		State: "completed", NATType: "port_restricted_cone",
+		MappingBehavior: natEndpointIndependent, FilteringBehavior: natAddressPortDependent,
+	}
+	limited := applyHostFirewallReliability(&result, NATFirewallState{Supported: true, Enabled: true})
+	if !limited || !result.HostFirewallLimited || result.NATType != "inconclusive" || result.FilteringBehavior != natBehaviorInconclusive {
+		t.Fatalf("expected host-firewall-limited result, got %+v", result)
+	}
+}
+
+func TestAllowedFirewallKeepsFilteringResult(t *testing.T) {
+	result := NATDetectionResult{FilteringBehavior: natAddressPortDependent}
+	if applyHostFirewallReliability(&result, NATFirewallState{Supported: true, Enabled: true, Allowed: true}) {
+		t.Fatalf("allowed firewall must not invalidate filtering: %+v", result)
+	}
+}
+
 func TestDiagnosticsNATRunPersistsResult(t *testing.T) {
 	service := newTestDiagnostics(t, &fakeDiagnosticProbe{})
 	service.detectNAT = func(_ context.Context, adapter AdapterView, _ []NATServer) NATDetectionResult {

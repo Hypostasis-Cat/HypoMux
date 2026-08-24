@@ -38,20 +38,21 @@ type NATProbeAttempt struct {
 }
 
 type NATDetectionResult struct {
-	State             string            `json:"state"`
-	AdapterID         string            `json:"adapter_id,omitempty"`
-	Name              string            `json:"name,omitempty"`
-	Address           string            `json:"address,omitempty"`
-	NATType           string            `json:"nat_type,omitempty"`
-	MappingBehavior   string            `json:"mapping_behavior,omitempty"`
-	FilteringBehavior string            `json:"filtering_behavior,omitempty"`
-	PublicEndpoint    string            `json:"public_endpoint,omitempty"`
-	Server            string            `json:"server,omitempty"`
-	Detail            string            `json:"detail,omitempty"`
-	Attempts          []NATProbeAttempt `json:"attempts,omitempty"`
-	DurationMS        int64             `json:"duration_ms,omitempty"`
-	StartedAt         time.Time         `json:"started_at,omitempty"`
-	CompletedAt       time.Time         `json:"completed_at,omitempty"`
+	State               string            `json:"state"`
+	AdapterID           string            `json:"adapter_id,omitempty"`
+	Name                string            `json:"name,omitempty"`
+	Address             string            `json:"address,omitempty"`
+	NATType             string            `json:"nat_type,omitempty"`
+	MappingBehavior     string            `json:"mapping_behavior,omitempty"`
+	FilteringBehavior   string            `json:"filtering_behavior,omitempty"`
+	PublicEndpoint      string            `json:"public_endpoint,omitempty"`
+	Server              string            `json:"server,omitempty"`
+	Detail              string            `json:"detail,omitempty"`
+	HostFirewallLimited bool              `json:"host_firewall_limited,omitempty"`
+	Attempts            []NATProbeAttempt `json:"attempts,omitempty"`
+	DurationMS          int64             `json:"duration_ms,omitempty"`
+	StartedAt           time.Time         `json:"started_at,omitempty"`
+	CompletedAt         time.Time         `json:"completed_at,omitempty"`
 }
 
 type natSTUNSession struct {
@@ -98,9 +99,15 @@ func detectAdapterNAT(parent context.Context, adapter AdapterView, servers []NAT
 		attemptStarted := time.Now()
 		probe, resolved, err := probeNATBehavior(ctx, adapter, server.Address)
 		if err == nil {
+			attemptCode := "success"
+			attemptDetail := "RFC 5780 behavior discovery completed"
+			if probe.HostFirewallLimited {
+				attemptCode = "host_firewall"
+				attemptDetail = "Mapping completed, but Windows Firewall can affect alternate-endpoint replies"
+			}
 			probe.Attempts = append(result.Attempts, NATProbeAttempt{
-				Server: server.Address, Resolved: resolved, Code: "success",
-				Detail: "RFC 5780 behavior discovery completed", DurationMS: time.Since(attemptStarted).Milliseconds(),
+				Server: server.Address, Resolved: resolved, Code: attemptCode,
+				Detail: attemptDetail, DurationMS: time.Since(attemptStarted).Milliseconds(),
 			})
 			probe.StartedAt = started
 			probe.CompletedAt = time.Now()
@@ -231,6 +238,10 @@ func probeNATBehavior(ctx context.Context, adapter AdapterView, server string) (
 		}
 	}
 
+	if applyHostFirewallReliability(&result, currentNATFirewallState()) {
+		return result, resolved, nil
+	}
+
 	result.NATType = classifyNAT(result.MappingBehavior, result.FilteringBehavior)
 	if result.NATType == "inconclusive" {
 		result.Detail = "The STUN behavior tests did not produce a conclusive classification"
@@ -239,6 +250,18 @@ func probeNATBehavior(ctx context.Context, adapter AdapterView, server string) (
 	result.State = "completed"
 	result.Detail = "RFC 5780 UDP mapping and filtering behavior detected"
 	return result, resolved, nil
+}
+
+func applyHostFirewallReliability(result *NATDetectionResult, firewall NATFirewallState) bool {
+	if result.FilteringBehavior == natEndpointIndependent || !firewall.Supported || !firewall.Enabled || firewall.Allowed {
+		return false
+	}
+	result.HostFirewallLimited = true
+	result.FilteringBehavior = natBehaviorInconclusive
+	result.NATType = "inconclusive"
+	result.State = "inconclusive"
+	result.Detail = "Windows Firewall may have blocked STUN responses from the alternate endpoint; allow UDP replies for HypoMux and retry"
+	return true
 }
 
 func resolveNATServer(ctx context.Context, adapter AdapterView, address string) (*net.UDPAddr, error) {

@@ -132,6 +132,14 @@ func (s *DiagnosticsService) ResetNATServers() (NATServerSnapshot, error) {
 	return s.natServerStore().reset()
 }
 
+func (s *DiagnosticsService) NATFirewallState() NATFirewallState {
+	return currentNATFirewallState()
+}
+
+func (s *DiagnosticsService) AllowNATFirewallTraffic() (NATFirewallState, error) {
+	return allowNATFirewallTraffic()
+}
+
 func (s *DiagnosticsService) natServerStore() *natServerStore {
 	s.mu.Lock()
 	defer s.mu.Unlock()

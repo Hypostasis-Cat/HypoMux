@@ -757,6 +757,9 @@ Section "uninstall"
     ; application-owned and are removed.
     DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "HypoMux"
 
+    ; Remove the optional, user-approved NAT detection UDP reply rule.
+    nsExec::ExecToLog '"$SYSDIR\netsh.exe" advfirewall firewall delete rule name="HypoMux NAT Type Detection" program="$INSTDIR\${PRODUCT_EXECUTABLE}"'
+
     RMDir /r "$AppData\${PRODUCT_EXECUTABLE}" # Remove the WebView2 DataPath
 
     Delete "$SMPROGRAMS\${INFO_PRODUCTNAME}.lnk"
