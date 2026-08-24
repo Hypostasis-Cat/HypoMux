@@ -10,6 +10,7 @@ import { WallpaperLayer } from "./components/material/WallpaperLayer";
 import { AppShell } from "./components/shell/AppShell";
 import type { AppPage } from "./components/shell/CompactNavigation";
 import { HomePage } from "./pages/HomePage";
+import { advanceConnectionsNavigation } from "./pages/connectionNavigation";
 import { AppearanceProvider, useAppearance } from "./theme/appearance.store";
 import { LanguageProvider } from "./i18n/i18n";
 import { desktopPlatform } from "./platform/desktop";
@@ -36,6 +37,7 @@ function HypoMuxWindow() {
   });
   const [pageDirection, setPageDirection] = useState<"forward" | "backward">("forward");
   const [navigationRevision, setNavigationRevision] = useState(0);
+  const [connectionsNavigation, setConnectionsNavigation] = useState({ adapter: "", revision: 0 });
   const [startupRevealed, setStartupRevealed] = useState(false);
   const { fluentTheme } = useAppearance();
   const pageOrder: AppPage[] = [
@@ -49,7 +51,10 @@ function HypoMuxWindow() {
     "appearance",
   ];
 
-  const navigate = (nextPage: AppPage) => {
+  const navigate = (nextPage: AppPage, adapterName?: string) => {
+    if (nextPage === "connections") {
+      setConnectionsNavigation((current) => advanceConnectionsNavigation(current, adapterName));
+    }
     if (nextPage === page) return;
     const currentIndex = pageOrder.indexOf(page);
     const nextIndex = pageOrder.indexOf(nextPage);
@@ -96,7 +101,10 @@ function HypoMuxWindow() {
             : page === "health"
               ? <HealthPage />
               : page === "connections"
-                ? <ConnectionsPage />
+                ? <ConnectionsPage
+                  initialAdapter={connectionsNavigation.adapter}
+                  adapterRevision={connectionsNavigation.revision}
+                />
             : page === "routing"
               ? <RoutingPage />
               : null}

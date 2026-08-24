@@ -40,7 +40,7 @@ const formatBytes = (value: number) => {
   return `${value} B`;
 };
 
-export function HomePage({ onNavigate }: { onNavigate?: (page: AppPage) => void }) {
+export function HomePage({ onNavigate }: { onNavigate?: (page: AppPage, adapterName?: string) => void }) {
   const { locale, t } = useI18n();
   const text = (zh: string, en: string) => locale === "en" ? en : zh;
   const [preflightDialog, setPreflightDialog] = useState<TunPreflightSnapshot | null>(null);
@@ -162,6 +162,7 @@ export function HomePage({ onNavigate }: { onNavigate?: (page: AppPage) => void 
               adapter={adapter}
               percentage={adapter.selected ? Math.round((adapter.weight / engine.totalWeight) * 100) || 0 : 0}
               disabled={engine.transitioning || engine.phase === "running"}
+              onOpenConnections={() => onNavigate?.("connections", adapter.name)}
               onSelectedChange={(checked) => engine.toggleAdapter(adapter.id, checked)}
               onWeightChange={(value) => engine.updateWeight(adapter.id, value)}
             />

@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { ConnectionView } from "../platform/services";
+import type { ConnectionSort } from "./connectionSort";
 import { selectConnections } from "./connectionView";
+
+const longestFirst: ConnectionSort = { key: "duration", direction: "descending" };
+const shortestFirst: ConnectionSort = { key: "duration", direction: "ascending" };
 
 const connection = (overrides: Partial<ConnectionView>): ConnectionView => ({
   id: 1,
@@ -26,18 +30,24 @@ describe("selectConnections", () => {
   ];
 
   it("filters by outbound policy and searchable egress detail", () => {
-    expect(selectConnections(connections, "", "adapter", "longest").map((item) => item.id)).toEqual([2]);
-    expect(selectConnections(connections, "热点", "all", "longest").map((item) => item.id)).toEqual([2]);
+    expect(selectConnections(connections, "", "adapter", "", longestFirst).map((item) => item.id)).toEqual([2]);
+    expect(selectConnections(connections, "热点", "all", "", longestFirst).map((item) => item.id)).toEqual([2]);
+  });
+
+  it("filters an adapter entry by exact adapter name", () => {
+    expect(selectConnections(connections, "", "all", "WLAN", longestFirst).map((item) => item.id))
+      .toEqual([1, 3, 2]);
+    expect(selectConnections(connections, "", "all", "LAN", longestFirst)).toEqual([]);
   });
 
   it("sorts active connections by longest or shortest duration", () => {
-    expect(selectConnections(connections, "", "all", "longest").map((item) => item.id)).toEqual([1, 3, 2]);
-    expect(selectConnections(connections, "", "all", "shortest").map((item) => item.id)).toEqual([2, 3, 1]);
+    expect(selectConnections(connections, "", "all", "", longestFirst).map((item) => item.id)).toEqual([1, 3, 2]);
+    expect(selectConnections(connections, "", "all", "", shortestFirst).map((item) => item.id)).toEqual([2, 3, 1]);
   });
 
   it("does not mutate the service snapshot order", () => {
     const original = connections.map((item) => item.id);
-    selectConnections(connections, "", "all", "shortest");
+    selectConnections(connections, "", "all", "", shortestFirst);
     expect(connections.map((item) => item.id)).toEqual(original);
   });
 });
