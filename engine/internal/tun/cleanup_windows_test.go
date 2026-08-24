@@ -41,3 +41,9 @@ func TestResolveWindowsPowerShellDoesNotDependOnPATH(t *testing.T) {
 		t.Fatalf("resolved PowerShell path = %q", path)
 	}
 }
+
+func TestOwnedTunDeviceInspectionUsesSetupAPIWithoutElevation(t *testing.T) {
+	if _, err := hasOwnedTunDevice(); err != nil {
+		t.Fatalf("inspect owned TUN device: %v", err)
+	}
+}

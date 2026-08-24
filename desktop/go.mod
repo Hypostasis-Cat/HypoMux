@@ -8,7 +8,6 @@ require (
 	github.com/wailsapp/wails/v3 v3.0.0-alpha2.119
 	golang.org/x/net v0.56.0
 	golang.org/x/sys v0.47.0
-	golang.org/x/text v0.41.0
 )
 
 require (
@@ -26,4 +25,5 @@ require (
 	github.com/wlynxg/anet v0.0.5 // indirect
 	golang.org/x/crypto v0.53.0 // indirect
 	golang.org/x/image v0.45.0 // indirect
+	golang.org/x/text v0.41.0 // indirect
 )

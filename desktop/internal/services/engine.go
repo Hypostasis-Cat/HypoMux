@@ -721,10 +721,14 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 		if s.tun == nil {
 			return EngineSnapshot{}, errors.New("TUN 启动前检查服务未注册；系统网络未修改")
 		}
-		preflight := s.tun.checkSelected(selected)
+		preflight, reusedPreflight := s.tun.consumeRecentPreflight(selected)
+		if !reusedPreflight {
+			preflight = s.tun.checkSelected(selected)
+		}
 		effectiveStrictRoute = preflight.EffectiveStrictRoute && !wfpFallbackApplied
 		if s.logs != nil {
 			s.logs.RecordEvent("tun_preflight", "completed", map[string]any{
+				"reused":                     reusedPreflight,
 				"ready":                      preflight.Ready,
 				"host_elevated":              preflight.HostElevated,
 				"privilege_broker_available": preflight.PrivilegeBrokerAvailable,

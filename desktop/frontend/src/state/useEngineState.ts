@@ -368,10 +368,13 @@ export function useEngineState(
         }
       }
       if (!stopping && mode === "proxy") {
-        const processes = await appServices.routing.listProcesses().catch(() => []);
-        if ((processes ?? []).some((name) => name.toLowerCase() === "steam.exe")) {
-          onError("检测到 Steam 正在运行，请重启 Steam 客户端以使多链路加速完全生效。");
-        }
+        // The Steam notice is advisory and must never sit on the engine's
+        // critical startup path. Process discovery continues independently.
+        void appServices.routing.listProcesses().then((processes) => {
+          if (mounted.current && (processes ?? []).some((name) => name.toLowerCase() === "steam.exe")) {
+            onError("检测到 Steam 正在运行，请重启 Steam 客户端以使多链路加速完全生效。");
+          }
+        }).catch(() => undefined);
       }
       const next = await withServiceTimeout(
         stopping ? appServices.engine.stop() : appServices.engine.start(mode),

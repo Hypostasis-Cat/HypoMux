@@ -77,6 +77,67 @@ func TestTunPreflightCanBecomeReadyWithIndependentCore(t *testing.T) {
 	}
 }
 
+func TestTunPreflightIsReusedOnceForImmediateStartup(t *testing.T) {
+	service := testTunService(t, tunPlatformSnapshot{
+		PrivilegeBrokerAvailable: true,
+		WFPReady:                 true,
+	})
+	checkedAt := time.Date(2026, 7, 31, 11, 0, 0, 0, time.UTC)
+	service.now = func() time.Time { return checkedAt }
+	inspectionCalls := 0
+	service.inspectPlatform = func(bool) tunPlatformSnapshot {
+		inspectionCalls++
+		return tunPlatformSnapshot{PrivilegeBrokerAvailable: true, WFPReady: true}
+	}
+	if _, err := service.Preflight([]string{"ethernet"}); err != nil {
+		t.Fatal(err)
+	}
+	available, err := service.listAdapters()
+	if err != nil {
+		t.Fatal(err)
+	}
+	selected := []AdapterView{available[0]}
+	cached, reused := service.consumeRecentPreflight(selected)
+	if !reused || !cached.Ready {
+		t.Fatalf("immediate startup did not reuse ready preflight: reused=%t snapshot=%+v", reused, cached)
+	}
+	if inspectionCalls != 1 {
+		t.Fatalf("platform inspections = %d, want 1", inspectionCalls)
+	}
+	if _, reused = service.consumeRecentPreflight(selected); reused {
+		t.Fatal("startup preflight cache was reused more than once")
+	}
+}
+
+func TestTunPreflightReuseRejectsChangedOrExpiredNetwork(t *testing.T) {
+	service := testTunService(t, tunPlatformSnapshot{
+		PrivilegeBrokerAvailable: true,
+		WFPReady:                 true,
+	})
+	now := time.Date(2026, 7, 31, 11, 0, 0, 0, time.UTC)
+	service.now = func() time.Time { return now }
+	available, err := service.listAdapters()
+	if err != nil {
+		t.Fatal(err)
+	}
+	selected := []AdapterView{available[0]}
+	if _, err := service.Preflight([]string{"ethernet"}); err != nil {
+		t.Fatal(err)
+	}
+	changed := append([]AdapterView(nil), selected...)
+	changed[0].Address = "192.168.10.99"
+	if _, reused := service.consumeRecentPreflight(changed); reused {
+		t.Fatal("preflight was reused after the adapter address changed")
+	}
+	if _, err := service.Preflight([]string{"ethernet"}); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(startupPreflightReuseWindow + time.Millisecond)
+	if _, reused := service.consumeRecentPreflight(selected); reused {
+		t.Fatal("expired preflight was reused for startup")
+	}
+}
+
 func TestTunPreflightTreatsSharedGatewayAsInformational(t *testing.T) {
 	service := testTunService(t, tunPlatformSnapshot{
 		PrivilegeBrokerAvailable: true,

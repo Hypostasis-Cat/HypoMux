@@ -3,38 +3,41 @@
 package services
 
 import (
-	"encoding/csv"
+	"errors"
 	"fmt"
-	"os/exec"
 	"sort"
 	"strings"
-	"syscall"
+	"unsafe"
 
-	"golang.org/x/text/encoding/simplifiedchinese"
+	"golang.org/x/sys/windows"
 )
 
 func listRunningProcesses() ([]string, error) {
-	command := exec.Command("tasklist", "/NH", "/FO", "CSV")
-	command.SysProcAttr = &syscall.SysProcAttr{
-		HideWindow:    true,
-		CreationFlags: 0x08000000,
-	}
-	output, err := command.Output()
+	snapshot, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
 	if err != nil {
-		return nil, fmt.Errorf("读取运行中进程失败：%w", err)
+		return nil, fmt.Errorf("创建运行中进程快照失败：%w", err)
 	}
-	rows, err := csv.NewReader(strings.NewReader(decodeWindowsOutput(output))).ReadAll()
-	if err != nil {
-		return nil, fmt.Errorf("解析进程列表失败：%w", err)
-	}
+	defer windows.CloseHandle(snapshot)
+
 	seen := map[string]string{}
-	for _, row := range rows {
-		if len(row) == 0 {
-			continue
+	var entry windows.ProcessEntry32
+	entry.Size = uint32(unsafe.Sizeof(entry))
+	if err := windows.Process32First(snapshot, &entry); err != nil {
+		if errors.Is(err, windows.ERROR_NO_MORE_FILES) {
+			return []string{}, nil
 		}
-		name := strings.TrimSpace(row[0])
+		return nil, fmt.Errorf("读取运行中进程快照失败：%w", err)
+	}
+	for {
+		name := strings.TrimSpace(windows.UTF16ToString(entry.ExeFile[:]))
 		if strings.HasSuffix(strings.ToLower(name), ".exe") && !strings.ContainsAny(name, "/\\:\x00") {
 			seen[strings.ToLower(name)] = name
+		}
+		if err := windows.Process32Next(snapshot, &entry); err != nil {
+			if errors.Is(err, windows.ERROR_NO_MORE_FILES) {
+				break
+			}
+			return nil, fmt.Errorf("枚举运行中进程失败：%w", err)
 		}
 	}
 	result := make([]string, 0, len(seen))
@@ -43,11 +46,4 @@ func listRunningProcesses() ([]string, error) {
 	}
 	sort.Slice(result, func(i, j int) bool { return strings.ToLower(result[i]) < strings.ToLower(result[j]) })
 	return result, nil
-}
-
-func decodeWindowsOutput(data []byte) string {
-	if decoded, err := simplifiedchinese.GBK.NewDecoder().Bytes(data); err == nil {
-		return string(decoded)
-	}
-	return string(data)
 }

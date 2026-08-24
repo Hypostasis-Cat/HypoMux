@@ -47,6 +47,14 @@ type tunPlatformSnapshot struct {
 	NetworkRisks             []string
 }
 
+const startupPreflightReuseWindow = 8 * time.Second
+
+type startupPreflightCache struct {
+	key       string
+	checkedAt time.Time
+	snapshot  TunPreflightSnapshot
+}
+
 type TunService struct {
 	mu              sync.Mutex
 	settings        *SettingsService
@@ -57,6 +65,7 @@ type TunService struct {
 	resolveSingBox  func() (string, error)
 	now             func() time.Time
 	latest          TunPreflightSnapshot
+	startupCache    startupPreflightCache
 }
 
 func NewTunService(settings *SettingsService, adapters *AdapterService) *TunService {
@@ -100,10 +109,14 @@ func (s *TunService) Preflight(adapterIDs []string) (TunPreflightSnapshot, error
 			selected = append(selected, adapter)
 		}
 	}
-	return s.checkSelected(selected), nil
+	return s.evaluateSelected(selected, true), nil
 }
 
 func (s *TunService) checkSelected(selected []AdapterView) TunPreflightSnapshot {
+	return s.evaluateSelected(selected, false)
+}
+
+func (s *TunService) evaluateSelected(selected []AdapterView, reusableForStartup bool) TunPreflightSnapshot {
 	settings := s.settings.Get()
 	rememberedWFPFailure, rememberedWFPDetail := s.settings.rememberedWFPCompatibilityFailure()
 	platform := s.inspectPlatform(settings.StrictRoute && !rememberedWFPFailure)
@@ -220,8 +233,64 @@ func (s *TunService) checkSelected(selected []AdapterView) TunPreflightSnapshot 
 	}
 	s.mu.Lock()
 	s.latest = cloneTunPreflight(snapshot)
+	if reusableForStartup {
+		s.startupCache = startupPreflightCache{
+			key: tunPreflightCacheKey(
+				selected, settings.StrictRoute, rememberedWFPFailure, rememberedWFPDetail,
+			),
+			checkedAt: snapshot.CheckedAt,
+			snapshot:  cloneTunPreflight(snapshot),
+		}
+	} else {
+		s.startupCache = startupPreflightCache{}
+	}
 	s.mu.Unlock()
 	return snapshot
+}
+
+// consumeRecentPreflight reuses only the immediately preceding UI preflight,
+// once, when the selected network identity and strict-route inputs are still
+// identical. The short window removes duplicate PowerShell inspection without
+// turning a diagnostic snapshot into long-lived authorization for takeover.
+func (s *TunService) consumeRecentPreflight(selected []AdapterView) (TunPreflightSnapshot, bool) {
+	settings := s.settings.Get()
+	rememberedWFPFailure, rememberedWFPDetail := s.settings.rememberedWFPCompatibilityFailure()
+	key := tunPreflightCacheKey(
+		selected, settings.StrictRoute, rememberedWFPFailure, rememberedWFPDetail,
+	)
+	now := s.now().UTC()
+	s.mu.Lock()
+	cached := s.startupCache
+	s.startupCache = startupPreflightCache{}
+	s.mu.Unlock()
+	age := now.Sub(cached.checkedAt)
+	if cached.key == "" || cached.key != key || age < 0 || age > startupPreflightReuseWindow {
+		return TunPreflightSnapshot{}, false
+	}
+	return cloneTunPreflight(cached.snapshot), true
+}
+
+func tunPreflightCacheKey(
+	selected []AdapterView,
+	strictRoute bool,
+	rememberedWFPFailure bool,
+	rememberedWFPDetail string,
+) string {
+	adapters := append([]AdapterView(nil), selected...)
+	sort.Slice(adapters, func(i, j int) bool { return adapters[i].ID < adapters[j].ID })
+	parts := make([]string, 0, len(adapters)+1)
+	parts = append(parts, fmt.Sprintf(
+		"strict=%t|remembered=%t|detail=%s",
+		strictRoute, rememberedWFPFailure, strings.TrimSpace(rememberedWFPDetail),
+	))
+	for _, adapter := range adapters {
+		parts = append(parts, fmt.Sprintf(
+			"%s|%s|%d|%d|%s|%d|%s|%t",
+			adapter.ID, adapter.Address, adapter.PrefixLength, adapter.IfIndex,
+			adapter.SourceIPv6, adapter.IPv6IfIndex, adapter.Gateway, adapter.Operational,
+		))
+	}
+	return strings.Join(parts, "\n")
 }
 
 func tunBlocker(code, title, detail string) TunPreflightIssue {

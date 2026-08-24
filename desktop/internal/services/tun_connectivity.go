@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	xproxy "golang.org/x/net/proxy"
@@ -132,8 +133,8 @@ func probeTUNConnectivityThroughChannels(
 	aggregationEndpoint string,
 	dnsResult dnsResolveResult,
 ) (tunConnectivityReport, error) {
-	report := tunConnectivityReport{Checks: make([]tunConnectivityCheck, 0, len(tunConnectivityURLs)+2)}
-	report.Checks = append(report.Checks, probeDNSBootstrap(parent, dnsResult))
+	probes := make([]func() tunConnectivityCheck, 0, len(tunConnectivityURLs)+2)
+	probes = append(probes, func() tunConnectivityCheck { return probeDNSBootstrap(parent, dnsResult) })
 	aggregationTargets := 0
 	for _, endpoint := range tunConnectivityURLs {
 		requestEndpoint, originalHost, supported, err := resolveAggregationTarget(endpoint, dnsResult)
@@ -142,22 +143,38 @@ func probeTUNConnectivityThroughChannels(
 		}
 		aggregationTargets++
 		if err != nil {
-			report.Checks = append(report.Checks, tunConnectivityCheck{
+			failure := tunConnectivityCheck{
 				Stage: "aggregation_data", Endpoint: endpoint, Outbound: "aggregation", Error: err.Error(),
-			})
+			}
+			probes = append(probes, func() tunConnectivityCheck { return failure })
 			continue
 		}
-		report.Checks = append(report.Checks, probeHTTPURLTarget(
-			parent, endpoint, requestEndpoint, originalHost, &aggregationEndpoint, "aggregation",
-		))
-	}
-	if aggregationTargets == 0 {
-		report.Checks = append(report.Checks, tunConnectivityCheck{
-			Stage: "aggregation_data", Endpoint: "none", Outbound: "aggregation",
-			Error: "no connectivity endpoint matches the pre-TUN DNS result",
+		endpoint, requestEndpoint, originalHost := endpoint, requestEndpoint, originalHost
+		probes = append(probes, func() tunConnectivityCheck {
+			return probeHTTPURLTarget(
+				parent, endpoint, requestEndpoint, originalHost, &aggregationEndpoint, "aggregation",
+			)
 		})
 	}
-	report.Checks = append(report.Checks, tunDataPathProbe(parent))
+	if aggregationTargets == 0 {
+		failure := tunConnectivityCheck{
+			Stage: "aggregation_data", Endpoint: "none", Outbound: "aggregation",
+			Error: "no connectivity endpoint matches the pre-TUN DNS result",
+		}
+		probes = append(probes, func() tunConnectivityCheck { return failure })
+	}
+	probes = append(probes, func() tunConnectivityCheck { return tunDataPathProbe(parent) })
+	report := tunConnectivityReport{Checks: make([]tunConnectivityCheck, len(probes))}
+	var wait sync.WaitGroup
+	wait.Add(len(probes))
+	for index, probe := range probes {
+		index, probe := index, probe
+		go func() {
+			defer wait.Done()
+			report.Checks[index] = probe()
+		}()
+	}
+	wait.Wait()
 	return report, report.failure()
 }
 

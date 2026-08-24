@@ -3,16 +3,20 @@
 package services
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os/exec"
 	"strings"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"github.com/Hypostasis-Cat/HypoMux/desktop/internal/engineclient"
 	"golang.org/x/sys/windows"
 )
+
+const tunPreflightPowerShellTimeout = 4 * time.Second
 
 func inspectTunPlatform(checkWFP bool) tunPlatformSnapshot {
 	snapshot := tunPlatformSnapshot{
@@ -24,10 +28,7 @@ func inspectTunPlatform(checkWFP bool) tunPlatformSnapshot {
 	} else {
 		snapshot.WFPDetail = "严格路由已由用户关闭；未执行 WFP 探测"
 	}
-	snapshot.DefaultRouteAliases, snapshot.RouteScanError = foreignDefaultRouteAliases()
-	snapshot.NetworkRisks, snapshot.RouteScanError = appendForeignNetworkRisks(
-		snapshot.NetworkRisks, snapshot.RouteScanError,
-	)
+	snapshot.DefaultRouteAliases, snapshot.NetworkRisks, snapshot.RouteScanError = inspectForeignNetworkState()
 	return snapshot
 }
 
@@ -55,27 +56,74 @@ func probeWFPEngine() (bool, string) {
 	return true, "FwpmEngineOpen0 succeeded"
 }
 
-func foreignDefaultRouteAliases() ([]string, string) {
+// inspectForeignNetworkState collects all PowerShell-only network evidence in
+// one process. Starting Windows PowerShell dominated the read-only preflight;
+// the old implementation paid that cold-start cost twice on every check.
+func inspectForeignNetworkState() ([]string, []string, string) {
 	const script = `
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
-$pattern = 'meta|clash|mihomo|tun|wintun|wireguard|tailscale|vpn|tap'
-$items = @(Get-NetRoute -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' -ErrorAction Stop |
-  Where-Object { $_.InterfaceAlias -match $pattern } |
-  Select-Object -ExpandProperty InterfaceAlias -Unique)
-ConvertTo-Json -InputObject @($items) -Compress
+$inspectionErrors = @()
+$aliases = @()
+$risks = @()
+try {
+  $routePattern = 'meta|clash|mihomo|tun|wintun|wireguard|tailscale|vpn|tap'
+  $aliases = @(Get-NetRoute -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' -ErrorAction Stop |
+    Where-Object { $_.InterfaceAlias -match $routePattern } |
+    Select-Object -ExpandProperty InterfaceAlias -Unique)
+} catch {
+  $inspectionErrors += ('默认路由检查失败：' + $_.Exception.Message)
+}
+try {
+  $adapterPattern = '(?i)(tun|tap|wintun|wireguard|tailscale|vpn|virtual|vgate)'
+  $adapters = @(Get-NetAdapter -ErrorAction Stop)
+  foreach ($adapter in $adapters) {
+    if ($adapter.Status -eq 'Up' -and $adapter.Name -ne 'HypoMux-Tun' -and
+        ($adapter.Name -match $adapterPattern -or $adapter.InterfaceDescription -match $adapterPattern)) {
+      $risks += ('active foreign virtual adapter: ' + $adapter.Name + ' [' + $adapter.InterfaceDescription + ']')
+    }
+  }
+} catch {
+  $inspectionErrors += ('虚拟网卡检查失败：' + $_.Exception.Message)
+}
+try {
+  $forwarding = @(Get-NetIPInterface -AddressFamily IPv4 -ErrorAction Stop |
+    Where-Object { $_.Forwarding -eq 'Enabled' -and $_.InterfaceAlias -ne 'HypoMux-Tun' })
+  foreach ($item in $forwarding) {
+    $risks += ('IPv4 forwarding enabled: ' + $item.InterfaceAlias)
+  }
+} catch {
+  $inspectionErrors += ('IPv4 转发检查失败：' + $_.Exception.Message)
+}
+try {
+  $ics = Get-Service -Name SharedAccess -ErrorAction SilentlyContinue
+  if ($null -ne $ics -and $ics.Status -eq 'Running') {
+    $risks += 'Internet Connection Sharing service is running'
+  }
+} catch {
+  $inspectionErrors += ('网络共享检查失败：' + $_.Exception.Message)
+}
+ConvertTo-Json -InputObject @{
+  aliases = @($aliases)
+  risks = @($risks)
+  errors = @($inspectionErrors)
+} -Compress
 `
 	output, err := runPreflightPowerShell(script)
 	if err != nil {
-		return []string{}, fmt.Sprintf("默认路由检查失败：%v", err)
+		return []string{}, []string{}, fmt.Sprintf("网络接管风险检查失败：%v", err)
 	}
-	var aliases []string
-	if err := json.Unmarshal(output, &aliases); err != nil {
-		return []string{}, fmt.Sprintf("默认路由检查结果无效：%v", err)
+	var payload struct {
+		Aliases []string `json:"aliases"`
+		Risks   []string `json:"risks"`
+		Errors  []string `json:"errors"`
 	}
-	result := make([]string, 0, len(aliases))
+	if err := json.Unmarshal(output, &payload); err != nil {
+		return []string{}, []string{}, fmt.Sprintf("网络接管风险检查结果无效：%v", err)
+	}
+	aliases := make([]string, 0, len(payload.Aliases))
 	seen := map[string]struct{}{}
-	for _, alias := range aliases {
+	for _, alias := range payload.Aliases {
 		value := strings.TrimSpace(alias)
 		key := strings.ToLower(value)
 		if value == "" {
@@ -85,59 +133,10 @@ ConvertTo-Json -InputObject @($items) -Compress
 			continue
 		}
 		seen[key] = struct{}{}
-		result = append(result, value)
+		aliases = append(aliases, value)
 	}
-	return result, ""
-}
-
-func appendForeignNetworkRisks(risks []string, existingError string) ([]string, string) {
-	const script = `
-$ErrorActionPreference = 'Stop'
-[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
-$pattern = '(?i)(tun|tap|wintun|wireguard|tailscale|vpn|virtual|vgate)'
-$risks = @()
-$adapters = @(Get-NetAdapter -ErrorAction Stop)
-foreach ($adapter in $adapters) {
-  if ($adapter.Status -eq 'Up' -and $adapter.Name -ne 'HypoMux-Tun' -and
-      ($adapter.Name -match $pattern -or $adapter.InterfaceDescription -match $pattern)) {
-    $risks += ('active foreign virtual adapter: ' + $adapter.Name + ' [' + $adapter.InterfaceDescription + ']')
-  }
-}
-$forwarding = @(Get-NetIPInterface -AddressFamily IPv4 -ErrorAction Stop |
-  Where-Object { $_.Forwarding -eq 'Enabled' -and $_.InterfaceAlias -ne 'HypoMux-Tun' })
-foreach ($item in $forwarding) {
-  $risks += ('IPv4 forwarding enabled: ' + $item.InterfaceAlias)
-}
-$ics = Get-Service -Name SharedAccess -ErrorAction SilentlyContinue
-if ($null -ne $ics -and $ics.Status -eq 'Running') {
-  $risks += 'Internet Connection Sharing service is running'
-}
-ConvertTo-Json -InputObject @{ risks = @($risks) } -Compress
-`
-	output, err := runPreflightPowerShell(script)
-	if err != nil {
-		if existingError == "" {
-			existingError = fmt.Sprintf("网络接管风险检查失败：%v", err)
-		} else {
-			existingError += fmt.Sprintf("；网络接管风险检查失败：%v", err)
-		}
-		return risks, existingError
-	}
-	var payload struct {
-		Risks []string `json:"risks"`
-	}
-	if err := json.Unmarshal(output, &payload); err != nil {
-		if existingError == "" {
-			existingError = fmt.Sprintf("网络接管风险检查结果无效：%v", err)
-		} else {
-			existingError += fmt.Sprintf("；网络接管风险检查结果无效：%v", err)
-		}
-		return risks, existingError
-	}
-	seen := make(map[string]struct{}, len(risks)+len(payload.Risks))
-	for _, value := range risks {
-		seen[strings.ToLower(strings.TrimSpace(value))] = struct{}{}
-	}
+	risks := make([]string, 0, len(payload.Risks))
+	seen = make(map[string]struct{}, len(payload.Risks))
 	for _, value := range payload.Risks {
 		value = strings.TrimSpace(value)
 		if value == "" {
@@ -150,7 +149,13 @@ ConvertTo-Json -InputObject @{ risks = @($risks) } -Compress
 		seen[key] = struct{}{}
 		risks = append(risks, value)
 	}
-	return risks, existingError
+	errors := make([]string, 0, len(payload.Errors))
+	for _, value := range payload.Errors {
+		if value = strings.TrimSpace(value); value != "" {
+			errors = append(errors, value)
+		}
+	}
+	return aliases, risks, strings.Join(errors, "；")
 }
 
 func runPreflightPowerShell(script string) ([]byte, error) {
@@ -158,10 +163,17 @@ func runPreflightPowerShell(script string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	command := exec.Command(
+	ctx, cancel := context.WithTimeout(context.Background(), tunPreflightPowerShellTimeout)
+	defer cancel()
+	command := exec.CommandContext(
+		ctx,
 		powerShell, "-NoProfile", "-NonInteractive",
 		"-ExecutionPolicy", "Bypass", "-Command", script,
 	)
 	command.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-	return command.Output()
+	output, err := command.Output()
+	if ctx.Err() != nil {
+		return nil, fmt.Errorf("PowerShell 网络检查超过 %s：%w", tunPreflightPowerShellTimeout, ctx.Err())
+	}
+	return output, err
 }
