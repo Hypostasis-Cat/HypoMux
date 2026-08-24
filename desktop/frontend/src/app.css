@@ -2513,14 +2513,9 @@ svg {
   box-shadow: none;
 }
 
-.nat-adapter-dropdown::after {
-  border-bottom: 0 !important;
-  transform: none !important;
-}
-
 .nat-adapter-dropdown:focus-within {
-  border-color: color-mix(in srgb, var(--hm-text-secondary) 38%, var(--hm-outer-border));
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--hm-text-secondary) 12%, transparent);
+  border-color: var(--hm-outer-border);
+  box-shadow: none;
 }
 
 .nat-adapter-option strong {
@@ -2559,14 +2554,9 @@ svg {
   box-shadow: none;
 }
 
-.nat-stun-mode > .fui-Input::after {
-  border-bottom: 0 !important;
-  transform: none !important;
-}
-
 .nat-stun-mode > .fui-Input:focus-within {
-  border-color: color-mix(in srgb, var(--hm-text-secondary) 38%, var(--hm-outer-border));
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--hm-text-secondary) 12%, transparent);
+  border-color: var(--hm-outer-border);
+  box-shadow: none;
 }
 
 .nat-stun-mode > .fui-Button {
@@ -2595,8 +2585,6 @@ svg {
   background: color-mix(in srgb, rgb(var(--hm-surface-secondary-rgb)) 94%, transparent) !important;
   box-shadow: 0 14px 34px rgba(0, 0, 0, 0.24), 0 3px 10px rgba(0, 0, 0, 0.14) !important;
   backdrop-filter: blur(22px) saturate(125%);
-  transform-origin: top right;
-  animation: nat-menu-enter var(--hm-motion-fast) var(--hm-motion-ease-out) backwards;
 }
 
 .nat-stun-listbox .fui-Option {
@@ -2642,18 +2630,6 @@ svg {
   to {
     opacity: 1;
     transform: translateY(0);
-  }
-}
-
-@keyframes nat-menu-enter {
-  from {
-    opacity: 0;
-    transform: translateY(-3px) scale(0.985);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
   }
 }
 
@@ -2807,14 +2783,9 @@ svg {
   box-shadow: none;
 }
 
-.nat-server-add .fui-Input::after {
-  border-bottom: 0 !important;
-  transform: none !important;
-}
-
 .nat-server-add .fui-Input:focus-within {
-  border-color: color-mix(in srgb, var(--hm-text-secondary) 38%, var(--hm-outer-border));
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--hm-text-secondary) 12%, transparent);
+  border-color: var(--hm-outer-border);
+  box-shadow: none;
 }
 
 .nat-server-panel > p {
@@ -2850,8 +2821,7 @@ svg {
   animation-duration: var(--hm-motion-fast);
 }
 
-[data-motion="reduced"] .nat-stun-mode,
-[data-motion="reduced"] .nat-stun-listbox {
+[data-motion="reduced"] .nat-stun-mode {
   animation-name: none;
 }
 
