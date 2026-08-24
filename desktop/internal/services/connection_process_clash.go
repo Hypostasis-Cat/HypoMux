@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"path"
+	"sort"
 	"strings"
 	"time"
 )
@@ -40,6 +41,8 @@ type clashConnectionMetadata struct {
 type clashConnection struct {
 	Metadata clashConnectionMetadata `json:"metadata"`
 	Start    time.Time               `json:"start"`
+	Upload   int64                   `json:"upload"`
+	Download int64                   `json:"download"`
 }
 
 type clashConnectionSnapshot struct {
@@ -82,45 +85,92 @@ func fetchClashConnectionDetails(
 
 func matchClashConnections(core []connectionTelemetry, clash []clashConnection) map[uint64]clashConnectionDetails {
 	result := make(map[uint64]clashConnectionDetails)
-	used := make([]bool, len(clash))
-	for _, item := range core {
+	type candidateMatch struct {
+		coreIndex  int
+		clashIndex int
+		score      int
+		distance   time.Duration
+		byteDelta  uint64
+	}
+	matches := make([]candidateMatch, 0, len(core))
+	for coreIndex, item := range core {
 		targetHost, targetPort := splitConnectionEndpoint(item.Target)
-		best := -1
-		bestScore := -1
-		bestDistance := time.Duration(1<<63 - 1)
-		for index, candidate := range clash {
-			if used[index] || (clashProcessName(candidate.Metadata) == "" && clashDomain(candidate.Metadata) == "") {
+		for clashIndex, candidate := range clash {
+			if clashProcessName(candidate.Metadata) == "" && clashDomain(candidate.Metadata) == "" {
+				continue
+			}
+			if !connectionNetworkMatches(item.Protocol, candidate.Metadata.Network) {
 				continue
 			}
 			candidatePort := string(candidate.Metadata.DestinationPort)
-			if targetPort != "" && candidatePort != "" && targetPort != candidatePort {
+			if targetPort == "" || candidatePort == "" || targetPort != candidatePort {
 				continue
 			}
 			score := connectionTargetScore(targetHost, candidate.Metadata)
-			if score == 0 {
-				continue
-			}
 			distance := item.StartedAt.Sub(candidate.Start)
 			if distance < 0 {
 				distance = -distance
 			}
-			if distance > 8*time.Second {
+			maxDistance := 8 * time.Second
+			if score == 0 {
+				// FakeIP and pre-resolved destinations intentionally differ from the
+				// literal IP received by the aggregation core. Start time and port
+				// provide a narrow fallback for restoring Clash metadata.
+				score = 1
+				maxDistance = 2 * time.Second
+			}
+			if distance > maxDistance {
 				continue
 			}
-			if score > bestScore || (score == bestScore && distance < bestDistance) {
-				best, bestScore, bestDistance = index, score, distance
-			}
+			matches = append(matches, candidateMatch{
+				coreIndex: coreIndex, clashIndex: clashIndex, score: score,
+				distance: distance, byteDelta: connectionByteDelta(item, candidate),
+			})
 		}
-		if best >= 0 {
-			used[best] = true
-			metadata := clash[best].Metadata
-			result[item.ID] = clashConnectionDetails{
-				Process: clashProcessName(metadata),
-				Domain:  clashDomain(metadata),
-			}
+	}
+	sort.SliceStable(matches, func(left, right int) bool {
+		if matches[left].score != matches[right].score {
+			return matches[left].score > matches[right].score
+		}
+		if matches[left].distance != matches[right].distance {
+			return matches[left].distance < matches[right].distance
+		}
+		return matches[left].byteDelta < matches[right].byteDelta
+	})
+	usedCore := make([]bool, len(core))
+	usedClash := make([]bool, len(clash))
+	for _, match := range matches {
+		if usedCore[match.coreIndex] || usedClash[match.clashIndex] {
+			continue
+		}
+		usedCore[match.coreIndex] = true
+		usedClash[match.clashIndex] = true
+		metadata := clash[match.clashIndex].Metadata
+		result[core[match.coreIndex].ID] = clashConnectionDetails{
+			Process: clashProcessName(metadata),
+			Domain:  clashDomain(metadata),
 		}
 	}
 	return result
+}
+
+func connectionNetworkMatches(protocol string, network string) bool {
+	network = strings.ToLower(strings.TrimSpace(network))
+	if network == "" {
+		return true
+	}
+	return strings.Contains(strings.ToLower(protocol), "udp") == (network == "udp")
+}
+
+func connectionByteDelta(core connectionTelemetry, clash clashConnection) uint64 {
+	return absoluteInt64Delta(core.BytesUp, clash.Upload) + absoluteInt64Delta(core.BytesDown, clash.Download)
+}
+
+func absoluteInt64Delta(left int64, right int64) uint64 {
+	if left >= right {
+		return uint64(left - right)
+	}
+	return uint64(right - left)
 }
 
 func connectionTargetScore(host string, metadata clashConnectionMetadata) int {

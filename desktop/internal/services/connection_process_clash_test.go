@@ -82,3 +82,43 @@ func TestMatchClashConnectionsKeepsDomainWithoutProcess(t *testing.T) {
 		t.Fatalf("domain-only connection details = %#v", got)
 	}
 }
+
+func TestMatchClashConnectionsRestoresDomainWhenFakeIPDiffersFromCoreTarget(t *testing.T) {
+	started := time.Now().UTC()
+	got := matchClashConnections(
+		[]connectionTelemetry{
+			{ID: 20, Target: "150.171.110.133:443", StartedAt: started.Add(35 * time.Millisecond), BytesUp: 1900, BytesDown: 24400},
+			{ID: 21, Target: "203.0.113.50:443", StartedAt: started.Add(340 * time.Millisecond), BytesUp: 700, BytesDown: 1200},
+		},
+		[]clashConnection{
+			{
+				Metadata: clashConnectionMetadata{Network: "tcp", Host: "api.bilibili.com", DestinationIP: "198.18.0.10", DestinationPort: "443", Process: "browser.exe"},
+				Start:    started, Upload: 1900, Download: 24400,
+			},
+			{
+				Metadata: clashConnectionMetadata{Network: "tcp", Host: "other.example", DestinationIP: "198.18.0.11", DestinationPort: "443"},
+				Start:    started.Add(300 * time.Millisecond), Upload: 700, Download: 1200,
+			},
+		},
+	)
+	if got[20].Domain != "api.bilibili.com" || got[20].Process != "browser.exe" {
+		t.Fatalf("bilibili connection details = %#v", got)
+	}
+	if got[21].Domain != "other.example" {
+		t.Fatalf("second connection details = %#v", got)
+	}
+}
+
+func TestMatchClashConnectionsDoesNotGuessAcrossWideStartGap(t *testing.T) {
+	started := time.Now().UTC()
+	got := matchClashConnections(
+		[]connectionTelemetry{{ID: 30, Target: "150.171.110.133:443", StartedAt: started.Add(3 * time.Second)}},
+		[]clashConnection{{
+			Metadata: clashConnectionMetadata{Host: "api.bilibili.com", DestinationIP: "198.18.0.10", DestinationPort: "443"},
+			Start:    started,
+		}},
+	)
+	if _, exists := got[30]; exists {
+		t.Fatalf("unrelated connection was guessed: %#v", got)
+	}
+}

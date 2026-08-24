@@ -1582,20 +1582,69 @@ svg {
 }
 
 .routing-batch-dialog {
-  width: min(720px, calc(100vw - 40px));
-  max-width: 720px;
+  width: min(660px, calc(100vw - 48px)) !important;
+  max-width: 660px !important;
+  max-inline-size: 660px !important;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--hm-outer-border) 72%, var(--hm-accent) 14%) !important;
+  border-radius: calc(var(--hm-radius) + 5px) !important;
+  color: var(--hm-text-primary) !important;
+  background: rgba(var(--hm-surface-rgb), 0.88) !important;
+  box-shadow:
+    inset 0 1px 0 var(--hm-inner-highlight),
+    0 28px 80px rgba(var(--hm-shadow-colour), 0.42) !important;
+  backdrop-filter: blur(calc(var(--hm-panel-blur) + 10px)) saturate(calc(var(--hm-panel-saturation) + 14%));
+}
+
+[data-background-source="local"][data-panel-material="blur"] .routing-batch-dialog {
+  background:
+    linear-gradient(color-mix(in srgb, var(--hm-accent-soft) 12%, transparent), transparent 38%),
+    rgba(var(--hm-surface-rgb), max(0.66, var(--hm-panel-opacity))) !important;
 }
 
 .routing-batch-dialog .fui-DialogContent {
   display: grid;
-  gap: 14px;
+  gap: 12px;
+  padding-top: 4px;
 }
 
-.routing-batch-intro {
-  margin: 0;
+.routing-batch-title {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 11px;
+}
+
+.routing-batch-title-icon {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--hm-accent) 22%, var(--hm-outer-border));
+  border-radius: 10px;
+  color: var(--hm-accent-strong);
+  background: color-mix(in srgb, var(--hm-accent-soft) 70%, transparent);
+  box-shadow: inset 0 1px 0 var(--hm-inner-highlight);
+}
+
+.routing-batch-title > span:last-child {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.routing-batch-title strong {
+  color: var(--hm-text-primary);
+  font-size: 17px;
+  font-weight: 640;
+  letter-spacing: -0.015em;
+}
+
+.routing-batch-title small {
   color: var(--hm-text-tertiary);
-  font-size: 11.5px;
-  line-height: 1.55;
+  font-size: 10.5px;
+  font-weight: 450;
 }
 
 .routing-batch-controls {
@@ -1620,17 +1669,40 @@ svg {
 
 .routing-batch-controls .fui-Dropdown {
   width: 100%;
+  min-height: 34px;
+  border: 1px solid color-mix(in srgb, var(--hm-outer-border) 82%, transparent) !important;
+  border-radius: 8px !important;
+  background: rgba(var(--hm-surface-secondary-rgb), 0.58) !important;
+  box-shadow: none !important;
+}
+
+.routing-batch-editor {
+  padding: 11px;
+  border: 1px solid color-mix(in srgb, var(--hm-outer-border) 82%, transparent);
+  border-radius: 11px;
+  background: rgba(var(--hm-surface-secondary-rgb), 0.32);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--hm-inner-highlight) 70%, transparent);
 }
 
 .routing-batch-editor .fui-Textarea {
   width: 100%;
-  min-height: 170px;
-  border-radius: 9px;
-  background: color-mix(in srgb, var(--hm-row-hover) 42%, transparent);
+  min-height: 142px;
+  border: 1px solid transparent !important;
+  border-radius: 8px;
+  background: rgba(var(--hm-surface-rgb), 0.38) !important;
+  box-shadow: none !important;
+  transition:
+    border-color var(--hm-motion-fast) var(--hm-motion-ease-out),
+    box-shadow var(--hm-motion-normal) var(--hm-motion-ease-out);
+}
+
+.routing-batch-editor .fui-Textarea:focus-within {
+  border-color: color-mix(in srgb, var(--hm-accent) 72%, transparent) !important;
+  box-shadow: 0 0 0 3px var(--hm-focus-ring) !important;
 }
 
 .routing-batch-editor textarea {
-  min-height: 156px;
+  min-height: 128px;
   font-family: var(--fontFamilyMonospace, "Cascadia Mono", Consolas, monospace);
   font-size: 11.5px;
   line-height: 1.55;
@@ -1647,7 +1719,7 @@ svg {
   padding: 12px;
   border: 1px solid color-mix(in srgb, var(--hm-outer-border) 80%, transparent);
   border-radius: 10px;
-  background: color-mix(in srgb, var(--hm-row-hover) 38%, transparent);
+  background: rgba(var(--hm-surface-secondary-rgb), 0.28);
   animation: motion-content-rise var(--hm-motion-normal) var(--hm-motion-ease-out) backwards;
 }
 
@@ -1693,6 +1765,18 @@ svg {
 
 .routing-batch-issue.is-invalid span {
   color: var(--colorPaletteRedForeground1, #bc2f32);
+}
+
+.routing-batch-actions {
+  margin-top: 2px;
+  padding-top: 12px;
+  border-top: 1px solid color-mix(in srgb, var(--hm-outer-border) 72%, transparent);
+  gap: 8px;
+}
+
+.routing-batch-actions .fui-Button {
+  min-width: 92px;
+  border-radius: 8px;
 }
 
 .tun-preflight-dialog {

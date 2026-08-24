@@ -816,23 +816,25 @@ export function RoutingPage() {
       </Dialog>
 
       <Dialog open={batchOpen} onOpenChange={(_, data) => !batchApplying && setBatchOpen(data.open)}>
-        <DialogSurface className="routing-batch-dialog">
+        <DialogSurface className="routing-batch-dialog glass-surface" data-tone="primary">
           <DialogBody>
-            <DialogTitle>{text("批量添加分流规则", "Batch add routing rules")}</DialogTitle>
+            <DialogTitle>
+              <div className="routing-batch-title">
+                <span className="routing-batch-title-icon"><Add20Regular /></span>
+                <span>
+                  <strong>{text("批量添加分流规则", "Batch add routing rules")}</strong>
+                  <small>{batchType === "process"
+                    ? text("一行一个进程名，空格和标点会完整保留", "One process per line; spaces and punctuation are preserved")
+                    : text("一行一个，也可以用逗号、分号或空格分隔", "Use one per line, or separate values with commas, semicolons, or spaces")}</small>
+                </span>
+              </div>
+            </DialogTitle>
             <DialogContent>
-              <p className="routing-batch-intro">{batchType === "process"
-                ? text(
-                    "每个进程名仍会保存为独立规则。请一行一个，名称中的空格和标点会完整保留。",
-                    "Each process name remains an individual rule. Use one per line; spaces and punctuation are preserved.",
-                  )
-                : text(
-                    "每个匹配值仍会保存为独立规则。建议一行一个，也支持逗号、分号和中文标点分隔。",
-                    "Each match value remains an individual rule. Use one per line, or separate values with commas or semicolons.",
-                  )}</p>
               <div className="routing-batch-controls">
                 <label>
                   <span>{text("规则类型", "Rule type")}</span>
                   <Dropdown
+                    appearance="filled-darker"
                     value={matchLabels[batchType]}
                     selectedOptions={[batchType]}
                     onOptionSelect={(_, data) => {
@@ -849,6 +851,7 @@ export function RoutingPage() {
                 <label>
                   <span>{text("出口策略", "Egress policy")}</span>
                   <Dropdown
+                    appearance="filled-darker"
                     value={outboundLabel(batchOutbound)}
                     selectedOptions={[batchOutbound]}
                     onOptionSelect={(_, data) => {
@@ -867,6 +870,7 @@ export function RoutingPage() {
                 <span>{text("匹配值", "Match values")}</span>
                 <Textarea
                   autoFocus
+                  appearance="filled-darker"
                   resize="vertical"
                   value={batchText}
                   placeholder={batchType === "domain"
@@ -921,20 +925,26 @@ export function RoutingPage() {
                 </div>
               )}
             </DialogContent>
-            <DialogActions>
-              <Button disabled={batchApplying} onClick={() => setBatchOpen(false)}>{t("routing_dialog_cancel")}</Button>
-              <Button
-                appearance="secondary"
-                disabled={batchChecking || batchApplying || !batchText.trim()}
-                icon={batchChecking ? <Spinner size="tiny" /> : undefined}
-                onClick={() => void previewBatch()}
-              >{text("检查内容", "Check values")}</Button>
-              <Button
-                appearance="primary"
-                disabled={!batchPreview || batchPreview.invalid_count > 0 || batchApplying || (batchPreview.add_count === 0 && (!replaceBatchConflicts || batchPreview.conflict_count === 0))}
-                icon={batchApplying ? <Spinner size="tiny" /> : <Add20Regular />}
-                onClick={() => void confirmBatch()}
-              >{text("确认添加", "Add rules")}</Button>
+            <DialogActions className="routing-batch-actions">
+              <Button appearance="subtle" disabled={batchApplying} onClick={() => setBatchOpen(false)}>{t("routing_dialog_cancel")}</Button>
+              {batchPreview ? (
+                <Button
+                  appearance="primary"
+                  disabled={batchPreview.invalid_count > 0 || batchApplying || (batchPreview.add_count === 0 && (!replaceBatchConflicts || batchPreview.conflict_count === 0))}
+                  icon={batchApplying ? <Spinner size="tiny" /> : <Add20Regular />}
+                  onClick={() => void confirmBatch()}
+                >{text(
+                    `添加 ${batchPreview.add_count + (replaceBatchConflicts ? batchPreview.conflict_count : 0)} 条规则`,
+                    `Add ${batchPreview.add_count + (replaceBatchConflicts ? batchPreview.conflict_count : 0)} rules`,
+                  )}</Button>
+              ) : (
+                <Button
+                  appearance="primary"
+                  disabled={batchChecking || batchApplying || !batchText.trim()}
+                  icon={batchChecking ? <Spinner size="tiny" /> : <CheckmarkCircle16Regular />}
+                  onClick={() => void previewBatch()}
+                >{text("检查并预览", "Check and preview")}</Button>
+              )}
             </DialogActions>
           </DialogBody>
         </DialogSurface>
