@@ -376,7 +376,7 @@ export function NATDetectionPage({ adapters, loading, preview, text, notify }: N
     : "—";
 
   return (
-    <section className="nat-page" aria-live="polite">
+    <section className="nat-page health-view-enter" aria-live="polite">
       <GlassSurface className="nat-control" tone="secondary">
         <div className="nat-control-copy">
           <span className="nat-icon"><Globe20Regular /></span>
@@ -408,7 +408,7 @@ export function NATDetectionPage({ adapters, loading, preview, text, notify }: N
             <span>STUN</span>
             <div className="nat-stun-editor">
               {addingServer ? (
-                <>
+                <div className="nat-stun-mode nat-stun-mode-add">
                   <Input autoFocus value={serverAddress} disabled={running || serverBusy}
                     placeholder="stun.example.com:3478" aria-label={text("新 STUN 服务器地址", "New STUN server address")}
                     onChange={(_, data) => setServerAddress(data.value)}
@@ -418,11 +418,13 @@ export function NATDetectionPage({ adapters, loading, preview, text, notify }: N
                   <Button appearance="subtle" icon={<Dismiss20Regular />} disabled={serverBusy}
                     aria-label={text("取消添加", "Cancel adding")} title={text("取消", "Cancel")}
                     onClick={() => { setAddingServer(false); setServerAddress(""); }} />
-                </>
+                </div>
               ) : (
-                <>
+                <div className="nat-stun-mode nat-stun-mode-select">
                   <Dropdown
-                    className="nat-adapter-dropdown"
+                    className="nat-adapter-dropdown nat-stun-dropdown"
+                    positioning={{ position: "below", align: "end", offset: 6 }}
+                    listbox={{ className: "nat-stun-listbox" }}
                     value={serverSnapshot.selected_id === "auto"
                       ? text(`自动选择 · ${serverSnapshot.servers.length} 台`, `Automatic · ${serverSnapshot.servers.length} servers`)
                       : selectedServer?.address ?? ""}
@@ -434,13 +436,21 @@ export function NATDetectionPage({ adapters, loading, preview, text, notify }: N
                       else if (data.optionValue) void chooseServer(data.optionValue);
                     }}
                   >
-                    <Option value="auto">{text(`自动选择（依次尝试 ${serverSnapshot.servers.length} 台）`, `Automatic (${serverSnapshot.servers.length} servers in order)`)}</Option>
+                    <Option value="auto" text={text("自动选择", "Automatic selection")}>
+                      <span className="nat-adapter-option">
+                        <strong>{text("自动选择", "Automatic selection")}</strong>
+                        <small>{text(`按顺序尝试 ${serverSnapshot.servers.length} 台服务器`, `Try ${serverSnapshot.servers.length} servers in order`)}</small>
+                      </span>
+                    </Option>
                     {serverSnapshot.servers.map((server) => (
                       <Option key={server.id} value={server.id} text={`${server.name} · ${server.address}`}>
                         <span className="nat-adapter-option"><strong>{server.name}</strong><small>{server.address}</small></span>
                       </Option>
                     ))}
-                    <Option value="restore-builtins">{text("恢复内置服务器", "Restore built-in servers")}</Option>
+                    <Option className="nat-stun-restore-option" value="restore-builtins" text={text("恢复内置服务器", "Restore built-in servers")}>
+                      <ArrowSync20Regular />
+                      <span>{text("恢复内置服务器", "Restore built-in servers")}</span>
+                    </Option>
                   </Dropdown>
                   <Button appearance="subtle" icon={<Add20Regular />} disabled={running || serverBusy}
                     aria-label={text("添加 STUN 服务器", "Add STUN server")} title={text("添加服务器", "Add server")}
@@ -450,7 +460,7 @@ export function NATDetectionPage({ adapters, loading, preview, text, notify }: N
                     aria-label={text("删除当前 STUN 服务器", "Delete selected STUN server")}
                     title={text("删除当前服务器", "Delete selected server")}
                     onClick={() => selectedServer && void removeServer(selectedServer.id)} />
-                </>
+                </div>
               )}
             </div>
           </label>
@@ -469,23 +479,23 @@ export function NATDetectionPage({ adapters, loading, preview, text, notify }: N
 
       <div className="nat-content">
         {running ? (
-          <GlassSurface className="nat-status-card nat-running" tone="secondary">
+          <GlassSurface className="nat-status-card nat-running nat-state-enter" tone="secondary">
             <Spinner size="medium" />
             <div><strong>{text("正在分析 NAT 行为", "Analyzing NAT behavior")}</strong><span>{selected?.name} · {selected?.address}</span></div>
             <ol><li>{text("建立 STUN 基准映射", "Establishing baseline STUN mapping")}</li><li>{text("比较不同目标的公网映射", "Comparing mappings across destinations")}</li><li>{text("验证入站过滤条件", "Testing inbound filtering conditions")}</li></ol>
           </GlassSurface>
         ) : result.state === "idle" ? (
-          <GlassSurface className="nat-status-card nat-idle" tone="secondary">
+          <GlassSurface className="nat-status-card nat-idle nat-state-enter" tone="secondary">
             <Globe20Regular />
             <div><strong>{text("尚未进行 NAT 类型检测", "No NAT detection yet")}</strong><span>{text("选择出口后，将发送少量 UDP STUN 探针，不会改变代理、路由或网卡配置。", "A few UDP STUN probes will be sent after selecting an egress. Proxy, routing, and adapter settings are not changed.")}</span></div>
           </GlassSurface>
         ) : result.state === "cancelled" ? (
-          <GlassSurface className="nat-status-card nat-idle" tone="secondary">
+          <GlassSurface className="nat-status-card nat-idle nat-state-enter" tone="secondary">
             <Warning20Regular />
             <div><strong>{text("检测已取消", "Detection cancelled")}</strong><span>{detail}</span></div>
           </GlassSurface>
         ) : (
-          <GlassSurface className={`nat-result-card nat-result-${typeMeta.tone}`} tone="secondary">
+          <GlassSurface className={`nat-result-card nat-result-${typeMeta.tone} nat-state-enter`} tone="secondary">
             <div className="nat-result-hero">
               <span className="nat-result-icon">{result.state === "completed" ? <CheckmarkCircle20Regular /> : <Warning20Regular />}</span>
               <div><span>{text("检测结果", "Detection result")}</span><strong>{typeMeta.label}</strong><p>{typeMeta.summary}</p></div>

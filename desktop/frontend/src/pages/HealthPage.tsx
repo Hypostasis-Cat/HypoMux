@@ -338,7 +338,7 @@ export function HealthPage() {
     <main className="health-page">
       <AppToaster toasterId={toasterId} position="top-end" />
       <header className="health-heading">
-        <div>
+        <div key={healthView} className="health-heading-copy">
           <span className="section-kicker">{healthView === "link"
             ? text("逐接口真实出口验证", "Per-interface exit verification")
             : text("UDP 映射与过滤行为", "UDP mapping and filtering behavior")}</span>
@@ -351,7 +351,7 @@ export function HealthPage() {
             "Analyze UDP mapping and filtering behavior over the selected egress using RFC 5780.",
           )}</p>
         </div>
-        <div className="health-heading-actions">
+        <div key={`actions-${healthView}`} className="health-heading-actions health-heading-actions-enter">
           {healthView === "nat" ? <span>RFC 5780 · UDP</span> : <span>{text("目标", "Target")} {snapshot.target_ip || "223.5.5.5"}</span>}
           {healthView === "link" && (running ? (
             <Button appearance="secondary" icon={<Stop20Regular />} onClick={cancel}>{text("取消体检", "Cancel")}</Button>
@@ -379,7 +379,7 @@ export function HealthPage() {
       </nav>
 
       {healthView === "link" ? (
-        <div className="health-link-page">
+        <div className="health-link-page health-view-enter">
           <GlassSurface className="health-adapter-surface" tone="secondary">
         <div className="health-adapter-toolbar">
           <div>
