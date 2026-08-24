@@ -27,7 +27,7 @@ var compatibilityProcessNames = []string{
 	"xunyou.exe", "xylauncher.exe", "xyprotectservice.exe", "xyservicelink.exe",
 	"leigod.exe", "leigod_launcher.exe", "leishensdk.exe", "leigod-tool.exe",
 	"clash.exe", "clash-meta.exe", "clash-win64.exe", "mihomo.exe", "mihomo-core.exe",
-	"clash-verge.exe", "clash verge.exe", "clash-verge-rev.exe", "clash-verge-service.exe",
+	"clash-verge.exe", "clash verge.exe", "clash-verge-rev.exe", "clash-verge-service.exe", "verge-mihomo.exe",
 	"clash for windows.exe", "cfw.exe", "clashnyanpasu.exe", "flclash.exe",
 	"v2rayn.exe", "v2ray.exe", "xray.exe", "nekoray.exe", "qv2ray.exe", "hiddify.exe", "hiddify-cli.exe",
 	"shadowsocks.exe", "shadowsocksr.exe", "ss-local.exe", "surge.exe", "proxifier.exe",

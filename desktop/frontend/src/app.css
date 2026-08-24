@@ -1582,14 +1582,14 @@ svg {
 }
 
 .routing-batch-dialog {
-  width: min(660px, calc(100vw - 48px)) !important;
-  max-width: 660px !important;
-  max-inline-size: 660px !important;
+  width: min(600px, calc(100vw - 48px)) !important;
+  max-width: 600px !important;
+  max-inline-size: 600px !important;
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--hm-outer-border) 72%, var(--hm-accent) 14%) !important;
   border-radius: calc(var(--hm-radius) + 5px) !important;
   color: var(--hm-text-primary) !important;
-  background: rgba(var(--hm-surface-rgb), 0.88) !important;
+  background: rgba(var(--hm-surface-rgb), 0.82) !important;
   box-shadow:
     inset 0 1px 0 var(--hm-inner-highlight),
     0 28px 80px rgba(var(--hm-shadow-colour), 0.42) !important;
@@ -1598,53 +1598,27 @@ svg {
 
 [data-background-source="local"][data-panel-material="blur"] .routing-batch-dialog {
   background:
-    linear-gradient(color-mix(in srgb, var(--hm-accent-soft) 12%, transparent), transparent 38%),
-    rgba(var(--hm-surface-rgb), max(0.66, var(--hm-panel-opacity))) !important;
+    linear-gradient(color-mix(in srgb, var(--hm-accent-soft) 8%, transparent), transparent 34%),
+    rgba(var(--hm-surface-rgb), 0.72) !important;
 }
 
 .routing-batch-dialog .fui-DialogContent {
   display: grid;
-  gap: 12px;
-  padding-top: 4px;
+  gap: 14px;
+  padding-top: 2px;
 }
 
 .routing-batch-title {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 11px;
-}
-
-.routing-batch-title-icon {
-  display: grid;
-  width: 36px;
-  height: 36px;
-  flex: 0 0 36px;
-  place-items: center;
-  border: 1px solid color-mix(in srgb, var(--hm-accent) 22%, var(--hm-outer-border));
-  border-radius: 10px;
-  color: var(--hm-accent-strong);
-  background: color-mix(in srgb, var(--hm-accent-soft) 70%, transparent);
-  box-shadow: inset 0 1px 0 var(--hm-inner-highlight);
-}
-
-.routing-batch-title > span:last-child {
-  display: grid;
-  min-width: 0;
-  gap: 3px;
-}
-
-.routing-batch-title strong {
   color: var(--hm-text-primary);
-  font-size: 17px;
+  font-size: 18px;
   font-weight: 640;
   letter-spacing: -0.015em;
 }
 
-.routing-batch-title small {
+.routing-batch-intro {
   color: var(--hm-text-tertiary);
-  font-size: 10.5px;
-  font-weight: 450;
+  font-size: 11.5px;
+  line-height: 1.45;
 }
 
 .routing-batch-controls {
@@ -1661,7 +1635,7 @@ svg {
 }
 
 .routing-batch-controls label > span,
-.routing-batch-editor > span {
+.routing-batch-editor-heading > span {
   color: var(--hm-text-secondary);
   font-size: 11px;
   font-weight: 620;
@@ -1672,45 +1646,67 @@ svg {
   min-height: 34px;
   border: 1px solid color-mix(in srgb, var(--hm-outer-border) 82%, transparent) !important;
   border-radius: 8px !important;
-  background: rgba(var(--hm-surface-secondary-rgb), 0.58) !important;
+  background: rgba(var(--hm-surface-secondary-rgb), 0.44) !important;
   box-shadow: none !important;
 }
 
 .routing-batch-editor {
-  padding: 11px;
-  border: 1px solid color-mix(in srgb, var(--hm-outer-border) 82%, transparent);
-  border-radius: 11px;
-  background: rgba(var(--hm-surface-secondary-rgb), 0.32);
-  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--hm-inner-highlight) 70%, transparent);
+  gap: 7px;
+}
+
+.routing-batch-editor-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.routing-batch-editor-heading > small {
+  color: var(--hm-text-tertiary);
+  font-size: 10.5px;
+  font-weight: 520;
+}
+
+.routing-batch-editor-heading > small.is-over-limit {
+  color: var(--colorPaletteRedForeground1, #bc2f32);
 }
 
 .routing-batch-editor .fui-Textarea {
   width: 100%;
-  min-height: 142px;
-  border: 1px solid transparent !important;
-  border-radius: 8px;
-  background: rgba(var(--hm-surface-rgb), 0.38) !important;
-  box-shadow: none !important;
+  min-height: 126px;
+  border: 1px solid color-mix(in srgb, var(--hm-outer-border) 88%, transparent) !important;
+  border-radius: 9px;
+  outline: none !important;
+  background: rgba(var(--hm-surface-secondary-rgb), 0.36) !important;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--hm-inner-highlight) 48%, transparent) !important;
   transition:
     border-color var(--hm-motion-fast) var(--hm-motion-ease-out),
     box-shadow var(--hm-motion-normal) var(--hm-motion-ease-out);
 }
 
+.routing-batch-editor .fui-Textarea::after {
+  border-bottom: 0 !important;
+  transform: none !important;
+}
+
 .routing-batch-editor .fui-Textarea:focus-within {
-  border-color: color-mix(in srgb, var(--hm-accent) 72%, transparent) !important;
-  box-shadow: 0 0 0 3px var(--hm-focus-ring) !important;
+  border-color: color-mix(in srgb, var(--hm-text-secondary) 34%, var(--hm-outer-border)) !important;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--hm-inner-highlight) 48%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, var(--hm-text-secondary) 7%, transparent) !important;
 }
 
 .routing-batch-editor textarea {
-  min-height: 128px;
+  min-height: 112px;
   font-family: var(--fontFamilyMonospace, "Cascadia Mono", Consolas, monospace);
   font-size: 11.5px;
   line-height: 1.55;
 }
 
-.routing-batch-editor > small {
+.routing-batch-helper {
   color: var(--hm-text-tertiary);
   font-size: 10.5px;
+  line-height: 1.4;
 }
 
 .routing-batch-preview {
@@ -1768,9 +1764,8 @@ svg {
 }
 
 .routing-batch-actions {
-  margin-top: 2px;
-  padding-top: 12px;
-  border-top: 1px solid color-mix(in srgb, var(--hm-outer-border) 72%, transparent);
+  margin-top: 0;
+  padding-top: 5px;
   gap: 8px;
 }
 

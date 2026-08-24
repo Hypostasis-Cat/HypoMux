@@ -154,6 +154,7 @@ export function RoutingPage() {
   const [batchChecking, setBatchChecking] = useState(false);
   const [batchApplying, setBatchApplying] = useState(false);
   const [replaceBatchConflicts, setReplaceBatchConflicts] = useState(false);
+  const batchValueCount = useMemo(() => parseRoutingBatchValues(batchText, batchType).length, [batchText, batchType]);
   const loaded = useRef(false);
   const rulesRef = useRef<DraftRule[]>([]);
   const editRevision = useRef(0);
@@ -818,18 +819,13 @@ export function RoutingPage() {
       <Dialog open={batchOpen} onOpenChange={(_, data) => !batchApplying && setBatchOpen(data.open)}>
         <DialogSurface className="routing-batch-dialog glass-surface" data-tone="primary">
           <DialogBody>
-            <DialogTitle>
-              <div className="routing-batch-title">
-                <span className="routing-batch-title-icon"><Add20Regular /></span>
-                <span>
-                  <strong>{text("批量添加分流规则", "Batch add routing rules")}</strong>
-                  <small>{batchType === "process"
-                    ? text("一行一个进程名，空格和标点会完整保留", "One process per line; spaces and punctuation are preserved")
-                    : text("一行一个，也可以用逗号、分号或空格分隔", "Use one per line, or separate values with commas, semicolons, or spaces")}</small>
-                </span>
-              </div>
-            </DialogTitle>
+            <DialogTitle className="routing-batch-title">{text("批量添加分流规则", "Batch add routing rules")}</DialogTitle>
             <DialogContent>
+              <div className="routing-batch-intro">
+                <span>{batchType === "process"
+                  ? text("每行输入一个进程名，名称中的空格与标点会完整保留。", "Enter one process per line; spaces and punctuation are preserved.")
+                  : text("每行输入一项，也支持逗号、分号或空格分隔。", "Enter one value per line, or separate values with commas, semicolons, or spaces.")}</span>
+              </div>
               <div className="routing-batch-controls">
                 <label>
                   <span>{text("规则类型", "Rule type")}</span>
@@ -867,7 +863,13 @@ export function RoutingPage() {
                 </label>
               </div>
               <label className="routing-batch-editor">
-                <span>{text("匹配值", "Match values")}</span>
+                <span className="routing-batch-editor-heading">
+                  <span>{text("匹配值", "Match values")}</span>
+                  <small className={batchValueCount > ROUTING_BATCH_MAX_VALUES ? "is-over-limit" : ""}>{text(
+                    `已识别 ${batchValueCount} 项`,
+                    `${batchValueCount} ${batchValueCount === 1 ? "value" : "values"}`,
+                  )}</small>
+                </span>
                 <Textarea
                   autoFocus
                   appearance="filled-darker"
@@ -883,7 +885,7 @@ export function RoutingPage() {
                     setBatchPreview(null);
                   }}
                 />
-                <small>{batchType === "process"
+                <small className="routing-batch-helper">{batchType === "process"
                   ? text("进程名中的空格和标点会保留；请使用换行或 Tab 分隔。", "Spaces and punctuation in process names are preserved; use line breaks or tabs as separators.")
                   : text("域名和 IP 也可使用空格或 Tab 分隔；单次最多 2000 条。", "Domains and IPs may also be separated by spaces or tabs; up to 2,000 values per batch.")}</small>
               </label>
@@ -926,7 +928,7 @@ export function RoutingPage() {
               )}
             </DialogContent>
             <DialogActions className="routing-batch-actions">
-              <Button appearance="subtle" disabled={batchApplying} onClick={() => setBatchOpen(false)}>{t("routing_dialog_cancel")}</Button>
+              <Button disabled={batchApplying} onClick={() => setBatchOpen(false)}>{t("routing_dialog_cancel")}</Button>
               {batchPreview ? (
                 <Button
                   appearance="primary"
@@ -943,7 +945,7 @@ export function RoutingPage() {
                   disabled={batchChecking || batchApplying || !batchText.trim()}
                   icon={batchChecking ? <Spinner size="tiny" /> : <CheckmarkCircle16Regular />}
                   onClick={() => void previewBatch()}
-                >{text("检查并预览", "Check and preview")}</Button>
+                >{text(batchValueCount > 0 ? `预览 ${batchValueCount} 条` : "检查并预览", batchValueCount > 0 ? `Preview ${batchValueCount}` : "Check and preview")}</Button>
               )}
             </DialogActions>
           </DialogBody>
