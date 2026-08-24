@@ -11,6 +11,7 @@ import type {
   DiagnosticResult,
   DiagnosticSnapshot,
   EngineSnapshot,
+  RoutingBatchPreview,
   RoutingRule,
   RoutingSnapshot,
   RoutingValidation,
@@ -25,6 +26,7 @@ export type {
   DiagnosticResult,
   DiagnosticSnapshot,
   EngineSnapshot,
+  RoutingBatchPreview,
   RoutingRule,
   RoutingSnapshot,
   RoutingValidation,
@@ -175,6 +177,8 @@ export const appServices = {
     snapshot: () => RoutingRuleService.Snapshot(),
     validate: (rule: RoutingRule, existing: RoutingRule[]) =>
       RoutingRuleService.Validate(rule, existing),
+    previewBatch: (matchType: string, values: string[], outbound: string, existing: RoutingRule[]) =>
+      RoutingRuleService.PreviewBatch(matchType, values, outbound, existing),
     save: (rules: RoutingRule[]) => RoutingRuleService.Save(rules),
     listProcesses: () => RoutingRuleService.ListProcesses(),
     importRules: () => RoutingRuleService.Import(),

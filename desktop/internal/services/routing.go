@@ -20,6 +20,13 @@ const (
 	MatchDomain  = "domain"
 	MatchIP      = "ip"
 
+	RoutingBatchMaxValues = 2000
+
+	RoutingBatchAdd       = "add"
+	RoutingBatchDuplicate = "duplicate"
+	RoutingBatchConflict  = "conflict"
+	RoutingBatchInvalid   = "invalid"
+
 	RoutingBackupFormat  = "hypomux-routing-rules"
 	RoutingBackupVersion = 2
 )
@@ -118,6 +125,22 @@ type RoutingValidation struct {
 	Duplicate bool        `json:"duplicate"`
 }
 
+type RoutingBatchItem struct {
+	Input            string      `json:"input"`
+	Status           string      `json:"status"`
+	Rule             RoutingRule `json:"rule"`
+	Message          string      `json:"message,omitempty"`
+	ExistingOutbound string      `json:"existing_outbound,omitempty"`
+}
+
+type RoutingBatchPreview struct {
+	Items          []RoutingBatchItem `json:"items"`
+	AddCount       int                `json:"add_count"`
+	DuplicateCount int                `json:"duplicate_count"`
+	ConflictCount  int                `json:"conflict_count"`
+	InvalidCount   int                `json:"invalid_count"`
+}
+
 type RoutingSnapshot struct {
 	Rules     []RoutingRule `json:"rules"`
 	Outbounds []Outbound    `json:"outbounds"`
@@ -182,6 +205,79 @@ func (s *RoutingRuleService) Validate(rule RoutingRule, existing []RoutingRule) 
 		}
 	}
 	return RoutingValidation{Valid: true, Rule: normalized}
+}
+
+func (s *RoutingRuleService) PreviewBatch(
+	matchType string,
+	values []string,
+	outbound string,
+	existing []RoutingRule,
+) (RoutingBatchPreview, error) {
+	if len(values) == 0 {
+		return RoutingBatchPreview{}, fmt.Errorf("批量输入不能为空")
+	}
+	if len(values) > RoutingBatchMaxValues {
+		return RoutingBatchPreview{}, fmt.Errorf("单次最多预检 %d 条规则", RoutingBatchMaxValues)
+	}
+	outbound = strings.TrimSpace(outbound)
+	if !isValidOutbound(outbound) {
+		return RoutingBatchPreview{}, fmt.Errorf("未知出口通道")
+	}
+	if err := s.validateSelectedOutbounds([]RoutingRule{{Outbound: outbound}}); err != nil {
+		return RoutingBatchPreview{}, err
+	}
+
+	existingByIdentity := make(map[string]RoutingRule, len(existing))
+	for _, raw := range existing {
+		rule, err := normalizeRule(raw)
+		if err == nil {
+			existingByIdentity[ruleIdentity(rule)] = rule
+		}
+	}
+	preview := RoutingBatchPreview{Items: make([]RoutingBatchItem, 0, len(values))}
+	seenBatch := make(map[string]struct{}, len(values))
+	for _, input := range values {
+		rule, err := normalizeRule(RoutingRule{
+			MatchType: matchType,
+			Value:     input,
+			Outbound:  outbound,
+		})
+		item := RoutingBatchItem{Input: input, Rule: rule}
+		if err != nil {
+			item.Status = RoutingBatchInvalid
+			item.Message = err.Error()
+			preview.InvalidCount++
+			preview.Items = append(preview.Items, item)
+			continue
+		}
+		identity := ruleIdentity(rule)
+		if _, duplicate := seenBatch[identity]; duplicate {
+			item.Status = RoutingBatchDuplicate
+			item.Message = "批量输入中存在重复项"
+			preview.DuplicateCount++
+			preview.Items = append(preview.Items, item)
+			continue
+		}
+		seenBatch[identity] = struct{}{}
+		if current, exists := existingByIdentity[identity]; exists {
+			item.ExistingOutbound = current.Outbound
+			if current.Outbound == rule.Outbound {
+				item.Status = RoutingBatchDuplicate
+				item.Message = "当前规则中已存在"
+				preview.DuplicateCount++
+			} else {
+				item.Status = RoutingBatchConflict
+				item.Message = "当前规则已指向其他出口"
+				preview.ConflictCount++
+			}
+			preview.Items = append(preview.Items, item)
+			continue
+		}
+		item.Status = RoutingBatchAdd
+		preview.AddCount++
+		preview.Items = append(preview.Items, item)
+	}
+	return preview, nil
 }
 
 func (s *RoutingRuleService) Save(rules []RoutingRule) (RoutingSnapshot, error) {

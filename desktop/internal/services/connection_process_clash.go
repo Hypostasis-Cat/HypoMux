@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"path"
 	"strings"
@@ -45,37 +46,42 @@ type clashConnectionSnapshot struct {
 	Connections []clashConnection `json:"connections"`
 }
 
-func fetchClashConnectionProcesses(
+type clashConnectionDetails struct {
+	Process string
+	Domain  string
+}
+
+func fetchClashConnectionDetails(
 	ctx context.Context,
 	config clashAPIConfig,
 	connections []connectionTelemetry,
-) map[uint64]string {
+) map[uint64]clashConnectionDetails {
 	if strings.TrimSpace(config.Endpoint) == "" || strings.TrimSpace(config.Secret) == "" {
-		return map[uint64]string{}
+		return map[uint64]clashConnectionDetails{}
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+config.Endpoint+"/connections", nil)
 	if err != nil {
-		return map[uint64]string{}
+		return map[uint64]clashConnectionDetails{}
 	}
 	request.Header.Set("Authorization", "Bearer "+config.Secret)
 	response, err := (&http.Client{Timeout: 650 * time.Millisecond}).Do(request)
 	if err != nil {
-		return map[uint64]string{}
+		return map[uint64]clashConnectionDetails{}
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return map[uint64]string{}
+		return map[uint64]clashConnectionDetails{}
 	}
 	var snapshot clashConnectionSnapshot
 	decoder := json.NewDecoder(response.Body)
 	if err := decoder.Decode(&snapshot); err != nil {
-		return map[uint64]string{}
+		return map[uint64]clashConnectionDetails{}
 	}
-	return matchClashProcesses(connections, snapshot.Connections)
+	return matchClashConnections(connections, snapshot.Connections)
 }
 
-func matchClashProcesses(core []connectionTelemetry, clash []clashConnection) map[uint64]string {
-	result := make(map[uint64]string)
+func matchClashConnections(core []connectionTelemetry, clash []clashConnection) map[uint64]clashConnectionDetails {
+	result := make(map[uint64]clashConnectionDetails)
 	used := make([]bool, len(clash))
 	for _, item := range core {
 		targetHost, targetPort := splitConnectionEndpoint(item.Target)
@@ -83,7 +89,7 @@ func matchClashProcesses(core []connectionTelemetry, clash []clashConnection) ma
 		bestScore := -1
 		bestDistance := time.Duration(1<<63 - 1)
 		for index, candidate := range clash {
-			if used[index] || clashProcessName(candidate.Metadata) == "" {
+			if used[index] || (clashProcessName(candidate.Metadata) == "" && clashDomain(candidate.Metadata) == "") {
 				continue
 			}
 			candidatePort := string(candidate.Metadata.DestinationPort)
@@ -107,7 +113,11 @@ func matchClashProcesses(core []connectionTelemetry, clash []clashConnection) ma
 		}
 		if best >= 0 {
 			used[best] = true
-			result[item.ID] = clashProcessName(clash[best].Metadata)
+			metadata := clash[best].Metadata
+			result[item.ID] = clashConnectionDetails{
+				Process: clashProcessName(metadata),
+				Domain:  clashDomain(metadata),
+			}
 		}
 	}
 	return result
@@ -129,6 +139,14 @@ func connectionTargetScore(host string, metadata clashConnectionMetadata) int {
 
 func normalizeConnectionHost(value string) string {
 	return strings.ToLower(strings.Trim(strings.TrimSpace(value), "[]"))
+}
+
+func clashDomain(metadata clashConnectionMetadata) string {
+	value := strings.TrimSuffix(normalizeConnectionHost(metadata.Host), ".")
+	if value == "" || net.ParseIP(value) != nil {
+		return ""
+	}
+	return value
 }
 
 func clashProcessName(metadata clashConnectionMetadata) string {

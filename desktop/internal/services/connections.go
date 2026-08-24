@@ -66,8 +66,11 @@ func (s *EngineService) Connections() (ConnectionListSnapshot, error) {
 	s.mu.Lock()
 	clashAPI := s.clashAPI
 	s.mu.Unlock()
-	for id, process := range fetchClashConnectionProcesses(ctx, clashAPI, telemetry.Connections) {
-		processes[id] = process
+	clashDetails := fetchClashConnectionDetails(ctx, clashAPI, telemetry.Connections)
+	for id, details := range clashDetails {
+		if details.Process != "" {
+			processes[id] = details.Process
+		}
 	}
 	result.Connections = make([]ConnectionView, 0, len(telemetry.Connections))
 	for _, item := range telemetry.Connections {
@@ -82,6 +85,9 @@ func (s *EngineService) Connections() (ConnectionListSnapshot, error) {
 		domain := ""
 		if targetHost != "" && net.ParseIP(strings.Trim(targetHost, "[]")) == nil {
 			domain = targetHost
+		}
+		if domain == "" {
+			domain = clashDetails[item.ID].Domain
 		}
 		if remoteHost == "" && net.ParseIP(strings.Trim(targetHost, "[]")) != nil {
 			remoteHost = targetHost

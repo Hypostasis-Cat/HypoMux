@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Badge,
   Button,
+  Checkbox,
   createTableColumn,
   DataGrid,
   DataGridBody,
@@ -23,6 +25,7 @@ import {
   Spinner,
   Tab,
   TabList,
+  Textarea,
   Toast,
   ToastBody,
   ToastTitle,
@@ -44,11 +47,16 @@ import {
   ErrorCircle16Regular,
   Save20Regular,
 } from "@fluentui/react-icons";
-import { appServices, type RoutingRule, type RoutingSnapshot } from "../platform/services";
+import { appServices, type RoutingBatchPreview, type RoutingRule, type RoutingSnapshot } from "../platform/services";
 import { GlassSurface } from "../components/material/GlassSurface";
 import { useI18n } from "../i18n/i18n";
 import { isDesktopRuntime } from "../platform/runtime";
 import { LatestSaveQueue } from "../platform/latestSaveQueue";
+import {
+  parseRoutingBatchValues,
+  ROUTING_BATCH_MAX_VALUES,
+  routingRuleIdentity,
+} from "./routingBatch";
 
 type MatchType = "process" | "domain" | "ip";
 type DraftRule = RoutingRule & {
@@ -138,6 +146,14 @@ export function RoutingPage() {
   const [processLoading, setProcessLoading] = useState(false);
   const [importPreview, setImportPreview] = useState<RoutingSnapshot | null>(null);
   const [importPreviewOpen, setImportPreviewOpen] = useState(false);
+  const [batchOpen, setBatchOpen] = useState(false);
+  const [batchType, setBatchType] = useState<MatchType>("domain");
+  const [batchOutbound, setBatchOutbound] = useState("aggregation");
+  const [batchText, setBatchText] = useState("");
+  const [batchPreview, setBatchPreview] = useState<RoutingBatchPreview | null>(null);
+  const [batchChecking, setBatchChecking] = useState(false);
+  const [batchApplying, setBatchApplying] = useState(false);
+  const [replaceBatchConflicts, setReplaceBatchConflicts] = useState(false);
   const loaded = useRef(false);
   const rulesRef = useRef<DraftRule[]>([]);
   const editRevision = useRef(0);
@@ -417,6 +433,116 @@ export function RoutingPage() {
     }
   }, [applyRules, importPreview, notify, text]);
 
+  const openBatch = useCallback(() => {
+    setBatchType(activeType);
+    setBatchOutbound(newOutbound);
+    setBatchText("");
+    setBatchPreview(null);
+    setReplaceBatchConflicts(false);
+    setBatchOpen(true);
+  }, [activeType, newOutbound]);
+
+  const previewBatch = useCallback(async () => {
+    const values = parseRoutingBatchValues(batchText, batchType);
+    if (values.length === 0) {
+      notify(text("没有可检查的内容", "Nothing to check"), text("请先输入至少一个匹配值。", "Enter at least one match value."), "error");
+      return;
+    }
+    if (values.length > ROUTING_BATCH_MAX_VALUES) {
+      notify(
+        text("批量内容过多", "Batch is too large"),
+        text(`单次最多添加 ${ROUTING_BATCH_MAX_VALUES} 条，当前识别到 ${values.length} 条。`, `A batch can contain up to ${ROUTING_BATCH_MAX_VALUES} values; ${values.length} were found.`),
+        "error",
+      );
+      return;
+    }
+    setBatchChecking(true);
+    try {
+      const preview = await appServices.routing.previewBatch(
+        batchType,
+        values,
+        batchOutbound,
+        rulesRef.current.map(({ match_type, value, outbound }) => ({ match_type, value, outbound })),
+      );
+      setBatchPreview({ ...preview, items: preview.items ?? [] });
+    } catch (error) {
+      setBatchPreview(null);
+      notify(text("批量检查失败", "Batch check failed"), error instanceof Error ? error.message : String(error), "error");
+    } finally {
+      setBatchChecking(false);
+    }
+  }, [batchOutbound, batchText, batchType, notify, text]);
+
+  const confirmBatch = useCallback(async () => {
+    if (!batchPreview || batchPreview.invalid_count > 0) return;
+    const accepted = (batchPreview.items ?? []).filter((item) =>
+      item.status === "add" || (replaceBatchConflicts && item.status === "conflict"));
+    if (accepted.length === 0) {
+      notify(text("没有需要添加的规则", "No rules to add"), text("输入内容均已存在或被跳过。", "All values already exist or were skipped."));
+      return;
+    }
+    const invalidDraft = rulesRef.current.find((rule) => rule.validating || rule.error || !rule.value.trim());
+    if (invalidDraft) {
+      notify(
+        text("暂时不能批量保存", "Cannot save the batch yet"),
+        invalidDraft.error || text("请先完成当前列表中的规则校验。", "Finish validating the current rules first."),
+        "error",
+      );
+      return;
+    }
+
+    if (autosaveTimer.current !== undefined) {
+      window.clearTimeout(autosaveTimer.current);
+      autosaveTimer.current = undefined;
+    }
+    const previous = rulesRef.current;
+    const replacementKeys = new Set(
+      accepted
+        .filter((item) => item.status === "conflict")
+        .map((item) => routingRuleIdentity(item.rule.match_type, item.rule.value)),
+    );
+    const next = [
+      ...previous.filter((rule) => !replacementKeys.has(routingRuleIdentity(rule.match_type, rule.value))),
+      ...accepted.map((item) => ({ ...item.rule, id: newID(), dirty: true })),
+    ];
+    applyRules(next, true);
+    setPendingSave(false);
+    setSaving(true);
+    setBatchApplying(true);
+    const queue = saveQueue.current!;
+    const batchEditRevision = editRevision.current;
+    const handle = queue.enqueue(next.map(({ match_type, value, outbound }) => ({ match_type, value, outbound })));
+    try {
+      const saved = await handle.done;
+      if (!queue.isCurrent(handle.revision) || batchEditRevision !== editRevision.current) return;
+      applyRules(reconcileSavedDrafts(saved.rules ?? [], next));
+      setOutbounds(saved.outbounds ?? []);
+      setSavedAt(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
+      setPendingSave(false);
+      setSelected(new Set());
+      setActiveType(batchType);
+      setBatchOpen(false);
+      notify(
+        text("批量添加完成", "Batch added"),
+        text(
+          `新增 ${batchPreview.add_count} 条${replaceBatchConflicts && batchPreview.conflict_count > 0 ? `，更新 ${batchPreview.conflict_count} 条冲突规则` : ""}，跳过 ${batchPreview.duplicate_count} 条重复项${!replaceBatchConflicts && batchPreview.conflict_count > 0 ? `和 ${batchPreview.conflict_count} 条冲突项` : ""}。`,
+          `Added ${batchPreview.add_count}${replaceBatchConflicts && batchPreview.conflict_count > 0 ? ` and updated ${batchPreview.conflict_count} conflicts` : ""}; skipped ${batchPreview.duplicate_count} duplicates${!replaceBatchConflicts && batchPreview.conflict_count > 0 ? ` and ${batchPreview.conflict_count} conflicts` : ""}.`,
+        ),
+        "success",
+      );
+    } catch (error) {
+      if (queue.isCurrent(handle.revision) && batchEditRevision === editRevision.current) {
+        applyRules(previous, true);
+        notify(text("批量保存失败", "Batch save failed"), error instanceof Error ? error.message : String(error), "error");
+      }
+    } finally {
+      if (queue.isCurrent(handle.revision)) {
+        setSaving(false);
+        setBatchApplying(false);
+      }
+    }
+  }, [applyRules, batchPreview, batchType, notify, replaceBatchConflicts, text]);
+
   const activeRules = useMemo(() => rules.filter((rule) => {
     if (rule.match_type !== activeType) return false;
     const keyword = filter.trim().toLowerCase();
@@ -551,8 +677,11 @@ export function RoutingPage() {
           <Button appearance="primary" icon={<Add20Regular />} disabled={!newValue.trim()} onClick={() => void addRule()}>
             {t("routing_add")}
           </Button>
+          <Button icon={<Add20Regular />} onClick={openBatch}>
+            {text("批量添加", "Batch add")}
+          </Button>
           {activeType === "process" && (
-            <Button icon={<AppsList20Regular />} onClick={() => void openProcesses()}>{t("routing_select_process")}</Button>
+            <Button className="routing-process-button" icon={<AppsList20Regular />} onClick={() => void openProcesses()}>{t("routing_select_process")}</Button>
           )}
         </div>
         <Toolbar className="routing-actions" aria-label={text("规则操作", "Rule actions")}>
@@ -561,7 +690,7 @@ export function RoutingPage() {
           <ToolbarButton icon={<Delete20Regular />} disabled={selected.size === 0} onClick={() => setDeleteOpen(true)}>
             {text(`删除选中 (${selected.size})`, `Delete selected (${selected.size})`)}
           </ToolbarButton>
-          <ToolbarButton icon={<ArrowDownload20Regular />} onClick={() => void importRules()}>{t("routing_import")}</ToolbarButton>
+          <ToolbarButton icon={<ArrowDownload20Regular />} onClick={() => void importRules()}>{text("导入备份", "Import backup")}</ToolbarButton>
           <ToolbarButton icon={<ArrowUpload20Regular />} onClick={() => void appServices.routing.exportRules(
             rules.map(({ match_type, value, outbound }) => ({ match_type, value, outbound })),
           ).then((path) => path && notify(text("导出完成", "Export complete"), path, "success")).catch((error) =>
@@ -681,6 +810,131 @@ export function RoutingPage() {
                 setProcessOpen(false);
                 void addRule(newValue, "process");
               }}>{text("添加进程规则", "Add process rule")}</Button>
+            </DialogActions>
+          </DialogBody>
+        </DialogSurface>
+      </Dialog>
+
+      <Dialog open={batchOpen} onOpenChange={(_, data) => !batchApplying && setBatchOpen(data.open)}>
+        <DialogSurface className="routing-batch-dialog">
+          <DialogBody>
+            <DialogTitle>{text("批量添加分流规则", "Batch add routing rules")}</DialogTitle>
+            <DialogContent>
+              <p className="routing-batch-intro">{batchType === "process"
+                ? text(
+                    "每个进程名仍会保存为独立规则。请一行一个，名称中的空格和标点会完整保留。",
+                    "Each process name remains an individual rule. Use one per line; spaces and punctuation are preserved.",
+                  )
+                : text(
+                    "每个匹配值仍会保存为独立规则。建议一行一个，也支持逗号、分号和中文标点分隔。",
+                    "Each match value remains an individual rule. Use one per line, or separate values with commas or semicolons.",
+                  )}</p>
+              <div className="routing-batch-controls">
+                <label>
+                  <span>{text("规则类型", "Rule type")}</span>
+                  <Dropdown
+                    value={matchLabels[batchType]}
+                    selectedOptions={[batchType]}
+                    onOptionSelect={(_, data) => {
+                      if (!data.optionValue) return;
+                      setBatchType(data.optionValue as MatchType);
+                      setBatchPreview(null);
+                    }}
+                  >
+                    {(Object.keys(matchLabels) as MatchType[]).map((type) => (
+                      <Option key={type} value={type}>{matchLabels[type]}</Option>
+                    ))}
+                  </Dropdown>
+                </label>
+                <label>
+                  <span>{text("出口策略", "Egress policy")}</span>
+                  <Dropdown
+                    value={outboundLabel(batchOutbound)}
+                    selectedOptions={[batchOutbound]}
+                    onOptionSelect={(_, data) => {
+                      if (!data.optionValue) return;
+                      setBatchOutbound(data.optionValue);
+                      setBatchPreview(null);
+                    }}
+                  >
+                    {(outbounds ?? []).map((outbound) => (
+                      <Option key={outbound.id} value={outbound.id}>{outboundLabel(outbound.id)}</Option>
+                    ))}
+                  </Dropdown>
+                </label>
+              </div>
+              <label className="routing-batch-editor">
+                <span>{text("匹配值", "Match values")}</span>
+                <Textarea
+                  autoFocus
+                  resize="vertical"
+                  value={batchText}
+                  placeholder={batchType === "domain"
+                    ? "example.com\ncdn.example.com"
+                    : batchType === "ip"
+                      ? "192.0.2.10\n198.51.100.0/24"
+                      : "browser.exe\ngame.exe"}
+                  onChange={(_, data) => {
+                    setBatchText(data.value);
+                    setBatchPreview(null);
+                  }}
+                />
+                <small>{batchType === "process"
+                  ? text("进程名中的空格和标点会保留；请使用换行或 Tab 分隔。", "Spaces and punctuation in process names are preserved; use line breaks or tabs as separators.")
+                  : text("域名和 IP 也可使用空格或 Tab 分隔；单次最多 2000 条。", "Domains and IPs may also be separated by spaces or tabs; up to 2,000 values per batch.")}</small>
+              </label>
+              {batchPreview && (
+                <div className="routing-batch-preview">
+                  <div className="routing-batch-summary">
+                    <Badge appearance="tint" color="success">{text(`新增 ${batchPreview.add_count}`, `${batchPreview.add_count} new`)}</Badge>
+                    <Badge appearance="tint" color="informative">{text(`重复 ${batchPreview.duplicate_count}`, `${batchPreview.duplicate_count} duplicates`)}</Badge>
+                    <Badge appearance="tint" color="warning">{text(`冲突 ${batchPreview.conflict_count}`, `${batchPreview.conflict_count} conflicts`)}</Badge>
+                    <Badge appearance="tint" color={batchPreview.invalid_count > 0 ? "danger" : "subtle"}>{text(`无效 ${batchPreview.invalid_count}`, `${batchPreview.invalid_count} invalid`)}</Badge>
+                  </div>
+                  {batchPreview.conflict_count > 0 && (
+                    <Checkbox
+                      checked={replaceBatchConflicts}
+                      onChange={(_, data) => setReplaceBatchConflicts(Boolean(data.checked))}
+                      label={text("将冲突规则更新为本次选择的出口", "Update conflicting rules to the selected egress")}
+                    />
+                  )}
+                  {batchPreview.invalid_count > 0 && (
+                    <MessageBar intent="error">
+                      <MessageBarBody>{text("请修正无效项后重新检查，当前不会保存任何更改。", "Fix invalid values and check again; no changes will be saved yet.")}</MessageBarBody>
+                    </MessageBar>
+                  )}
+                  {(batchPreview.items ?? []).some((item) => item.status === "invalid" || item.status === "conflict") && (
+                    <div className="routing-batch-issues">
+                      {(batchPreview.items ?? [])
+                        .filter((item) => item.status === "invalid" || item.status === "conflict")
+                        .slice(0, 40)
+                        .map((item, index) => (
+                          <div key={`${item.status}-${item.input}-${index}`} className={`routing-batch-issue is-${item.status}`}>
+                            <strong>{item.input}</strong>
+                            <span>{item.status === "conflict"
+                              ? text(`当前出口：${outboundLabel(item.existing_outbound || "")}`, `Current egress: ${outboundLabel(item.existing_outbound || "")}`)
+                              : item.message}</span>
+                          </div>
+                        ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </DialogContent>
+            <DialogActions>
+              <Button disabled={batchApplying} onClick={() => setBatchOpen(false)}>{t("routing_dialog_cancel")}</Button>
+              <Button
+                appearance="secondary"
+                disabled={batchChecking || batchApplying || !batchText.trim()}
+                icon={batchChecking ? <Spinner size="tiny" /> : undefined}
+                onClick={() => void previewBatch()}
+              >{text("检查内容", "Check values")}</Button>
+              <Button
+                appearance="primary"
+                disabled={!batchPreview || batchPreview.invalid_count > 0 || batchApplying || (batchPreview.add_count === 0 && (!replaceBatchConflicts || batchPreview.conflict_count === 0))}
+                icon={batchApplying ? <Spinner size="tiny" /> : <Add20Regular />}
+                onClick={() => void confirmBatch()}
+              >{text("确认添加", "Add rules")}</Button>
             </DialogActions>
           </DialogBody>
         </DialogSurface>

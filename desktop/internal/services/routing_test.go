@@ -84,3 +84,49 @@ func TestRejectInvalidRulesWithoutPartialSave(t *testing.T) {
 		t.Fatal("expected invalid domain to fail the complete batch")
 	}
 }
+
+func TestPreviewRoutingBatchClassifiesNormalizedValues(t *testing.T) {
+	t.Setenv("HYPOMUX_DATA_DIR", t.TempDir())
+	settings := NewSettingsService()
+	service := NewRoutingRuleService(settings, NewAdapterService(settings), nil)
+	preview, err := service.PreviewBatch(
+		MatchDomain,
+		[]string{"New.Example.", "new.example", "same.example", "move.example", "https://invalid/path"},
+		"direct",
+		[]RoutingRule{
+			{MatchType: MatchDomain, Value: "same.example", Outbound: "direct"},
+			{MatchType: MatchDomain, Value: "move.example", Outbound: "aggregation"},
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview.AddCount != 1 || preview.DuplicateCount != 2 || preview.ConflictCount != 1 || preview.InvalidCount != 1 {
+		t.Fatalf("unexpected batch counts: %#v", preview)
+	}
+	statuses := []string{
+		RoutingBatchAdd,
+		RoutingBatchDuplicate,
+		RoutingBatchDuplicate,
+		RoutingBatchConflict,
+		RoutingBatchInvalid,
+	}
+	for index, status := range statuses {
+		if preview.Items[index].Status != status {
+			t.Fatalf("item %d status = %q, want %q", index, preview.Items[index].Status, status)
+		}
+	}
+	if preview.Items[0].Rule.Value != "new.example" || preview.Items[3].ExistingOutbound != "aggregation" {
+		t.Fatalf("batch values were not normalized: %#v", preview.Items)
+	}
+}
+
+func TestPreviewRoutingBatchRejectsOversizedInput(t *testing.T) {
+	t.Setenv("HYPOMUX_DATA_DIR", t.TempDir())
+	settings := NewSettingsService()
+	service := NewRoutingRuleService(settings, NewAdapterService(settings), nil)
+	values := make([]string, RoutingBatchMaxValues+1)
+	if _, err := service.PreviewBatch(MatchIP, values, "direct", nil); err == nil {
+		t.Fatal("expected oversized batch to be rejected")
+	}
+}

@@ -1345,7 +1345,7 @@ svg {
 
 .routing-add-row {
   display: grid;
-  grid-template-columns: minmax(260px, 1fr) minmax(180px, 250px) auto auto;
+  grid-template-columns: minmax(260px, 1fr) minmax(180px, 250px) repeat(3, auto);
   gap: 8px;
 }
 
@@ -1579,6 +1579,120 @@ svg {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.routing-batch-dialog {
+  width: min(720px, calc(100vw - 40px));
+  max-width: 720px;
+}
+
+.routing-batch-dialog .fui-DialogContent {
+  display: grid;
+  gap: 14px;
+}
+
+.routing-batch-intro {
+  margin: 0;
+  color: var(--hm-text-tertiary);
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+
+.routing-batch-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr);
+  gap: 10px;
+}
+
+.routing-batch-controls > label,
+.routing-batch-editor {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+}
+
+.routing-batch-controls label > span,
+.routing-batch-editor > span {
+  color: var(--hm-text-secondary);
+  font-size: 11px;
+  font-weight: 620;
+}
+
+.routing-batch-controls .fui-Dropdown {
+  width: 100%;
+}
+
+.routing-batch-editor .fui-Textarea {
+  width: 100%;
+  min-height: 170px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--hm-row-hover) 42%, transparent);
+}
+
+.routing-batch-editor textarea {
+  min-height: 156px;
+  font-family: var(--fontFamilyMonospace, "Cascadia Mono", Consolas, monospace);
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+
+.routing-batch-editor > small {
+  color: var(--hm-text-tertiary);
+  font-size: 10.5px;
+}
+
+.routing-batch-preview {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--hm-outer-border) 80%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--hm-row-hover) 38%, transparent);
+  animation: motion-content-rise var(--hm-motion-normal) var(--hm-motion-ease-out) backwards;
+}
+
+.routing-batch-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.routing-batch-issues {
+  display: grid;
+  max-height: 150px;
+  overflow-y: auto;
+  border-top: 1px solid color-mix(in srgb, var(--hm-outer-border) 72%, transparent);
+}
+
+.routing-batch-issue {
+  display: grid;
+  min-width: 0;
+  padding: 8px 2px;
+  grid-template-columns: minmax(150px, 0.9fr) minmax(0, 1.1fr);
+  gap: 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--hm-outer-border) 58%, transparent);
+  font-size: 10.5px;
+}
+
+.routing-batch-issue:last-child {
+  border-bottom: 0;
+}
+
+.routing-batch-issue strong {
+  overflow: hidden;
+  color: var(--hm-text-primary);
+  font-family: var(--fontFamilyMonospace, "Cascadia Mono", Consolas, monospace);
+  font-size: 10.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.routing-batch-issue span {
+  color: var(--hm-text-tertiary);
+}
+
+.routing-batch-issue.is-invalid span {
+  color: var(--colorPaletteRedForeground1, #bc2f32);
 }
 
 .tun-preflight-dialog {
@@ -3262,10 +3376,10 @@ svg {
   }
 
   .routing-add-row {
-    grid-template-columns: minmax(220px, 1fr) minmax(160px, 210px) auto;
+    grid-template-columns: minmax(220px, 1fr) minmax(160px, 210px) auto auto;
   }
 
-  .routing-add-row > .fui-Button:last-child {
+  .routing-process-button {
     grid-column: 1 / -1;
     justify-self: start;
   }
