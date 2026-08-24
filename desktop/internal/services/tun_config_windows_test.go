@@ -100,6 +100,73 @@ func TestTunRouteResolvesFakeIPBeforeUserCIDRRules(t *testing.T) {
 	}
 }
 
+func TestExplicitAdapterIPRuleOverridesProxyCompatibilityFallback(t *testing.T) {
+	t.Setenv("HYPOMUX_DATA_DIR", t.TempDir())
+	endpoints := map[string]string{
+		"nic_ethernet": "127.0.0.1:19211",
+		"nic_wifi":     "127.0.0.1:19212",
+		"aggregation":  "127.0.0.1:19213",
+	}
+	_, configPath, _, err := writeSingBoxConfig(
+		endpoints,
+		AdapterView{Name: "Ethernet", Address: "192.0.2.10"},
+		dnsResolveResult{Transport: "udp", Server: "1.1.1.1"},
+		[]RoutingRule{{MatchType: MatchIP, Value: "203.0.113.7/32", Outbound: "nic_wifi"}},
+		compatibilityPlan{
+			ProcessNames: []string{"verge-mihomo.exe"},
+			ProcessPaths: []string{`C:\Program Files\Clash Verge\verge-mihomo.exe`},
+		},
+		true,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config struct {
+		Route struct {
+			Rules []map[string]any `json:"rules"`
+		} `json:"route"`
+	}
+	if err := json.Unmarshal(data, &config); err != nil {
+		t.Fatal(err)
+	}
+	compatibilityAt, compatibilityPathAt, resolveAt := -1, -1, -1
+	adapterIPRules := []int{}
+	for index, rule := range config.Route.Rules {
+		if rule["action"] == "resolve" {
+			resolveAt = index
+		}
+		if rule["outbound"] == "nic_wifi" {
+			if cidrs, ok := rule["ip_cidr"].([]any); ok && len(cidrs) == 1 && cidrs[0] == "203.0.113.7/32" {
+				adapterIPRules = append(adapterIPRules, index)
+			}
+		}
+		if names, ok := rule["process_name"].([]any); ok {
+			for _, name := range names {
+				if name == "verge-mihomo.exe" {
+					compatibilityAt = index
+				}
+			}
+		}
+		if paths, ok := rule["process_path"].([]any); ok {
+			for _, path := range paths {
+				if path == `C:\Program Files\Clash Verge\verge-mihomo.exe` {
+					compatibilityPathAt = index
+				}
+			}
+		}
+	}
+	if len(adapterIPRules) != 2 || compatibilityAt < 0 || compatibilityPathAt < 0 || resolveAt < 0 {
+		t.Fatalf("missing adapter override, compatibility, or resolved rule: adapter=%v compatibility=%d path=%d resolve=%d", adapterIPRules, compatibilityAt, compatibilityPathAt, resolveAt)
+	}
+	if adapterIPRules[0] >= compatibilityAt || adapterIPRules[0] >= compatibilityPathAt || adapterIPRules[1] <= resolveAt {
+		t.Fatalf("unexpected adapter override order: adapter=%v compatibility=%d path=%d resolve=%d", adapterIPRules, compatibilityAt, compatibilityPathAt, resolveAt)
+	}
+}
+
 func TestGeneratedTunConfigProtectsLiteralDNSBootstrapAndOmitsIPv6WhenUnavailable(t *testing.T) {
 	t.Setenv("HYPOMUX_DATA_DIR", t.TempDir())
 	endpoints := map[string]string{

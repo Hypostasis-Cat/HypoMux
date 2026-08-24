@@ -39,6 +39,20 @@ type tunConfigOptions struct {
 	ConfigSHA256  *string
 }
 
+func singBoxRouteRule(rule RoutingRule) map[string]any {
+	entry := map[string]any{"outbound": rule.Outbound}
+	switch rule.MatchType {
+	case MatchProcess:
+		entry["process_name"] = []string{rule.Value}
+	case MatchDomain:
+		entry["domain"] = []string{rule.Value}
+		entry["domain_suffix"] = []string{"." + strings.TrimPrefix(rule.Value, ".")}
+	case MatchIP:
+		entry["ip_cidr"] = []string{rule.Value}
+	}
+	return entry
+}
+
 func writeSingBoxConfig(
 	endpoints map[string]string,
 	dnsAdapter AdapterView,
@@ -118,6 +132,17 @@ func writeSingBoxConfigWithOptions(
 			"outbound":     "system-direct",
 		},
 	}
+	// A user may deliberately pin an upstream proxy server to a hotspot or
+	// another selected adapter. Match that literal destination before the
+	// third-party proxy compatibility fallback, otherwise the process-name
+	// bypass would silently force the connection back to the system default
+	// route. The rule is repeated after DNS resolution below so regular TUN
+	// traffic still retains FakeIP-aware CIDR matching.
+	for _, rule := range rules {
+		if rule.MatchType == MatchIP && strings.HasPrefix(rule.Outbound, "nic_") {
+			routeRules = append(routeRules, singBoxRouteRule(rule))
+		}
+	}
 	if len(compatibilityPaths) > 0 {
 		routeRules = append(routeRules, map[string]any{
 			"process_path": compatibilityPaths, "outbound": "system-direct",
@@ -136,19 +161,10 @@ func writeSingBoxConfigWithOptions(
 		)
 	}
 	for _, rule := range rules {
-		entry := map[string]any{"outbound": rule.Outbound}
-		switch rule.MatchType {
-		case MatchProcess:
-			entry["process_name"] = []string{rule.Value}
-		case MatchDomain:
-			entry["domain"] = []string{rule.Value}
-			entry["domain_suffix"] = []string{"." + strings.TrimPrefix(rule.Value, ".")}
-		case MatchIP:
-			entry["ip_cidr"] = []string{rule.Value}
-		default:
+		if rule.MatchType != MatchProcess && rule.MatchType != MatchDomain && rule.MatchType != MatchIP {
 			continue
 		}
-		routeRules = append(routeRules, entry)
+		routeRules = append(routeRules, singBoxRouteRule(rule))
 	}
 	directOutbound := map[string]any{"type": "direct", "tag": "direct"}
 	if directPort, directErr := loopbackPort(endpoints, "direct"); directErr == nil {
