@@ -1116,6 +1116,10 @@ svg {
   outline-offset: 3px;
 }
 
+.adapter-name:disabled {
+  cursor: default;
+}
+
 .adapter-selection-control,
 .adapter-weight {
   cursor: default;
@@ -2841,7 +2845,8 @@ svg {
 }
 
 .connection-view-controls,
-.connection-view-controls label {
+.connection-view-controls label,
+.connection-adapter-filter {
   display: flex;
   min-width: 0;
   align-items: center;
@@ -2856,6 +2861,24 @@ svg {
   color: var(--hm-text-tertiary);
   font-size: 10.5px;
   white-space: nowrap;
+}
+
+.connection-adapter-filter {
+  gap: 5px;
+  color: var(--hm-text-tertiary);
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+
+.connection-adapter-filter .fui-Badge {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.connection-adapter-filter .fui-Button {
+  min-width: 0;
 }
 
 .connection-view-controls label > svg {

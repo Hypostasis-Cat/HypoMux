@@ -17,6 +17,7 @@ import {
   ArrowDownload20Regular,
   ArrowSync20Regular,
   ArrowUpload20Regular,
+  Dismiss16Regular,
   Filter20Regular,
   Globe20Regular,
   PlugConnected20Regular,
@@ -85,6 +86,7 @@ export function ConnectionsPage({
   const [live, setLive] = useState(true);
   const [query, setQuery] = useState("");
   const [outboundFilter, setOutboundFilter] = useState<ConnectionOutboundFilter>("all");
+  const [adapterFilter, setAdapterFilter] = useState(initialAdapter.trim());
   const [sort, setSort] = useState<ConnectionSort>({ key: "duration", direction: "descending" });
   const [now, setNow] = useState(Date.now());
   const requestActive = useRef(false);
@@ -92,10 +94,10 @@ export function ConnectionsPage({
   const pendingScrollTop = useRef<number | null>(null);
   const toasterId = useId("connections-toaster");
   const { dispatchToast } = useToastController(toasterId);
-  const adapterFilter = initialAdapter.trim();
   const groupedByAdapter = adapterFilter.length > 0;
 
   useEffect(() => {
+    setAdapterFilter(initialAdapter.trim());
     setQuery("");
     setOutboundFilter("all");
   }, [adapterRevision, initialAdapter]);
@@ -286,6 +288,25 @@ export function ConnectionsPage({
             {text(`显示 ${filtered.length} / ${snapshot.connections.length}`, `Showing ${filtered.length} of ${snapshot.connections.length}`)}
           </span>
           <div className="connection-view-controls">
+            {groupedByAdapter && (
+              <div
+                className="connection-adapter-filter"
+                role="group"
+                aria-label={text("适配器筛选", "Adapter filter")}
+              >
+                <span>{text("适配器", "Adapter")}</span>
+                <Badge appearance="tint" color="brand" title={adapterFilter}>{adapterFilter}</Badge>
+                <Button
+                  appearance="subtle"
+                  size="small"
+                  icon={<Dismiss16Regular />}
+                  aria-label={text(`清除适配器筛选 ${adapterFilter}`, `Clear adapter filter ${adapterFilter}`)}
+                  onClick={() => setAdapterFilter("")}
+                >
+                  {text("清除", "Clear")}
+                </Button>
+              </div>
+            )}
             <label>
               <span>{text("出口策略", "Egress")}</span>
               <Dropdown

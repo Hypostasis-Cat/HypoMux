@@ -37,6 +37,7 @@ export function NetworkAdapterItem({
   const { locale, t } = useI18n();
   const text = (zh: string, en: string) => locale === "en" ? en : zh;
   const [inputValue, setInputValue] = useState(String(adapter.weight));
+  const canOpenConnections = adapter.selected;
   useEffect(() => setInputValue(String(adapter.weight)), [adapter.weight]);
   const commit = (next: number) => {
     const normalized = Math.max(1, Math.min(100, Math.round(next)));
@@ -45,8 +46,8 @@ export function NetworkAdapterItem({
   };
   return (
     <article
-      className={`network-adapter hm-card is-navigable${adapter.selected ? " is-selected" : " is-muted"}`}
-      onClick={onOpenConnections}
+      className={`network-adapter hm-card${adapter.selected ? " is-selected is-navigable" : " is-muted"}`}
+      onClick={canOpenConnections ? onOpenConnections : undefined}
     >
       <div className="adapter-primary">
         <span className="adapter-selection-control" onClick={(event) => event.stopPropagation()}>
@@ -64,6 +65,7 @@ export function NetworkAdapterItem({
           type="button"
           className="adapter-name"
           aria-label={text(`查看 ${adapter.name} 的活动连接`, `View active connections for ${adapter.name}`)}
+          disabled={!canOpenConnections}
           onClick={(event) => {
             event.stopPropagation();
             onOpenConnections();
