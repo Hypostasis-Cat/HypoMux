@@ -2405,8 +2405,34 @@ svg {
   min-height: 74px;
   padding: 12px 14px;
   align-items: center;
-  grid-template-columns: minmax(280px, 1fr) minmax(250px, 360px) auto;
+  grid-template-columns: minmax(230px, 0.72fr) minmax(440px, 1.35fr) auto;
   gap: 12px;
+}
+
+.nat-control-fields {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: repeat(2, minmax(190px, 1fr));
+  gap: 8px;
+}
+
+.nat-control-fields > label {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.nat-control-fields > label > span {
+  padding-left: 2px;
+  color: var(--hm-text-tertiary);
+  font-size: 9.5px;
+}
+
+.nat-control-actions {
+  display: flex;
+  align-self: end;
+  gap: 5px;
 }
 
 .nat-control-copy {
@@ -2469,6 +2495,149 @@ svg {
 .nat-adapter-option strong {
   font-size: 12px;
   font-weight: 610;
+}
+
+.nat-server-panel {
+  display: grid;
+  min-height: 196px;
+  height: 100%;
+  padding: 12px 14px;
+  align-content: start;
+  grid-template-rows: auto auto auto auto;
+  gap: 9px;
+  overflow: hidden;
+}
+
+.nat-server-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.nat-server-heading > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.nat-server-heading strong {
+  color: var(--hm-text-primary);
+  font-size: 12px;
+  font-weight: 640;
+}
+
+.nat-server-heading span,
+.nat-server-panel > p {
+  color: var(--hm-text-tertiary);
+  font-size: 9.5px;
+}
+
+.nat-server-list {
+  display: grid;
+  min-height: 0;
+  padding-right: 3px;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  align-content: start;
+  gap: 6px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.nat-server-row {
+  display: grid;
+  min-width: 0;
+  align-items: center;
+  grid-template-columns: minmax(0, 1fr) auto;
+  border: 1px solid var(--hm-outer-border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--hm-row-hover) 60%, transparent);
+}
+
+.nat-server-row.is-selected {
+  border-color: color-mix(in srgb, var(--hm-accent) 30%, var(--hm-outer-border));
+  background: color-mix(in srgb, var(--hm-accent-soft) 66%, transparent);
+}
+
+.nat-server-row > button {
+  display: grid;
+  min-width: 0;
+  padding: 7px 4px 7px 9px;
+  align-items: center;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.nat-server-row > button > span {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.nat-server-row > button strong,
+.nat-server-row > button small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nat-server-row > button strong {
+  color: var(--hm-text-primary);
+  font-size: 10.5px;
+  font-weight: 610;
+}
+
+.nat-server-row > button small {
+  color: var(--hm-text-tertiary);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+
+.nat-server-row > .fui-Button {
+  margin-right: 3px;
+}
+
+.nat-server-empty {
+  display: grid;
+  min-height: 54px;
+  grid-column: 1 / -1;
+  place-items: center;
+  color: var(--hm-text-tertiary);
+  font-size: 10px;
+}
+
+.nat-server-add {
+  display: grid;
+  grid-template-columns: minmax(140px, 0.35fr) minmax(260px, 1fr) auto;
+  gap: 7px;
+}
+
+.nat-server-add .fui-Input {
+  border-color: var(--hm-outer-border);
+  background: color-mix(in srgb, var(--hm-row-hover) 62%, transparent);
+  box-shadow: none;
+}
+
+.nat-server-add .fui-Input::after {
+  border-bottom: 0 !important;
+  transform: none !important;
+}
+
+.nat-server-add .fui-Input:focus-within {
+  border-color: color-mix(in srgb, var(--hm-text-secondary) 38%, var(--hm-outer-border));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--hm-text-secondary) 12%, transparent);
+}
+
+.nat-server-panel > p {
+  margin: 0;
+  padding-left: 2px;
 }
 
 .nat-content {
@@ -2538,6 +2707,12 @@ svg {
   grid-template-rows: auto auto auto;
   gap: 15px;
   overflow: hidden;
+}
+
+.nat-result-card:has(.nat-attempts) {
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: thin;
 }
 
 .nat-result-hero {
@@ -2645,6 +2820,54 @@ svg {
 
 .nat-detail > svg {
   flex: 0 0 auto;
+}
+
+.nat-attempts {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.nat-attempts > strong {
+  color: var(--hm-text-secondary);
+  font-size: 10px;
+  font-weight: 620;
+}
+
+.nat-attempts > div {
+  display: grid;
+  min-width: 0;
+  padding: 7px 9px;
+  align-items: center;
+  grid-template-columns: minmax(0, 1fr) auto 48px;
+  gap: 8px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--hm-row-hover) 70%, transparent);
+}
+
+.nat-attempts > div > span {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.nat-attempts > div strong {
+  overflow: hidden;
+  color: var(--hm-text-primary);
+  font-size: 10px;
+  font-weight: 610;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nat-attempts small {
+  overflow: hidden;
+  color: var(--hm-text-tertiary);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .nat-method-card {

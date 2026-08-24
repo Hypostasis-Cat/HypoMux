@@ -2,15 +2,19 @@ import {
   Badge,
   Button,
   Dropdown,
+  Input,
   Option,
   Spinner,
 } from "@fluentui/react-components";
 import {
   ArrowSync20Regular,
+  Add20Regular,
   CheckmarkCircle20Regular,
+  Delete20Regular,
   Globe20Regular,
   Play20Regular,
   Stop20Regular,
+  Settings20Regular,
   Warning20Regular,
 } from "@fluentui/react-icons";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -19,6 +23,7 @@ import {
   appServices,
   type AdapterView,
   type NATDetectionResult,
+  type NATServerSnapshot,
 } from "../platform/services";
 import { startSerialPoll } from "../platform/serialPoll";
 
@@ -34,6 +39,15 @@ type NATDetectionPageProps = {
 };
 
 const emptyResult = (): NATDetectionResult => ({ state: "idle" });
+
+const previewServers = (): NATServerSnapshot => ({
+  selected_id: "auto",
+  servers: [
+    { id: "builtin-miwifi", name: "小米 STUN", address: "stun.miwifi.com:3478", built_in: true },
+    { id: "builtin-stuntman", name: "STUNTMAN 官方", address: "stunserver2025.stunprotocol.org:3478", built_in: true },
+    { id: "builtin-voipgate", name: "Pion / VoIPGate", address: "stun.voipgate.com:3478", built_in: true },
+  ],
+});
 
 const previewResult = (adapter: AdapterView): NATDetectionResult => ({
   state: "completed",
@@ -51,6 +65,23 @@ const previewResult = (adapter: AdapterView): NATDetectionResult => ({
   completed_at: new Date().toISOString(),
 });
 
+const previewFailure = (adapter: AdapterView): NATDetectionResult => ({
+  state: "inconclusive",
+  adapter_id: adapter.id,
+  name: adapter.name,
+  address: adapter.address,
+  nat_type: "inconclusive",
+  mapping_behavior: "inconclusive",
+  filtering_behavior: "inconclusive",
+  detail: "All configured STUN servers failed",
+  duration_ms: 6120,
+  completed_at: new Date().toISOString(),
+  attempts: [
+    { server: "stun.voipgate.com:3478", resolved: "185.125.180.70:3478", code: "timeout", detail: "binding request: STUN response timeout", duration_ms: 3010 },
+    { server: "stun.example.com:3478", code: "unsupported", detail: "STUN server does not support RFC 5780 OTHER-ADDRESS", duration_ms: 110 },
+  ],
+});
+
 export function NATDetectionPage({ adapters, loading, preview, text, notify }: NATDetectionPageProps) {
   const eligible = useMemo(
     () => adapters.filter((adapter) => adapter.operational && Boolean(adapter.address)),
@@ -58,6 +89,11 @@ export function NATDetectionPage({ adapters, loading, preview, text, notify }: N
   );
   const [adapterID, setAdapterID] = useState("");
   const [result, setResult] = useState<NATDetectionResult>(emptyResult);
+  const [serverSnapshot, setServerSnapshot] = useState<NATServerSnapshot>({ selected_id: "auto", servers: [] });
+  const [showServers, setShowServers] = useState(false);
+  const [serverName, setServerName] = useState("");
+  const [serverAddress, setServerAddress] = useState("");
+  const [serverBusy, setServerBusy] = useState(false);
   const mounted = useRef(true);
 
   useEffect(() => {
@@ -76,13 +112,28 @@ export function NATDetectionPage({ adapters, loading, preview, text, notify }: N
   useEffect(() => {
     if (preview) {
       const preferred = eligible.find((adapter) => adapter.selected) ?? eligible[0];
-      setResult(preferred ? previewResult(preferred) : emptyResult());
+      const failed = new URLSearchParams(window.location.search).get("nat") === "failed";
+      setResult(preferred ? (failed ? previewFailure(preferred) : previewResult(preferred)) : emptyResult());
       return;
     }
     void appServices.diagnostics.natLatest()
       .then((latest) => { if (mounted.current) setResult(latest ?? emptyResult()); })
       .catch(() => { /* A missing persisted result is equivalent to idle. */ });
   }, [eligible, preview]);
+
+  useEffect(() => {
+    if (preview) {
+      setServerSnapshot(previewServers());
+      return;
+    }
+    void appServices.diagnostics.natServers()
+      .then((snapshot) => { if (mounted.current) setServerSnapshot(snapshot); })
+      .catch((error) => notify(
+        text("无法读取 STUN 服务器", "Unable to load STUN servers"),
+        error instanceof Error ? error.message : String(error),
+        "warning",
+      ));
+  }, [notify, preview, text]);
 
   useEffect(() => {
     if (preview || result.state !== "running") return;
@@ -94,6 +145,7 @@ export function NATDetectionPage({ adapters, loading, preview, text, notify }: N
 
   const running = result.state === "running";
   const selected = eligible.find((adapter) => adapter.id === adapterID);
+  const selectedServer = serverSnapshot.servers.find((server) => server.id === serverSnapshot.selected_id);
 
   const run = useCallback(async () => {
     if (!selected) {
@@ -118,7 +170,7 @@ export function NATDetectionPage({ adapters, loading, preview, text, notify }: N
       return;
     }
     try {
-      const final = await appServices.diagnostics.runNAT(selected.id);
+      const final = await appServices.diagnostics.runNAT(selected.id, serverSnapshot.selected_id);
       if (!mounted.current) return;
       setResult(final);
       notify(
@@ -134,7 +186,7 @@ export function NATDetectionPage({ adapters, loading, preview, text, notify }: N
       if (latest) setResult(latest);
       notify(text("NAT 检测失败", "NAT detection failed"), error instanceof Error ? error.message : String(error));
     }
-  }, [notify, preview, selected, text]);
+  }, [notify, preview, selected, serverSnapshot.selected_id, text]);
 
   const cancel = useCallback(async () => {
     if (preview) {
@@ -145,6 +197,77 @@ export function NATDetectionPage({ adapters, loading, preview, text, notify }: N
       await appServices.diagnostics.cancelNAT();
     } catch (error) {
       notify(text("取消失败", "Cancel failed"), error instanceof Error ? error.message : String(error));
+    }
+  }, [notify, preview, text]);
+
+  const chooseServer = useCallback(async (id: string) => {
+    if (preview) {
+      setServerSnapshot((current) => ({ ...current, selected_id: id }));
+      return;
+    }
+    setServerBusy(true);
+    try {
+      setServerSnapshot(await appServices.diagnostics.selectNATServer(id));
+    } catch (error) {
+      notify(text("无法选择服务器", "Unable to select server"), error instanceof Error ? error.message : String(error));
+    } finally {
+      setServerBusy(false);
+    }
+  }, [notify, preview, text]);
+
+  const addServer = useCallback(async () => {
+    if (!serverAddress.trim()) return;
+    setServerBusy(true);
+    try {
+      if (preview) {
+        const address = serverAddress.includes(":") ? serverAddress.trim() : `${serverAddress.trim()}:3478`;
+        const id = `custom-${Date.now()}`;
+        setServerSnapshot((current) => ({
+          selected_id: id,
+          servers: [...current.servers, { id, name: serverName.trim() || serverAddress.trim(), address, built_in: false }],
+        }));
+      } else {
+        const added = await appServices.diagnostics.addNATServer(serverName, serverAddress);
+        const custom = added.servers[added.servers.length - 1];
+        setServerSnapshot(custom ? await appServices.diagnostics.selectNATServer(custom.id) : added);
+      }
+      setServerName("");
+      setServerAddress("");
+      notify(text("STUN 服务器已添加", "STUN server added"), text("新服务器已保存并设为当前选择。", "The new server was saved and selected."), "success");
+    } catch (error) {
+      notify(text("无法添加服务器", "Unable to add server"), error instanceof Error ? error.message : String(error));
+    } finally {
+      setServerBusy(false);
+    }
+  }, [notify, preview, serverAddress, serverName, text]);
+
+  const removeServer = useCallback(async (id: string) => {
+    setServerBusy(true);
+    try {
+      if (preview) {
+        setServerSnapshot((current) => ({
+          selected_id: current.selected_id === id ? "auto" : current.selected_id,
+          servers: current.servers.filter((server) => server.id !== id),
+        }));
+      } else {
+        setServerSnapshot(await appServices.diagnostics.removeNATServer(id));
+      }
+    } catch (error) {
+      notify(text("无法删除服务器", "Unable to remove server"), error instanceof Error ? error.message : String(error));
+    } finally {
+      setServerBusy(false);
+    }
+  }, [notify, preview, text]);
+
+  const resetServers = useCallback(async () => {
+    setServerBusy(true);
+    try {
+      setServerSnapshot(preview ? previewServers() : await appServices.diagnostics.resetNATServers());
+      notify(text("已恢复内置服务器", "Built-in servers restored"), text("服务器列表与自动选择顺序已恢复。", "The server list and automatic order were restored."), "success");
+    } catch (error) {
+      notify(text("无法恢复服务器", "Unable to restore servers"), error instanceof Error ? error.message : String(error));
+    } finally {
+      setServerBusy(false);
     }
   }, [notify, preview, text]);
 
@@ -191,49 +314,125 @@ export function NATDetectionPage({ adapters, loading, preview, text, notify }: N
     if (result.state === "cancelled") return text("检测已由用户取消。", "Detection was cancelled.");
     if (result.detail?.includes("OTHER-ADDRESS")) return text("STUN 服务器未提供 RFC 5780 所需的 OTHER-ADDRESS。", "The STUN server did not provide the RFC 5780 OTHER-ADDRESS attribute.");
     if (result.detail?.toLowerCase().includes("timeout")) return text("UDP 探测超时；请检查防火墙、公司网络或上游是否限制 STUN。", "UDP probes timed out; check firewall, corporate-network, or upstream STUN restrictions.");
+    if (result.detail?.includes("fake-IP")) return text("域名被解析到 Fake-IP；请关闭 DNS 劫持，或改用 IP 地址形式的 STUN 服务器。", "The hostname resolved to a fake-IP; disable DNS interception or use an IP-based STUN endpoint.");
+    if (result.detail?.includes("All configured")) return text("所有已配置 STUN 服务器均未完成检测，请查看下方逐项记录。", "No configured STUN server completed the test; review the attempt history below.");
     return result.detail || text("未返回更多细节。", "No additional detail was returned.");
   })();
+
+  const attemptLabel = (code: string) => ({
+    success: text("检测成功", "Succeeded"),
+    timeout: text("3 秒内无响应", "No response within 3 seconds"),
+    unsupported: text("不支持 RFC 5780", "RFC 5780 unsupported"),
+    fake_ip: text("解析为 Fake-IP", "Resolved to fake-IP"),
+    resolve_failed: text("域名解析失败", "DNS resolution failed"),
+    invalid_response: text("响应格式不兼容", "Incompatible response"),
+    network_error: text("网络错误", "Network error"),
+  })[code] ?? code;
 
   const completed = result.completed_at
     ? new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(new Date(result.completed_at))
     : "—";
 
   return (
-    <section className="nat-page" aria-live="polite">
+    <section className={`nat-page${showServers ? " has-server-panel" : ""}`} aria-live="polite">
       <GlassSurface className="nat-control" tone="secondary">
         <div className="nat-control-copy">
           <span className="nat-icon"><Globe20Regular /></span>
           <div>
             <strong>{text("选择检测出口", "Choose an egress adapter")}</strong>
-            <span>{text("每张网卡可能位于不同 NAT 后方，因此一次只检测一个出口。", "Each adapter may sit behind a different NAT, so one egress is tested at a time.")}</span>
+            <span>{text("按出口检测，每次选择一张网卡。", "Test one adapter egress at a time.")}</span>
           </div>
         </div>
-        <Dropdown
-          className="nat-adapter-dropdown"
-          value={selected ? `${selected.name} · ${selected.address}` : ""}
-          selectedOptions={adapterID ? [adapterID] : []}
-          disabled={loading || running || eligible.length === 0}
-          aria-label={text("检测出口网卡", "Egress adapter to test")}
-          placeholder={text("请选择活动网卡", "Select an active adapter")}
-          onOptionSelect={(_, data) => data.optionValue && setAdapterID(data.optionValue)}
-        >
-          {eligible.map((adapter) => (
-            <Option key={adapter.id} value={adapter.id} text={`${adapter.name} · ${adapter.address}`}>
-              <span className="nat-adapter-option"><strong>{adapter.name}</strong><small>{adapter.address}</small></span>
-            </Option>
-          ))}
-        </Dropdown>
-        {running ? (
-          <Button appearance="secondary" icon={<Stop20Regular />} onClick={cancel}>{text("取消检测", "Cancel")}</Button>
-        ) : (
-          <Button appearance="primary" icon={result.state === "idle" ? <Play20Regular /> : <ArrowSync20Regular />}
-            disabled={loading || !selected} onClick={run}>
-            {result.state === "idle" ? text("开始检测", "Start detection") : text("重新检测", "Test again")}
+        <div className="nat-control-fields">
+          <label>
+            <span>{text("出口网卡", "Egress adapter")}</span>
+            <Dropdown
+              className="nat-adapter-dropdown"
+              value={selected ? `${selected.name} · ${selected.address}` : ""}
+              selectedOptions={adapterID ? [adapterID] : []}
+              disabled={loading || running || eligible.length === 0}
+              aria-label={text("检测出口网卡", "Egress adapter to test")}
+              placeholder={text("请选择活动网卡", "Select an active adapter")}
+              onOptionSelect={(_, data) => data.optionValue && setAdapterID(data.optionValue)}
+            >
+              {eligible.map((adapter) => (
+                <Option key={adapter.id} value={adapter.id} text={`${adapter.name} · ${adapter.address}`}>
+                  <span className="nat-adapter-option"><strong>{adapter.name}</strong><small>{adapter.address}</small></span>
+                </Option>
+              ))}
+            </Dropdown>
+          </label>
+          <label>
+            <span>STUN</span>
+            <Dropdown
+              className="nat-adapter-dropdown"
+              value={serverSnapshot.selected_id === "auto"
+                ? text(`自动选择 · ${serverSnapshot.servers.length} 台`, `Automatic · ${serverSnapshot.servers.length} servers`)
+                : selectedServer ? `${selectedServer.name} · ${selectedServer.address}` : ""}
+              selectedOptions={[serverSnapshot.selected_id]}
+              disabled={running || serverBusy}
+              aria-label={text("STUN 服务器", "STUN server")}
+              onOptionSelect={(_, data) => data.optionValue && void chooseServer(data.optionValue)}
+            >
+              <Option value="auto">{text(`自动选择（依次尝试 ${serverSnapshot.servers.length} 台）`, `Automatic (${serverSnapshot.servers.length} servers in order)`)}</Option>
+              {serverSnapshot.servers.map((server) => (
+                <Option key={server.id} value={server.id} text={`${server.name} · ${server.address}`}>
+                  <span className="nat-adapter-option"><strong>{server.name}</strong><small>{server.address}</small></span>
+                </Option>
+              ))}
+            </Dropdown>
+          </label>
+        </div>
+        <div className="nat-control-actions">
+          <Button appearance="subtle" icon={<Settings20Regular />} disabled={running}
+            aria-expanded={showServers} onClick={() => setShowServers((current) => !current)}>
+            {text("服务器", "Servers")}
           </Button>
-        )}
+          {running ? (
+            <Button appearance="secondary" icon={<Stop20Regular />} onClick={cancel}>{text("取消检测", "Cancel")}</Button>
+          ) : (
+            <Button appearance="primary" icon={result.state === "idle" ? <Play20Regular /> : <ArrowSync20Regular />}
+              disabled={loading || !selected || serverSnapshot.servers.length === 0} onClick={run}>
+              {result.state === "idle" ? text("开始检测", "Start detection") : text("重新检测", "Test again")}
+            </Button>
+          )}
+        </div>
       </GlassSurface>
 
-      <div className="nat-content">
+      {showServers ? (
+        <GlassSurface className="nat-server-panel" tone="secondary">
+          <div className="nat-server-heading">
+            <div><strong>{text("STUN 服务器", "STUN servers")}</strong><span>{text("内置服务器也可以删除；需要恢复时使用“恢复内置”。", "Built-in servers can be removed and restored at any time.")}</span></div>
+            <Button appearance="subtle" size="small" icon={<ArrowSync20Regular />} disabled={serverBusy || running} onClick={resetServers}>
+              {text("恢复内置", "Restore built-ins")}
+            </Button>
+          </div>
+          <div className="nat-server-list">
+            {serverSnapshot.servers.length === 0 ? <span className="nat-server-empty">{text("列表为空，请添加一台支持 RFC 5780 的服务器。", "The list is empty. Add an RFC 5780-capable server.")}</span> : serverSnapshot.servers.map((server) => (
+              <div className={`nat-server-row${server.id === serverSnapshot.selected_id ? " is-selected" : ""}`} key={server.id}>
+                <button type="button" disabled={serverBusy || running} onClick={() => void chooseServer(server.id)}>
+                  <span><strong>{server.name}</strong><small>{server.address}</small></span>
+                  <Badge appearance="tint" color={server.built_in ? "informative" : "subtle"}>{server.built_in ? text("内置", "Built-in") : text("自定义", "Custom")}</Badge>
+                </button>
+                <Button appearance="subtle" size="small" icon={<Delete20Regular />} disabled={serverBusy || running}
+                  aria-label={text(`删除 ${server.name}`, `Delete ${server.name}`)} onClick={() => void removeServer(server.id)} />
+              </div>
+            ))}
+          </div>
+          <div className="nat-server-add">
+            <Input value={serverName} disabled={serverBusy || running} placeholder={text("名称（可选）", "Name (optional)")}
+              aria-label={text("服务器名称", "Server name")} onChange={(_, data) => setServerName(data.value)} />
+            <Input value={serverAddress} disabled={serverBusy || running} placeholder="stun.example.com:3478"
+              aria-label={text("STUN 服务器地址", "STUN server address")} onChange={(_, data) => setServerAddress(data.value)}
+              onKeyDown={(event) => { if (event.key === "Enter") void addServer(); }} />
+            <Button appearance="secondary" icon={<Add20Regular />} disabled={serverBusy || running || !serverAddress.trim()} onClick={addServer}>
+              {text("添加并选择", "Add and select")}
+            </Button>
+          </div>
+          <p>{text("完整 NAT 分类要求服务器返回 OTHER-ADDRESS 并支持 CHANGE-REQUEST；普通 STUN 服务器可能只能发现公网端点。", "Full NAT classification requires OTHER-ADDRESS and CHANGE-REQUEST; ordinary STUN servers may only reveal the public endpoint.")}</p>
+        </GlassSurface>
+      ) : (
+        <div className="nat-content">
         {running ? (
           <GlassSurface className="nat-status-card nat-running" tone="secondary">
             <Spinner size="medium" />
@@ -266,6 +465,18 @@ export function NATDetectionPage({ adapters, loading, preview, text, notify }: N
               <div><span>{text("耗时 / 完成时间", "Duration / completed")}</span><strong>{result.duration_ms ? `${(result.duration_ms / 1000).toFixed(2)} s` : "—"}</strong><small>{completed}</small></div>
             </div>
             {(result.state === "inconclusive" || result.nat_type === "unknown") && <div className="nat-detail"><Warning20Regular /><span>{detail}</span></div>}
+            {(result.attempts?.length ?? 0) > 0 && result.state === "inconclusive" && (
+              <div className="nat-attempts">
+                <strong>{text("服务器尝试记录", "Server attempt history")}</strong>
+                {result.attempts?.map((attempt) => (
+                  <div key={`${attempt.server}-${attempt.duration_ms}`}>
+                    <span><strong>{attempt.server}</strong><small>{attempt.resolved || text("未解析", "Unresolved")}</small></span>
+                    <Badge appearance="tint" color={attempt.code === "unsupported" ? "warning" : "danger"}>{attemptLabel(attempt.code)}</Badge>
+                    <small>{(attempt.duration_ms / 1000).toFixed(2)} s</small>
+                  </div>
+                ))}
+              </div>
+            )}
           </GlassSurface>
         )}
 
@@ -278,7 +489,8 @@ export function NATDetectionPage({ adapters, loading, preview, text, notify }: N
           </ul>
           <p>{text("检测仅描述当前网卡、当前网络下的 UDP 行为，不代表防火墙整体安全等级，也不会影响现有代理分流。", "This describes current UDP behavior for the selected adapter and network. It is not a firewall security grade and does not affect proxy routing.")}</p>
         </GlassSurface>
-      </div>
+        </div>
+      )}
     </section>
   );
 }

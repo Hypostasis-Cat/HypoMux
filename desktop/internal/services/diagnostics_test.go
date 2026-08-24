@@ -41,6 +41,7 @@ func newTestDiagnostics(t *testing.T, probe diagnosticProbe) *DiagnosticsService
 	}
 	return &DiagnosticsService{
 		logs: logs, probe: probe,
+		natServers:   newNATServerStore(filepath.Join(t.TempDir(), "nat_servers.json")),
 		listAdapters: func() ([]AdapterView, error) { return []AdapterView{adapter}, nil },
 		latest: DiagnosticSnapshot{
 			State: "idle", TargetIP: diagnosticTargetIPv4, Results: []DiagnosticResult{},

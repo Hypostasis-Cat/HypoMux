@@ -77,7 +77,8 @@ type DiagnosticsService struct {
 	cancel       context.CancelFunc
 	natCancel    context.CancelFunc
 	natRunning   bool
-	detectNAT    func(context.Context, AdapterView) NATDetectionResult
+	detectNAT    func(context.Context, AdapterView, []NATServer) NATDetectionResult
+	natServers   *natServerStore
 	latest       DiagnosticSnapshot
 	natLatest    NATDetectionResult
 }
@@ -92,6 +93,7 @@ func NewDiagnosticsService(
 		settings: settings, adapters: adapters, desktop: desktop, logs: logs,
 		probe:        newDiagnosticProbe(),
 		detectNAT:    detectAdapterNAT,
+		natServers:   newDefaultNATServerStore(),
 		listAdapters: adapters.List,
 		latest:       DiagnosticSnapshot{State: "idle", TargetIP: diagnosticTargetIPv4, Results: []DiagnosticResult{}},
 		natLatest:    NATDetectionResult{State: "idle"},
@@ -110,7 +112,36 @@ func (s *DiagnosticsService) NATLatest() NATDetectionResult {
 	return s.natLatest
 }
 
-func (s *DiagnosticsService) RunNAT(adapterID string) (NATDetectionResult, error) {
+func (s *DiagnosticsService) NATServers() NATServerSnapshot {
+	return s.natServerStore().snapshot()
+}
+
+func (s *DiagnosticsService) SelectNATServer(id string) (NATServerSnapshot, error) {
+	return s.natServerStore().selectServer(id)
+}
+
+func (s *DiagnosticsService) AddNATServer(name string, address string) (NATServerSnapshot, error) {
+	return s.natServerStore().add(name, address)
+}
+
+func (s *DiagnosticsService) RemoveNATServer(id string) (NATServerSnapshot, error) {
+	return s.natServerStore().remove(id)
+}
+
+func (s *DiagnosticsService) ResetNATServers() (NATServerSnapshot, error) {
+	return s.natServerStore().reset()
+}
+
+func (s *DiagnosticsService) natServerStore() *natServerStore {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.natServers == nil {
+		s.natServers = newDefaultNATServerStore()
+	}
+	return s.natServers
+}
+
+func (s *DiagnosticsService) RunNAT(adapterID string, serverID string) (NATDetectionResult, error) {
 	s.mu.Lock()
 	if s.natRunning {
 		s.mu.Unlock()
@@ -127,6 +158,10 @@ func (s *DiagnosticsService) RunNAT(adapterID string) (NATDetectionResult, error
 		s.natRunning = false
 		s.mu.Unlock()
 	}()
+	servers, err := s.natServerStore().selectedServers(serverID)
+	if err != nil {
+		return NATDetectionResult{}, err
+	}
 
 	available, err := s.listAdapters()
 	if err != nil {
@@ -157,7 +192,7 @@ func (s *DiagnosticsService) RunNAT(adapterID string) (NATDetectionResult, error
 	if detector == nil {
 		detector = detectAdapterNAT
 	}
-	result := detector(ctx, selected)
+	result := detector(ctx, selected, servers)
 	if result.AdapterID == "" {
 		result.AdapterID, result.Name, result.Address = selected.ID, selected.Name, selected.Address
 	}

@@ -30,7 +30,7 @@ func TestClassifyNAT(t *testing.T) {
 
 func TestDiagnosticsNATRunPersistsResult(t *testing.T) {
 	service := newTestDiagnostics(t, &fakeDiagnosticProbe{})
-	service.detectNAT = func(_ context.Context, adapter AdapterView) NATDetectionResult {
+	service.detectNAT = func(_ context.Context, adapter AdapterView, _ []NATServer) NATDetectionResult {
 		return NATDetectionResult{
 			State: "completed", AdapterID: adapter.ID, Name: adapter.Name, Address: adapter.Address,
 			NATType: "full_cone", MappingBehavior: natEndpointIndependent,
@@ -38,7 +38,7 @@ func TestDiagnosticsNATRunPersistsResult(t *testing.T) {
 			Server: "stun.example:3478", Detail: "test fixture",
 		}
 	}
-	result, err := service.RunNAT("ethernet")
+	result, err := service.RunNAT("ethernet", natServerAutoID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,14 +53,14 @@ func TestDiagnosticsNATRunPersistsResult(t *testing.T) {
 func TestDiagnosticsNATCanBeCancelled(t *testing.T) {
 	service := newTestDiagnostics(t, &fakeDiagnosticProbe{})
 	started := make(chan struct{})
-	service.detectNAT = func(ctx context.Context, _ AdapterView) NATDetectionResult {
+	service.detectNAT = func(ctx context.Context, _ AdapterView, _ []NATServer) NATDetectionResult {
 		close(started)
 		<-ctx.Done()
 		return NATDetectionResult{State: "cancelled"}
 	}
 	done := make(chan NATDetectionResult, 1)
 	go func() {
-		result, _ := service.RunNAT("ethernet")
+		result, _ := service.RunNAT("ethernet", natServerAutoID)
 		done <- result
 	}()
 	select {
@@ -83,14 +83,14 @@ func TestDiagnosticsNATRejectsConcurrentRun(t *testing.T) {
 	service := newTestDiagnostics(t, &fakeDiagnosticProbe{})
 	started := make(chan struct{})
 	release := make(chan struct{})
-	service.detectNAT = func(_ context.Context, _ AdapterView) NATDetectionResult {
+	service.detectNAT = func(_ context.Context, _ AdapterView, _ []NATServer) NATDetectionResult {
 		close(started)
 		<-release
 		return NATDetectionResult{State: "completed", NATType: "full_cone"}
 	}
 	done := make(chan struct{})
 	go func() {
-		_, _ = service.RunNAT("ethernet")
+		_, _ = service.RunNAT("ethernet", natServerAutoID)
 		close(done)
 	}()
 	select {
@@ -98,7 +98,7 @@ func TestDiagnosticsNATRejectsConcurrentRun(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("first NAT detection did not start")
 	}
-	if _, err := service.RunNAT("ethernet"); err == nil || !strings.Contains(err.Error(), "已在运行") {
+	if _, err := service.RunNAT("ethernet", natServerAutoID); err == nil || !strings.Contains(err.Error(), "已在运行") {
 		t.Fatalf("expected concurrent run rejection, got %v", err)
 	}
 	close(release)

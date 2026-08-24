@@ -134,9 +134,30 @@ export type NATDetectionResult = {
   public_endpoint?: string;
   server?: string;
   detail?: string;
+  attempts?: NATProbeAttempt[];
   duration_ms?: number;
   started_at?: string;
   completed_at?: string;
+};
+
+export type NATProbeAttempt = {
+  server: string;
+  resolved?: string;
+  code: "success" | "timeout" | "unsupported" | "fake_ip" | "resolve_failed" | "invalid_response" | "network_error";
+  detail: string;
+  duration_ms: number;
+};
+
+export type NATServer = {
+  id: string;
+  name: string;
+  address: string;
+  built_in: boolean;
+};
+
+export type NATServerSnapshot = {
+  selected_id: string;
+  servers: NATServer[];
 };
 
 const settingsMethod = (method: string) =>
@@ -210,9 +231,17 @@ export const appServices = {
     exportLogs: () => DiagnosticsService.ExportLogs(),
     openLogDirectory: () => DiagnosticsService.OpenLogDirectory(),
     natLatest: () => Call.ByName(diagnosticsMethod("NATLatest")) as Promise<NATDetectionResult>,
-    runNAT: (adapterID: string) =>
-      Call.ByName(diagnosticsMethod("RunNAT"), adapterID) as Promise<NATDetectionResult>,
+    runNAT: (adapterID: string, serverID: string) =>
+      Call.ByName(diagnosticsMethod("RunNAT"), adapterID, serverID) as Promise<NATDetectionResult>,
     cancelNAT: () => Call.ByName(diagnosticsMethod("CancelNAT")) as Promise<NATDetectionResult>,
+    natServers: () => Call.ByName(diagnosticsMethod("NATServers")) as Promise<NATServerSnapshot>,
+    selectNATServer: (id: string) =>
+      Call.ByName(diagnosticsMethod("SelectNATServer"), id) as Promise<NATServerSnapshot>,
+    addNATServer: (name: string, address: string) =>
+      Call.ByName(diagnosticsMethod("AddNATServer"), name, address) as Promise<NATServerSnapshot>,
+    removeNATServer: (id: string) =>
+      Call.ByName(diagnosticsMethod("RemoveNATServer"), id) as Promise<NATServerSnapshot>,
+    resetNATServers: () => Call.ByName(diagnosticsMethod("ResetNATServers")) as Promise<NATServerSnapshot>,
   },
   tun: {
     latest: () => TunService.Latest(),
