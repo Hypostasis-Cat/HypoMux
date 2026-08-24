@@ -1,6 +1,8 @@
 import {
   Badge,
   Button,
+  Dropdown,
+  Option,
   SearchBox,
   Spinner,
   Switch,
@@ -13,8 +15,10 @@ import {
 import {
   AppsListDetail24Regular,
   ArrowDownload20Regular,
+  ArrowSort20Regular,
   ArrowSync20Regular,
   ArrowUpload20Regular,
+  Filter20Regular,
   Globe20Regular,
   PlugConnected20Regular,
 } from "@fluentui/react-icons";
@@ -29,6 +33,11 @@ import {
   withServiceTimeout,
 } from "../platform/services";
 import { startSerialPoll } from "../platform/serialPoll";
+import {
+  selectConnections,
+  type ConnectionDurationSort,
+  type ConnectionOutboundFilter,
+} from "./connectionView";
 
 const emptySnapshot: ConnectionListSnapshot = {
   phase: "stopped",
@@ -63,6 +72,8 @@ export function ConnectionsPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [live, setLive] = useState(true);
   const [query, setQuery] = useState("");
+  const [outboundFilter, setOutboundFilter] = useState<ConnectionOutboundFilter>("all");
+  const [durationSort, setDurationSort] = useState<ConnectionDurationSort>("longest");
   const [now, setNow] = useState(Date.now());
   const requestActive = useRef(false);
   const connectionListRef = useRef<HTMLDivElement>(null);
@@ -120,19 +131,8 @@ export function ConnectionsPage() {
   }, [snapshot]);
 
   const filtered = useMemo(() => {
-    const needle = query.trim().toLocaleLowerCase();
-    if (!needle) return snapshot.connections;
-    return snapshot.connections.filter((connection) => [
-      connection.process,
-      connection.domain,
-      connection.remote_ip,
-      connection.remote_port,
-      connection.target,
-      connection.adapter,
-      connection.outbound,
-      connection.protocol,
-    ].some((value) => value?.toLocaleLowerCase().includes(needle)));
-  }, [query, snapshot.connections]);
+    return selectConnections(snapshot.connections, query, outboundFilter, durationSort);
+  }, [durationSort, outboundFilter, query, snapshot.connections]);
 
   const totals = useMemo(() => snapshot.connections.reduce(
     (current, connection) => ({
@@ -206,6 +206,50 @@ export function ConnectionsPage() {
       </GlassSurface>
 
       <GlassSurface className={`connections-surface${loading || filtered.length === 0 ? " is-empty" : ""}`}>
+        <div className="connection-view-toolbar">
+          <span className="connection-view-result">
+            <Filter20Regular />
+            {text(`显示 ${filtered.length} / ${snapshot.connections.length}`, `Showing ${filtered.length} of ${snapshot.connections.length}`)}
+          </span>
+          <div className="connection-view-controls">
+            <label>
+              <span>{text("出口策略", "Egress")}</span>
+              <Dropdown
+                appearance="filled-darker"
+                size="small"
+                aria-label={text("按出口策略筛选", "Filter by egress policy")}
+                value={{
+                  all: text("全部出口", "All egress"),
+                  aggregation: text("多网卡聚合", "Aggregated"),
+                  direct: text("直连", "Direct"),
+                  adapter: text("指定网卡", "Specified NIC"),
+                }[outboundFilter]}
+                selectedOptions={[outboundFilter]}
+                onOptionSelect={(_, data) => data.optionValue && setOutboundFilter(data.optionValue as ConnectionOutboundFilter)}
+              >
+                <Option value="all">{text("全部出口", "All egress")}</Option>
+                <Option value="aggregation">{text("多网卡聚合", "Aggregated")}</Option>
+                <Option value="direct">{text("直连", "Direct")}</Option>
+                <Option value="adapter">{text("指定网卡", "Specified NIC")}</Option>
+              </Dropdown>
+            </label>
+            <label>
+              <ArrowSort20Regular />
+              <span>{text("时长", "Duration")}</span>
+              <Dropdown
+                appearance="filled-darker"
+                size="small"
+                aria-label={text("按连接时长排序", "Sort by connection duration")}
+                value={durationSort === "longest" ? text("最长优先", "Longest first") : text("最短优先", "Shortest first")}
+                selectedOptions={[durationSort]}
+                onOptionSelect={(_, data) => data.optionValue && setDurationSort(data.optionValue as ConnectionDurationSort)}
+              >
+                <Option value="longest">{text("最长优先", "Longest first")}</Option>
+                <Option value="shortest">{text("最短优先", "Shortest first")}</Option>
+              </Dropdown>
+            </label>
+          </div>
+        </div>
         <div className="connection-table-head" role="row">
           <span>{text("进程", "Process")}</span>
           <span>{text("目标", "Destination")}</span>
@@ -223,10 +267,12 @@ export function ConnectionsPage() {
               <span>{text("启动聚合后，这里会实时显示本次会话正在处理的连接。", "Start aggregation to see the connections handled in this session.")}</span>
             </div>
           ) : filtered.length === 0 ? (
-            <div key={query ? "connections-no-match" : "connections-idle"} className="connections-empty motion-state-content">
+            <div key={query || outboundFilter !== "all" ? "connections-no-match" : "connections-idle"} className="connections-empty motion-state-content">
               <Globe20Regular />
-              <strong>{query ? text("没有匹配的连接", "No matching connections") : text("当前没有活动连接", "No active connections")}</strong>
-              <span>{text("短连接可能只会短暂出现；实时刷新会保留最新状态。", "Short-lived flows may appear briefly; live refresh keeps the view current.")}</span>
+              <strong>{query || outboundFilter !== "all" ? text("没有符合当前筛选的连接", "No connections match the current filters") : text("当前没有活动连接", "No active connections")}</strong>
+              <span>{query || outboundFilter !== "all"
+                ? text("可以更换出口策略或清空搜索内容。", "Choose another egress policy or clear the search query.")
+                : text("短连接可能只会短暂出现；实时刷新会保留最新状态。", "Short-lived flows may appear briefly; live refresh keeps the view current.")}</span>
             </div>
           ) : filtered.map((connection) => {
             const outbound = policy(connection);

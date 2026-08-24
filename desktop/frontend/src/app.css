@@ -2415,7 +2415,7 @@ svg {
   min-width: 0;
   min-height: 0;
   padding: 0;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
   overflow: hidden;
 }
 
@@ -2424,6 +2424,80 @@ svg {
   height: min(320px, 44vh);
   min-height: 270px;
   align-self: start;
+}
+
+.connection-view-toolbar {
+  display: flex;
+  min-height: 43px;
+  padding: 6px 11px 6px 15px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border-bottom: 1px solid color-mix(in srgb, var(--hm-outer-border) 76%, transparent);
+  background: color-mix(in srgb, rgba(var(--hm-surface-secondary-rgb), 0.28) 72%, transparent);
+}
+
+.connection-view-result {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--hm-text-tertiary);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.connection-view-result > svg,
+.connection-view-controls label > svg {
+  color: var(--hm-accent-strong);
+}
+
+.connection-view-controls,
+.connection-view-controls label {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+}
+
+.connection-view-controls {
+  gap: 12px;
+}
+
+.connection-view-controls label {
+  gap: 6px;
+  color: var(--hm-text-tertiary);
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+
+.connection-view-controls label > svg {
+  width: 16px;
+  height: 16px;
+}
+
+.connection-view-controls .fui-Dropdown {
+  min-width: 128px;
+  min-height: 30px;
+  border: 1px solid color-mix(in srgb, var(--hm-outer-border) 82%, transparent) !important;
+  border-radius: 7px !important;
+  background: rgba(var(--hm-surface-rgb), 0.42) !important;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--hm-inner-highlight) 55%, transparent) !important;
+}
+
+.connection-view-controls .fui-Dropdown::after {
+  border-bottom: 0 !important;
+  transform: none !important;
+}
+
+.connection-view-controls .fui-Dropdown:focus-within {
+  border-color: color-mix(in srgb, var(--hm-text-secondary) 34%, var(--hm-outer-border)) !important;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--hm-inner-highlight) 55%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, var(--hm-text-secondary) 7%, transparent) !important;
+}
+
+.connection-view-controls label:first-child .fui-Dropdown {
+  min-width: 142px;
 }
 
 .connection-table-head,
