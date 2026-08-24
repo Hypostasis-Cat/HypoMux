@@ -3,6 +3,7 @@ module github.com/Hypostasis-Cat/HypoMux/desktop
 go 1.25.0
 
 require (
+	github.com/pion/stun/v3 v3.1.6
 	github.com/tc-hib/winres v0.3.1
 	github.com/wailsapp/wails/v3 v3.0.0-alpha2.119
 	golang.org/x/net v0.56.0
@@ -19,5 +20,10 @@ require (
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646 // indirect
+	github.com/pion/dtls/v3 v3.1.4 // indirect
+	github.com/pion/logging v0.2.4 // indirect
+	github.com/pion/transport/v4 v4.0.2 // indirect
+	github.com/wlynxg/anet v0.0.5 // indirect
+	golang.org/x/crypto v0.53.0 // indirect
 	golang.org/x/image v0.45.0 // indirect
 )

@@ -75,7 +75,11 @@ type DiagnosticsService struct {
 	probe        diagnosticProbe
 	listAdapters func() ([]AdapterView, error)
 	cancel       context.CancelFunc
+	natCancel    context.CancelFunc
+	natRunning   bool
+	detectNAT    func(context.Context, AdapterView) NATDetectionResult
 	latest       DiagnosticSnapshot
+	natLatest    NATDetectionResult
 }
 
 func NewDiagnosticsService(
@@ -87,8 +91,10 @@ func NewDiagnosticsService(
 	return &DiagnosticsService{
 		settings: settings, adapters: adapters, desktop: desktop, logs: logs,
 		probe:        newDiagnosticProbe(),
+		detectNAT:    detectAdapterNAT,
 		listAdapters: adapters.List,
 		latest:       DiagnosticSnapshot{State: "idle", TargetIP: diagnosticTargetIPv4, Results: []DiagnosticResult{}},
+		natLatest:    NATDetectionResult{State: "idle"},
 	}
 }
 
@@ -96,6 +102,103 @@ func (s *DiagnosticsService) Latest() DiagnosticSnapshot {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return cloneDiagnosticSnapshot(s.latest)
+}
+
+func (s *DiagnosticsService) NATLatest() NATDetectionResult {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.natLatest
+}
+
+func (s *DiagnosticsService) RunNAT(adapterID string) (NATDetectionResult, error) {
+	s.mu.Lock()
+	if s.natRunning {
+		s.mu.Unlock()
+		return NATDetectionResult{}, errors.New("NAT 类型检测已在运行")
+	}
+	s.natRunning = true
+	s.mu.Unlock()
+	reserved := true
+	defer func() {
+		if !reserved {
+			return
+		}
+		s.mu.Lock()
+		s.natRunning = false
+		s.mu.Unlock()
+	}()
+
+	available, err := s.listAdapters()
+	if err != nil {
+		return NATDetectionResult{}, fmt.Errorf("扫描网络适配器失败：%w", err)
+	}
+	var selected AdapterView
+	for _, adapter := range available {
+		if adapter.ID == adapterID && adapter.Operational && adapter.Address != "" {
+			selected = adapter
+			break
+		}
+	}
+	if selected.ID == "" {
+		return NATDetectionResult{}, errors.New("请选择一张拥有有效 IPv4 的活动网卡")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	started := time.Now()
+	s.mu.Lock()
+	s.natCancel = cancel
+	s.natLatest = NATDetectionResult{
+		State: "running", AdapterID: selected.ID, Name: selected.Name,
+		Address: selected.Address, StartedAt: started,
+	}
+	s.mu.Unlock()
+
+	detector := s.detectNAT
+	if detector == nil {
+		detector = detectAdapterNAT
+	}
+	result := detector(ctx, selected)
+	if result.AdapterID == "" {
+		result.AdapterID, result.Name, result.Address = selected.ID, selected.Name, selected.Address
+	}
+	if result.StartedAt.IsZero() {
+		result.StartedAt = started
+	}
+	if result.CompletedAt.IsZero() {
+		result.CompletedAt = time.Now()
+	}
+	if result.DurationMS == 0 {
+		result.DurationMS = result.CompletedAt.Sub(result.StartedAt).Milliseconds()
+	}
+	if ctx.Err() != nil {
+		result.State = "cancelled"
+		result.Detail = "NAT detection cancelled"
+	}
+	cancel()
+
+	s.mu.Lock()
+	s.natCancel = nil
+	s.natRunning = false
+	s.natLatest = result
+	s.mu.Unlock()
+	reserved = false
+	s.logs.RecordEvent("nat_detection", result.State, map[string]any{
+		"adapter": selected.Name, "source_ip": selected.Address,
+		"nat_type": result.NATType, "mapping": result.MappingBehavior,
+		"filtering": result.FilteringBehavior, "public_endpoint": result.PublicEndpoint,
+		"server": result.Server, "duration_ms": result.DurationMS, "detail": result.Detail,
+	})
+	return result, nil
+}
+
+func (s *DiagnosticsService) CancelNAT() NATDetectionResult {
+	s.mu.Lock()
+	cancel := s.natCancel
+	s.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	return s.NATLatest()
 }
 
 func (s *DiagnosticsService) Run(adapterIDs []string) (DiagnosticSnapshot, error) {
@@ -233,9 +336,13 @@ func (s *DiagnosticsService) OpenLogDirectory() error {
 func (s *DiagnosticsService) Shutdown() {
 	s.mu.Lock()
 	cancel := s.cancel
+	natCancel := s.natCancel
 	s.mu.Unlock()
 	if cancel != nil {
 		cancel()
+	}
+	if natCancel != nil {
+		natCancel()
 	}
 }
 

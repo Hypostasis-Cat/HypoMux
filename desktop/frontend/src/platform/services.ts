@@ -123,6 +123,22 @@ export type ConfigMigrationStatus = {
   message: string;
 };
 
+export type NATDetectionResult = {
+  state: "idle" | "running" | "completed" | "inconclusive" | "cancelled";
+  adapter_id?: string;
+  name?: string;
+  address?: string;
+  nat_type?: "direct" | "full_cone" | "restricted_cone" | "port_restricted_cone" | "symmetric" | "unknown" | "inconclusive";
+  mapping_behavior?: "direct" | "endpoint_independent" | "address_dependent" | "address_port_dependent" | "inconclusive";
+  filtering_behavior?: "direct" | "endpoint_independent" | "address_dependent" | "address_port_dependent" | "inconclusive";
+  public_endpoint?: string;
+  server?: string;
+  detail?: string;
+  duration_ms?: number;
+  started_at?: string;
+  completed_at?: string;
+};
+
 const settingsMethod = (method: string) =>
   `github.com/Hypostasis-Cat/HypoMux/desktop/internal/services.SettingsService.${method}`;
 const blockedDomainMethod = (method: string) =>
@@ -133,6 +149,8 @@ const engineMethod = (method: string) =>
   `github.com/Hypostasis-Cat/HypoMux/desktop/internal/services.EngineService.${method}`;
 const appearanceMethod = (method: string) =>
   `github.com/Hypostasis-Cat/HypoMux/desktop/internal/services.AppearanceService.${method}`;
+const diagnosticsMethod = (method: string) =>
+  `github.com/Hypostasis-Cat/HypoMux/desktop/internal/services.DiagnosticsService.${method}`;
 
 export async function withServiceTimeout<T>(
   request: Promise<T>,
@@ -191,6 +209,10 @@ export const appServices = {
     logs: () => DiagnosticsService.Logs(),
     exportLogs: () => DiagnosticsService.ExportLogs(),
     openLogDirectory: () => DiagnosticsService.OpenLogDirectory(),
+    natLatest: () => Call.ByName(diagnosticsMethod("NATLatest")) as Promise<NATDetectionResult>,
+    runNAT: (adapterID: string) =>
+      Call.ByName(diagnosticsMethod("RunNAT"), adapterID) as Promise<NATDetectionResult>,
+    cancelNAT: () => Call.ByName(diagnosticsMethod("CancelNAT")) as Promise<NATDetectionResult>,
   },
   tun: {
     latest: () => TunService.Latest(),

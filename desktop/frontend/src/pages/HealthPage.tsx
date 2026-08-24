@@ -8,6 +8,8 @@ import {
   Checkbox,
   ProgressBar,
   Spinner,
+  Tab,
+  TabList,
   Toast,
   ToastBody,
   ToastTitle,
@@ -36,6 +38,7 @@ import { useI18n } from "../i18n/i18n";
 import { isDesktopRuntime } from "../platform/runtime";
 import { adapterSaveInput, adapterSaveQueue } from "../platform/adapterSaveQueue";
 import { startSerialPoll } from "../platform/serialPoll";
+import { NATDetectionPage } from "./NATDetectionPage";
 
 const isBrowserPreview = () => import.meta.env.DEV && !isDesktopRuntime();
 
@@ -118,6 +121,7 @@ export function HealthPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [preview, setPreview] = useState(false);
   const [engineRunning, setEngineRunning] = useState(false);
+  const [healthView, setHealthView] = useState<"link" | "nat">("link");
   const adaptersRef = useRef<AdapterView[]>([]);
   const homeSettingsRef = useRef({ mode: "proxy", weighted: false });
   const stopPoller = useRef<(() => void)>();
@@ -335,16 +339,21 @@ export function HealthPage() {
       <AppToaster toasterId={toasterId} position="top-end" />
       <header className="health-heading">
         <div>
-          <span className="section-kicker">{text("逐接口真实出口验证", "Per-interface exit verification")}</span>
-          <h1>{text("网络体检", "Network diagnostics")}</h1>
-          <p>{text(
+          <span className="section-kicker">{healthView === "link"
+            ? text("逐接口真实出口验证", "Per-interface exit verification")
+            : text("UDP 映射与过滤行为", "UDP mapping and filtering behavior")}</span>
+          <h1>{healthView === "link" ? text("网络体检", "Network diagnostics") : text("NAT 类型检测", "NAT type detection")}</h1>
+          <p>{healthView === "link" ? text(
             "ICMP 负责质量数据，绑定 TCP 负责确认流量确实从所选网卡发出。",
             "ICMP measures link quality while bound TCP confirms traffic actually leaves through the selected adapter.",
+          ) : text(
+            "使用 RFC 5780 分析所选出口的 UDP 映射与过滤行为，并给出经典 NAT 类型。",
+            "Analyze UDP mapping and filtering behavior over the selected egress using RFC 5780.",
           )}</p>
         </div>
         <div className="health-heading-actions">
-          <span>{text("目标", "Target")} {snapshot.target_ip || "223.5.5.5"}</span>
-          {running ? (
+          {healthView === "nat" ? <span>RFC 5780 · UDP</span> : <span>{text("目标", "Target")} {snapshot.target_ip || "223.5.5.5"}</span>}
+          {healthView === "link" && (running ? (
             <Button appearance="secondary" icon={<Stop20Regular />} onClick={cancel}>{text("取消体检", "Cancel")}</Button>
           ) : (
             <Button
@@ -355,11 +364,23 @@ export function HealthPage() {
             >
               {text("开始体检", "Start diagnostics")}
             </Button>
-          )}
+          ))}
         </div>
       </header>
 
-      <GlassSurface className="health-adapter-surface" tone="secondary">
+      <nav className="health-subnav" aria-label={text("网络体检页面", "Network diagnostic pages")}>
+        <TabList
+          selectedValue={healthView}
+          onTabSelect={(_, data) => setHealthView(data.value as "link" | "nat")}
+        >
+          <Tab value="link">{text("链路体检", "Link diagnostics")}</Tab>
+          <Tab value="nat">{text("NAT 类型检测", "NAT type detection")}</Tab>
+        </TabList>
+      </nav>
+
+      {healthView === "link" ? (
+        <div className="health-link-page">
+          <GlassSurface className="health-adapter-surface" tone="secondary">
         <div className="health-adapter-toolbar">
           <div>
             <strong>{text("参与体检的网卡", "Adapters to diagnose")}</strong>
@@ -418,9 +439,9 @@ export function HealthPage() {
             "Adapter selection is locked while aggregation is running; diagnostics can still run against the current selection.",
           )}</div>
         )}
-      </GlassSurface>
+          </GlassSurface>
 
-      <section className={`health-results${results.length === 0 ? " is-empty" : ""}`} aria-live="polite">
+          <section className={`health-results${results.length === 0 ? " is-empty" : ""}`} aria-live="polite">
         <div className="health-results-heading">
           <div>
             <strong>{text("链路体检报告", "Link diagnostic report")}</strong>
@@ -499,7 +520,11 @@ export function HealthPage() {
             );
           })}
         </div>
-      </section>
+          </section>
+        </div>
+      ) : (
+        <NATDetectionPage adapters={adapters} loading={loading} preview={preview} text={text} notify={notify} />
+      )}
       {preview && (
         <Tooltip content={text("浏览器预览不会发送真实网络探针", "Browser preview does not send real network probes")} relationship="description">
           <span className="health-preview-label">{text("视觉容量夹具", "Visual capacity fixture")}</span>
