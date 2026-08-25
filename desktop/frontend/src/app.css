@@ -991,17 +991,12 @@ svg {
 
 .throughput-line,
 .throughput-line-glow,
-.throughput-clip-path,
 .throughput-fill {
   transition: d 680ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .throughput-fill {
   opacity: 0.92;
-}
-
-.throughput-clip-path {
-  fill: #000;
 }
 
 .throughput-grid line {
@@ -1016,47 +1011,9 @@ svg {
   stroke-dasharray: none;
 }
 
-.throughput-ambient-flow {
-  opacity: 0;
-  transform: translateX(0);
-  animation: throughput-ambient-flow 7.2s var(--hm-motion-ease-in-out) infinite;
-}
-
-@keyframes throughput-ambient-flow {
-  0%, 18% {
-    opacity: 0;
-    transform: translateX(0);
-  }
-
-  28% {
-    opacity: 0.72;
-  }
-
-  66% {
-    opacity: 0.46;
-  }
-
-  76%, 100% {
-    opacity: 0;
-    transform: translateX(146px);
-  }
-}
-
-[data-motion="reduced"] .throughput-ambient-flow,
-[data-motion="off"] .throughput-ambient-flow {
-  animation: none;
-  opacity: 0;
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .throughput-ambient-flow {
-    animation: none;
-    opacity: 0;
-  }
-
   .throughput-line,
   .throughput-line-glow,
-  .throughput-clip-path,
   .throughput-fill {
     transition-duration: 100ms;
   }

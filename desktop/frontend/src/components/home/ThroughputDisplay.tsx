@@ -71,8 +71,6 @@ export function ThroughputDisplay({
   const { areaPath, linePath } = createThroughputChart(history);
   const fillID = `${chartID}-throughput-fill`;
   const lineID = `${chartID}-throughput-line`;
-  const sheenID = `${chartID}-throughput-sheen`;
-  const clipID = `${chartID}-throughput-area`;
   return (
     <div className="throughput-display">
       <div className="throughput-label">{t("home_total_speed")}</div>
@@ -97,16 +95,6 @@ export function ThroughputDisplay({
               <stop offset="55%" stopColor="var(--hm-accent)" stopOpacity=".62" />
               <stop offset="100%" stopColor="var(--hm-accent-strong)" stopOpacity=".96" />
             </linearGradient>
-            <linearGradient id={sheenID} x1="0" y1="0" x2="1" y2="0">
-              <stop offset="0%" stopColor="var(--hm-accent)" stopOpacity="0" />
-              <stop offset="48%" stopColor="var(--hm-accent)" stopOpacity="0" />
-              <stop offset="64%" stopColor="var(--hm-accent)" stopOpacity=".15" />
-              <stop offset="76%" stopColor="var(--hm-text-primary)" stopOpacity=".28" />
-              <stop offset="90%" stopColor="var(--hm-accent)" stopOpacity="0" />
-            </linearGradient>
-            <clipPath id={clipID}>
-              <path className="throughput-clip-path" d={areaPath} />
-            </clipPath>
           </defs>
           <g className="throughput-grid">
             <line x1="0" x2="100" y1="13" y2="13" />
@@ -114,9 +102,6 @@ export function ThroughputDisplay({
             <line x1="0" x2="100" y1="41" y2="41" />
           </g>
           <path className="throughput-fill" d={areaPath} fill={`url(#${fillID})`} />
-          <g clipPath={`url(#${clipID})`}>
-            <rect className="throughput-ambient-flow" x="-42" y="0" width="38" height="44" fill={`url(#${sheenID})`} />
-          </g>
           <path className="throughput-line-glow" d={linePath} />
           <path className="throughput-line" d={linePath} stroke={`url(#${lineID})`} />
         </svg>
