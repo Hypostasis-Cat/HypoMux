@@ -37,8 +37,10 @@ export function NetworkAdapterItem({
   const { locale, t } = useI18n();
   const text = (zh: string, en: string) => locale === "en" ? en : zh;
   const [inputValue, setInputValue] = useState(String(adapter.weight));
-  const canOpenConnections = adapter.selected;
   useEffect(() => setInputValue(String(adapter.weight)), [adapter.weight]);
+  const toggleSelection = () => {
+    if (!disabled) onSelectedChange(!adapter.selected);
+  };
   const commit = (next: number) => {
     const normalized = Math.max(1, Math.min(100, Math.round(next)));
     setInputValue(String(normalized));
@@ -46,8 +48,8 @@ export function NetworkAdapterItem({
   };
   return (
     <article
-      className={`network-adapter hm-card${adapter.selected ? " is-selected is-navigable" : " is-muted"}`}
-      onClick={canOpenConnections ? onOpenConnections : undefined}
+      className={`network-adapter hm-card${adapter.selected ? " is-selected" : " is-muted"}${disabled ? " is-selection-disabled" : " is-selectable"}`}
+      onClick={toggleSelection}
     >
       <div className="adapter-primary">
         <span className="adapter-selection-control" onClick={(event) => event.stopPropagation()}>
@@ -61,26 +63,30 @@ export function NetworkAdapterItem({
         <span className="adapter-icon" aria-hidden="true">
           {adapter.kind === "wifi" ? <Wifi124Regular /> : <Router24Regular />}
         </span>
+        <span className="adapter-name">
+          <strong>{adapter.name}</strong>
+          <span>{adapter.address}</span>
+        </span>
+      </div>
+
+      <Tooltip
+        content={text(`查看 ${adapter.name} 的活动连接`, `View active connections for ${adapter.name}`)}
+        relationship="description"
+      >
         <button
           type="button"
-          className="adapter-name"
+          className="adapter-live"
           aria-label={text(`查看 ${adapter.name} 的活动连接`, `View active connections for ${adapter.name}`)}
-          disabled={!canOpenConnections}
           onClick={(event) => {
             event.stopPropagation();
             onOpenConnections();
           }}
         >
-          <strong>{adapter.name}</strong>
-          <span>{adapter.address}</span>
+          <span><ArrowDownload20Regular /><strong>{formatRate(adapter.downloadBPS)}</strong><small>{text("下载", "Down")}</small></span>
+          <span><ArrowUpload20Regular /><strong>{formatRate(adapter.uploadBPS)}</strong><small>{text("上传", "Up")}</small></span>
+          <span><PlugConnected20Regular /><strong>{adapter.connections}</strong><small>{text("连接", "Conn")}</small></span>
         </button>
-      </div>
-
-      <div className="adapter-live" aria-label={text("实时网络状态", "Live network status")}>
-        <span><ArrowDownload20Regular /><strong>{formatRate(adapter.downloadBPS)}</strong><small>{text("下载", "Down")}</small></span>
-        <span><ArrowUpload20Regular /><strong>{formatRate(adapter.uploadBPS)}</strong><small>{text("上传", "Up")}</small></span>
-        <span><PlugConnected20Regular /><strong>{adapter.connections}</strong><small>{text("连接", "Conn")}</small></span>
-      </div>
+      </Tooltip>
 
       <div className="adapter-quality">
         <NetworkHealthBadge health={adapter.health} />

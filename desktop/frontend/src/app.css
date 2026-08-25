@@ -1112,8 +1112,12 @@ svg {
   opacity: 0.72;
 }
 
-.network-adapter.is-navigable {
+.network-adapter.is-selectable {
   cursor: pointer;
+}
+
+.network-adapter.is-selection-disabled {
+  cursor: default;
 }
 
 .adapter-primary {
@@ -1139,23 +1143,7 @@ svg {
   min-width: 0;
   flex-direction: column;
   gap: 3px;
-  padding: 0;
-  border: 0;
   color: inherit;
-  font: inherit;
-  text-align: left;
-  background: transparent;
-  cursor: pointer;
-}
-
-.adapter-name:focus-visible {
-  border-radius: 4px;
-  outline: 2px solid var(--hm-accent);
-  outline-offset: 3px;
-}
-
-.adapter-name:disabled {
-  cursor: default;
 }
 
 .adapter-selection-control,
@@ -1178,11 +1166,40 @@ svg {
 
 .adapter-live {
   display: grid;
+  width: 100%;
+  min-width: 0;
   grid-template-columns: 1fr 1fr 0.8fr;
   gap: 10px;
   padding: 8px 10px;
+  border: 1px solid transparent;
   border-radius: 9px;
+  color: inherit;
+  font: inherit;
+  text-align: left;
   background: color-mix(in srgb, var(--hm-row-hover) 68%, transparent);
+  cursor: pointer;
+  transition:
+    background var(--hm-motion-fast) var(--hm-motion-ease-out),
+    border-color var(--hm-motion-fast) var(--hm-motion-ease-out),
+    box-shadow var(--hm-motion-fast) var(--hm-motion-ease-out),
+    transform var(--hm-motion-fast) var(--hm-motion-ease-out);
+}
+
+.adapter-live:hover {
+  border-color: color-mix(in srgb, var(--hm-accent) 22%, transparent);
+  background: color-mix(in srgb, var(--hm-accent-soft) 68%, var(--hm-row-hover));
+  box-shadow: 0 5px 14px color-mix(in srgb, var(--hm-accent) 8%, transparent);
+  transform: translateY(-1px);
+}
+
+.adapter-live:active {
+  transform: translateY(0);
+}
+
+.adapter-live:focus-visible {
+  border-color: var(--hm-accent);
+  outline: 2px solid color-mix(in srgb, var(--hm-accent) 32%, transparent);
+  outline-offset: 2px;
 }
 
 .adapter-live > span {

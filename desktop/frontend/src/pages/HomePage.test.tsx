@@ -97,23 +97,23 @@ describe("HomePage adapter interactions", () => {
     expect(onNavigate).toHaveBeenCalledWith("connections", "Ethernet");
   });
 
-  it("does not open connections for an adapter outside aggregation", () => {
+  it("keeps connection navigation available and uses the card to select an inactive adapter", () => {
     const inactiveAdapter = { ...adapter, selected: false };
-    mocks.useEngineState.mockReturnValue({
+    const inactiveEngine = {
       ...engineState(),
       adapters: [inactiveAdapter],
       selected: [],
       totalWeight: 0,
-    });
+    };
+    mocks.useEngineState.mockReturnValue(inactiveEngine);
     const onNavigate = vi.fn();
     render(<HomePage onNavigate={onNavigate} />);
 
-    const nameButton = screen.getByRole("button", { name: "View active connections for Ethernet" }) as HTMLButtonElement;
-    expect(nameButton.disabled).toBe(true);
-    fireEvent.click(nameButton);
+    fireEvent.click(screen.getByRole("button", { name: "View active connections for Ethernet" }));
     fireEvent.click(screen.getByRole("article"));
 
-    expect(onNavigate).not.toHaveBeenCalled();
+    expect(onNavigate).toHaveBeenCalledWith("connections", "Ethernet");
+    expect(inactiveEngine.toggleAdapter).toHaveBeenCalledWith("Ethernet", true);
   });
 
   it("keeps adapter controls from triggering connection navigation", () => {

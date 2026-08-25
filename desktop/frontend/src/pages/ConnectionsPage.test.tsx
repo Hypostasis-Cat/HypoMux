@@ -192,4 +192,31 @@ describe("ConnectionsPage interactions", () => {
     expect(within(rows[1]).getByText("Zulu.exe")).not.toBeNull();
     expect(screen.getByRole("status").textContent).toContain("Traffic · Ascending");
   });
+
+  it("only offers single-NIC routing when such connections exist", async () => {
+    render(<ConnectionsPage adapterRuntime={adapterRuntime} />);
+    await screen.findByText("ethernet.example");
+
+    fireEvent.click(screen.getByRole("combobox", { name: "Filter by egress policy" }));
+    expect(screen.queryByRole("option", { name: "Single-NIC routing" })).toBeNull();
+
+    cleanup();
+    mocks.connections.mockResolvedValue({
+      ...snapshot,
+      connections: [
+        ...connections,
+        connection({
+          id: 3,
+          process: "Pinned.exe",
+          outbound: "adapter",
+          outbound_detail: "Ethernet",
+        }),
+      ],
+    });
+    render(<ConnectionsPage adapterRuntime={adapterRuntime} />);
+    await screen.findByText("Pinned.exe");
+
+    fireEvent.click(screen.getByRole("combobox", { name: "Filter by egress policy" }));
+    expect(await screen.findByRole("option", { name: "Single-NIC routing" })).not.toBeNull();
+  });
 });

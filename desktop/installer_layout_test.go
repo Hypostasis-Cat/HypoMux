@@ -600,8 +600,8 @@ func TestHomeThroughputUsesLightweightFastTelemetryAndSynchronizedLayers(t *test
 		`export const HOME_TELEMETRY_POLL_MS = 800`,
 		`}, HOME_TELEMETRY_POLL_MS);`,
 		`map[string]any{"include_connections": false}`,
-		`.throughput-line,` + "\n" + `.throughput-fill {`,
-		`transition: d var(--hm-motion-normal) linear`,
+		`.throughput-line,` + "\n" + `.throughput-line-glow,` + "\n" + `.throughput-fill {`,
+		`transition: d 680ms cubic-bezier(0.22, 1, 0.36, 1);`,
 	} {
 		if !strings.Contains(stateSource+engineSource+css, required) {
 			t.Fatalf("home throughput synchronization is missing %q", required)

@@ -164,6 +164,17 @@ export function ConnectionsPage({
     { up: 0, down: 0 },
   ), [snapshot.connections]);
 
+  const hasSingleAdapterRouting = useMemo(
+    () => snapshot.connections.some((connection) => connection.outbound === "adapter"),
+    [snapshot.connections],
+  );
+
+  useEffect(() => {
+    if (!loading && outboundFilter === "adapter" && !hasSingleAdapterRouting) {
+      setOutboundFilter("all");
+    }
+  }, [hasSingleAdapterRouting, loading, outboundFilter]);
+
   const groups = useMemo(
     () => groupedByAdapter ? groupConnectionsByAdapter(filtered, adapterRuntime) : [],
     [adapterRuntime, filtered, groupedByAdapter],
@@ -175,7 +186,7 @@ export function ConnectionsPage({
     }
     if (connection.outbound === "adapter") {
       return {
-        label: text(`指定网卡 · ${connection.outbound_detail || connection.adapter || "—"}`, `NIC · ${connection.outbound_detail || connection.adapter || "—"}`),
+        label: text(`单网卡分流 · ${connection.outbound_detail || connection.adapter || "—"}`, `Single-NIC route · ${connection.outbound_detail || connection.adapter || "—"}`),
         color: "informative" as const,
       };
     }
@@ -325,12 +336,13 @@ export function ConnectionsPage({
               <Dropdown
                 appearance="filled-darker"
                 size="small"
+                positioning={{ position: "below", align: "end", pinned: true, strategy: "fixed", offset: 4 }}
                 aria-label={text("按出口策略筛选", "Filter by egress policy")}
                 value={{
                   all: text("全部出口", "All egress"),
                   aggregation: text("多网卡聚合", "Aggregated"),
                   direct: text("直连", "Direct"),
-                  adapter: text("指定网卡", "Specified NIC"),
+                  adapter: text("单网卡分流", "Single-NIC routing"),
                 }[outboundFilter]}
                 selectedOptions={[outboundFilter]}
                 onOptionSelect={(_, data) => data.optionValue && setOutboundFilter(data.optionValue as ConnectionOutboundFilter)}
@@ -338,7 +350,9 @@ export function ConnectionsPage({
                 <Option value="all">{text("全部出口", "All egress")}</Option>
                 <Option value="aggregation">{text("多网卡聚合", "Aggregated")}</Option>
                 <Option value="direct">{text("直连", "Direct")}</Option>
-                <Option value="adapter">{text("指定网卡", "Specified NIC")}</Option>
+                {hasSingleAdapterRouting && (
+                  <Option value="adapter">{text("单网卡分流", "Single-NIC routing")}</Option>
+                )}
               </Dropdown>
             </label>
           </div>
