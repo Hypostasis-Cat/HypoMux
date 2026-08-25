@@ -932,11 +932,13 @@ svg {
 }
 
 .throughput-graph {
+  isolation: isolate;
   width: 100%;
   height: 82px;
   min-height: 0;
   margin-top: 14px;
-  overflow: visible;
+  overflow: hidden;
+  border-radius: 8px;
 }
 
 .throughput-idle {
@@ -970,19 +972,94 @@ svg {
 
 .throughput-line {
   fill: none;
-  stroke: color-mix(in srgb, var(--hm-accent) 74%, var(--hm-text-primary));
-  stroke-width: 1.15;
+  stroke-width: 1.35;
+  stroke-linecap: round;
+  stroke-linejoin: round;
   vector-effect: non-scaling-stroke;
-  filter: drop-shadow(0 2px 5px var(--hm-accent-soft));
+}
+
+.throughput-line-glow {
+  fill: none;
+  stroke: color-mix(in srgb, var(--hm-accent) 32%, transparent);
+  stroke-width: 5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+  filter: blur(3.5px);
+  opacity: 0.48;
 }
 
 .throughput-line,
+.throughput-line-glow,
+.throughput-clip-path,
 .throughput-fill {
-  transition: d var(--hm-motion-normal) linear;
+  transition: d 680ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .throughput-fill {
-  fill: url("#throughputFill");
+  opacity: 0.92;
+}
+
+.throughput-clip-path {
+  fill: #000;
+}
+
+.throughput-grid line {
+  stroke: color-mix(in srgb, var(--hm-outer-border) 68%, transparent);
+  stroke-width: 0.65;
+  stroke-dasharray: 1.2 3.4;
+  vector-effect: non-scaling-stroke;
+}
+
+.throughput-grid line:last-child {
+  stroke: color-mix(in srgb, var(--hm-accent) 20%, var(--hm-outer-border));
+  stroke-dasharray: none;
+}
+
+.throughput-ambient-flow {
+  opacity: 0;
+  transform: translateX(0);
+  animation: throughput-ambient-flow 7.2s var(--hm-motion-ease-in-out) infinite;
+}
+
+@keyframes throughput-ambient-flow {
+  0%, 18% {
+    opacity: 0;
+    transform: translateX(0);
+  }
+
+  28% {
+    opacity: 0.72;
+  }
+
+  66% {
+    opacity: 0.46;
+  }
+
+  76%, 100% {
+    opacity: 0;
+    transform: translateX(146px);
+  }
+}
+
+[data-motion="reduced"] .throughput-ambient-flow,
+[data-motion="off"] .throughput-ambient-flow {
+  animation: none;
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .throughput-ambient-flow {
+    animation: none;
+    opacity: 0;
+  }
+
+  .throughput-line,
+  .throughput-line-glow,
+  .throughput-clip-path,
+  .throughput-fill {
+    transition-duration: 100ms;
+  }
 }
 
 .network-section {
@@ -2467,12 +2544,21 @@ svg {
   padding: 12px 14px;
   align-items: center;
   grid-template-columns: minmax(230px, 0.72fr) minmax(440px, 1.35fr) auto;
+  grid-template-areas: "copy fields actions";
   gap: 12px;
+}
+
+.nat-control.is-engine-blocked {
+  grid-template-areas:
+    "copy warning warning"
+    "fields fields actions";
+  row-gap: 10px;
 }
 
 .nat-control-fields {
   display: grid;
   min-width: 0;
+  grid-area: fields;
   grid-template-columns: repeat(2, minmax(190px, 1fr));
   gap: 8px;
 }
@@ -2492,6 +2578,7 @@ svg {
 
 .nat-control-actions {
   display: flex;
+  grid-area: actions;
   align-self: end;
   gap: 5px;
 }
@@ -2500,6 +2587,7 @@ svg {
   display: flex;
   min-width: 0;
   align-items: center;
+  grid-area: copy;
   gap: 11px;
 }
 
@@ -2527,7 +2615,7 @@ svg {
   display: grid;
   padding: 9px 11px;
   align-items: center;
-  grid-column: 1 / -1;
+  grid-area: warning;
   grid-template-columns: auto minmax(0, 1fr);
   gap: 9px;
   border: 1px solid color-mix(in srgb, var(--hm-warning) 25%, var(--hm-outer-border));

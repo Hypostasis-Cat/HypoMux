@@ -392,7 +392,7 @@ export function NATDetectionPage({ adapters, enginePhase, loading, preview, text
 
   return (
     <section className="nat-page health-view-enter" aria-live="polite">
-      <GlassSurface className="nat-control" tone="secondary">
+      <GlassSurface className={`nat-control${engineBlocked ? " is-engine-blocked" : ""}`} tone="secondary">
         <div className="nat-control-copy">
           <span className="nat-icon"><Globe20Regular /></span>
           <div>

@@ -78,6 +78,11 @@ function browserFixturePhase(): EnginePhase {
     : "stopped";
 }
 
+function browserThroughputFixture() {
+  if (new URLSearchParams(window.location.search).get("throughput") !== "demo") return undefined;
+  return [2.6, 3.1, 4.8, 4.2, 6.5, 8.4, 7.8, 11.2, 13.6, 12.4, 17.8, 20.2, 18.9, 24.6, 27.2, 25.8, 31.4, 34.8];
+}
+
 const isBrowserPreview = () => {
   const explicitVisualQA = new URLSearchParams(window.location.search).get("fixture") === "visual-qa";
   return !isDesktopRuntime() && (import.meta.env.DEV || explicitVisualQA);
@@ -204,7 +209,15 @@ export function useEngineState(
       adaptersRef.current = fixtures;
       setAdapters(fixtures);
       setPreview(true);
-      applySnapshot({ ...emptySnapshot(modeRef.current), phase: browserFixturePhase() });
+      const throughputFixture = browserThroughputFixture();
+      if (throughputFixture) setHistory(throughputFixture.slice(0, -1));
+      applySnapshot({
+        ...emptySnapshot(modeRef.current),
+        phase: browserFixturePhase(),
+        download_bps: (throughputFixture?.[throughputFixture.length - 1] ?? 0) * 1024 * 1024,
+        upload_bps: (throughputFixture ? 4.6 : 0) * 1024 * 1024,
+        connections: throughputFixture ? 36 : 0,
+      });
       setLoading(false);
       return;
     }
