@@ -27,12 +27,15 @@ import {
   type NATServerSnapshot,
 } from "../platform/services";
 import { startSerialPoll } from "../platform/serialPoll";
+import type { EnginePhase } from "../state/useEngineState";
+import { isNATDetectionBlocked } from "./natDetectionPolicy";
 
 type Text = (zh: string, en: string) => string;
 type Notify = (title: string, message: string, intent?: "success" | "error" | "warning") => void;
 
 type NATDetectionPageProps = {
   adapters: AdapterView[];
+  enginePhase?: EnginePhase;
   loading: boolean;
   preview: boolean;
   text: Text;
@@ -101,7 +104,7 @@ const previewFirewallLimited = (adapter: AdapterView): NATDetectionResult => ({
   }],
 });
 
-export function NATDetectionPage({ adapters, loading, preview, text, notify }: NATDetectionPageProps) {
+export function NATDetectionPage({ adapters, enginePhase, loading, preview, text, notify }: NATDetectionPageProps) {
   const eligible = useMemo(
     () => adapters.filter((adapter) => adapter.operational && Boolean(adapter.address)),
     [adapters],
@@ -165,10 +168,22 @@ export function NATDetectionPage({ adapters, loading, preview, text, notify }: N
   }, [preview, result.state]);
 
   const running = result.state === "running";
+  const engineBlocked = isNATDetectionBlocked(enginePhase);
   const selected = eligible.find((adapter) => adapter.id === adapterID);
   const selectedServer = serverSnapshot.servers.find((server) => server.id === serverSnapshot.selected_id);
 
   const run = useCallback(async () => {
+    if (engineBlocked) {
+      notify(
+        text("请先停止聚合", "Stop aggregation first"),
+        text(
+          "NAT 检测需要直连所选物理网卡；聚合运行时会改变代理、TUN 或路由路径，检测结果可能失败或不准确。",
+          "NAT detection needs a direct path through the selected physical adapter. Aggregation changes proxy, TUN, or routing paths, making the result unreliable.",
+        ),
+        "warning",
+      );
+      return;
+    }
     if (!selected) {
       notify(
         text("尚未选择网卡", "No adapter selected"),
@@ -207,7 +222,7 @@ export function NATDetectionPage({ adapters, loading, preview, text, notify }: N
       if (latest) setResult(latest);
       notify(text("NAT 检测失败", "NAT detection failed"), error instanceof Error ? error.message : String(error));
     }
-  }, [notify, preview, selected, serverSnapshot.selected_id, text]);
+  }, [engineBlocked, notify, preview, selected, serverSnapshot.selected_id, text]);
 
   const cancel = useCallback(async () => {
     if (preview) {
@@ -385,6 +400,18 @@ export function NATDetectionPage({ adapters, loading, preview, text, notify }: N
             <span>{text("按出口检测，每次选择一张网卡。", "Test one adapter egress at a time.")}</span>
           </div>
         </div>
+        {engineBlocked && !running && (
+          <div className="nat-engine-warning" role="status">
+            <Warning20Regular />
+            <span>
+              <strong>{text("请先停止聚合再检测", "Stop aggregation before testing")}</strong>
+              <small>{text(
+                "聚合会改变当前网络路径，无法保证结果属于所选物理网卡。停止后即可检测，现有配置不会被修改。",
+                "Aggregation changes the active network path, so the result cannot be attributed reliably to the selected physical adapter. Stop it to test; your configuration will not be changed.",
+              )}</small>
+            </span>
+          </div>
+        )}
         <div className="nat-control-fields">
           <label>
             <span>{text("出口网卡", "Egress adapter")}</span>
@@ -470,7 +497,7 @@ export function NATDetectionPage({ adapters, loading, preview, text, notify }: N
             <Button appearance="secondary" icon={<Stop20Regular />} onClick={cancel}>{text("取消检测", "Cancel")}</Button>
           ) : (
             <Button appearance="primary" icon={result.state === "idle" ? <Play20Regular /> : <ArrowSync20Regular />}
-              disabled={loading || !selected || serverSnapshot.servers.length === 0} onClick={run}>
+              disabled={engineBlocked || loading || !selected || serverSnapshot.servers.length === 0} onClick={run}>
               {result.state === "idle" ? text("开始检测", "Start detection") : text("重新检测", "Test again")}
             </Button>
           )}
@@ -513,7 +540,7 @@ export function NATDetectionPage({ adapters, loading, preview, text, notify }: N
               <div className="nat-firewall-warning">
                 <Warning20Regular />
                 <span><strong>{text("本机防火墙影响了过滤测试", "Host firewall affected the filtering test")}</strong><small>{detail}</small></span>
-                <Button appearance="secondary" size="small" disabled={firewallBusy} onClick={allowFirewallAndRetry}>
+                <Button appearance="secondary" size="small" disabled={engineBlocked || firewallBusy} onClick={allowFirewallAndRetry}>
                   {firewallBusy ? text("正在处理…", "Working…") : text("允许并重测", "Allow and retest")}
                 </Button>
               </div>

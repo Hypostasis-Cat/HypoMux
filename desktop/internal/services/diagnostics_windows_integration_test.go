@@ -27,7 +27,7 @@ func TestRealWindowsAdapterDiagnostic(t *testing.T) {
 	}
 
 	logs := newSupportLogStore(filepath.Join(t.TempDir(), "logs", "app.log"))
-	service := NewDiagnosticsService(settings, adapters, nil, logs)
+	service := NewDiagnosticsService(settings, adapters, nil, logs, nil)
 	snapshot, err := service.Run([]string{available[0].ID})
 	if err != nil {
 		t.Fatal(err)

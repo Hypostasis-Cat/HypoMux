@@ -11,7 +11,7 @@ import { AppShell } from "./components/shell/AppShell";
 import type { AppPage } from "./components/shell/CompactNavigation";
 import { HomePage } from "./pages/HomePage";
 import { advanceConnectionsNavigation } from "./pages/connectionNavigation";
-import type { HomeAdapter } from "./state/useEngineState";
+import type { EnginePhase, HomeAdapter } from "./state/useEngineState";
 import { AppearanceProvider, useAppearance } from "./theme/appearance.store";
 import { LanguageProvider } from "./i18n/i18n";
 import { desktopPlatform } from "./platform/desktop";
@@ -39,7 +39,8 @@ function HypoMuxWindow() {
   const [pageDirection, setPageDirection] = useState<"forward" | "backward">("forward");
   const [navigationRevision, setNavigationRevision] = useState(0);
   const [connectionsNavigation, setConnectionsNavigation] = useState({ adapter: "", revision: 0 });
-  const [connectionAdapters, setConnectionAdapters] = useState<HomeAdapter[]>([]);
+  const [connectionAdapters, setConnectionAdapters] = useState<HomeAdapter[] | undefined>(undefined);
+  const [enginePhase, setEnginePhase] = useState<EnginePhase | undefined>(undefined);
   const [startupRevealed, setStartupRevealed] = useState(false);
   const { fluentTheme } = useAppearance();
   const pageOrder: AppPage[] = [
@@ -93,6 +94,7 @@ function HypoMuxWindow() {
           <HomePage
             onNavigate={navigate}
             onAdapterRuntimeChange={setConnectionAdapters}
+            onEnginePhaseChange={setEnginePhase}
           />
         )}
       >
@@ -102,16 +104,19 @@ function HypoMuxWindow() {
             : page === "about"
               ? <AboutPage />
               : page === "settings"
-                ? <SettingsPage onOpenBlockedDomains={() => navigate("blocked-domains")} />
+                ? <SettingsPage
+                  adapterRuntime={connectionAdapters}
+                  onOpenBlockedDomains={() => navigate("blocked-domains")}
+                />
                 : page === "blocked-domains"
                   ? <BlockedDomainsPage onBack={() => navigate("settings")} />
             : page === "health"
-              ? <HealthPage />
+              ? <HealthPage adapterRuntime={connectionAdapters} enginePhase={enginePhase} />
               : page === "connections"
                 ? <ConnectionsPage
                   initialAdapter={connectionsNavigation.adapter}
                   adapterRevision={connectionsNavigation.revision}
-                  adapterRuntime={connectionAdapters}
+                  adapterRuntime={connectionAdapters ?? []}
                 />
             : page === "routing"
               ? <RoutingPage />

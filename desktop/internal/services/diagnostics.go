@@ -77,6 +77,7 @@ type DiagnosticsService struct {
 	cancel       context.CancelFunc
 	natCancel    context.CancelFunc
 	natRunning   bool
+	natRunGuard  func() error
 	detectNAT    func(context.Context, AdapterView, []NATServer) NATDetectionResult
 	natServers   *natServerStore
 	latest       DiagnosticSnapshot
@@ -88,10 +89,12 @@ func NewDiagnosticsService(
 	adapters *AdapterService,
 	desktop platform.DesktopHost,
 	logs *SupportLogStore,
+	natRunGuard func() error,
 ) *DiagnosticsService {
 	return &DiagnosticsService{
 		settings: settings, adapters: adapters, desktop: desktop, logs: logs,
 		probe:        newDiagnosticProbe(),
+		natRunGuard:  natRunGuard,
 		detectNAT:    detectAdapterNAT,
 		natServers:   newDefaultNATServerStore(),
 		listAdapters: adapters.List,
@@ -150,6 +153,18 @@ func (s *DiagnosticsService) natServerStore() *natServerStore {
 }
 
 func (s *DiagnosticsService) RunNAT(adapterID string, serverID string) (NATDetectionResult, error) {
+	s.mu.Lock()
+	if s.natRunning {
+		s.mu.Unlock()
+		return NATDetectionResult{}, errors.New("NAT 类型检测已在运行")
+	}
+	guard := s.natRunGuard
+	s.mu.Unlock()
+	if guard != nil {
+		if err := guard(); err != nil {
+			return NATDetectionResult{}, err
+		}
+	}
 	s.mu.Lock()
 	if s.natRunning {
 		s.mu.Unlock()

@@ -38,7 +38,10 @@ import { useI18n } from "../i18n/i18n";
 import { isDesktopRuntime } from "../platform/runtime";
 import { adapterSaveInput, adapterSaveQueue } from "../platform/adapterSaveQueue";
 import { startSerialPoll } from "../platform/serialPoll";
+import type { EnginePhase } from "../state/useEngineState";
+import { adapterListKey } from "../state/adapterRuntime";
 import { NATDetectionPage } from "./NATDetectionPage";
+import { isNATDetectionBlocked } from "./natDetectionPolicy";
 
 const isBrowserPreview = () => import.meta.env.DEV && !isDesktopRuntime();
 
@@ -87,7 +90,13 @@ const previewResult = (adapter: AdapterView, index: number): DiagnosticResult =>
   completed_at: new Date().toISOString(),
 });
 
-export function HealthPage() {
+export function HealthPage({
+  adapterRuntime,
+  enginePhase,
+}: {
+  adapterRuntime?: readonly AdapterView[];
+  enginePhase?: EnginePhase;
+}) {
   const { locale } = useI18n();
   const text = useCallback((zh: string, en: string) => locale === "en" ? en : zh, [locale]);
   const statusMeta = useMemo(() => ({
@@ -123,10 +132,15 @@ export function HealthPage() {
   const [engineRunning, setEngineRunning] = useState(false);
   const [healthView, setHealthView] = useState<"link" | "nat">("link");
   const adaptersRef = useRef<AdapterView[]>([]);
+  const adapterRuntimeRef = useRef(adapterRuntime);
+  const adapterRuntimeKeyRef = useRef<string>();
+  const enginePhaseRef = useRef(enginePhase);
   const homeSettingsRef = useRef({ mode: "proxy", weighted: false });
   const stopPoller = useRef<(() => void)>();
   const diagnosticEpoch = useRef(0);
   const mounted = useRef(true);
+  adapterRuntimeRef.current = adapterRuntime;
+  enginePhaseRef.current = enginePhase;
 
   const notify = useCallback((title: string, message: string, intent: "success" | "error" | "warning" = "error") => {
     dispatchToast(
@@ -139,29 +153,36 @@ export function HealthPage() {
   }, [dispatchToast]);
 
   const load = useCallback(async () => {
-    const runtimeTask = withServiceTimeout(
-      appServices.engine.snapshot(),
-      10_000,
-      text("读取 Core 状态", "Loading Core status"),
-    ).then((engine) => {
-      setEngineRunning(engine.phase === "running" || engine.phase === "starting");
-    }).catch((error) => {
-      if (!isBrowserPreview()) {
-        notify(
-          text("Core 状态暂不可用", "Core status is temporarily unavailable"),
-          error instanceof Error ? error.message : String(error),
-          "warning",
-        );
-      }
-    });
+    const runtimeTask = enginePhaseRef.current === undefined
+      ? withServiceTimeout(
+        appServices.engine.snapshot(),
+        10_000,
+        text("读取 Core 状态", "Loading Core status"),
+      ).then((engine) => {
+        setEngineRunning(isNATDetectionBlocked(engine.phase as EnginePhase));
+      }).catch((error) => {
+        if (!isBrowserPreview()) {
+          notify(
+            text("Core 状态暂不可用", "Core status is temporarily unavailable"),
+            error instanceof Error ? error.message : String(error),
+            "warning",
+          );
+        }
+      })
+      : Promise.resolve();
     try {
       const [nextAdapters, latest, settings] = await withServiceTimeout(Promise.all([
-        appServices.adapters.list(),
+        adapterRuntimeRef.current !== undefined
+          ? Promise.resolve([...adapterRuntimeRef.current])
+          : appServices.adapters.list(),
         appServices.diagnostics.latest(),
         appServices.settings.get(),
       ]), 10_000, text("读取网络体检数据", "Loading network diagnostics"));
-      setAdapters(nextAdapters ?? []);
-      adaptersRef.current = nextAdapters ?? [];
+      const authoritativeAdapters = adapterRuntimeRef.current !== undefined
+        ? [...adapterRuntimeRef.current]
+        : nextAdapters ?? [];
+      setAdapters(authoritativeAdapters);
+      adaptersRef.current = authoritativeAdapters;
       setSnapshot(latest);
       homeSettingsRef.current = { mode: settings.mode, weighted: settings.weighted };
       setPreview(false);
@@ -190,6 +211,22 @@ export function HealthPage() {
     }
     void runtimeTask;
   }, [notify, text]);
+
+  useEffect(() => {
+    if (adapterRuntime === undefined) return;
+    const nextKey = adapterListKey(adapterRuntime);
+    if (adapterRuntimeKeyRef.current === nextKey) return;
+    adapterRuntimeKeyRef.current = nextKey;
+    const next = [...adapterRuntime];
+    adaptersRef.current = next;
+    setAdapters(next);
+    setLoading(false);
+  }, [adapterRuntime]);
+
+  useEffect(() => {
+    if (enginePhase === undefined) return;
+    setEngineRunning(isNATDetectionBlocked(enginePhase));
+  }, [enginePhase]);
 
   useEffect(() => {
     mounted.current = true;
@@ -523,7 +560,14 @@ export function HealthPage() {
           </section>
         </div>
       ) : (
-        <NATDetectionPage adapters={adapters} loading={loading} preview={preview} text={text} notify={notify} />
+        <NATDetectionPage
+          adapters={adapters}
+          enginePhase={enginePhase}
+          loading={loading}
+          preview={preview}
+          text={text}
+          notify={notify}
+        />
       )}
       {preview && (
         <Tooltip content={text("浏览器预览不会发送真实网络探针", "Browser preview does not send real network probes")} relationship="description">

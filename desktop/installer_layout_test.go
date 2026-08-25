@@ -316,7 +316,7 @@ func TestReleasePublishesOneSignedInstallerThenUpdatesSignedChannel(t *testing.T
 }
 
 func TestReleaseNotesAreTheSingleSourceForReleaseBodiesAndManifest(t *testing.T) {
-	notesPath := "../.github/release-notes/v2.5.7.md"
+	notesPath := "../.github/release-notes/v2.5.8.md"
 	notes, err := os.ReadFile(notesPath)
 	if err != nil {
 		t.Fatal(err)
@@ -427,7 +427,7 @@ func TestReleaseTrustSmokeWorkflowIsReadOnly(t *testing.T) {
 }
 
 func TestVersionMetadataIsConsistent(t *testing.T) {
-	const version = "2.5.7"
+	const version = "2.5.8"
 	files := []string{
 		"Taskfile.yml",
 		"build/config.yml",
@@ -571,12 +571,41 @@ func TestHomeEngineStatePersistsAcrossPageNavigation(t *testing.T) {
 	if strings.Contains(appSource, `: <HomePage onNavigate={navigate} />}`) {
 		t.Fatal("HomePage is still conditionally mounted and will lose an in-flight engine transition")
 	}
-	if !strings.Contains(homeSource, `onAdapterRuntimeChange?.(engine.adapters)`) {
-		t.Fatal("HomePage does not propagate its existing adapter telemetry")
+	if !strings.Contains(homeSource, `engine.loading ? undefined : engine.adapters`) {
+		t.Fatal("HomePage does not propagate its authoritative adapter telemetry after loading")
 	}
 	if strings.Contains(connectionsSource, `appServices.engine.snapshot()`) ||
 		strings.Contains(connectionsSource, `setAdapterRuntime`) {
 		t.Fatal("ConnectionsPage must reuse HomePage telemetry instead of sampling engine state")
+	}
+}
+
+func TestHomeThroughputUsesLightweightFastTelemetryAndSynchronizedLayers(t *testing.T) {
+	stateData, err := os.ReadFile("frontend/src/state/useEngineState.ts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	engineData, err := os.ReadFile("internal/services/engine.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cssData, err := os.ReadFile("frontend/src/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stateSource := string(stateData)
+	engineSource := string(engineData)
+	css := string(cssData)
+	for _, required := range []string{
+		`export const HOME_TELEMETRY_POLL_MS = 800`,
+		`}, HOME_TELEMETRY_POLL_MS);`,
+		`map[string]any{"include_connections": false}`,
+		`.throughput-line,` + "\n" + `.throughput-fill {`,
+		`transition: d var(--hm-motion-normal) linear`,
+	} {
+		if !strings.Contains(stateSource+engineSource+css, required) {
+			t.Fatalf("home throughput synchronization is missing %q", required)
+		}
 	}
 }
 
@@ -683,7 +712,7 @@ func TestWindowsTaskManagerUsesProductName(t *testing.T) {
 			t.Fatalf("Windows version strings are missing language fallback %s", language)
 		}
 	}
-	if strings.Count(string(infoData), `"FileVersion": "2.5.7"`) != 2 {
+	if strings.Count(string(infoData), `"FileVersion": "2.5.8"`) != 2 {
 		t.Fatal("Windows neutral and en-US version tables must both expose FileVersion")
 	}
 }

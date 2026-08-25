@@ -405,7 +405,7 @@ func (s *EngineService) Snapshot() (EngineSnapshot, error) {
 	}
 	s.mu.Unlock()
 	var telemetry telemetryResult
-	if err := s.client.Request(ctx, "engine.telemetry", map[string]any{"include_connections": true}, &telemetry); err != nil {
+	if err := s.client.Request(ctx, "engine.telemetry", map[string]any{"include_connections": false}, &telemetry); err != nil {
 		return EngineSnapshot{}, fmt.Errorf("读取聚合遥测失败：%w", err)
 	}
 	snapshot.SampledAt = telemetry.SampledAt

@@ -24,7 +24,7 @@ import {
   ShieldError20Regular,
   Warning20Regular,
 } from "@fluentui/react-icons";
-import { useEngineState, type HomeAdapter } from "../state/useEngineState";
+import { useEngineState, type EnginePhase, type HomeAdapter } from "../state/useEngineState";
 import { EngineHero } from "../components/home/EngineHero";
 import { NetworkAdapterItem } from "../components/home/NetworkAdapterItem";
 import { RuntimeStatusBar } from "../components/home/RuntimeStatusBar";
@@ -43,9 +43,11 @@ const formatBytes = (value: number) => {
 export function HomePage({
   onNavigate,
   onAdapterRuntimeChange,
+  onEnginePhaseChange,
 }: {
   onNavigate?: (page: AppPage, adapterName?: string) => void;
-  onAdapterRuntimeChange?: (adapters: HomeAdapter[]) => void;
+  onAdapterRuntimeChange?: (adapters: HomeAdapter[] | undefined) => void;
+  onEnginePhaseChange?: (phase: EnginePhase) => void;
 }) {
   const { locale, t } = useI18n();
   const text = (zh: string, en: string) => locale === "en" ? en : zh;
@@ -87,7 +89,11 @@ export function HomePage({
   }, []);
   useEffect(() => () => preflightResolver.current?.(false), []);
   const engine = useEngineState(notifyError, handleTunPreflight);
-  useEffect(() => onAdapterRuntimeChange?.(engine.adapters), [engine.adapters, onAdapterRuntimeChange]);
+  useEffect(
+    () => onAdapterRuntimeChange?.(engine.loading ? undefined : engine.adapters),
+    [engine.adapters, engine.loading, onAdapterRuntimeChange],
+  );
+  useEffect(() => onEnginePhaseChange?.(engine.phase), [engine.phase, onEnginePhaseChange]);
   const preflightIssues = preflightDialog?.issues ?? [];
   const blockerCount = preflightIssues.filter((issue) => issue.level === "blocker").length;
   const warningCount = preflightIssues.filter((issue) => issue.level === "warning").length;

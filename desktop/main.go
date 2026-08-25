@@ -154,6 +154,18 @@ func main() {
 	updaterService := services.NewUpdaterService(desktop.Quit)
 	diagnosticsService = services.NewDiagnosticsService(
 		settingsService, adapterService, desktop, supportLogs,
+		func() error {
+			snapshot, err := engineService.Snapshot()
+			if err != nil {
+				return nil
+			}
+			switch snapshot.Phase {
+			case "starting", "running", "degraded", "stopping":
+				return fmt.Errorf("请先停止聚合再进行 NAT 类型检测；聚合运行时无法保证检测流量直连所选物理网卡")
+			default:
+				return nil
+			}
+		},
 	)
 	routingService := services.NewRoutingRuleService(settingsService, adapterService, desktop)
 	app.RegisterService(application.NewService(desktop))

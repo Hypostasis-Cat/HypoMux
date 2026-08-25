@@ -125,4 +125,30 @@ describe("HomePage adapter interactions", () => {
 
     expect(onNavigate).not.toHaveBeenCalled();
   });
+
+  it("publishes adapter readiness and engine phase to the shared runtime feed", () => {
+    const onAdapterRuntimeChange = vi.fn();
+    const onEnginePhaseChange = vi.fn();
+    mocks.useEngineState.mockReturnValue({ ...engineState(), loading: true, phase: "starting" });
+    const { rerender } = render(
+      <HomePage
+        onAdapterRuntimeChange={onAdapterRuntimeChange}
+        onEnginePhaseChange={onEnginePhaseChange}
+      />,
+    );
+
+    expect(onAdapterRuntimeChange).toHaveBeenLastCalledWith(undefined);
+    expect(onEnginePhaseChange).toHaveBeenLastCalledWith("starting");
+
+    mocks.useEngineState.mockReturnValue({ ...engineState(), adapters: [], selected: [], totalWeight: 0 });
+    rerender(
+      <HomePage
+        onAdapterRuntimeChange={onAdapterRuntimeChange}
+        onEnginePhaseChange={onEnginePhaseChange}
+      />,
+    );
+
+    expect(onAdapterRuntimeChange).toHaveBeenLastCalledWith([]);
+    expect(onEnginePhaseChange).toHaveBeenLastCalledWith("stopped");
+  });
 });

@@ -33,6 +33,7 @@ import { AppToaster } from "../components/AppToaster";
 import { desktopPlatform } from "../platform/desktop";
 import { appServices, type AdapterView, type CompleteAppSettings, type ConfigMigrationStatus } from "../platform/services";
 import { SettingsSaveQueue, type SaveOutcome } from "../platform/settingsQueue";
+import { adapterListKey } from "../state/adapterRuntime";
 import { accentColours } from "../theme/appearance.presets";
 import { useAppearance } from "../theme/appearance.store";
 import { backgroundService } from "../theme/background.service";
@@ -222,7 +223,13 @@ function SettingTabs({
   );
 }
 
-export function SettingsPage({ onOpenBlockedDomains }: { onOpenBlockedDomains: () => void }) {
+export function SettingsPage({
+  adapterRuntime,
+  onOpenBlockedDomains,
+}: {
+  adapterRuntime?: readonly AdapterView[];
+  onOpenBlockedDomains: () => void;
+}) {
   const [settings, setSettings] = useState<CompleteAppSettings>(emptySettings);
   const [adapters, setAdapters] = useState<AdapterView[]>([]);
   const [configPath, setConfigPath] = useState("");
@@ -241,6 +248,9 @@ export function SettingsPage({ onOpenBlockedDomains }: { onOpenBlockedDomains: (
   const sectionIndexSentinelRef = useRef<HTMLSpanElement>(null);
   const sectionIndexShellRef = useRef<HTMLDivElement>(null);
   const sectionIndexRef = useRef<HTMLElement>(null);
+  const adapterRuntimeRef = useRef(adapterRuntime);
+  const adapterRuntimeKeyRef = useRef<string>();
+  adapterRuntimeRef.current = adapterRuntime;
 
   useEffect(() => {
     const root = settingsPageRef.current;
@@ -312,17 +322,27 @@ export function SettingsPage({ onOpenBlockedDomains }: { onOpenBlockedDomains: (
   }, [appearancePersistenceError, notify, t]);
 
   useEffect(() => {
+    if (adapterRuntime === undefined) return;
+    const nextKey = adapterListKey(adapterRuntime);
+    if (adapterRuntimeKeyRef.current === nextKey) return;
+    adapterRuntimeKeyRef.current = nextKey;
+    setAdapters([...adapterRuntime]);
+  }, [adapterRuntime]);
+
+  useEffect(() => {
     Promise.all([
       appServices.settings.get(),
       appServices.settings.configPath(),
       appServices.settings.migrationStatus(),
-      appServices.adapters.list().catch(() => []),
+      adapterRuntimeRef.current !== undefined
+        ? Promise.resolve([...adapterRuntimeRef.current])
+        : appServices.adapters.list().catch(() => []),
     ])
       .then(([loaded, path, migrationStatus, loadedAdapters]) => {
         setSettings({ ...emptySettings, ...loaded });
         setConfigPath(path);
         setMigration(migrationStatus);
-        setAdapters(loadedAdapters ?? []);
+        setAdapters(adapterRuntimeRef.current !== undefined ? [...adapterRuntimeRef.current] : loadedAdapters ?? []);
       })
       .catch((error) => notify(text("设置读取失败", "Failed to load settings"), String(error), "error"))
       .finally(() => setLoading(false));

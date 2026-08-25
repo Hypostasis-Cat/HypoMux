@@ -184,13 +184,22 @@ export function ConnectionsPage({
 
   const engineRunning = snapshot.phase === "running";
   const hasViewFilter = query.trim().length > 0 || outboundFilter !== "all" || groupedByAdapter;
-  const columns: Array<{ key: ConnectionSortKey; label: string }> = [
-    { key: "process", label: text("进程", "Process") },
-    { key: "destination", label: text("目标", "Destination") },
-    { key: "policy", label: text("出口策略", "Egress policy") },
-    { key: "traffic", label: text("流量", "Traffic") },
-    { key: "duration", label: text("时长", "Duration") },
+  const columns: Array<{
+    key: ConnectionSortKey;
+    label: string;
+    defaultDirection: ConnectionSort["direction"];
+  }> = [
+    { key: "process", label: text("进程", "Process"), defaultDirection: "ascending" },
+    { key: "destination", label: text("目标", "Destination"), defaultDirection: "ascending" },
+    { key: "policy", label: text("出口策略", "Egress policy"), defaultDirection: "ascending" },
+    { key: "traffic", label: text("流量", "Traffic"), defaultDirection: "descending" },
+    { key: "duration", label: text("时长", "Duration"), defaultDirection: "descending" },
   ];
+  const activeSortColumn = columns.find((column) => column.key === sort.key) ?? columns[4];
+  const sortSummary = text(
+    `${activeSortColumn.label} · ${sort.direction === "ascending" ? "升序" : "降序"}`,
+    `${activeSortColumn.label} · ${sort.direction === "ascending" ? "Ascending" : "Descending"}`,
+  );
 
   const renderConnection = (connection: ConnectionView) => {
     const outbound = policy(connection);
@@ -285,7 +294,11 @@ export function ConnectionsPage({
         <div className="connection-view-toolbar">
           <span className="connection-view-result">
             <Filter20Regular />
-            {text(`显示 ${filtered.length} / ${snapshot.connections.length}`, `Showing ${filtered.length} of ${snapshot.connections.length}`)}
+            <span>{text(`显示 ${filtered.length} / ${snapshot.connections.length}`, `Showing ${filtered.length} of ${snapshot.connections.length}`)}</span>
+            <span className="connection-sort-summary" role="status" aria-live="polite">
+              {sortSummary}
+              <span aria-hidden="true">{sort.direction === "ascending" ? "↑" : "↓"}</span>
+            </span>
           </span>
           <div className="connection-view-controls">
             {groupedByAdapter && (
@@ -333,21 +346,28 @@ export function ConnectionsPage({
         <div className="connection-table-head" role="row">
           {columns.map((column) => {
             const direction = sort.key === column.key ? sort.direction : undefined;
-            const nextDirection = direction === "ascending" ? "descending" : "ascending";
+            const nextDirection = direction
+              ? direction === "ascending" ? "descending" : "ascending"
+              : column.defaultDirection;
+            const sortAction = text(
+              `按${column.label}${nextDirection === "ascending" ? "升序" : "降序"}排序`,
+              `Sort ${column.label} ${nextDirection}`,
+            );
             return (
               <span key={column.key} role="columnheader" aria-sort={direction ?? "none"}>
                 <button
                   type="button"
                   className={`connection-sort-button${direction ? " is-active" : ""}`}
-                  aria-label={text(
-                    `按${column.label}${nextDirection === "ascending" ? "升序" : "降序"}排序`,
-                    `Sort ${column.label} ${nextDirection}`,
-                  )}
+                  aria-label={sortAction}
+                  title={sortAction}
                   onClick={() => setSort({ key: column.key, direction: nextDirection })}
                 >
                   <span>{column.label}</span>
-                  <span className="connection-sort-indicator" aria-hidden="true">
-                    {direction === "ascending" ? "↑" : direction === "descending" ? "↓" : "↕"}
+                  <span
+                    className={`connection-sort-indicator${direction ? ` is-${direction}` : " is-idle"}`}
+                    aria-hidden="true"
+                  >
+                    {direction ? "↑" : "↕"}
                   </span>
                 </button>
               </span>

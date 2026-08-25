@@ -974,6 +974,10 @@ svg {
   stroke-width: 1.15;
   vector-effect: non-scaling-stroke;
   filter: drop-shadow(0 2px 5px var(--hm-accent-soft));
+}
+
+.throughput-line,
+.throughput-fill {
   transition: d var(--hm-motion-normal) linear;
 }
 
@@ -2519,6 +2523,42 @@ svg {
   font-size: 10.5px;
 }
 
+.nat-engine-warning {
+  display: grid;
+  padding: 9px 11px;
+  align-items: center;
+  grid-column: 1 / -1;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 9px;
+  border: 1px solid color-mix(in srgb, var(--hm-warning) 25%, var(--hm-outer-border));
+  border-radius: 8px;
+  color: var(--hm-warning);
+  background: color-mix(in srgb, var(--hm-warning) 9%, transparent);
+}
+
+.nat-engine-warning > svg {
+  flex: 0 0 auto;
+}
+
+.nat-engine-warning > span {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.nat-engine-warning strong {
+  color: var(--hm-text-primary);
+  font-size: 10.5px;
+  font-weight: 640;
+}
+
+.nat-engine-warning small {
+  color: var(--hm-text-secondary);
+  font-size: 9.5px;
+  line-height: 1.45;
+}
+
 .nat-icon {
   display: grid;
   width: 34px;
@@ -3266,6 +3306,26 @@ svg {
   white-space: nowrap;
 }
 
+.connection-sort-summary {
+  display: inline-flex;
+  min-height: 22px;
+  padding: 2px 7px;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid color-mix(in srgb, var(--hm-accent) 22%, transparent);
+  border-radius: 999px;
+  color: var(--hm-accent-strong);
+  background: color-mix(in srgb, var(--hm-accent-soft) 58%, transparent);
+  font-size: 9.5px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+}
+
+.connection-sort-summary > span {
+  font-size: 11px;
+  line-height: 1;
+}
+
 .connection-view-result > svg,
 .connection-view-controls label > svg {
   color: var(--hm-accent-strong);
@@ -3354,6 +3414,7 @@ svg {
 .connection-table-head {
   min-height: 40px;
   padding: 0 15px;
+  align-items: stretch;
   border-bottom: 1px solid var(--hm-outer-border);
   color: var(--hm-text-tertiary);
   font-size: 10.5px;
@@ -3361,46 +3422,111 @@ svg {
   letter-spacing: 0.035em;
 }
 
-.connection-sort-button {
-  display: inline-flex;
+.connection-table-head > span {
+  display: flex;
   min-width: 0;
-  padding: 5px 3px;
+  align-items: stretch;
+}
+
+.connection-sort-button {
+  position: relative;
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  min-height: 39px;
+  padding: 0 8px;
   align-items: center;
   gap: 4px;
   border: 0;
-  border-radius: 5px;
+  border-radius: 7px 7px 0 0;
   color: inherit;
   font: inherit;
   font-weight: inherit;
   letter-spacing: inherit;
   background: transparent;
   cursor: pointer;
+  transition:
+    color var(--hm-motion-fast) var(--hm-motion-ease-out),
+    background var(--hm-motion-fast) var(--hm-motion-ease-out),
+    box-shadow var(--hm-motion-fast) var(--hm-motion-ease-out);
+}
+
+.connection-sort-button::after {
+  position: absolute;
+  bottom: -1px;
+  left: 8px;
+  width: 42px;
+  height: 2px;
+  border-radius: 999px 999px 0 0;
+  background: var(--hm-accent);
+  box-shadow: 0 0 9px color-mix(in srgb, var(--hm-accent) 54%, transparent);
+  content: "";
+  opacity: 0;
+  transform: scaleX(0.35);
+  transform-origin: left center;
+  transition:
+    opacity var(--hm-motion-fast) var(--hm-motion-ease-out),
+    transform var(--hm-motion-fast) var(--hm-motion-spring);
 }
 
 .connection-table-head > span:last-child .connection-sort-button {
-  margin-left: auto;
+  justify-content: flex-end;
 }
 
-.connection-sort-button:hover,
-.connection-sort-button.is-active {
+.connection-table-head > span:last-child .connection-sort-button::after {
+  right: 8px;
+  left: auto;
+  transform-origin: right center;
+}
+
+.connection-sort-button:hover {
   color: var(--hm-text-primary);
-  background: color-mix(in srgb, var(--hm-accent-soft) 64%, transparent);
+  background: color-mix(in srgb, var(--hm-accent-soft) 34%, transparent);
+}
+
+.connection-sort-button.is-active {
+  color: var(--hm-accent-strong);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--hm-accent-soft) 70%, transparent),
+    color-mix(in srgb, var(--hm-accent-soft) 40%, transparent)
+  );
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--hm-accent) 16%, transparent);
+}
+
+.connection-sort-button.is-active::after {
+  opacity: 1;
+  transform: scaleX(1);
 }
 
 .connection-sort-button:focus-visible {
   outline: 2px solid var(--hm-accent);
-  outline-offset: 1px;
+  outline-offset: -3px;
 }
 
 .connection-sort-indicator {
+  display: inline-block;
   color: var(--hm-accent-strong);
   font-size: 11px;
   line-height: 1;
+  opacity: 0;
+  transform: rotate(0deg);
+  transition:
+    opacity var(--hm-motion-fast) var(--hm-motion-ease-out),
+    transform var(--hm-motion-fast) var(--hm-motion-spring);
+}
+
+.connection-sort-button:hover .connection-sort-indicator,
+.connection-sort-button:focus-visible .connection-sort-indicator {
   opacity: 0.58;
 }
 
 .connection-sort-button.is-active .connection-sort-indicator {
   opacity: 1;
+}
+
+.connection-sort-indicator.is-descending {
+  transform: rotate(180deg);
 }
 
 .connection-list {

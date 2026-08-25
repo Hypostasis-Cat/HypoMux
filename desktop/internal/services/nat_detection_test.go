@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -65,6 +66,28 @@ func TestDiagnosticsNATRunPersistsResult(t *testing.T) {
 	}
 	if latest := service.NATLatest(); latest.NATType != result.NATType || latest.AdapterID != "ethernet" {
 		t.Fatalf("NAT result was not persisted: %+v", latest)
+	}
+}
+
+func TestDiagnosticsNATRejectsRunWhileAggregationIsActive(t *testing.T) {
+	service := newTestDiagnostics(t, &fakeDiagnosticProbe{})
+	detectorCalled := false
+	service.detectNAT = func(_ context.Context, _ AdapterView, _ []NATServer) NATDetectionResult {
+		detectorCalled = true
+		return NATDetectionResult{State: "completed"}
+	}
+	service.natRunGuard = func() error {
+		return errors.New("请先停止聚合再进行 NAT 类型检测")
+	}
+
+	if _, err := service.RunNAT("ethernet", natServerAutoID); err == nil || !strings.Contains(err.Error(), "停止聚合") {
+		t.Fatalf("expected aggregation guard rejection, got %v", err)
+	}
+	if detectorCalled {
+		t.Fatal("NAT detector must not run while aggregation is active")
+	}
+	if service.natRunning {
+		t.Fatal("a rejected NAT run must not reserve the running state")
 	}
 }
 

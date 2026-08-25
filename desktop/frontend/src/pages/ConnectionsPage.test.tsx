@@ -174,4 +174,22 @@ describe("ConnectionsPage interactions", () => {
     expect(within(rows[0]).getByText("Alpha.exe")).not.toBeNull();
     expect(within(rows[1]).getByText("Zulu.exe")).not.toBeNull();
   });
+
+  it("uses natural defaults and exposes the active sort state", async () => {
+    render(<ConnectionsPage adapterRuntime={adapterRuntime} />);
+    await screen.findByText("ethernet.example");
+
+    const trafficSort = screen.getByRole("button", { name: "Sort Traffic descending" });
+    fireEvent.click(trafficSort);
+
+    expect(trafficSort.closest('[role="columnheader"]')?.getAttribute("aria-sort")).toBe("descending");
+    expect(screen.getByRole("status").textContent).toContain("Traffic · Descending");
+
+    fireEvent.click(screen.getByRole("button", { name: "Sort Traffic ascending" }));
+
+    const rows = screen.getAllByRole("article");
+    expect(within(rows[0]).getByText("Alpha.exe")).not.toBeNull();
+    expect(within(rows[1]).getByText("Zulu.exe")).not.toBeNull();
+    expect(screen.getByRole("status").textContent).toContain("Traffic · Ascending");
+  });
 });

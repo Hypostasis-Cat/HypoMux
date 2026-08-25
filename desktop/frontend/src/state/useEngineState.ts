@@ -11,10 +11,12 @@ import { desktopPlatform } from "../platform/desktop";
 import { isDesktopRuntime } from "../platform/runtime";
 import { adapterSaveInput, adapterSaveQueue } from "../platform/adapterSaveQueue";
 import { startSerialPoll } from "../platform/serialPoll";
+import { adapterListKey } from "./adapterRuntime";
 
 export type EnginePhase = "stopped" | "starting" | "running" | "degraded" | "stopping" | "failed";
 export type EngineMode = "proxy" | "tun";
 export type AdapterHealth = "idle" | "healthy" | "unstable" | "cooldown" | "probing" | "failed";
+export const HOME_TELEMETRY_POLL_MS = 800;
 
 export type HomeAdapter = AdapterView & {
   downloadBPS: number;
@@ -67,6 +69,13 @@ const previewAdapter = (index: number): AdapterView => {
 function browserFixtureCount() {
   const value = Number(new URLSearchParams(window.location.search).get("adapters") ?? 2);
   return [0, 1, 2, 4, 8, 16, 32].includes(value) ? value : 2;
+}
+
+function browserFixturePhase(): EnginePhase {
+  const value = new URLSearchParams(window.location.search).get("engine");
+  return value === "starting" || value === "running" || value === "degraded" || value === "stopping" || value === "failed"
+    ? value
+    : "stopped";
 }
 
 const isBrowserPreview = () => {
@@ -195,7 +204,7 @@ export function useEngineState(
       adaptersRef.current = fixtures;
       setAdapters(fixtures);
       setPreview(true);
-      applySnapshot(emptySnapshot(modeRef.current));
+      applySnapshot({ ...emptySnapshot(modeRef.current), phase: browserFixturePhase() });
       setLoading(false);
       return;
     }
@@ -248,14 +257,14 @@ export function useEngineState(
         const next = await appServices.engine.snapshot();
         applySnapshot(next, false, requestEpoch);
       }
-    }, 1500);
+    }, HOME_TELEMETRY_POLL_MS);
     const stopAdapterPoll = startSerialPoll(async () => {
       if (transitionRef.current || previewRef.current || adapterSaveQueue.isPending()) return;
       const next = await appServices.adapters.list();
       if (mounted.current) {
         setAdapters((current) => {
-          const currentKey = current.map((item) => `${item.id}:${item.address}:${item.operational}`).join("|");
-          const nextKey = (next ?? []).map((item) => `${item.id}:${item.address}:${item.operational}`).join("|");
+          const currentKey = adapterListKey(current);
+          const nextKey = adapterListKey(next ?? []);
           if (currentKey === nextKey) return current;
           adaptersRef.current = next ?? [];
           return adaptersRef.current;

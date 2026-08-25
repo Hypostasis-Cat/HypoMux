@@ -10,7 +10,7 @@
   <Identity
     Name="io.hypomux.desktop"
     Publisher="CN=HypoMux"
-    Version="2.5.7.0"
+    Version="2.5.8.0"
     ProcessorArchitecture="x64" />
 
   <Properties>
