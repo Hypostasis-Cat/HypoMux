@@ -23,18 +23,21 @@ export function NetworkAdapterItem({
   adapter,
   percentage,
   disabled,
+  onOpenConnections,
   onSelectedChange,
   onWeightChange,
 }: {
   adapter: HomeAdapter;
   percentage: number;
   disabled: boolean;
+  onOpenConnections: () => void;
   onSelectedChange: (checked: boolean) => void;
   onWeightChange: (value: number) => void;
 }) {
   const { locale, t } = useI18n();
   const text = (zh: string, en: string) => locale === "en" ? en : zh;
   const [inputValue, setInputValue] = useState(String(adapter.weight));
+  const canOpenConnections = adapter.selected;
   useEffect(() => setInputValue(String(adapter.weight)), [adapter.weight]);
   const commit = (next: number) => {
     const normalized = Math.max(1, Math.min(100, Math.round(next)));
@@ -42,21 +45,35 @@ export function NetworkAdapterItem({
     onWeightChange(normalized);
   };
   return (
-    <article className={`network-adapter hm-card${adapter.selected ? " is-selected" : " is-muted"}`}>
+    <article
+      className={`network-adapter hm-card${adapter.selected ? " is-selected is-navigable" : " is-muted"}`}
+      onClick={canOpenConnections ? onOpenConnections : undefined}
+    >
       <div className="adapter-primary">
-        <Checkbox
-          checked={adapter.selected}
-          disabled={disabled}
-          onChange={(_, data) => onSelectedChange(data.checked === true)}
-          aria-label={`${adapter.selected ? text("停用", "Disable") : text("启用", "Enable")} ${adapter.name}`}
-        />
+        <span className="adapter-selection-control" onClick={(event) => event.stopPropagation()}>
+          <Checkbox
+            checked={adapter.selected}
+            disabled={disabled}
+            onChange={(_, data) => onSelectedChange(data.checked === true)}
+            aria-label={`${adapter.selected ? text("停用", "Disable") : text("启用", "Enable")} ${adapter.name}`}
+          />
+        </span>
         <span className="adapter-icon" aria-hidden="true">
           {adapter.kind === "wifi" ? <Wifi124Regular /> : <Router24Regular />}
         </span>
-        <div className="adapter-name">
+        <button
+          type="button"
+          className="adapter-name"
+          aria-label={text(`查看 ${adapter.name} 的活动连接`, `View active connections for ${adapter.name}`)}
+          disabled={!canOpenConnections}
+          onClick={(event) => {
+            event.stopPropagation();
+            onOpenConnections();
+          }}
+        >
           <strong>{adapter.name}</strong>
           <span>{adapter.address}</span>
-        </div>
+        </button>
       </div>
 
       <div className="adapter-live" aria-label={text("实时网络状态", "Live network status")}>
@@ -71,7 +88,7 @@ export function NetworkAdapterItem({
         <span>{text("丢包", "Loss")} {adapter.lossRate === undefined ? "—" : `${adapter.lossRate}%`}</span>
       </div>
 
-      <div className="adapter-weight">
+      <div className="adapter-weight" onClick={(event) => event.stopPropagation()}>
         <div>
           <span>{t("home_bw_column")}</span>
           <strong>{percentage}% {text("份额", "share")}</strong>

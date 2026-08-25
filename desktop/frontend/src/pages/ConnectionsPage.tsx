@@ -15,9 +15,9 @@ import {
 import {
   AppsListDetail24Regular,
   ArrowDownload20Regular,
-  ArrowSort20Regular,
   ArrowSync20Regular,
   ArrowUpload20Regular,
+  Dismiss16Regular,
   Filter20Regular,
   Globe20Regular,
   PlugConnected20Regular,
@@ -33,11 +33,16 @@ import {
   withServiceTimeout,
 } from "../platform/services";
 import { startSerialPoll } from "../platform/serialPoll";
+import type { HomeAdapter } from "../state/useEngineState";
+import { groupConnectionsByAdapter } from "./connectionGroups";
 import {
   selectConnections,
-  type ConnectionDurationSort,
   type ConnectionOutboundFilter,
 } from "./connectionView";
+import {
+  type ConnectionSort,
+  type ConnectionSortKey,
+} from "./connectionSort";
 
 const emptySnapshot: ConnectionListSnapshot = {
   phase: "stopped",
@@ -64,7 +69,15 @@ const formatDuration = (startedAt: string, now: number) => {
     : `${minutes}:${String(remaining).padStart(2, "0")}`;
 };
 
-export function ConnectionsPage() {
+export function ConnectionsPage({
+  initialAdapter = "",
+  adapterRevision = 0,
+  adapterRuntime = [],
+}: {
+  initialAdapter?: string;
+  adapterRevision?: number;
+  adapterRuntime?: readonly HomeAdapter[];
+}) {
   const { locale } = useI18n();
   const text = useCallback((zh: string, en: string) => locale === "en" ? en : zh, [locale]);
   const [snapshot, setSnapshot] = useState<ConnectionListSnapshot>(emptySnapshot);
@@ -73,13 +86,21 @@ export function ConnectionsPage() {
   const [live, setLive] = useState(true);
   const [query, setQuery] = useState("");
   const [outboundFilter, setOutboundFilter] = useState<ConnectionOutboundFilter>("all");
-  const [durationSort, setDurationSort] = useState<ConnectionDurationSort>("longest");
+  const [adapterFilter, setAdapterFilter] = useState(initialAdapter.trim());
+  const [sort, setSort] = useState<ConnectionSort>({ key: "duration", direction: "descending" });
   const [now, setNow] = useState(Date.now());
   const requestActive = useRef(false);
   const connectionListRef = useRef<HTMLDivElement>(null);
   const pendingScrollTop = useRef<number | null>(null);
   const toasterId = useId("connections-toaster");
   const { dispatchToast } = useToastController(toasterId);
+  const groupedByAdapter = adapterFilter.length > 0;
+
+  useEffect(() => {
+    setAdapterFilter(initialAdapter.trim());
+    setQuery("");
+    setOutboundFilter("all");
+  }, [adapterRevision, initialAdapter]);
 
   const load = useCallback(async (manual = false) => {
     if (requestActive.current) return;
@@ -130,9 +151,10 @@ export function ConnectionsPage() {
     pendingScrollTop.current = null;
   }, [snapshot]);
 
-  const filtered = useMemo(() => {
-    return selectConnections(snapshot.connections, query, outboundFilter, durationSort);
-  }, [durationSort, outboundFilter, query, snapshot.connections]);
+  const filtered = useMemo(
+    () => selectConnections(snapshot.connections, query, outboundFilter, adapterFilter, sort),
+    [adapterFilter, outboundFilter, query, snapshot.connections, sort],
+  );
 
   const totals = useMemo(() => snapshot.connections.reduce(
     (current, connection) => ({
@@ -141,6 +163,11 @@ export function ConnectionsPage() {
     }),
     { up: 0, down: 0 },
   ), [snapshot.connections]);
+
+  const groups = useMemo(
+    () => groupedByAdapter ? groupConnectionsByAdapter(filtered, adapterRuntime) : [],
+    [adapterRuntime, filtered, groupedByAdapter],
+  );
 
   const policy = (connection: ConnectionView) => {
     if (connection.outbound === "direct") {
@@ -156,6 +183,55 @@ export function ConnectionsPage() {
   };
 
   const engineRunning = snapshot.phase === "running";
+  const hasViewFilter = query.trim().length > 0 || outboundFilter !== "all" || groupedByAdapter;
+  const columns: Array<{ key: ConnectionSortKey; label: string }> = [
+    { key: "process", label: text("进程", "Process") },
+    { key: "destination", label: text("目标", "Destination") },
+    { key: "policy", label: text("出口策略", "Egress policy") },
+    { key: "traffic", label: text("流量", "Traffic") },
+    { key: "duration", label: text("时长", "Duration") },
+  ];
+
+  const renderConnection = (connection: ConnectionView) => {
+    const outbound = policy(connection);
+    const identity = connection.process || connection.domain || connection.remote_ip || connection.target;
+    const identitySource = connection.process
+      ? `${connection.protocol.toUpperCase()} · ${connection.client || "—"}`
+      : connection.domain
+        ? text("按目标域名显示", "Shown by destination domain")
+        : connection.remote_ip || connection.target
+          ? text("按远端 IP 显示", "Shown by remote IP")
+          : text("未识别连接", "Unidentified connection");
+    return (
+      <article className="connection-row" key={connection.id}>
+        <div className="connection-process">
+          <span className="connection-process-icon"><AppsListDetail24Regular /></span>
+          <span>
+            <strong>{identity || text("未识别连接", "Unidentified connection")}</strong>
+            <small>{identitySource}</small>
+          </span>
+        </div>
+        <div className="connection-destination">
+          <strong>{connection.domain || connection.remote_ip || connection.target || "—"}</strong>
+          <small>{connection.remote_ip && connection.domain ? `${connection.remote_ip}:${connection.remote_port || ""}` : connection.target || "—"}</small>
+        </div>
+        <div className="connection-policy">
+          <Badge appearance="tint" color={outbound.color}>{outbound.label}</Badge>
+          <small>{connection.adapter
+            ? text(`实际出口：${connection.adapter}`, `Actual egress: ${connection.adapter}`)
+            : text("出口待建立", "Egress pending")}</small>
+        </div>
+        <div className="connection-traffic">
+          <span><ArrowUpload20Regular /> {formatBytes(connection.bytes_up)}</span>
+          <span><ArrowDownload20Regular /> {formatBytes(connection.bytes_down)}</span>
+        </div>
+        <div className="connection-duration">
+          <strong>{formatDuration(connection.started_at, now)}</strong>
+          <small>{new Date(connection.started_at).toLocaleTimeString(locale === "en" ? "en-US" : "zh-CN", { hour12: false })}</small>
+        </div>
+      </article>
+    );
+  };
 
   return (
     <main className="connections-page">
@@ -212,6 +288,25 @@ export function ConnectionsPage() {
             {text(`显示 ${filtered.length} / ${snapshot.connections.length}`, `Showing ${filtered.length} of ${snapshot.connections.length}`)}
           </span>
           <div className="connection-view-controls">
+            {groupedByAdapter && (
+              <div
+                className="connection-adapter-filter"
+                role="group"
+                aria-label={text("适配器筛选", "Adapter filter")}
+              >
+                <span>{text("适配器", "Adapter")}</span>
+                <Badge appearance="tint" color="brand" title={adapterFilter}>{adapterFilter}</Badge>
+                <Button
+                  appearance="subtle"
+                  size="small"
+                  icon={<Dismiss16Regular />}
+                  aria-label={text(`清除适配器筛选 ${adapterFilter}`, `Clear adapter filter ${adapterFilter}`)}
+                  onClick={() => setAdapterFilter("")}
+                >
+                  {text("清除", "Clear")}
+                </Button>
+              </div>
+            )}
             <label>
               <span>{text("出口策略", "Egress")}</span>
               <Dropdown
@@ -233,29 +328,31 @@ export function ConnectionsPage() {
                 <Option value="adapter">{text("指定网卡", "Specified NIC")}</Option>
               </Dropdown>
             </label>
-            <label>
-              <ArrowSort20Regular />
-              <span>{text("时长", "Duration")}</span>
-              <Dropdown
-                appearance="filled-darker"
-                size="small"
-                aria-label={text("按连接时长排序", "Sort by connection duration")}
-                value={durationSort === "longest" ? text("最长优先", "Longest first") : text("最短优先", "Shortest first")}
-                selectedOptions={[durationSort]}
-                onOptionSelect={(_, data) => data.optionValue && setDurationSort(data.optionValue as ConnectionDurationSort)}
-              >
-                <Option value="longest">{text("最长优先", "Longest first")}</Option>
-                <Option value="shortest">{text("最短优先", "Shortest first")}</Option>
-              </Dropdown>
-            </label>
           </div>
         </div>
         <div className="connection-table-head" role="row">
-          <span>{text("进程", "Process")}</span>
-          <span>{text("目标", "Destination")}</span>
-          <span>{text("出口策略", "Egress policy")}</span>
-          <span>{text("流量", "Traffic")}</span>
-          <span>{text("时长", "Duration")}</span>
+          {columns.map((column) => {
+            const direction = sort.key === column.key ? sort.direction : undefined;
+            const nextDirection = direction === "ascending" ? "descending" : "ascending";
+            return (
+              <span key={column.key} role="columnheader" aria-sort={direction ?? "none"}>
+                <button
+                  type="button"
+                  className={`connection-sort-button${direction ? " is-active" : ""}`}
+                  aria-label={text(
+                    `按${column.label}${nextDirection === "ascending" ? "升序" : "降序"}排序`,
+                    `Sort ${column.label} ${nextDirection}`,
+                  )}
+                  onClick={() => setSort({ key: column.key, direction: nextDirection })}
+                >
+                  <span>{column.label}</span>
+                  <span className="connection-sort-indicator" aria-hidden="true">
+                    {direction === "ascending" ? "↑" : direction === "descending" ? "↓" : "↕"}
+                  </span>
+                </button>
+              </span>
+            );
+          })}
         </div>
         <div ref={connectionListRef} className="connection-list">
           {loading ? (
@@ -267,47 +364,29 @@ export function ConnectionsPage() {
               <span>{text("启动聚合后，这里会实时显示本次会话正在处理的连接。", "Start aggregation to see the connections handled in this session.")}</span>
             </div>
           ) : filtered.length === 0 ? (
-            <div key={query || outboundFilter !== "all" ? "connections-no-match" : "connections-idle"} className="connections-empty motion-state-content">
+            <div key={hasViewFilter ? "connections-no-match" : "connections-idle"} className="connections-empty motion-state-content">
               <Globe20Regular />
-              <strong>{query || outboundFilter !== "all" ? text("没有符合当前筛选的连接", "No connections match the current filters") : text("当前没有活动连接", "No active connections")}</strong>
-              <span>{query || outboundFilter !== "all"
+              <strong>{hasViewFilter ? text("没有符合当前筛选的连接", "No connections match the current filters") : text("当前没有活动连接", "No active connections")}</strong>
+              <span>{hasViewFilter
                 ? text("可以更换出口策略或清空搜索内容。", "Choose another egress policy or clear the search query.")
                 : text("短连接可能只会短暂出现；实时刷新会保留最新状态。", "Short-lived flows may appear briefly; live refresh keeps the view current.")}</span>
             </div>
-          ) : filtered.map((connection) => {
-            const outbound = policy(connection);
-            const identity = connection.process || text("未识别进程", "Unknown process");
-            const identitySource = `${connection.protocol.toUpperCase()} · ${connection.client || "—"}`;
-            return (
-              <article className="connection-row" key={connection.id}>
-                <div className="connection-process">
-                  <span className="connection-process-icon"><AppsListDetail24Regular /></span>
-                  <span>
-                    <strong>{identity}</strong>
-                    <small>{identitySource}</small>
-                  </span>
-                </div>
-                <div className="connection-destination">
-                  <strong>{connection.domain || connection.remote_ip || connection.target || "—"}</strong>
-                  <small>{connection.remote_ip && connection.domain ? `${connection.remote_ip}:${connection.remote_port || ""}` : connection.target || "—"}</small>
-                </div>
-                <div className="connection-policy">
-                  <Badge appearance="tint" color={outbound.color}>{outbound.label}</Badge>
-                  <small>{connection.adapter
-                    ? text(`实际出口：${connection.adapter}`, `Actual egress: ${connection.adapter}`)
-                    : text("出口待建立", "Egress pending")}</small>
-                </div>
-                <div className="connection-traffic">
-                  <span><ArrowUpload20Regular /> {formatBytes(connection.bytes_up)}</span>
-                  <span><ArrowDownload20Regular /> {formatBytes(connection.bytes_down)}</span>
-                </div>
-                <div className="connection-duration">
-                  <strong>{formatDuration(connection.started_at, now)}</strong>
-                  <small>{new Date(connection.started_at).toLocaleTimeString(locale === "en" ? "en-US" : "zh-CN", { hour12: false })}</small>
-                </div>
-              </article>
-            );
-          })}
+          ) : groupedByAdapter ? groups.map((group) => (
+            <section className="connection-adapter-group" key={group.adapter || "pending-adapter"}>
+              <div className="connection-adapter-heading">
+                <span>
+                  <PlugConnected20Regular />
+                  <strong>{group.adapter || text("出口待分配", "Egress pending")}</strong>
+                  <small>{text(`${group.connections.length} 条连接`, `${group.connections.length} connection(s)`)}</small>
+                </span>
+                <span className="connection-adapter-speed">
+                  <span><ArrowDownload20Regular /> {formatBytes(Math.round(group.downloadBPS))}/s</span>
+                  <span><ArrowUpload20Regular /> {formatBytes(Math.round(group.uploadBPS))}/s</span>
+                </span>
+              </div>
+              {group.connections.map(renderConnection)}
+            </section>
+          )) : filtered.map(renderConnection)}
         </div>
       </GlassSurface>
     </main>

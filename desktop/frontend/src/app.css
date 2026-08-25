@@ -1074,6 +1074,10 @@ svg {
   opacity: 0.72;
 }
 
+.network-adapter.is-navigable {
+  cursor: pointer;
+}
+
 .adapter-primary {
   display: grid;
   min-width: 0;
@@ -1097,6 +1101,28 @@ svg {
   min-width: 0;
   flex-direction: column;
   gap: 3px;
+  padding: 0;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  background: transparent;
+  cursor: pointer;
+}
+
+.adapter-name:focus-visible {
+  border-radius: 4px;
+  outline: 2px solid var(--hm-accent);
+  outline-offset: 3px;
+}
+
+.adapter-name:disabled {
+  cursor: default;
+}
+
+.adapter-selection-control,
+.adapter-weight {
+  cursor: default;
 }
 
 .adapter-name strong {
@@ -3246,7 +3272,8 @@ svg {
 }
 
 .connection-view-controls,
-.connection-view-controls label {
+.connection-view-controls label,
+.connection-adapter-filter {
   display: flex;
   min-width: 0;
   align-items: center;
@@ -3261,6 +3288,24 @@ svg {
   color: var(--hm-text-tertiary);
   font-size: 10.5px;
   white-space: nowrap;
+}
+
+.connection-adapter-filter {
+  gap: 5px;
+  color: var(--hm-text-tertiary);
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+
+.connection-adapter-filter .fui-Badge {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.connection-adapter-filter .fui-Button {
+  min-width: 0;
 }
 
 .connection-view-controls label > svg {
@@ -3316,6 +3361,48 @@ svg {
   letter-spacing: 0.035em;
 }
 
+.connection-sort-button {
+  display: inline-flex;
+  min-width: 0;
+  padding: 5px 3px;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  border-radius: 5px;
+  color: inherit;
+  font: inherit;
+  font-weight: inherit;
+  letter-spacing: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+
+.connection-table-head > span:last-child .connection-sort-button {
+  margin-left: auto;
+}
+
+.connection-sort-button:hover,
+.connection-sort-button.is-active {
+  color: var(--hm-text-primary);
+  background: color-mix(in srgb, var(--hm-accent-soft) 64%, transparent);
+}
+
+.connection-sort-button:focus-visible {
+  outline: 2px solid var(--hm-accent);
+  outline-offset: 1px;
+}
+
+.connection-sort-indicator {
+  color: var(--hm-accent-strong);
+  font-size: 11px;
+  line-height: 1;
+  opacity: 0.58;
+}
+
+.connection-sort-button.is-active .connection-sort-indicator {
+  opacity: 1;
+}
+
 .connection-list {
   width: 100%;
   min-height: 0;
@@ -3324,6 +3411,62 @@ svg {
   overflow-anchor: none;
   scrollbar-gutter: stable;
   scrollbar-width: thin;
+}
+
+.connection-adapter-group + .connection-adapter-group {
+  border-top: 1px solid var(--hm-outer-border);
+}
+
+.connection-adapter-heading {
+  display: flex;
+  min-height: 38px;
+  padding: 7px 15px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: color-mix(in srgb, var(--hm-accent-soft) 38%, rgba(var(--hm-surface-rgb), 0.52));
+}
+
+.connection-adapter-heading > span,
+.connection-adapter-speed,
+.connection-adapter-speed > span {
+  display: flex;
+  align-items: center;
+}
+
+.connection-adapter-heading > span {
+  min-width: 0;
+  gap: 7px;
+}
+
+.connection-adapter-heading svg {
+  color: var(--hm-accent-strong);
+}
+
+.connection-adapter-heading strong {
+  overflow: hidden;
+  color: var(--hm-text-primary);
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.connection-adapter-heading small {
+  color: var(--hm-text-tertiary);
+  font-size: 9.5px;
+  white-space: nowrap;
+}
+
+.connection-adapter-speed {
+  flex: 0 0 auto;
+  gap: 13px;
+  color: var(--hm-text-secondary);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.connection-adapter-speed > span {
+  gap: 4px;
 }
 
 .connection-row {

@@ -1,7 +1,7 @@
 import type { ConnectionView } from "../platform/services";
+import { sortConnections, type ConnectionSort } from "./connectionSort";
 
 export type ConnectionOutboundFilter = "all" | "aggregation" | "direct" | "adapter";
-export type ConnectionDurationSort = "longest" | "shortest";
 
 const searchableValues = (connection: ConnectionView) => [
   connection.process,
@@ -15,33 +15,19 @@ const searchableValues = (connection: ConnectionView) => [
   connection.protocol,
 ];
 
-const startedAt = (connection: ConnectionView) => {
-  const value = new Date(connection.started_at).getTime();
-  return Number.isFinite(value) ? value : null;
-};
-
 export const selectConnections = (
-  connections: ConnectionView[],
+  connections: readonly ConnectionView[],
   query: string,
   outboundFilter: ConnectionOutboundFilter,
-  durationSort: ConnectionDurationSort,
+  adapterFilter: string,
+  sort: ConnectionSort | null,
 ) => {
   const needle = query.trim().toLocaleLowerCase();
-  return connections
+  const adapter = adapterFilter.trim();
+  const filtered = connections
     .filter((connection) => outboundFilter === "all" || connection.outbound === outboundFilter)
+    .filter((connection) => !adapter || connection.adapter === adapter)
     .filter((connection) => !needle || searchableValues(connection)
-      .some((value) => value?.toLocaleLowerCase().includes(needle)))
-    .slice()
-    .sort((left, right) => {
-      const leftStartedAt = startedAt(left);
-      const rightStartedAt = startedAt(right);
-      if (leftStartedAt === null || rightStartedAt === null) {
-        if (leftStartedAt === rightStartedAt) return left.id - right.id;
-        return leftStartedAt === null ? 1 : -1;
-      }
-      const byStartedAt = durationSort === "longest"
-        ? leftStartedAt - rightStartedAt
-        : rightStartedAt - leftStartedAt;
-      return byStartedAt || left.id - right.id;
-    });
+      .some((value) => value?.toLocaleLowerCase().includes(needle)));
+  return sortConnections(filtered, sort);
 };
