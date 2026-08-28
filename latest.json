@@ -1,15 +1,15 @@
 {
   "schema_version": 1,
-  "version": "2.5.7",
-  "name": "HypoMux 2.5.7",
-  "notes": "## v2.5.7 更新日志\n\n> QQ群：1002583295\n\n**安装兼容性与更新安全增强**\n\n- 修复安装器继承异常 `PSModulePath` 时，Windows PowerShell 无法加载系统模块并导致 Core 受保护目录配置失败的问题。\n- 改进受保护目录的 ACL 写入方式，兼容 Windows PowerShell 5.1 与 PowerShell 7。\n- 修复切换页面后，首页引擎状态与实时信息可能被重新初始化的问题。\n- 新增腾讯 CNB 国内更新源，支持 CNB 与 GitHub 双源更新及故障自动回退。\n- 更新清单增加 Ed25519 签名验证；安装前同时校验文件大小、SHA-256 与 Authenticode 签名。\n- 自动更新改用 GitHub 与 CNB 双源签名更新通道，更新元数据必须通过 Ed25519 验证后才会被接受。\n- GitHub 与 CNB 发布相同的 SignPath 签名安装包，进一步提升国内更新的可用性与安全性。\n\n> 感谢 SignPath.io 为 HypoMux 提供 Windows 代码签名服务，并感谢 SignPath Foundation 为本项目颁发开源代码签名证书。\n",
+  "version": "2.5.8",
+  "name": "HypoMux 2.5.8",
+  "notes": "## v2.5.8 更新日志\n\n> QQ 群：1002583295\n\n本版本重点完善网络检测、活动连接可视化、批量分流和聚合启动性能，并进一步提升 Windows TUN 与安装更新流程的稳定性。\n\n### 网络检测\n\n- 新增基于 RFC 5780 的逐网卡 NAT 类型检测，展示映射与过滤行为、公网端点和探测记录；支持自动选择、自定义 STUN 服务器及 Windows 防火墙校准。\n- “网络体检”更名为“网络检测”，统一提供链路体检与 NAT 检测；聚合运行期间会阻止无法可靠归属物理网卡的 NAT 检测并说明原因。\n- 首页网卡实时扫描结果同步至网络检测、活动连接和设置页面，网卡断开或切换后不再残留旧状态。\n\n### 活动连接\n\n- 完善进程、目标域名、远端 IP、实际出口网卡、分流策略、会话流量与时长信息，并提升 Core 与 Clash 元数据的匹配准确性。\n- 支持搜索、出口策略筛选，以及按进程、目标、策略、流量和时长排序；仅在实际存在规则指定出口时显示“单网卡分流”。\n- 首页网卡卡片保持整卡选择操作，点击下载、上传和连接数区域可进入该网卡的连接视图，并显示对应实时吞吐。\n\n### 分流规则\n\n- 新增进程、域名和 IP 规则的批量添加与预检，支持重复项跳过、冲突替换、无效项提示及多选删除，单次最多处理 2,000 项。\n- “选择运行中进程”列表新增真实进程图标；无法提取图标或使用 Windows 默认图标的进程会统一显示通用占位图标，查找和辨认进程更加直观。\n- 修复显式指定网卡的上游代理服务器可能被兼容性直连规则覆盖的问题，并补充 `verge-mihomo.exe` 兼容识别。\n\n### 性能与体验\n\n- 缩短聚合与 TUN 启动等待：复用短期预检结果、合并系统网络检查、并行执行连通性探测，并跳过无残留设备时的清理流程。\n- 首页遥测周期缩短至约 0.8 秒并改用轻量汇总数据；吞吐趋势采用同步的平滑曲线与渐变填充，提升实时性与可读性。\n\n### 依赖与维护\n\n- sing-box 升级至 1.13.19。\n\n### 升级说明\n\n- 支持 Windows 10/11 x64，可使用官方签名安装包直接覆盖升级；安装程序会在替换文件前安全停止正在运行的 HypoMux 与独立 Core 服务。\n- 在 TUN 模式运行期间修改分流规则会立即保存，但需要停止并重新启动聚合后才会应用到当前 sing-box 路由配置。\n- GitHub Releases 与腾讯 CNB Release 提供同一份 SignPath 签名安装包；自动更新仍会校验 Ed25519 更新清单、文件大小、SHA-256 和 Windows Authenticode 签名。\n\n> 感谢 SignPath.io 为 HypoMux 提供 Windows 代码签名服务，并感谢 SignPath Foundation 为本项目颁发开源代码签名证书。\n\n### 本次更新贡献者\n\n- [@Hypostasis-Cat](https://github.com/Hypostasis-Cat)\n- [@s3qazx](https://github.com/s3qazx)（[#64](https://github.com/Hypostasis-Cat/HypoMux/pull/64)）\n",
   "installer": {
-    "name": "HypoMux_Setup_2.5.7.exe",
-    "size": 30806208,
-    "sha256": "becfc6ef863e3864e5d929ce461881ee2fa2bcefb485a6ebea449f8e71cb30b0",
+    "name": "HypoMux_Setup_2.5.8.exe",
+    "size": 30988760,
+    "sha256": "f4c1c7a5c531f277cb6d386d4bb89a1424c2e632242acdb156b47a79d3f00b03",
     "urls": [
-      "https://cnb.cool/Hypostasis-Cat/HypoMux/-/releases/download/v2.5.7/HypoMux_Setup_2.5.7.exe",
-      "https://github.com/Hypostasis-Cat/HypoMux/releases/download/v2.5.7/HypoMux_Setup_2.5.7.exe"
+      "https://cnb.cool/Hypostasis-Cat/HypoMux/-/releases/download/v2.5.8/HypoMux_Setup_2.5.8.exe",
+      "https://github.com/Hypostasis-Cat/HypoMux/releases/download/v2.5.8/HypoMux_Setup_2.5.8.exe"
     ]
   }
 }
