@@ -39,6 +39,7 @@ import {
 import { AppToaster } from "../components/AppToaster";
 import {
   Add20Regular,
+  AppGeneric20Regular,
   ArrowDownload20Regular,
   ArrowUpload20Regular,
   AppsList20Regular,
@@ -47,7 +48,7 @@ import {
   ErrorCircle16Regular,
   Save20Regular,
 } from "@fluentui/react-icons";
-import { appServices, type RoutingBatchPreview, type RoutingRule, type RoutingSnapshot } from "../platform/services";
+import { appServices, type RoutingBatchPreview, type RoutingRule, type RoutingSnapshot, type RunningProcess } from "../platform/services";
 import { GlassSurface } from "../components/material/GlassSurface";
 import { useI18n } from "../i18n/i18n";
 import { isDesktopRuntime } from "../platform/runtime";
@@ -114,6 +115,20 @@ const browserRoutingFixture = (): RoutingSnapshot | null => {
   };
 };
 
+const browserProcessFixture = (): RunningProcess[] | null => {
+  if (!import.meta.env.DEV || isDesktopRuntime()) return null;
+  return [
+    "ApplicationFrameHost.exe",
+    "ChatGPT.exe",
+    "cmd.exe",
+    "codex.exe",
+    "conhost.exe",
+    "explorer.exe",
+    "steam.exe",
+    "WindowsTerminal.exe",
+  ].map((name) => ({ name }));
+};
+
 export function RoutingPage() {
   const { locale, t } = useI18n();
   const text = useCallback((zh: string, en: string) => locale === "en" ? en : zh, [locale]);
@@ -141,7 +156,7 @@ export function RoutingPage() {
   const [engineRunningInTun, setEngineRunningInTun] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [processOpen, setProcessOpen] = useState(false);
-  const [processes, setProcesses] = useState<string[]>([]);
+  const [processes, setProcesses] = useState<RunningProcess[]>([]);
   const [processSearch, setProcessSearch] = useState("");
   const [processLoading, setProcessLoading] = useState(false);
   const [importPreview, setImportPreview] = useState<RoutingSnapshot | null>(null);
@@ -375,10 +390,15 @@ export function RoutingPage() {
     setProcessLoading(true);
     setProcessSearch("");
     try {
-      setProcesses((await appServices.routing.listProcesses()) ?? []);
+      setProcesses((await appServices.routing.listProcessChoices()) ?? []);
     } catch (error) {
-      notify(text("无法读取进程", "Unable to list processes"), error instanceof Error ? error.message : String(error), "error");
-      setProcesses([]);
+      const fixture = browserProcessFixture();
+      if (fixture) {
+        setProcesses(fixture);
+      } else {
+        notify(text("无法读取进程", "Unable to list processes"), error instanceof Error ? error.message : String(error), "error");
+        setProcesses([]);
+      }
     } finally {
       setProcessLoading(false);
     }
@@ -610,7 +630,7 @@ export function RoutingPage() {
 
   const filteredProcesses = useMemo(() => {
     const keyword = processSearch.trim().toLowerCase();
-    return processes.filter((process) => !keyword || process.toLowerCase().includes(keyword));
+    return processes.filter((process) => !keyword || process.name.toLowerCase().includes(keyword));
   }, [processSearch, processes]);
 
   return (
@@ -794,12 +814,17 @@ export function RoutingPage() {
                 {processLoading ? <Spinner label={t("routing_process_loading")} /> : filteredProcesses.length === 0
                   ? <span>{t("routing_process_empty")}</span>
                   : filteredProcesses.map((process) => (
-                    <button key={process} onDoubleClick={() => {
+                    <button key={process.name} onDoubleClick={() => {
                       setActiveType("process");
                       setProcessOpen(false);
-                      void addRule(process, "process");
-                    }} onClick={() => setNewValue(process)} className={newValue === process ? "is-selected" : ""}>
-                      {process}
+                      void addRule(process.name, "process");
+                    }} onClick={() => setNewValue(process.name)} className={newValue === process.name ? "is-selected" : ""}>
+                      <span className="process-icon" aria-hidden="true">
+                        {process.icon
+                          ? <img src={process.icon} alt="" />
+                          : <AppGeneric20Regular />}
+                      </span>
+                      <span className="process-name">{process.name}</span>
                     </button>
                   ))}
               </div>

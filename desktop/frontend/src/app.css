@@ -2006,6 +2006,9 @@ svg {
 }
 
 .process-list > button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   min-height: 34px;
   padding: 6px 10px;
   border: 0;
@@ -2017,6 +2020,33 @@ svg {
     background var(--hm-motion-fast) var(--hm-motion-ease-out),
     transform var(--hm-motion-fast) var(--hm-motion-ease-out);
   animation: motion-row-enter var(--hm-motion-normal) var(--hm-motion-ease-out) backwards;
+}
+
+.process-icon {
+  display: inline-grid;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  place-items: center;
+  color: var(--hm-text-secondary);
+}
+
+.process-icon > img,
+.process-icon > svg {
+  display: block;
+  width: 20px;
+  height: 20px;
+}
+
+.process-icon > img {
+  object-fit: contain;
+}
+
+.process-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .process-list > button:nth-child(2) { animation-delay: 20ms; }

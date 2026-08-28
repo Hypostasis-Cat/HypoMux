@@ -37,6 +37,14 @@ type RoutingRule struct {
 	Outbound  string `json:"outbound"`
 }
 
+// RunningProcess is a process choice shown by the routing rule picker. Icon is
+// an optional PNG data URL; an empty value tells the frontend to use the shared
+// fallback icon for inaccessible executables and Windows' generic app icon.
+type RunningProcess struct {
+	Name string `json:"name"`
+	Icon string `json:"icon,omitempty"`
+}
+
 func (r *RoutingRule) UnmarshalJSON(data []byte) error {
 	rules, err := expandRoutingRule(data)
 	if err != nil {
@@ -296,6 +304,10 @@ func (s *RoutingRuleService) Save(rules []RoutingRule) (RoutingSnapshot, error) 
 
 func (s *RoutingRuleService) ListProcesses() ([]string, error) {
 	return listRunningProcesses()
+}
+
+func (s *RoutingRuleService) ListProcessChoices() ([]RunningProcess, error) {
+	return listRunningProcessChoices()
 }
 
 func (s *RoutingRuleService) Import() (RoutingSnapshot, error) {
