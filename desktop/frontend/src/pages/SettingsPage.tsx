@@ -48,6 +48,7 @@ const emptySettings: CompleteAppSettings = {
   weighted: false,
   strict_route: true,
   force_tun_connectivity_bypass: false,
+  show_virtual_adapters: false,
   blocked_domain_bypass: false,
   blocked_domain_expiry: true,
   close_to_tray: false,
@@ -243,6 +244,7 @@ export function SettingsPage({
   const { settings: appearance, update: updateAppearance, persistenceError: appearancePersistenceError } = useAppearance();
   const { locale, setLocale, t } = useI18n();
   const text = (zh: string, en: string) => locale === "en" ? en : zh;
+  const macOS = navigator.platform.toLowerCase().includes("mac");
   const backgroundInput = useRef<HTMLInputElement>(null);
   const settingsPageRef = useRef<HTMLElement>(null);
   const sectionIndexSentinelRef = useRef<HTMLSpanElement>(null);
@@ -821,6 +823,14 @@ export function SettingsPage({
           >
             <SettingSwitch checked={settings.force_tun_connectivity_bypass} onChange={(checked) => patchAndSave({ force_tun_connectivity_bypass: checked })} />
           </SettingRow>
+          {macOS && (
+            <SettingRow
+              title={t("settings_show_virtual_adapters")}
+              description={t("settings_show_virtual_adapters_hint")}
+            >
+              <SettingSwitch checked={settings.show_virtual_adapters} onChange={(checked) => patchAndSave({ show_virtual_adapters: checked })} />
+            </SettingRow>
+          )}
           <SettingRow title={t("settings_wfp_strict_route")} description={t("settings_wfp_strict_route_hint")}>
             <SettingSwitch checked={settings.strict_route} onChange={(checked) => patchAndSave({ strict_route: checked })} />
           </SettingRow>

@@ -1,0 +1,94 @@
+version: '3'
+
+includes:
+  common: ../Taskfile.yml
+
+tasks:
+  build:
+    summary: Builds the native macOS application and proxy engine
+    deps:
+      - task: common:go:mod:tidy
+      - task: build:core-runtime
+        vars:
+          ARCH: '{{.ARCH}}'
+      - task: common:build:frontend
+        vars:
+          BUILD_FLAGS:
+            ref: .BUILD_FLAGS
+          DEV:
+            ref: .DEV
+    preconditions:
+      - sh: '[ "$(uname -s)" = "Darwin" ]'
+        msg: "The macOS app must be built on macOS."
+    cmds:
+      - mkdir -p "{{.BIN_DIR}}"
+      - go build {{.BUILD_FLAGS}} -o "{{.BIN_DIR}}/{{.APP_NAME}}"
+    vars:
+      BUILD_FLAGS: '{{if eq .DEV "true"}}-buildvcs=false -gcflags=all="-l"{{else}}-tags production -trimpath -buildvcs=false -ldflags="-w -s"{{end}}'
+    env:
+      GOOS: darwin
+      GOARCH: '{{.ARCH | default ARCH}}'
+      CGO_ENABLED: '1'
+      MACOSX_DEPLOYMENT_TARGET: '12.0'
+      CGO_CFLAGS: '-mmacosx-version-min=12.0'
+      CGO_LDFLAGS: '-mmacosx-version-min=12.0'
+
+  build:core-runtime:
+    summary: Builds the source-bound Go proxy engine for macOS
+    internal: true
+    dir: '{{.ROOT_DIR}}/../engine'
+    cmds:
+      - mkdir -p "{{.ROOT_DIR}}/{{.BIN_DIR}}"
+      - go build -trimpath -buildvcs=false -ldflags="-w -s -X main.version={{.APP_VERSION}}" -o "{{.ROOT_DIR}}/{{.BIN_DIR}}/hypomux-engine" ./cmd/hypomux-engine
+    env:
+      GOOS: darwin
+      GOARCH: '{{.ARCH | default ARCH}}'
+      CGO_ENABLED: '0'
+
+  generate:icon:
+    summary: Generates the macOS application icon
+    dir: build/darwin
+    sources:
+      - ../appicon.png
+    generates:
+      - icons.icns
+    cmds:
+      - rm -rf appicon.iconset
+      - mkdir -p appicon.iconset
+      - sips -z 16 16 ../appicon.png --out appicon.iconset/icon_16x16.png
+      - sips -z 32 32 ../appicon.png --out appicon.iconset/icon_16x16@2x.png
+      - sips -z 32 32 ../appicon.png --out appicon.iconset/icon_32x32.png
+      - sips -z 64 64 ../appicon.png --out appicon.iconset/icon_32x32@2x.png
+      - sips -z 128 128 ../appicon.png --out appicon.iconset/icon_128x128.png
+      - sips -z 256 256 ../appicon.png --out appicon.iconset/icon_128x128@2x.png
+      - sips -z 256 256 ../appicon.png --out appicon.iconset/icon_256x256.png
+      - sips -z 512 512 ../appicon.png --out appicon.iconset/icon_256x256@2x.png
+      - sips -z 512 512 ../appicon.png --out appicon.iconset/icon_512x512.png
+      - cp ../appicon.png appicon.iconset/icon_512x512@2x.png
+      - iconutil -c icns appicon.iconset -o icons.icns
+      - rm -rf appicon.iconset
+
+  package:
+    summary: Packages an ad-hoc signed HypoMux.app
+    deps:
+      - task: build
+      - task: generate:icon
+    cmds:
+      - rm -rf "{{.BIN_DIR}}/HypoMux.app"
+      - mkdir -p "{{.BIN_DIR}}/HypoMux.app/Contents/MacOS/bin"
+      - mkdir -p "{{.BIN_DIR}}/HypoMux.app/Contents/Resources"
+      - cp "{{.BIN_DIR}}/{{.APP_NAME}}" "{{.BIN_DIR}}/HypoMux.app/Contents/MacOS/{{.APP_NAME}}"
+      - cp "{{.BIN_DIR}}/hypomux-engine" "{{.BIN_DIR}}/HypoMux.app/Contents/MacOS/bin/hypomux-engine"
+      - cp build/darwin/Info.plist "{{.BIN_DIR}}/HypoMux.app/Contents/Info.plist"
+      - cp build/darwin/icons.icns "{{.BIN_DIR}}/HypoMux.app/Contents/Resources/icons.icns"
+      - chmod 755 "{{.BIN_DIR}}/HypoMux.app/Contents/MacOS/{{.APP_NAME}}" "{{.BIN_DIR}}/HypoMux.app/Contents/MacOS/bin/hypomux-engine"
+      - codesign --force --deep --sign - "{{.BIN_DIR}}/HypoMux.app"
+
+  run:
+    summary: Builds, packages and launches the macOS application
+    deps:
+      - task: package
+        vars:
+          DEV: 'true'
+    cmds:
+      - open "{{.BIN_DIR}}/HypoMux.app"

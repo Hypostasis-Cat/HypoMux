@@ -89,6 +89,11 @@ export function HomePage({
   }, []);
   useEffect(() => () => preflightResolver.current?.(false), []);
   const engine = useEngineState(notifyError, handleTunPreflight);
+  useEffect(() => {
+    if (navigator.platform.toLowerCase().includes("mac") && engine.mode === "tun") {
+      engine.setMode("proxy");
+    }
+  }, [engine.mode, engine.setMode]);
   useEffect(
     () => onAdapterRuntimeChange?.(engine.loading ? undefined : engine.adapters),
     [engine.adapters, engine.loading, onAdapterRuntimeChange],

@@ -29,6 +29,7 @@ type AppSettings struct {
 	StrictRoute         bool                  `json:"strict_route"`
 	WFPCompatibility    WFPCompatibilityState `json:"wfp_compatibility_state,omitempty"`
 	ForceTUNBypass      bool                  `json:"force_tun_connectivity_bypass"`
+	ShowVirtualAdapters bool                  `json:"show_virtual_adapters"`
 	BlockedDomainBypass bool                  `json:"blocked_domain_bypass"`
 	BlockedDomainExpiry bool                  `json:"blocked_domain_expiry"`
 	CloseToTray         bool                  `json:"close_to_tray"`

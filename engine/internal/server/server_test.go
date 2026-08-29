@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -220,6 +221,9 @@ func (f *fakeTunController) SetHandlers(
 }
 
 func TestManagedTunLifecycleRequiresPreparedPoolAndStopsInOrder(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("the pinned Wintun executable policy is Windows-specific")
+	}
 	var output bytes.Buffer
 	engineServer := New(
 		strings.NewReader(""),
@@ -414,6 +418,9 @@ func TestTunActivatePinsConfigDigestForInstalledServicePolicy(t *testing.T) {
 }
 
 func TestTunActivateUsesProtectedPinnedExecutableWhenDesktopAssertsAppCopy(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("the protected Wintun executable policy is Windows-specific")
+	}
 	metadata := testPinnedTunMetadata()
 	metadata.TunExecutable = `C:\ProgramData\HypoMux\Core\bin\sing-box.exe`
 	engineServer := New(strings.NewReader(""), &bytes.Buffer{}, metadata)

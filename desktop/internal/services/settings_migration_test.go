@@ -53,6 +53,7 @@ func TestLegacyMigrationRollbackRestoresNewSettings(t *testing.T) {
 	homeDir := t.TempDir()
 	t.Setenv("HYPOMUX_DATA_DIR", dataDir)
 	t.Setenv("USERPROFILE", homeDir)
+	t.Setenv("HOME", homeDir)
 	legacyDir := filepath.Join(homeDir, ".hypomux")
 	if err := os.MkdirAll(legacyDir, 0o755); err != nil {
 		t.Fatal(err)

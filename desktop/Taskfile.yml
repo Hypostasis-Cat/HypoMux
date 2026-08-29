@@ -14,23 +14,24 @@ vars:
   VITE_PORT: '{{.WAILS_VITE_PORT | default 9245}}'
 includes:
   common: ./build/Taskfile.yml
+  darwin: ./build/darwin/Taskfile.yml
   windows: ./build/windows/Taskfile.yml
 
 tasks:
   build:
-    summary: Builds the Windows application
+    summary: Builds the application for the current desktop platform
     cmds:
-      - task: windows:build
+      - task: '{{if eq OS "darwin"}}darwin:build{{else}}windows:build{{end}}'
 
   package:
-    summary: Packages a production Windows build
+    summary: Packages a production build for the current desktop platform
     cmds:
-      - task: windows:package
+      - task: '{{if eq OS "darwin"}}darwin:package{{else}}windows:package{{end}}'
 
   run:
-    summary: Runs the Windows application
+    summary: Runs the application for the current desktop platform
     cmds:
-      - task: windows:run
+      - task: '{{if eq OS "darwin"}}darwin:run{{else}}windows:run{{end}}'
 
   dev:
     summary: Runs the application in development mode

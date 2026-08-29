@@ -47,7 +47,8 @@ func (s *AdapterService) List() ([]AdapterView, error) {
 	}
 	result := make([]AdapterView, 0, len(interfaces))
 	for _, item := range interfaces {
-		if item.Flags&net.FlagUp == 0 || item.Flags&net.FlagLoopback != 0 || isHypoMuxManagedAdapter(item.Name) {
+		if item.Flags&net.FlagUp == 0 || item.Flags&net.FlagLoopback != 0 || isHypoMuxManagedAdapter(item.Name) ||
+			(!settings.ShowVirtualAdapters && isVirtualTunnelAdapter(item.Name)) {
 			continue
 		}
 		addresses, addressErr := item.Addrs()
@@ -92,15 +93,25 @@ func (s *AdapterService) List() ([]AdapterView, error) {
 		}
 		description := item.HardwareAddr.String()
 		if description == "" {
-			description = "Windows 网络接口"
+			description = "网络接口"
 		}
 		details, hasDetails := metadata[item.Index]
 		if !hasDetails {
 			details = adapterMetadata{Metric: -1, AutoMetric: true}
 		}
+		name := item.Name
+		if details.Name != "" {
+			name = details.Name
+		}
+		if details.Description != "" {
+			description = details.Description
+		}
+		if details.Kind != "" {
+			kind = details.Kind
+		}
 		result = append(result, AdapterView{
 			ID:           id,
-			Name:         item.Name,
+			Name:         name,
 			Description:  description,
 			Address:      ipv4,
 			PrefixLength: prefixLength,
@@ -128,6 +139,22 @@ func (s *AdapterService) List() ([]AdapterView, error) {
 
 func isHypoMuxManagedAdapter(name string) bool {
 	return strings.EqualFold(strings.TrimSpace(name), "HypoMux-Tun")
+}
+
+// isVirtualTunnelAdapter recognizes macOS Network Extension tunnel interfaces.
+// They represent VPN overlays rather than independent physical egress links and
+// must not be offered for aggregation unless the user explicitly opts in.
+func isVirtualTunnelAdapter(name string) bool {
+	value := strings.ToLower(strings.TrimSpace(name))
+	if !strings.HasPrefix(value, "utun") || len(value) == len("utun") {
+		return false
+	}
+	for _, character := range value[len("utun"):] {
+		if character < '0' || character > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *AdapterService) Refresh() ([]AdapterView, error) {
