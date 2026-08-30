@@ -142,17 +142,16 @@ export function AppearanceProvider({ children }: PropsWithChildren) {
 
   useEffect(() => {
     applyDocumentTokens(settings, resolvedMode, accent);
-    if (hydrated) {
-      void appearancePersistence.save(settings)
-        .then(() => {
-          setPersistenceError(undefined);
-        })
-        .catch((error) => {
-          const message = error instanceof Error ? error.message : String(error);
-          setPersistenceError(message);
-          console.error("Unable to save appearance settings", error);
-        });
-    }
+    if (!hydrated) return;
+    void appearancePersistence.save(settings)
+      .then(() => {
+        setPersistenceError(undefined);
+      })
+      .catch((error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        setPersistenceError(message);
+        console.error("Unable to save appearance settings", error);
+      });
     desktopPlatform
       .setWindowAppearance({ material: settings.material, mode: resolvedMode, accent })
       .then(setNativeResult);

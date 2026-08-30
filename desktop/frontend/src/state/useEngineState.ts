@@ -166,11 +166,13 @@ export function useEngineState(
   const transition = phase === "starting" || phase === "stopping";
   const transitionRef = useRef(transition);
   const previewRef = useRef(preview);
+  const onErrorRef = useRef(onError);
   modeRef.current = mode;
   weightedRef.current = weighted;
   adaptersRef.current = adapters;
   transitionRef.current = transition;
   previewRef.current = preview;
+  onErrorRef.current = onError;
 
   const applySnapshot = useCallback((
     next: EngineSnapshot,
@@ -196,11 +198,11 @@ export function useEngineState(
     const compatibilityNotice = next.reason?.startsWith("提示：") === true;
     if ((nextPhase === "failed" || nextPhase === "degraded" || compatibilityNotice) && next.reason && next.reason !== lastRuntimeFailure.current) {
       lastRuntimeFailure.current = next.reason;
-      onError(next.reason);
+      onErrorRef.current(next.reason);
     } else if (nextPhase === "running" && !compatibilityNotice) {
       lastRuntimeFailure.current = "";
     }
-  }, [onError]);
+  }, []);
 
   const load = useCallback(async (showError = true) => {
     if (isBrowserPreview()) {
@@ -235,7 +237,7 @@ export function useEngineState(
       applySnapshot(nextSnapshot, false, requestEpoch);
     }).catch((error) => {
       if (showError) {
-        onError(error instanceof Error ? error.message : String(error), () => void load());
+        onErrorRef.current(error instanceof Error ? error.message : String(error), () => void load());
       }
     });
 
@@ -253,13 +255,13 @@ export function useEngineState(
       setPreview(false);
     } catch (error) {
       if (showError) {
-        onError(error instanceof Error ? error.message : String(error), () => void load());
+        onErrorRef.current(error instanceof Error ? error.message : String(error), () => void load());
       }
     } finally {
       if (mounted.current) setLoading(false);
     }
     void runtimeTask;
-  }, [applySnapshot, onError]);
+  }, [applySnapshot]);
 
   useEffect(() => {
     mounted.current = true;
@@ -302,12 +304,12 @@ export function useEngineState(
       adaptersRef.current = authoritative;
       setAdapters(authoritative);
     }).catch((error) => {
-      if (!adapterSaveQueue.isCurrent(handle.revision)) return;
-      onError(error instanceof Error ? error.message : String(error), () => void persistAdapters(next, nextMode, nextWeighted));
+      if (!mounted.current || !adapterSaveQueue.isCurrent(handle.revision)) return;
+      onErrorRef.current(error instanceof Error ? error.message : String(error), () => void persistAdapters(next, nextMode, nextWeighted));
       void load(false);
     });
     return handle.done;
-  }, [load, onError, preview]);
+  }, [load, preview]);
 
   const setMode = useCallback((nextMode: EngineMode) => {
     setModeState(nextMode);
@@ -349,11 +351,11 @@ export function useEngineState(
         }
       }
     } catch (error) {
-      onError(error instanceof Error ? error.message : String(error), () => void refreshAdapters());
+      onErrorRef.current(error instanceof Error ? error.message : String(error), () => void refreshAdapters());
     } finally {
       if (mounted.current) setRefreshing(false);
     }
-  }, [onError, preview]);
+  }, [preview]);
 
   const toggleEngine = useCallback(async () => {
     if (transition || operationActive.current) return;

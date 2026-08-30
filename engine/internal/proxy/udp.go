@@ -459,8 +459,10 @@ func parseSOCKSUDPPacket(payload []byte) (socksUDPPacket, bool) {
 			return socksUDPPacket{}, false
 		}
 		ip = net.IP(payload[4:20])
-		if ip.To4() != nil {
-			return socksUDPPacket{}, false
+		// 部分客户端会用 IPv6 格式携带 IPv4 映射地址（::ffff:a.b.c.d），
+		// 按 IPv4 处理而不是拒绝，保持与回复编码（IPv4 用 ATYP=1）对称。
+		if mapped := ip.To4(); mapped != nil {
+			ip = mapped
 		}
 		portOffset = 20
 	default:

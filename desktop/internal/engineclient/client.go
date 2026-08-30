@@ -93,6 +93,8 @@ type Client struct {
 	normalLauncher   coreLauncher
 	elevatedLauncher coreLauncher
 	events           chan Event
+	done             chan struct{}
+	closed           atomic.Bool
 	lastLaunch       LaunchReport
 }
 
@@ -122,11 +124,30 @@ func newClient(normal, elevated coreLauncher) *Client {
 		normalLauncher:   normal,
 		elevatedLauncher: elevated,
 		events:           make(chan Event, 64),
+		done:             make(chan struct{}),
 	}
 }
 
 func (c *Client) Events() <-chan Event {
 	return c.events
+}
+
+// Done closes when the client is permanently shut down. Event consumers
+// select on it so they can exit even though events itself is never closed
+// (readLoop goroutines from old sessions may still try to deliver to it).
+func (c *Client) Done() <-chan struct{} {
+	return c.done
+}
+
+// Close permanently shuts the client down and unblocks event consumers.
+// Kill alone is not terminal because the client is reused across Core
+// restarts (engine stop/start, privilege switching, WFP repair).
+func (c *Client) Close() {
+	if !c.closed.CompareAndSwap(false, true) {
+		return
+	}
+	c.Kill()
+	close(c.done)
 }
 
 func (c *Client) ExecutablePath() string {
@@ -160,6 +181,9 @@ func (c *Client) EnsureElevated(ctx context.Context) (Hello, error) {
 }
 
 func (c *Client) ensure(ctx context.Context, requireElevated bool) (Hello, error) {
+	if c.closed.Load() {
+		return Hello{}, errors.New("聚合核心客户端已关闭")
+	}
 	select {
 	case c.startGate <- struct{}{}:
 		defer func() { <-c.startGate }()

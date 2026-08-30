@@ -249,7 +249,15 @@ func newEngineService(
 }
 
 func (s *EngineService) consumeCoreEvents() {
-	for event := range s.client.Events() {
+	events := s.client.Events()
+	done := s.client.Done()
+	for {
+		var event engineclient.Event
+		select {
+		case event = <-events:
+		case <-done:
+			return
+		}
 		switch event.Name {
 		case "dns.fallback_required":
 			var fallback dnsFallbackEvent
@@ -1134,6 +1142,7 @@ func (s *EngineService) Shutdown() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	s.client.Shutdown(ctx)
+	s.client.Close()
 }
 
 func errorText(err error) string {

@@ -228,15 +228,19 @@ export function HealthPage({
     setEngineRunning(isNATDetectionBlocked(enginePhase));
   }, [enginePhase]);
 
+  const loadRef = useRef(load);
+  loadRef.current = load;
+
   useEffect(() => {
     mounted.current = true;
-    void load();
+    // 通过 ref 调用最新的 load，使语言切换重建回调时不会重新触发整页加载。
+    void loadRef.current();
     return () => {
       mounted.current = false;
       diagnosticEpoch.current += 1;
       stopPoller.current?.();
     };
-  }, [load]);
+  }, []);
 
   const persistAdapters = useCallback((next: AdapterView[]) => {
     adaptersRef.current = next;
@@ -245,12 +249,12 @@ export function HealthPage({
     const settings = homeSettingsRef.current;
     const handle = adapterSaveQueue.enqueue(adapterSaveInput(settings.mode, settings.weighted, next));
     void handle.done.then((saved) => {
-      if (!adapterSaveQueue.isCurrent(handle.revision)) return;
+      if (!mounted.current || !adapterSaveQueue.isCurrent(handle.revision)) return;
       const authoritative = saved ?? next;
       adaptersRef.current = authoritative;
       setAdapters(authoritative);
     }).catch((error) => {
-      if (!adapterSaveQueue.isCurrent(handle.revision)) return;
+      if (!mounted.current || !adapterSaveQueue.isCurrent(handle.revision)) return;
       notify(text("未能同步网卡选择", "Unable to sync adapter selection"), error instanceof Error ? error.message : String(error));
       void load();
     });
@@ -295,12 +299,15 @@ export function HealthPage({
         state: "running", run_id: "browser-fixture", target_ip: "223.5.5.5",
         total: selected.length, completed: 0, results: [], started_at: new Date().toISOString(),
       });
-      window.setTimeout(() => setSnapshot({
-        state: "completed", run_id: "browser-fixture", target_ip: "223.5.5.5",
-        total: selected.length, completed: selected.length,
-        results: selected.map(previewResult), started_at: new Date(Date.now() - 1500).toISOString(),
-        completed_at: new Date().toISOString(),
-      }), 850);
+      window.setTimeout(() => {
+        if (!mounted.current) return;
+        setSnapshot({
+          state: "completed", run_id: "browser-fixture", target_ip: "223.5.5.5",
+          total: selected.length, completed: selected.length,
+          results: selected.map(previewResult), started_at: new Date(Date.now() - 1500).toISOString(),
+          completed_at: new Date().toISOString(),
+        });
+      }, 850);
       return;
     }
     try {

@@ -191,5 +191,7 @@ func (d *DesktopHost) OpenDirectory(path string) error {
 	if err := command.Start(); err != nil {
 		return fmt.Errorf("打开目录失败：%w", err)
 	}
+	// 打开目录的进程无需等待结果；显式释放避免进程资源滞留到 GC。
+	_ = command.Process.Release()
 	return nil
 }

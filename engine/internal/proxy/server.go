@@ -159,6 +159,7 @@ func (s *Server) startChannelListeners() (Endpoints, error) {
 				_ = opened.Close()
 			}
 			s.cancel()
+			s.resolver = nil
 			return Endpoints{}, fmt.Errorf("listen channel %q: %w", channel.Name, err)
 		}
 		listeners = append(listeners, listener)
@@ -252,8 +253,11 @@ func (s *Server) Snapshot(includeConnections bool) TelemetrySnapshot {
 			},
 		)
 	}
-	if s.resolver != nil {
-		status := s.resolver.Status()
+	s.mu.RLock()
+	resolver := s.resolver
+	s.mu.RUnlock()
+	if resolver != nil {
+		status := resolver.Status()
 		result.DNS = &status
 	}
 	return result

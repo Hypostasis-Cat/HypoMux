@@ -38,8 +38,18 @@ func TestBuildCoreServicePolicyPinsInstalledDesktopAndSidecar(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.EqualFold(policy.DesktopPath, desktopPath) ||
-		!strings.EqualFold(policy.TunExecutable, tunPath) {
+	// 临时目录可能包含 8.3 短名（如 ADMINI~1），而策略路径经
+	// GetFinalPathNameByHandle 规范化为长名，期望值必须同样规范化。
+	expectedDesktop, err := canonicalRegularFile(desktopPath, "expected desktop executable")
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectedTun, err := canonicalRegularFile(tunPath, "expected sing-box executable")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.EqualFold(policy.DesktopPath, expectedDesktop) ||
+		!strings.EqualFold(policy.TunExecutable, expectedTun) {
 		t.Fatalf("unexpected policy paths: %#v", policy)
 	}
 	if err := fileintegrity.VerifySHA256(policy.DesktopPath, policy.DesktopSHA256); err != nil {

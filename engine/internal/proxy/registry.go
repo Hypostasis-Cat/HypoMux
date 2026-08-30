@@ -87,6 +87,7 @@ type connection struct {
 	adapter   string
 	counters  atomic.Pointer[adapterCounters]
 	direct    atomic.Bool
+	finished  atomic.Bool
 	bytesUp   atomic.Uint64
 	bytesDown atomic.Uint64
 }
@@ -216,6 +217,10 @@ func (r *registry) AddDown(session *connection, amount uint64) {
 }
 
 func (r *registry) Finish(session *connection) {
+	// 防止重复 Finish 导致活跃连接计数下溢为巨大值。
+	if !session.finished.CompareAndSwap(false, true) {
+		return
+	}
 	r.mu.Lock()
 	delete(r.connections, session.id)
 	r.mu.Unlock()

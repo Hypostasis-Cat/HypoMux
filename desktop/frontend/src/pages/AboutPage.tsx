@@ -145,6 +145,7 @@ export function AboutPage() {
     } catch (error) {
       notify(text("下载安装包失败", "Installer download failed"), String(error), "error");
       setDownloading(false);
+      setDownloadPercent(0);
     } finally {
       stopProgressPoll();
     }
