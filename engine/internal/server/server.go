@@ -99,6 +99,18 @@ func (s *Server) Run(ctx context.Context) error {
 		close(lines)
 	}()
 
+	// ctx 取消后，上面的扫描协程可能仍阻塞在 Scan 上。若输入流可关闭，
+	// 主动关闭它让 Scan 返回，避免该协程泄漏到进程退出。
+	if closer, ok := s.input.(io.Closer); ok {
+		defer func() {
+			select {
+			case <-ctx.Done():
+				_ = closer.Close()
+			default:
+			}
+		}()
+	}
+
 	for {
 		var raw []byte
 		select {

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"sync"
 	"testing"
@@ -808,6 +809,65 @@ func TestServerStartsAndReportsTUNTCPPoolMode(t *testing.T) {
 	dnsStatus := resultObject(t, messages[3])
 	if dnsStatus["policy"] != "auto" {
 		t.Fatalf("TUN DNS status = %#v", dnsStatus)
+	}
+}
+
+type blockingReadCloser struct {
+	readStarted  chan struct{}
+	readReturned chan struct{}
+	closed       chan struct{}
+	closeOnce    sync.Once
+}
+
+func (r *blockingReadCloser) Read([]byte) (int, error) {
+	select {
+	case r.readStarted <- struct{}{}:
+	default:
+	}
+	<-r.closed
+	select {
+	case r.readReturned <- struct{}{}:
+	default:
+	}
+	return 0, io.EOF
+}
+
+func (r *blockingReadCloser) Close() error {
+	r.closeOnce.Do(func() { close(r.closed) })
+	return nil
+}
+
+func TestRunCancellationInterruptsBlockedInputRead(t *testing.T) {
+	input := &blockingReadCloser{
+		readStarted:  make(chan struct{}, 1),
+		readReturned: make(chan struct{}, 1),
+		closed:       make(chan struct{}),
+	}
+	engineServer := New(input, io.Discard, Metadata{})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() { done <- engineServer.Run(ctx) }()
+
+	select {
+	case <-input.readStarted:
+	case <-time.After(time.Second):
+		t.Fatal("Run did not reach the input read")
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("Run() = %v, want context.Canceled", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Run did not return after cancellation")
+	}
+	select {
+	case <-input.readReturned:
+	case <-time.After(time.Second):
+		t.Fatal("the blocked scanner read was not interrupted after cancellation")
 	}
 }
 

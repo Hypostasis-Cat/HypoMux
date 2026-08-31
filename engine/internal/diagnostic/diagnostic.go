@@ -89,7 +89,6 @@ func Run(ctx context.Context, config Config) Result {
 		default:
 		}
 
-		base.Sent++
 		probeTimeout := config.Timeout
 		if deadline, ok := ctx.Deadline(); ok {
 			if remaining := time.Until(deadline); remaining < probeTimeout {
@@ -101,6 +100,7 @@ func Run(ctx context.Context, config Config) Result {
 			result.Note = "cancelled"
 			return result
 		}
+		base.Sent++
 		probe := icmp.Probe(source, target, probePayload, probeTimeout)
 		if probe.success {
 			rtts = append(rtts, probe.roundTripTimeMS)

@@ -143,9 +143,17 @@ func (c *Client) Done() <-chan struct{} {
 // Kill alone is not terminal because the client is reused across Core
 // restarts (engine stop/start, privilege switching, WFP repair).
 func (c *Client) Close() {
-	if !c.closed.CompareAndSwap(false, true) {
+	c.mu.Lock()
+	if c.closed.Load() {
+		c.mu.Unlock()
 		return
 	}
+	// Set under the session lock so shutdown is mutually exclusive with
+	// negotiateSession's registration: either Kill below tears down a
+	// just-registered session, or the registration observes the flag and
+	// terminates the freshly launched Core itself.
+	c.closed.Store(true)
+	c.mu.Unlock()
 	c.Kill()
 	close(c.done)
 }
@@ -268,6 +276,14 @@ func (c *Client) negotiateSession(
 	}
 
 	c.mu.Lock()
+	if c.closed.Load() {
+		// Close ran while the launcher was in flight. Kill cannot have seen
+		// this session yet, so terminate the new Core here.
+		c.mu.Unlock()
+		_ = session.closeTransport()
+		_ = session.process.Kill()
+		return Hello{}, errors.New("聚合核心客户端已关闭")
+	}
 	if c.session != nil {
 		c.mu.Unlock()
 		_ = session.closeTransport()
