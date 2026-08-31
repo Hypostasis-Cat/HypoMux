@@ -15,3 +15,20 @@ func TestIsHypoMuxManagedAdapter(t *testing.T) {
 		}
 	}
 }
+
+func TestIsVirtualTunnelAdapter(t *testing.T) {
+	tests := map[string]bool{
+		"utun0":   true,
+		" utun9 ": true,
+		"UTUN12":  true,
+		"utun":    false,
+		"utunVPN": false,
+		"en0":     false,
+		"Wi-Fi":   false,
+	}
+	for name, expected := range tests {
+		if actual := isVirtualTunnelAdapter(name); actual != expected {
+			t.Fatalf("isVirtualTunnelAdapter(%q) = %v; want %v", name, actual, expected)
+		}
+	}
+}

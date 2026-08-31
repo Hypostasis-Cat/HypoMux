@@ -43,6 +43,7 @@ export function EngineHero({
 }) {
   const { locale, t } = useI18n();
   const text = (zh: string, en: string) => locale === "en" ? en : zh;
+  const macOS = navigator.platform.toLowerCase().includes("mac");
   const active = phase === "running" || phase === "degraded" || phase === "starting";
   const actionLabel = phase === "starting"
     ? text("正在启动", "Starting")
@@ -87,13 +88,15 @@ export function EngineHero({
           disabled={transitioning || phase === "running" || phase === "degraded"}
         >
           <Tab value="proxy" icon={<PlugConnected20Regular />}>{t("mode_proxy")}</Tab>
-          <Tab value="tun" icon={<Navigation20Regular />}>{text("TUN 模式", "TUN mode")}</Tab>
+          <Tab value="tun" icon={<Navigation20Regular />} disabled={macOS}>
+            {macOS ? text("TUN 模式（开发中）", "TUN mode (planned)") : text("TUN 模式", "TUN mode")}
+          </Tab>
         </TabList>
         <span key={mode} className="engine-mode-note motion-inline-swap">
           {mode === "proxy"
             ? text(
-              `接管遵循 Windows 系统代理的应用流量 · HTTP ${httpPort} · SOCKS5 ${socksPort}`,
-              `Manages apps that follow the Windows system proxy · HTTP ${httpPort} · SOCKS5 ${socksPort}`,
+              `接管遵循${macOS ? " macOS" : " Windows"}系统代理的应用流量 · HTTP ${httpPort} · SOCKS5 ${socksPort}`,
+              `Manages apps that follow the ${macOS ? "macOS" : "Windows"} system proxy · HTTP ${httpPort} · SOCKS5 ${socksPort}`,
             )
             : text(
               "启动前执行只读路由、WFP 与权限检查；系统级资源由独立 Go Core 管理",

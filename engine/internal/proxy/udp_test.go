@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"io"
 	"net"
+	"runtime"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -437,6 +438,12 @@ func TestSOCKSUDPDirectChannelUsesSystemRouteAndReportsTelemetry(t *testing.T) {
 
 func newTUNPoolTestServer(t *testing.T) *Server {
 	t.Helper()
+	if runtime.GOOS == "darwin" {
+		// These multi-adapter fixtures require two locally routed IPv4 loopback
+		// addresses. macOS only configures 127.0.0.1 by default; the production
+		// path is covered by the single-adapter and Darwin dialer tests instead.
+		t.Skip("multi-adapter UDP loopback fixture requires a configured 127.0.0.2 alias on macOS")
+	}
 	server, err := New(Config{
 		Adapters: []Adapter{
 			{Name: "wired", SourceIP: "127.0.0.1"},

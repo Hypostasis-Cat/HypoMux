@@ -521,6 +521,8 @@ func ResolveExecutable() (string, error) {
 	if executable, err := os.Executable(); err == nil {
 		root := filepath.Dir(executable)
 		candidates = append(candidates,
+			filepath.Join(root, "bin", "hypomux-engine"),
+			filepath.Join(root, "hypomux-engine"),
 			filepath.Join(root, "bin", "hypomux-engine.exe"),
 			filepath.Join(root, "hypomux-engine.exe"),
 		)
@@ -528,6 +530,9 @@ func ResolveExecutable() (string, error) {
 	if cwd, err := os.Getwd(); err == nil {
 		for current, count := cwd, 0; count < 6; count++ {
 			candidates = append(candidates,
+				filepath.Join(current, "hypomux-engine"),
+				filepath.Join(current, "bin", "hypomux-engine"),
+				filepath.Join(current, "dist", "hypomux-engine"),
 				filepath.Join(current, "hypomux-engine.exe"),
 				filepath.Join(current, "bin", "hypomux-engine.exe"),
 				filepath.Join(current, "dist", "hypomux-engine.exe"),
@@ -554,5 +559,5 @@ func ResolveExecutable() (string, error) {
 			return absolute, nil
 		}
 	}
-	return "", errors.New("未找到 hypomux-engine.exe；可设置 HYPOMUX_ENGINE_PATH")
+	return "", errors.New("未找到 hypomux-engine；可设置 HYPOMUX_ENGINE_PATH")
 }

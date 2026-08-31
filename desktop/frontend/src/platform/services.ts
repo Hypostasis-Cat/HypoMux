@@ -41,6 +41,7 @@ export type {
 export type CompleteAppSettings = AppSettings & {
   language: "zh" | "en";
   force_tun_connectivity_bypass: boolean;
+  show_virtual_adapters: boolean;
   blocked_domain_bypass: boolean;
   blocked_domain_expiry: boolean;
   autostart: boolean;
