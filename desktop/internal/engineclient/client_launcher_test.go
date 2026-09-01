@@ -200,10 +200,7 @@ func TestEnsureAfterCloseNeverInvokesLauncher(t *testing.T) {
 	}
 	t.Setenv("HYPOMUX_ENGINE_PATH", executable)
 	calls := 0
-	launcher := countingLauncher{
-		calls:   &calls,
-		session: helloProtocolSession(coreSourceStdio, 62, ProtocolVersion),
-	}
+	launcher := countingLauncher{calls: &calls}
 	client := newClient(launcher, launcher)
 	client.Close()
 	_, err = client.Ensure(context.Background())
