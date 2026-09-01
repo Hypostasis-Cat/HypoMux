@@ -126,8 +126,9 @@ func settingsDirectory() string {
 
 func (s *SettingsService) Get() AppSettings {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
 	result := cloneSettings(s.settings)
+	s.mu.RUnlock()
+	// 注册表查询可能因系统负载或安全软件变慢，放到锁外避免阻塞写入。
 	if enabled, err := s.autostartEnabled(); err == nil {
 		result.Autostart = enabled
 		if !enabled {

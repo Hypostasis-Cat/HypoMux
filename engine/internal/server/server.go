@@ -82,14 +82,51 @@ func (s *Server) Run(ctx context.Context) error {
 	scanner := bufio.NewScanner(s.input)
 	scanner.Buffer(make([]byte, 64*1024), protocol.MaxMessageBytes)
 
-	for scanner.Scan() {
+	// scanner.Scan 会阻塞在对端的下一次写入/关闭上，放在独立 goroutine 里
+	// 才能让 ctx 取消（如信号退出）立即结束 Run，而不是等到输入流关闭。
+	lines := make(chan []byte)
+	scanErr := make(chan error, 1)
+	go func() {
+		for scanner.Scan() {
+			line := append([]byte(nil), scanner.Bytes()...)
+			select {
+			case lines <- line:
+			case <-ctx.Done():
+				return
+			}
+		}
+		scanErr <- scanner.Err()
+		close(lines)
+	}()
+
+	// ctx 取消后，上面的扫描协程可能仍阻塞在 Scan 上。若输入流可关闭，
+	// 主动关闭它让 Scan 返回，避免该协程泄漏到进程退出。
+	if closer, ok := s.input.(io.Closer); ok {
+		defer func() {
+			select {
+			case <-ctx.Done():
+				_ = closer.Close()
+			default:
+			}
+		}()
+	}
+
+	for {
+		var raw []byte
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		default:
+		case received, ok := <-lines:
+			if !ok {
+				if err := <-scanErr; err != nil {
+					return fmt.Errorf("read request: %w", err)
+				}
+				return nil
+			}
+			raw = received
 		}
 
-		line := bytes.TrimSpace(scanner.Bytes())
+		line := bytes.TrimSpace(raw)
 		if len(line) == 0 {
 			continue
 		}
@@ -121,11 +158,6 @@ func (s *Server) Run(ctx context.Context) error {
 			return nil
 		}
 	}
-
-	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("read request: %w", err)
-	}
-	return nil
 }
 
 func (s *Server) handle(ctx context.Context, line []byte) (protocol.Response, bool) {

@@ -256,6 +256,7 @@ func writeSingBoxConfigWithOptions(
 		return "", "", clashAPIConfig{}, fmt.Errorf("写入 TUN 配置失败：%w", err)
 	}
 	if err := os.Rename(temporary, path); err != nil {
+		_ = os.Remove(temporary)
 		return "", "", clashAPIConfig{}, fmt.Errorf("提交 TUN 配置失败：%w", err)
 	}
 	return singBox, path, clashAPI, nil

@@ -102,6 +102,9 @@ export function ConnectionsPage({
     setOutboundFilter("all");
   }, [adapterRevision, initialAdapter]);
 
+  const textRef = useRef(text);
+  textRef.current = text;
+
   const load = useCallback(async (manual = false) => {
     if (requestActive.current) return;
     requestActive.current = true;
@@ -110,14 +113,14 @@ export function ConnectionsPage({
       const next = await withServiceTimeout(
         appServices.engine.connections(),
         8_000,
-        text("读取活动连接", "Loading active connections"),
+        textRef.current("读取活动连接", "Loading active connections"),
       );
       pendingScrollTop.current = connectionListRef.current?.scrollTop ?? null;
       setSnapshot({ ...next, connections: next.connections ?? [] });
     } catch (error) {
       dispatchToast(
         <Toast>
-          <ToastTitle>{text("无法读取活动连接", "Unable to load active connections")}</ToastTitle>
+          <ToastTitle>{textRef.current("无法读取活动连接", "Unable to load active connections")}</ToastTitle>
           <ToastBody>{error instanceof Error ? error.message : String(error)}</ToastBody>
         </Toast>,
         { intent: "error", timeout: 4200 },
@@ -127,7 +130,7 @@ export function ConnectionsPage({
       setLoading(false);
       setRefreshing(false);
     }
-  }, [dispatchToast, text]);
+  }, [dispatchToast]);
 
   useEffect(() => {
     void load();

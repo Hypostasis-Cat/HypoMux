@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -128,8 +130,10 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 }
 
 func runServer(input io.Reader, output, stderr io.Writer) int {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
 	engineServer := server.New(input, output, runtimeServerMetadata())
-	if err := engineServer.Run(context.Background()); err != nil {
+	if err := engineServer.Run(ctx); err != nil {
 		fmt.Fprintf(stderr, "hypomux-engine: %v\n", err)
 		return 1
 	}
@@ -154,6 +158,10 @@ func runtimeServerMetadata() server.Metadata {
 	if err != nil {
 		return metadata
 	}
-	metadata.TunExecutable = filepath.Join(filepath.Dir(executable), "sing-box.exe")
+	tunName := "sing-box"
+	if runtime.GOOS == "windows" {
+		tunName += ".exe"
+	}
+	metadata.TunExecutable = filepath.Join(filepath.Dir(executable), tunName)
 	return metadata
 }

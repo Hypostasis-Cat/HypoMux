@@ -16,8 +16,11 @@ func atomicWriteFile(path string, data []byte, permission os.FileMode) error {
 		return err
 	}
 	committed := false
+	closed := false
 	defer func() {
-		_ = file.Close()
+		if !closed {
+			_ = file.Close()
+		}
 		if !committed {
 			_ = os.Remove(temporary)
 		}
@@ -31,6 +34,7 @@ func atomicWriteFile(path string, data []byte, permission os.FileMode) error {
 	if err := file.Close(); err != nil {
 		return err
 	}
+	closed = true
 	if err := os.Rename(temporary, path); err != nil {
 		return fmt.Errorf("replace %s: %w", filepath.Base(path), err)
 	}

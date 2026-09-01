@@ -93,6 +93,8 @@ type Client struct {
 	normalLauncher   coreLauncher
 	elevatedLauncher coreLauncher
 	events           chan Event
+	done             chan struct{}
+	closed           atomic.Bool
 	lastLaunch       LaunchReport
 }
 
@@ -122,11 +124,38 @@ func newClient(normal, elevated coreLauncher) *Client {
 		normalLauncher:   normal,
 		elevatedLauncher: elevated,
 		events:           make(chan Event, 64),
+		done:             make(chan struct{}),
 	}
 }
 
 func (c *Client) Events() <-chan Event {
 	return c.events
+}
+
+// Done closes when the client is permanently shut down. Event consumers
+// select on it so they can exit even though events itself is never closed
+// (readLoop goroutines from old sessions may still try to deliver to it).
+func (c *Client) Done() <-chan struct{} {
+	return c.done
+}
+
+// Close permanently shuts the client down and unblocks event consumers.
+// Kill alone is not terminal because the client is reused across Core
+// restarts (engine stop/start, privilege switching, WFP repair).
+func (c *Client) Close() {
+	c.mu.Lock()
+	if c.closed.Load() {
+		c.mu.Unlock()
+		return
+	}
+	// Set under the session lock so shutdown is mutually exclusive with
+	// negotiateSession's registration: either Kill below tears down a
+	// just-registered session, or the registration observes the flag and
+	// terminates the freshly launched Core itself.
+	c.closed.Store(true)
+	c.mu.Unlock()
+	c.Kill()
+	close(c.done)
 }
 
 func (c *Client) ExecutablePath() string {
@@ -160,6 +189,9 @@ func (c *Client) EnsureElevated(ctx context.Context) (Hello, error) {
 }
 
 func (c *Client) ensure(ctx context.Context, requireElevated bool) (Hello, error) {
+	if c.closed.Load() {
+		return Hello{}, errors.New("聚合核心客户端已关闭")
+	}
 	select {
 	case c.startGate <- struct{}{}:
 		defer func() { <-c.startGate }()
@@ -244,6 +276,14 @@ func (c *Client) negotiateSession(
 	}
 
 	c.mu.Lock()
+	if c.closed.Load() {
+		// Close ran while the launcher was in flight. Kill cannot have seen
+		// this session yet, so terminate the new Core here.
+		c.mu.Unlock()
+		_ = session.closeTransport()
+		_ = session.process.Kill()
+		return Hello{}, errors.New("聚合核心客户端已关闭")
+	}
 	if c.session != nil {
 		c.mu.Unlock()
 		_ = session.closeTransport()

@@ -30,6 +30,7 @@ type countingLauncher struct {
 type blockingLauncher struct {
 	started chan struct{}
 	release chan struct{}
+	session *coreSession
 }
 
 type testCoreProcess struct {
@@ -68,6 +69,11 @@ func closedProtocolSession(source coreSessionSource, pid int) *coreSession {
 }
 
 func helloProtocolSession(source coreSessionSource, pid int, protocol int) *coreSession {
+	session, _ := helloProtocolSessionWithProcess(source, pid, protocol)
+	return session
+}
+
+func helloProtocolSessionWithProcess(source coreSessionSource, pid int, protocol int) (*coreSession, *testCoreProcess) {
 	client, server := net.Pipe()
 	process := newTestCoreProcess(pid)
 	go func() {
@@ -99,7 +105,7 @@ func helloProtocolSession(source coreSessionSource, pid int, protocol int) *core
 			_ = process.Kill()
 			return client.Close()
 		},
-	}
+	}, process
 }
 
 func (launcher blockingLauncher) Launch(context.Context, string) (*coreSession, error) {
@@ -108,6 +114,9 @@ func (launcher blockingLauncher) Launch(context.Context, string) (*coreSession, 
 	default:
 	}
 	<-launcher.release
+	if launcher.session != nil {
+		return launcher.session, nil
+	}
 	return nil, errors.New("released blocking launcher")
 }
 
@@ -129,6 +138,77 @@ func TestEnsureElevatedReturnsCancellationWithoutStartingCore(t *testing.T) {
 	}
 	if client.Hello().ProtocolVersion != 0 {
 		t.Fatal("a cancelled elevation must not leave a negotiated Core")
+	}
+}
+
+// A Close that lands while the launcher is still in flight must not leave a
+// live Core behind: either the close kills a registered session or the
+// registration aborts and terminates the freshly launched process.
+func TestCloseDuringInFlightEnsureTerminatesLaunchedCore(t *testing.T) {
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HYPOMUX_ENGINE_PATH", executable)
+	session, process := helloProtocolSessionWithProcess(coreSourceStdio, 61, ProtocolVersion)
+	launcher := blockingLauncher{
+		started: make(chan struct{}, 1),
+		release: make(chan struct{}),
+		session: session,
+	}
+	client := newClient(launcher, launcher)
+
+	ensureDone := make(chan error, 1)
+	go func() {
+		_, ensureErr := client.Ensure(context.Background())
+		ensureDone <- ensureErr
+	}()
+	select {
+	case <-launcher.started:
+	case <-time.After(time.Second):
+		t.Fatal("startup did not reach the launcher")
+	}
+
+	client.Close()
+	close(launcher.release)
+
+	select {
+	case err := <-ensureDone:
+		if err == nil {
+			t.Fatal("Ensure must fail once the client is closed during launch")
+		}
+		if !containsError(err, "聚合核心客户端已关闭") {
+			t.Fatalf("expected closed-client error, got %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Ensure did not return after Close")
+	}
+	select {
+	case <-process.done:
+	case <-time.After(time.Second):
+		t.Fatal("the launched Core process was not terminated after Close")
+	}
+	if hello := client.Hello(); hello.ProtocolVersion != 0 {
+		t.Fatalf("a closed client must not hold a negotiated Core: %#v", hello)
+	}
+}
+
+func TestEnsureAfterCloseNeverInvokesLauncher(t *testing.T) {
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HYPOMUX_ENGINE_PATH", executable)
+	calls := 0
+	launcher := countingLauncher{calls: &calls}
+	client := newClient(launcher, launcher)
+	client.Close()
+	_, err = client.Ensure(context.Background())
+	if err == nil || !containsError(err, "聚合核心客户端已关闭") {
+		t.Fatalf("expected closed-client error, got %v", err)
+	}
+	if calls != 0 {
+		t.Fatalf("launcher must not run after Close, got %d calls", calls)
 	}
 }
 

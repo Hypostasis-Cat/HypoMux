@@ -61,6 +61,10 @@ func validateDownloadedInstallerPath(installerPath string) (string, error) {
 	if err != nil {
 		return "", errors.New("下载的安装包路径无效")
 	}
+	// 路径会被写入批处理脚本执行，拒绝可能被 cmd.exe 解释的元字符。
+	if strings.ContainsAny(absolute, "%&|<>^\"") {
+		return "", errors.New("下载的安装包路径包含不安全字符")
+	}
 	info, err := os.Stat(absolute)
 	if err != nil || info.IsDir() || !installerNamePattern.MatchString(filepath.Base(absolute)) {
 		return "", errors.New("下载的安装包不存在或名称无效")

@@ -151,6 +151,8 @@ func connectCoreServicePipe(ctx context.Context, expectedPID int) (*os.File, err
 		return nil, err
 	}
 	var handle windows.Handle
+	retryTimer := time.NewTimer(40 * time.Millisecond)
+	defer retryTimer.Stop()
 	for {
 		handle, err = windows.CreateFile(
 			name,
@@ -170,7 +172,8 @@ func connectCoreServicePipe(ctx context.Context, expectedPID int) (*os.File, err
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
-		case <-time.After(40 * time.Millisecond):
+		case <-retryTimer.C:
+			retryTimer.Reset(40 * time.Millisecond)
 		}
 	}
 

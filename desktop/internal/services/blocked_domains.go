@@ -45,12 +45,20 @@ func NewBlockedDomainService(settings *SettingsService) *BlockedDomainService {
 	return service
 }
 
+type purgedDomain struct {
+	adapter string
+	domain  string
+	expiry  float64
+}
+
 func (s *BlockedDomainService) List() (BlockedDomainSnapshot, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	changed := s.purgeExpiredLocked()
-	if changed {
-		_ = s.saveLocked()
+	purged := s.purgeExpiredLocked()
+	if len(purged) > 0 {
+		if err := s.saveLocked(); err != nil {
+			s.restorePurgedLocked(purged)
+		}
 	}
 	preferences := s.settings.Get()
 	snapshot := BlockedDomainSnapshot{
@@ -166,24 +174,33 @@ func (s *BlockedDomainService) load() error {
 	return nil
 }
 
-func (s *BlockedDomainService) purgeExpiredLocked() bool {
+func (s *BlockedDomainService) purgeExpiredLocked() []purgedDomain {
 	if !s.settings.Get().BlockedDomainExpiry {
-		return false
+		return nil
 	}
 	now := float64(s.now().Unix())
-	changed := false
+	var purged []purgedDomain
 	for adapter, domains := range s.entries {
 		for domain, expiry := range domains {
 			if expiry <= now {
 				delete(domains, domain)
-				changed = true
+				purged = append(purged, purgedDomain{adapter: adapter, domain: domain, expiry: expiry})
 			}
 		}
 		if len(domains) == 0 {
 			delete(s.entries, adapter)
 		}
 	}
-	return changed
+	return purged
+}
+
+func (s *BlockedDomainService) restorePurgedLocked(purged []purgedDomain) {
+	for _, entry := range purged {
+		if s.entries[entry.adapter] == nil {
+			s.entries[entry.adapter] = map[string]float64{}
+		}
+		s.entries[entry.adapter][entry.domain] = entry.expiry
+	}
 }
 
 func (s *BlockedDomainService) saveLocked() error {
