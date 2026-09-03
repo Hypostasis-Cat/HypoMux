@@ -62,6 +62,9 @@ VIAddVersionKey "ProductName"     "${INFO_PRODUCTNAME}"
 
 # Enable HiDPI support. https://nsis.sourceforge.io/Reference/ManifestDPIAware
 ManifestDPIAware true
+# WinVer.nsh relies on this declaration on Windows 8.1 and later. Windows 11
+# uses the Windows 10 supportedOS identifier as well.
+ManifestSupportedOS Win10
 
 !include "MUI.nsh"
 
@@ -174,10 +177,61 @@ Var HypoMuxAutostartEnabled
    System::Call 'kernel32::SetEnvironmentVariable(t "PSModulePath", p 0)'
 !macroend
 
+Function HypoMuxCheckPlatform
+   ; WinVer.nsh is the primary check. Some modified Windows installations and
+   ; future builds can still expose a compatibility version, so fall back to
+   ; the protected CurrentVersion registry data before rejecting the system.
+   ${If} ${AtLeastWin10}
+       Goto hypoMuxPlatformArchitecture
+   ${EndIf}
+
+   SetRegView 64
+   ClearErrors
+   ReadRegDWORD $0 HKLM "SOFTWARE\Microsoft\Windows NT\CurrentVersion" "CurrentMajorVersionNumber"
+   IfErrors hypoMuxPlatformCheckBuild
+   IntCmp $0 10 hypoMuxPlatformArchitecture hypoMuxPlatformUnsupportedWindows hypoMuxPlatformArchitecture
+
+hypoMuxPlatformCheckBuild:
+   ClearErrors
+   ReadRegStr $0 HKLM "SOFTWARE\Microsoft\Windows NT\CurrentVersion" "CurrentBuildNumber"
+   IfErrors hypoMuxPlatformUnsupportedWindows
+   ; Windows 10 starts at build 10240; Server 2016 is newer (14393).
+   IntCmp $0 10240 hypoMuxPlatformArchitecture hypoMuxPlatformUnsupportedWindows hypoMuxPlatformArchitecture
+
+hypoMuxPlatformUnsupportedWindows:
+   IfSilent hypoMuxPlatformSilentWindows hypoMuxPlatformVisibleWindows
+hypoMuxPlatformSilentWindows:
+   SetErrorLevel 64
+   Abort
+hypoMuxPlatformVisibleWindows:
+   MessageBox MB_OK "${WAILS_WIN10_REQUIRED}"
+   Quit
+
+hypoMuxPlatformArchitecture:
+   !ifdef SUPPORTS_AMD64
+       ${If} ${IsNativeAMD64}
+           Return
+       ${EndIf}
+   !endif
+   !ifdef SUPPORTS_ARM64
+       ${If} ${IsNativeARM64}
+           Return
+       ${EndIf}
+   !endif
+
+   IfSilent hypoMuxPlatformSilentArchitecture hypoMuxPlatformVisibleArchitecture
+hypoMuxPlatformSilentArchitecture:
+   SetErrorLevel 65
+   Abort
+hypoMuxPlatformVisibleArchitecture:
+   MessageBox MB_OK "${WAILS_ARCHITECTURE_NOT_SUPPORTED}"
+   Quit
+FunctionEnd
+
 Function .onInit
    !insertmacro HypoMuxClearInheritedPSModulePath
    !insertmacro MUI_LANGDLL_DISPLAY
-   !insertmacro wails.checkArchitecture
+   Call HypoMuxCheckPlatform
    StrCpy $HypoMuxFreshInstall "1"
    StrCpy $HypoMuxPreviousInstallDir ""
    StrCpy $HypoMuxInstallPathChanged "0"

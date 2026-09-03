@@ -200,6 +200,33 @@ func TestInstallerClearsInheritedPowerShellModulePath(t *testing.T) {
 	}
 }
 
+func TestInstallerWindowsVersionCheckIsForwardCompatible(t *testing.T) {
+	data, err := os.ReadFile("build/windows/nsis/project.nsi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(data)
+	for _, required := range []string{
+		`ManifestSupportedOS Win10`,
+		`Function HypoMuxCheckPlatform`,
+		`Call HypoMuxCheckPlatform`,
+		`CurrentMajorVersionNumber`,
+		`CurrentBuildNumber`,
+		`IntCmp $0 10240 hypoMuxPlatformArchitecture hypoMuxPlatformUnsupportedWindows hypoMuxPlatformArchitecture`,
+		`${IsNativeAMD64}`,
+		`${IsNativeARM64}`,
+		`SetErrorLevel 64`,
+		`SetErrorLevel 65`,
+	} {
+		if !strings.Contains(script, required) {
+			t.Fatalf("forward-compatible Windows platform check is missing %q", required)
+		}
+	}
+	if strings.Contains(script, `!insertmacro wails.checkArchitecture`) {
+		t.Fatal("installer still delegates version rejection to the generated Wails macro")
+	}
+}
+
 func TestInstallerCoreShutdownBarrierIsPathScopedAndBounded(t *testing.T) {
 	data, err := os.ReadFile("build/windows/nsis/stop-core-for-upgrade.ps1")
 	if err != nil {
