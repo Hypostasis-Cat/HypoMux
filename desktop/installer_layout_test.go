@@ -812,6 +812,27 @@ func TestCardsUseThemeAccentHoverGlow(t *testing.T) {
 	}
 }
 
+func TestNotificationIslandKeepsWebViewBackdropSampling(t *testing.T) {
+	cssData, err := os.ReadFile("frontend/src/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	css := string(cssData)
+	for _, required := range []string{
+		`inset-inline: 0`,
+		`margin-inline: auto`,
+		`backdrop-filter: blur(28px) saturate(155%)`,
+		`clip-path: inset(0 42% round 22px)`,
+	} {
+		if !strings.Contains(css, required) {
+			t.Fatalf("notification island compositor-safe frosting is missing %q", required)
+		}
+	}
+	if strings.Contains(css, `transform: translateX(-50%)`) {
+		t.Fatal("notification island still uses a transformed compositor layer that disables WebView2 backdrop sampling")
+	}
+}
+
 func TestFrontendUsesWindowsNeutralPaletteAndDistinctWindowMaterials(t *testing.T) {
 	tokenData, err := os.ReadFile("frontend/src/theme/material.tokens.css")
 	if err != nil {

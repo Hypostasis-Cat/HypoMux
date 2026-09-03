@@ -583,10 +583,11 @@ svg {
   position: absolute;
   z-index: 80;
   top: 14px;
-  left: 50%;
+  inset-inline: 0;
   width: min(520px, calc(100% - 280px));
   min-width: 250px;
   max-width: 520px;
+  margin-inline: auto;
   padding: 5px 7px;
   overflow: hidden;
   border: 1px solid var(--hm-island-border);
@@ -599,12 +600,15 @@ svg {
     0 14px 38px var(--hm-island-shadow),
     0 3px 10px color-mix(in srgb, var(--hm-island-shadow) 48%, transparent),
     inset 0 1px 0 var(--hm-island-highlight);
-  transform: translateX(-50%);
-  transform-origin: 50% 0;
+  /*
+   * Keep the frosted surface out of a transformed compositor layer. WebView2
+   * renders the alpha correctly in that layer but can no longer sample the
+   * page behind it, which makes backdrop-filter look like plain transparency.
+   */
   backdrop-filter: blur(28px) saturate(155%);
   -webkit-backdrop-filter: blur(28px) saturate(155%);
   --wails-draggable: no-drag;
-  animation: dynamic-island-arrive 520ms var(--hm-motion-spring) both;
+  animation: dynamic-island-arrive 520ms var(--hm-motion-spring);
   transition:
     width 420ms var(--hm-motion-spring),
     border-radius 320ms var(--hm-motion-ease-out),
@@ -794,15 +798,15 @@ svg {
 @keyframes dynamic-island-arrive {
   0% {
     opacity: 0;
-    transform: translateX(-50%) translateY(-12px) scale(0.72, 0.58);
+    clip-path: inset(0 42% round 22px);
   }
   58% {
     opacity: 1;
-    transform: translateX(-50%) translateY(1px) scale(1.025, 1.04);
+    clip-path: inset(0 -1.5% round 22px);
   }
   100% {
     opacity: 1;
-    transform: translateX(-50%) translateY(0) scale(1);
+    clip-path: inset(0 round 22px);
   }
 }
 
