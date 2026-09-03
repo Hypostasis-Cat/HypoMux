@@ -8,10 +8,6 @@ import {
   DialogSurface,
   DialogTitle,
   DialogTrigger,
-  Toast,
-  ToastTitle,
-  useId,
-  useToastController,
 } from "@fluentui/react-components";
 import {
   ArrowLeft20Regular,
@@ -21,7 +17,7 @@ import {
 } from "@fluentui/react-icons";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { GlassSurface } from "../components/material/GlassSurface";
-import { AppToaster } from "../components/AppToaster";
+import { useAppNotifications } from "../components/notifications/AppNotifications";
 import { appServices, type BlockedDomainSnapshot } from "../platform/services";
 import { useI18n } from "../i18n/i18n";
 import { startSerialPoll } from "../platform/serialPoll";
@@ -41,8 +37,7 @@ export function BlockedDomainsPage({ onBack }: { onBack: () => void }) {
   const [clearOpen, setClearOpen] = useState(false);
   const requestSequence = useRef(0);
   const mounted = useRef(true);
-  const toasterId = useId("blocked-domains-toaster");
-  const { dispatchToast } = useToastController(toasterId);
+  const { notify } = useAppNotifications();
 
   const refresh = useCallback(async () => {
     const sequence = ++requestSequence.current;
@@ -51,11 +46,11 @@ export function BlockedDomainsPage({ onBack }: { onBack: () => void }) {
       const next = await appServices.blockedDomains.list();
       if (mounted.current && sequence === requestSequence.current) setSnapshot(next);
     } catch (error) {
-      dispatchToast(<Toast><ToastTitle>{text("读取域名记录失败", "Failed to load domain records")}: {String(error)}</ToastTitle></Toast>, { intent: "error" });
+      notify({ title: text("读取域名记录失败", "Failed to load domain records"), message: String(error), intent: "error" });
     } finally {
       if (mounted.current && sequence === requestSequence.current) setLoading(false);
     }
-  }, [dispatchToast, locale]);
+  }, [locale, notify]);
 
   useEffect(() => {
     mounted.current = true;
@@ -73,7 +68,7 @@ export function BlockedDomainsPage({ onBack }: { onBack: () => void }) {
       await appServices.blockedDomains.remove(adapter, domain);
       await refresh();
     } catch (error) {
-      dispatchToast(<Toast><ToastTitle>{text("移除失败", "Remove failed")}: {String(error)}</ToastTitle></Toast>, { intent: "error" });
+      notify({ title: text("移除失败", "Remove failed"), message: String(error), intent: "error" });
     }
   };
 
@@ -82,15 +77,14 @@ export function BlockedDomainsPage({ onBack }: { onBack: () => void }) {
       await appServices.blockedDomains.clear();
       setClearOpen(false);
       await refresh();
-      dispatchToast(<Toast><ToastTitle>{text("域名隔离记录已清空", "Domain-isolation records cleared")}</ToastTitle></Toast>, { intent: "success" });
+      notify({ title: text("域名隔离记录已清空", "Domain-isolation records cleared"), intent: "success" });
     } catch (error) {
-      dispatchToast(<Toast><ToastTitle>{text("清空失败", "Clear failed")}: {String(error)}</ToastTitle></Toast>, { intent: "error" });
+      notify({ title: text("清空失败", "Clear failed"), message: String(error), intent: "error" });
     }
   };
 
   return (
     <main className="blocked-domains-page">
-      <AppToaster toasterId={toasterId} position="top-end" />
       <header className="page-heading">
         <div>
           <span className="section-kicker">Per-adapter isolation</span>

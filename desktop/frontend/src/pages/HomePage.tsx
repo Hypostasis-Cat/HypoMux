@@ -9,13 +9,7 @@ import {
   DialogSurface,
   DialogTitle,
   Spinner,
-  Toast,
-  ToastBody,
-  ToastFooter,
-  ToastTitle,
   Tooltip,
-  useId,
-  useToastController,
 } from "@fluentui/react-components";
 import {
   ArrowSync20Regular,
@@ -31,7 +25,7 @@ import { RuntimeStatusBar } from "../components/home/RuntimeStatusBar";
 import type { AppPage } from "../components/shell/CompactNavigation";
 import type { TunPreflightSnapshot } from "../platform/services";
 import { useI18n } from "../i18n/i18n";
-import { AppToaster } from "../components/AppToaster";
+import { useAppNotifications } from "../components/notifications/AppNotifications";
 
 const formatBytes = (value: number) => {
   if (value >= 1024 ** 3) return `${(value / 1024 ** 3).toFixed(2)} GB`;
@@ -55,23 +49,17 @@ export function HomePage({
   const [preflightDialogOpen, setPreflightDialogOpen] = useState(false);
   const [showPreflightDetails, setShowPreflightDetails] = useState(false);
   const preflightResolver = useRef<((confirmed: boolean) => void) | null>(null);
-  const toasterId = useId("hypomux-toaster");
-  const { dispatchToast } = useToastController(toasterId);
+  const { notify } = useAppNotifications();
   const notifyError = useCallback((message: string, retry?: () => void) => {
     const informational = message.includes("Steam") || message.startsWith("提示：");
-    dispatchToast(
-      <Toast>
-        <ToastTitle>{informational ? t("infobar_info") : text("操作未完成", "Operation not completed")}</ToastTitle>
-        <ToastBody>{message}</ToastBody>
-        {retry && (
-          <ToastFooter>
-            <Button appearance="transparent" onClick={retry}>{text("重试", "Retry")}</Button>
-          </ToastFooter>
-        )}
-      </Toast>,
-      { intent: "error", timeout: 6000 },
-    );
-  }, [dispatchToast, locale, t]);
+    notify({
+      title: informational ? t("infobar_info") : text("操作未完成", "Operation not completed"),
+      message,
+      intent: informational ? "info" : "error",
+      action: retry ? { label: text("重试", "Retry"), onClick: retry } : undefined,
+      dedupeKey: informational ? "home:engine-info" : "home:engine-error",
+    });
+  }, [locale, notify, t]);
   const handleTunPreflight = useCallback((snapshot: TunPreflightSnapshot) => {
     return new Promise<boolean>((resolve) => {
       preflightResolver.current?.(false);
@@ -100,7 +88,6 @@ export function HomePage({
 
   return (
     <main className="home-page">
-      <AppToaster toasterId={toasterId} position="top-end" />
       <EngineHero
         phase={engine.phase}
         mode={engine.mode}

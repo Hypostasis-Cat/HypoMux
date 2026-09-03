@@ -14,11 +14,7 @@ import {
   Switch,
   Tab,
   TabList,
-  Toast,
-  ToastBody,
-  ToastTitle,
   useId,
-  useToastController,
 } from "@fluentui/react-components";
 import {
   ArrowSync20Regular,
@@ -29,7 +25,7 @@ import {
 } from "@fluentui/react-icons";
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { GlassSurface } from "../components/material/GlassSurface";
-import { AppToaster } from "../components/AppToaster";
+import { useAppNotifications } from "../components/notifications/AppNotifications";
 import { desktopPlatform } from "../platform/desktop";
 import { appServices, type AdapterView, type CompleteAppSettings, type ConfigMigrationStatus } from "../platform/services";
 import { SettingsSaveQueue, type SaveOutcome } from "../platform/settingsQueue";
@@ -302,18 +298,11 @@ export function SettingsPage({
       return undefined as T;
     });
 
-  const toasterId = useId("settings-toaster");
-  const { dispatchToast } = useToastController(toasterId);
+  const { notify: pushNotification } = useAppNotifications();
 
   const notify = useCallback((title: string, body: string, intent: "success" | "error" | "info" | "warning" = "success") => {
-    dispatchToast(
-      <Toast>
-        <ToastTitle>{title}</ToastTitle>
-        <ToastBody>{body}</ToastBody>
-      </Toast>,
-      { intent, timeout: 2800 },
-    );
-  }, [dispatchToast]);
+    pushNotification({ title, message: body, intent, dedupeKey: `settings:${intent}:${title}` });
+  }, [pushNotification]);
 
   useEffect(() => {
     if (appearancePersistenceError) {
@@ -520,7 +509,6 @@ export function SettingsPage({
 
   return (
     <main ref={settingsPageRef} className="settings-page" aria-busy={loading || saving}>
-      <AppToaster toasterId={toasterId} position="top-end" />
       <header className="page-heading">
         <div>
           <span className="section-kicker">{text("偏好设置", "HypoMux preferences")}</span>

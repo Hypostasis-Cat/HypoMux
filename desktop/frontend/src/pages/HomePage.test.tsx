@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import type { PropsWithChildren, ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { AppNotificationProvider } from "../components/notifications/AppNotifications";
 import type { HomeAdapter } from "../state/useEngineState";
 import { HomePage } from "./HomePage";
 
@@ -25,6 +27,12 @@ vi.mock("../i18n/i18n", () => ({
     })[key] ?? key,
   }),
 }));
+
+const NotificationTestProvider = ({ children }: PropsWithChildren) => (
+  <AppNotificationProvider>{children}</AppNotificationProvider>
+);
+
+const renderPage = (ui: ReactElement) => render(ui, { wrapper: NotificationTestProvider });
 
 const adapter: HomeAdapter = {
   id: "Ethernet",
@@ -89,7 +97,7 @@ describe("HomePage adapter interactions", () => {
 
   it("opens active connections for the clicked adapter", () => {
     const onNavigate = vi.fn();
-    render(<HomePage onNavigate={onNavigate} />);
+    renderPage(<HomePage onNavigate={onNavigate} />);
 
     fireEvent.click(screen.getByRole("button", { name: "View active connections for Ethernet" }));
 
@@ -107,7 +115,7 @@ describe("HomePage adapter interactions", () => {
     };
     mocks.useEngineState.mockReturnValue(inactiveEngine);
     const onNavigate = vi.fn();
-    render(<HomePage onNavigate={onNavigate} />);
+    renderPage(<HomePage onNavigate={onNavigate} />);
 
     fireEvent.click(screen.getByRole("button", { name: "View active connections for Ethernet" }));
     fireEvent.click(screen.getByRole("article"));
@@ -118,7 +126,7 @@ describe("HomePage adapter interactions", () => {
 
   it("keeps adapter controls from triggering connection navigation", () => {
     const onNavigate = vi.fn();
-    render(<HomePage onNavigate={onNavigate} />);
+    renderPage(<HomePage onNavigate={onNavigate} />);
 
     fireEvent.click(screen.getByRole("checkbox", { name: "Disable Ethernet" }));
     fireEvent.click(screen.getByRole("button", { name: "Increase Ethernet Weight" }));
@@ -130,7 +138,7 @@ describe("HomePage adapter interactions", () => {
     const onAdapterRuntimeChange = vi.fn();
     const onEnginePhaseChange = vi.fn();
     mocks.useEngineState.mockReturnValue({ ...engineState(), loading: true, phase: "starting" });
-    const { rerender } = render(
+    const { rerender } = renderPage(
       <HomePage
         onAdapterRuntimeChange={onAdapterRuntimeChange}
         onEnginePhaseChange={onEnginePhaseChange}

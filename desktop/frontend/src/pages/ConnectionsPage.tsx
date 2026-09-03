@@ -6,11 +6,6 @@ import {
   SearchBox,
   Spinner,
   Switch,
-  Toast,
-  ToastBody,
-  ToastTitle,
-  useId,
-  useToastController,
 } from "@fluentui/react-components";
 import {
   AppsListDetail24Regular,
@@ -24,7 +19,7 @@ import {
 } from "@fluentui/react-icons";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { GlassSurface } from "../components/material/GlassSurface";
-import { AppToaster } from "../components/AppToaster";
+import { useAppNotifications } from "../components/notifications/AppNotifications";
 import { useI18n } from "../i18n/i18n";
 import {
   appServices,
@@ -92,8 +87,7 @@ export function ConnectionsPage({
   const requestActive = useRef(false);
   const connectionListRef = useRef<HTMLDivElement>(null);
   const pendingScrollTop = useRef<number | null>(null);
-  const toasterId = useId("connections-toaster");
-  const { dispatchToast } = useToastController(toasterId);
+  const { notify } = useAppNotifications();
   const groupedByAdapter = adapterFilter.length > 0;
 
   useEffect(() => {
@@ -118,19 +112,18 @@ export function ConnectionsPage({
       pendingScrollTop.current = connectionListRef.current?.scrollTop ?? null;
       setSnapshot({ ...next, connections: next.connections ?? [] });
     } catch (error) {
-      dispatchToast(
-        <Toast>
-          <ToastTitle>{textRef.current("无法读取活动连接", "Unable to load active connections")}</ToastTitle>
-          <ToastBody>{error instanceof Error ? error.message : String(error)}</ToastBody>
-        </Toast>,
-        { intent: "error", timeout: 4200 },
-      );
+      notify({
+        title: textRef.current("无法读取活动连接", "Unable to load active connections"),
+        message: error instanceof Error ? error.message : String(error),
+        intent: "error",
+        dedupeKey: "connections:load-error",
+      });
     } finally {
       requestActive.current = false;
       setLoading(false);
       setRefreshing(false);
     }
-  }, [dispatchToast]);
+  }, [notify]);
 
   useEffect(() => {
     void load();
@@ -258,7 +251,6 @@ export function ConnectionsPage({
 
   return (
     <main className="connections-page">
-      <AppToaster toasterId={toasterId} position="top-end" />
       <header className="connections-heading">
         <div>
           <span className="section-kicker">{text("当前加速会话的实时网络流", "Live network flows in this acceleration session")}</span>

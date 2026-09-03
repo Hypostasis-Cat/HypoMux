@@ -5,15 +5,11 @@ import {
   Slider,
   Tab,
   TabList,
-  Toast,
-  ToastTitle,
-  useId,
-  useToastController,
 } from "@fluentui/react-components";
 import { ArrowReset20Regular, Image20Regular } from "@fluentui/react-icons";
 import { useRef } from "react";
 import { AppearancePreview } from "../components/appearance/AppearancePreview";
-import { AppToaster } from "../components/AppToaster";
+import { useAppNotifications } from "../components/notifications/AppNotifications";
 import { appearancePresets, accentColours } from "../theme/appearance.presets";
 import { useAppearance } from "../theme/appearance.store";
 import { backgroundService } from "../theme/background.service";
@@ -51,19 +47,14 @@ function RangeControl({
 export function AppearanceLab() {
   const { settings, nativeResult, update, applyPreset, reset } = useAppearance();
   const fileInput = useRef<HTMLInputElement>(null);
-  const toasterId = useId("appearance-lab-toaster");
-  const { dispatchToast } = useToastController(toasterId);
+  const { notify } = useAppNotifications();
 
   const showToast = () => {
-    dispatchToast(
-      <Toast><ToastTitle>主题令牌已应用到 Fluent UI 控件</ToastTitle></Toast>,
-      { intent: "success", timeout: 2200 },
-    );
+    notify({ title: "主题令牌已应用到 Fluent UI 控件", intent: "success", timeout: 2200 });
   };
 
   return (
     <main className="appearance-lab">
-      <AppToaster toasterId={toasterId} position="top-end" />
       <aside className="appearance-controls glass-surface" data-tone="secondary">
         <div className="lab-heading">
           <div>

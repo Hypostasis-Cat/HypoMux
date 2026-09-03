@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import type { PropsWithChildren, ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { AppNotificationProvider } from "../components/notifications/AppNotifications";
 import type { ConnectionListSnapshot, ConnectionView } from "../platform/services";
 import type { HomeAdapter } from "../state/useEngineState";
 import { ConnectionsPage } from "./ConnectionsPage";
@@ -18,6 +20,12 @@ vi.mock("../platform/services", () => ({
 vi.mock("../i18n/i18n", () => ({
   useI18n: () => ({ locale: "en" }),
 }));
+
+const NotificationTestProvider = ({ children }: PropsWithChildren) => (
+  <AppNotificationProvider>{children}</AppNotificationProvider>
+);
+
+const renderPage = (ui: ReactElement) => render(ui, { wrapper: NotificationTestProvider });
 
 const connection = (overrides: Partial<ConnectionView>): ConnectionView => ({
   id: 1,
@@ -102,7 +110,7 @@ describe("ConnectionsPage interactions", () => {
   });
 
   it("shows only the selected adapter with its shared live throughput", async () => {
-    render(<ConnectionsPage initialAdapter="Ethernet" adapterRuntime={adapterRuntime} />);
+    renderPage(<ConnectionsPage initialAdapter="Ethernet" adapterRuntime={adapterRuntime} />);
 
     expect(await screen.findByText("ethernet.example")).not.toBeNull();
     expect(screen.queryByText("wifi.example")).toBeNull();
@@ -112,7 +120,7 @@ describe("ConnectionsPage interactions", () => {
   });
 
   it("shows and clears the adapter filter without clearing search", async () => {
-    render(<ConnectionsPage initialAdapter="Ethernet" adapterRuntime={adapterRuntime} />);
+    renderPage(<ConnectionsPage initialAdapter="Ethernet" adapterRuntime={adapterRuntime} />);
     await screen.findByText("ethernet.example");
 
     const adapterFilter = screen.getByRole("group", { name: "Adapter filter" });
@@ -129,7 +137,7 @@ describe("ConnectionsPage interactions", () => {
   });
 
   it("preserves the egress policy when the adapter filter is cleared", async () => {
-    render(<ConnectionsPage initialAdapter="Ethernet" adapterRuntime={adapterRuntime} />);
+    renderPage(<ConnectionsPage initialAdapter="Ethernet" adapterRuntime={adapterRuntime} />);
     await screen.findByText("ethernet.example");
 
     const egressFilter = screen.getByRole("combobox", { name: "Filter by egress policy" }) as HTMLButtonElement;
@@ -145,7 +153,7 @@ describe("ConnectionsPage interactions", () => {
   });
 
   it("clears the search query when adapter navigation advances", async () => {
-    const view = render(
+    const view = renderPage(
       <ConnectionsPage initialAdapter="" adapterRevision={1} adapterRuntime={adapterRuntime} />,
     );
     await screen.findByText("ethernet.example");
@@ -165,7 +173,7 @@ describe("ConnectionsPage interactions", () => {
   });
 
   it("reorders visible rows when a sortable column is clicked", async () => {
-    render(<ConnectionsPage adapterRuntime={adapterRuntime} />);
+    renderPage(<ConnectionsPage adapterRuntime={adapterRuntime} />);
     await screen.findByText("ethernet.example");
 
     fireEvent.click(screen.getByRole("button", { name: "Sort Process ascending" }));
@@ -176,7 +184,7 @@ describe("ConnectionsPage interactions", () => {
   });
 
   it("uses natural defaults and exposes the active sort state", async () => {
-    render(<ConnectionsPage adapterRuntime={adapterRuntime} />);
+    renderPage(<ConnectionsPage adapterRuntime={adapterRuntime} />);
     await screen.findByText("ethernet.example");
 
     const trafficSort = screen.getByRole("button", { name: "Sort Traffic descending" });
@@ -194,7 +202,7 @@ describe("ConnectionsPage interactions", () => {
   });
 
   it("only offers single-NIC routing when such connections exist", async () => {
-    render(<ConnectionsPage adapterRuntime={adapterRuntime} />);
+    renderPage(<ConnectionsPage adapterRuntime={adapterRuntime} />);
     await screen.findByText("ethernet.example");
 
     fireEvent.click(screen.getByRole("combobox", { name: "Filter by egress policy" }));
@@ -213,7 +221,7 @@ describe("ConnectionsPage interactions", () => {
         }),
       ],
     });
-    render(<ConnectionsPage adapterRuntime={adapterRuntime} />);
+    renderPage(<ConnectionsPage adapterRuntime={adapterRuntime} />);
     await screen.findByText("Pinned.exe");
 
     fireEvent.click(screen.getByRole("combobox", { name: "Filter by egress policy" }));

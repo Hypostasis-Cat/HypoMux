@@ -2,6 +2,7 @@ import type { PropsWithChildren, ReactNode } from "react";
 import { useCardGlowField } from "../material/useCardGlowField";
 import { CompactNavigation, type AppPage } from "./CompactNavigation";
 import { TitleBar } from "./TitleBar";
+import { AppNotificationCenter } from "../notifications/AppNotifications";
 
 export function AppShell({
   page,
@@ -25,6 +26,7 @@ export function AppShell({
     <div className="app-shell">
       <TitleBar />
       <CompactNavigation page={page} onPageChange={onPageChange} />
+      <AppNotificationCenter />
       <div className="page-viewport">
         {persistentPage && persistentChildren ? (
           <div

@@ -26,17 +26,12 @@ import {
   Tab,
   TabList,
   Textarea,
-  Toast,
-  ToastBody,
-  ToastTitle,
   Toolbar,
   ToolbarButton,
-  useId,
-  useToastController,
   type TableColumnDefinition,
   type TableRowId,
 } from "@fluentui/react-components";
-import { AppToaster } from "../components/AppToaster";
+import { useAppNotifications } from "../components/notifications/AppNotifications";
 import {
   Add20Regular,
   AppGeneric20Regular,
@@ -181,18 +176,11 @@ export function RoutingPage() {
     saveQueue.current = new LatestSaveQueue((next) => appServices.routing.save(next));
   }
   const addRuleInputRef = useRef<HTMLInputElement>(null);
-  const toasterId = useId("routing-toaster");
-  const { dispatchToast } = useToastController(toasterId);
+  const { notify: pushNotification } = useAppNotifications();
 
   const notify = useCallback((title: string, message: string, intent: "success" | "error" | "info" = "info") => {
-    dispatchToast(
-      <Toast>
-        <ToastTitle>{title}</ToastTitle>
-        <ToastBody>{message}</ToastBody>
-      </Toast>,
-      { intent, timeout: intent === "error" ? 6000 : 2600 },
-    );
-  }, [dispatchToast]);
+    pushNotification({ title, message, intent, dedupeKey: `routing:${intent}:${title}` });
+  }, [pushNotification]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -635,7 +623,6 @@ export function RoutingPage() {
 
   return (
     <main className="routing-page">
-      <AppToaster toasterId={toasterId} position="top-end" />
       <header className="routing-page-heading">
         <div>
           <span className="section-kicker">{t("routing_title")}</span>
