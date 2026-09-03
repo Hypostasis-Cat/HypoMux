@@ -173,7 +173,7 @@ func TestManifestRequiresSchemaDigestAndExactInstallerMetadata(t *testing.T) {
 }
 
 func TestUpdaterChoosesNewestMetadataSource(t *testing.T) {
-	githubManifest, githubSignature := signedManifestJSON(t, testManifest("2.5.9", []byte("new")))
+	githubManifest, githubSignature := signedManifestJSON(t, testManifest("2.5.10", []byte("new")))
 	cnbManifest, cnbSignature := signedManifestJSON(t, testManifest("2.5.8", []byte("old")))
 	service := NewUpdaterService()
 	service.manifestPublicKey = testManifestPublicKey()
@@ -196,7 +196,7 @@ func TestUpdaterChoosesNewestMetadataSource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !result.Available || result.Release.TagName != "v2.5.9" {
+	if !result.Available || result.Release.TagName != "v2.5.10" {
 		t.Fatalf("newest update result = %#v", result)
 	}
 }

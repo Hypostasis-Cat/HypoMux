@@ -13,6 +13,7 @@ import {
 import {
   ArrowSync20Regular,
   Code20Regular,
+  Globe20Regular,
 } from "@fluentui/react-icons";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -164,6 +165,9 @@ export function AboutPage() {
           </div>
           <p>{t("about_intro")}</p>
           <div className="about-actions">
+            <Button appearance="secondary" icon={<Globe20Regular />} onClick={() => desktopPlatform.openURL(productInfo.website)}>
+              {text("官方网站", "Website")}
+            </Button>
             <Button appearance="secondary" icon={<Code20Regular />} onClick={() => desktopPlatform.openURL(productInfo.repository)}>
               GitHub
             </Button>

@@ -23,7 +23,7 @@ Unicode true
 ## !define INFO_PROJECTNAME    "my-project" # Default "HypoMux"
 ## !define INFO_COMPANYNAME    "My Company" # Default "HypoMux"
 ## !define INFO_PRODUCTNAME    "My Product Name" # Default "HypoMux"
-## !define INFO_PRODUCTVERSION "1.0.0"     # Default "2.5.8"
+## !define INFO_PRODUCTVERSION "1.0.0"     # Default "2.5.9"
 ## !define INFO_COPYRIGHT      "(c) Now, My Company" # Default "© 2026, My Company"
 ###
 ## !define PRODUCT_EXECUTABLE  "Application.exe"      # Default "${INFO_PROJECTNAME}.exe"

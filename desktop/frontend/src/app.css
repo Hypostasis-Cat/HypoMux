@@ -4490,9 +4490,8 @@ svg {
 }
 
 .about-product .about-actions .fui-Button {
-  width: 126px;
-  min-width: 126px;
-  flex: 0 0 126px;
+  min-width: 0;
+  flex: 1 1 0;
   justify-content: center;
 }
 
