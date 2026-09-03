@@ -132,8 +132,10 @@ LangString CoreServiceStopFailed ${LANG_ENGLISH} "Could not stop HypoMux Core Se
 LangString CoreServiceStopFailed ${LANG_SIMPCHINESE} "无法停止 HypoMux Core 服务，安装程序不能安全替换应用文件。"
 LangString CoreProcessStopping ${LANG_ENGLISH} "Stopping remaining HypoMux Core processes before updating files..."
 LangString CoreProcessStopping ${LANG_SIMPCHINESE} "正在结束残留的 HypoMux Core 进程以更新文件…"
-LangString CoreProcessStopFailed ${LANG_ENGLISH} "Could not unlock the previous HypoMux Core executable. Setup cannot safely replace the application files."
-LangString CoreProcessStopFailed ${LANG_SIMPCHINESE} "无法解除旧版 HypoMux Core 程序的文件占用，安装程序不能安全替换应用文件。"
+LangString CoreProcessStopFailed ${LANG_ENGLISH} "The old HypoMux Core file cannot be updated yet. Close HypoMux or wait a moment, then retry."
+LangString CoreProcessStopFailed ${LANG_SIMPCHINESE} "旧版 HypoMux Core 文件暂时无法更新。请关闭 HypoMux 或稍候片刻，然后重试。"
+LangString InstallerAlreadyRunning ${LANG_ENGLISH} "HypoMux Setup is already running. Finish or close it before starting another installer."
+LangString InstallerAlreadyRunning ${LANG_SIMPCHINESE} "HypoMux 安装程序已在运行，请先完成或关闭它。"
 LangString LegacyInstallRemoving ${LANG_ENGLISH} "Removing the previous HypoMux installation before migrating files..."
 LangString LegacyInstallRemoving ${LANG_SIMPCHINESE} "正在移除旧版 HypoMux 并迁移安装目录…"
 LangString LegacyInstallRemoveFailed ${LANG_ENGLISH} "The previous HypoMux installation could not be removed safely."
@@ -175,6 +177,20 @@ Var HypoMuxAutostartEnabled
    ; chain, so remove the inherited value in this process and let every Windows
    ; PowerShell 5.1 child reconstruct its own default PSModulePath.
    System::Call 'kernel32::SetEnvironmentVariable(t "PSModulePath", p 0)'
+!macroend
+
+!macro HypoMuxEnsureSingleInstaller
+   ; A machine-wide mutex prevents two installers from racing while one of
+   ; them stops and replaces the Core service files.
+   System::Call 'kernel32::CreateMutex(p 0, i 0, t "Global\HypoMux-Installer-4C1461C5-0555-4F4C-9D47-6619C5167414") p .r0 ?e'
+   Pop $1
+   ${If} $1 == 183
+       IfSilent hypoMuxSingleInstanceAbort 0
+       MessageBox MB_OK|MB_ICONEXCLAMATION "$(InstallerAlreadyRunning)"
+       hypoMuxSingleInstanceAbort:
+       SetErrorLevel 66
+       Abort
+   ${EndIf}
 !macroend
 
 Function HypoMuxCheckPlatform
@@ -231,6 +247,7 @@ FunctionEnd
 Function .onInit
    !insertmacro HypoMuxClearInheritedPSModulePath
    !insertmacro MUI_LANGDLL_DISPLAY
+   !insertmacro HypoMuxEnsureSingleInstaller
    Call HypoMuxCheckPlatform
    StrCpy $HypoMuxFreshInstall "1"
    StrCpy $HypoMuxPreviousInstallDir ""
@@ -259,6 +276,7 @@ FunctionEnd
 Function un.onInit
    !insertmacro HypoMuxClearInheritedPSModulePath
    !insertmacro MUI_UNGETLANGUAGE
+   !insertmacro HypoMuxEnsureSingleInstaller
 FunctionEnd
 
 Function RemoveLegacyAutostartTask
@@ -386,6 +404,8 @@ Function StopCoreProcessesForUpgrade
     SetOutPath "$PLUGINSDIR"
     File /oname=stop-core-for-upgrade.ps1 "stop-core-for-upgrade.ps1"
 
+    stopCoreProcessesRetry:
+
     ; If the user changed the directory on the installer page, the previous
     ; registered Core still has to be unlocked before its exact owned files
     ; can be removed after the new installation commits.
@@ -395,7 +415,9 @@ Function StopCoreProcessesForUpgrade
         Pop $1
         ${If} $0 != 0
             DetailPrint "$1"
-            Abort "$(CoreProcessStopFailed)"
+            IfSilent stopCoreProcessesAbort 0
+            MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "$(CoreProcessStopFailed)" IDRETRY stopCoreProcessesRetry
+            Goto stopCoreProcessesAbort
         ${EndIf}
     ${EndIf}
 
@@ -404,8 +426,14 @@ Function StopCoreProcessesForUpgrade
     Pop $1
     ${If} $0 != 0
         DetailPrint "$1"
-        Abort "$(CoreProcessStopFailed)"
+        IfSilent stopCoreProcessesAbort 0
+        MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "$(CoreProcessStopFailed)" IDRETRY stopCoreProcessesRetry
+        Goto stopCoreProcessesAbort
     ${EndIf}
+    Return
+
+    stopCoreProcessesAbort:
+    Abort "$(CoreProcessStopFailed)"
 FunctionEnd
 
 Function PrepareProtectedCoreDirectory

@@ -236,13 +236,37 @@ func TestInstallerCoreShutdownBarrierIsPathScopedAndBounded(t *testing.T) {
 	for _, required := range []string{
 		`[System.IO.Path]::GetFullPath($_.Path).Equals(`,
 		`[System.StringComparison]::OrdinalIgnoreCase`,
-		`Stop-Process -Id $process.Id -Force`,
-		`[System.IO.FileShare]::None`,
+		`Stop-Process -Id $process.Id -Force -ErrorAction Stop`,
+		`[System.IO.FileAccess]::Write`,
+		`[System.IO.FileShare]::Read -bor [System.IO.FileShare]::Delete`,
+		`exit 10`,
+		`exit 11`,
 		`[DateTime]::UtcNow -lt $deadline`,
 	} {
 		if !strings.Contains(script, required) {
 			t.Fatalf("Core shutdown barrier is missing safety guard %q", required)
 		}
+	}
+	if strings.Contains(script, `[System.IO.FileShare]::None`) {
+		t.Fatal("Core shutdown barrier still rejects harmless shared readers")
+	}
+
+	installerData, err := os.ReadFile("build/windows/nsis/project.nsi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	installer := string(installerData)
+	for _, required := range []string{
+		`MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "$(CoreProcessStopFailed)" IDRETRY stopCoreProcessesRetry`,
+		`System::Call 'kernel32::CreateMutex(`,
+		`SetErrorLevel 66`,
+	} {
+		if !strings.Contains(installer, required) {
+			t.Fatalf("installer lock recovery is missing %q", required)
+		}
+	}
+	if count := strings.Count(installer, `!insertmacro HypoMuxEnsureSingleInstaller`); count != 2 {
+		t.Fatalf("installer and uninstaller must share the single-instance mutex, got %d calls", count)
 	}
 }
 

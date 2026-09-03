@@ -11,6 +11,8 @@ param(
 $ErrorActionPreference = 'Stop'
 $targetPath = [System.IO.Path]::GetFullPath($EnginePath)
 $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+$lastStopFailure = ''
+$lastReplaceFailure = ''
 
 function Get-OwnedCoreProcesses {
     @(
@@ -30,37 +32,63 @@ function Get-OwnedCoreProcesses {
     )
 }
 
-function Test-TargetUnlocked {
+function Test-TargetReplaceable {
     if (-not [System.IO.File]::Exists($targetPath)) {
         return $true
     }
 
     try {
+        # Match the access needed by the installer without demanding that every
+        # harmless reader (for example an antivirus scanner) close its handle.
+        # Existing handles must still permit writes, so a running or genuinely
+        # write-locked Core remains blocked.
+        $shareMode = [System.IO.FileShare]::Read -bor [System.IO.FileShare]::Delete
         $stream = [System.IO.File]::Open(
             $targetPath,
             [System.IO.FileMode]::Open,
-            [System.IO.FileAccess]::Read,
-            [System.IO.FileShare]::None
+            [System.IO.FileAccess]::Write,
+            $shareMode
         )
         $stream.Dispose()
+        $script:lastReplaceFailure = ''
         return $true
     }
     catch {
+        $script:lastReplaceFailure = $_.Exception.Message
         return $false
     }
 }
 
 do {
     foreach ($process in @(Get-OwnedCoreProcesses)) {
-        Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+        try {
+            Stop-Process -Id $process.Id -Force -ErrorAction Stop
+            $lastStopFailure = ''
+        }
+        catch {
+            $lastStopFailure = $_.Exception.Message
+        }
     }
 
-    if (@(Get-OwnedCoreProcesses).Count -eq 0 -and (Test-TargetUnlocked)) {
+    if (@(Get-OwnedCoreProcesses).Count -eq 0 -and (Test-TargetReplaceable)) {
         exit 0
     }
 
     Start-Sleep -Milliseconds 250
 } while ([DateTime]::UtcNow -lt $deadline)
 
-Write-Error "Timed out while unlocking the previous HypoMux Core executable: $targetPath"
-exit 1
+$remaining = @(Get-OwnedCoreProcesses)
+if ($remaining.Count -gt 0) {
+    $processIds = ($remaining | ForEach-Object Id) -join ', '
+    Write-Output "Core process is still running (PID: $processIds)."
+    if ($lastStopFailure) {
+        Write-Output "Stop failed: $lastStopFailure"
+    }
+    exit 10
+}
+
+Write-Output "Core executable is still write-locked: $targetPath"
+if ($lastReplaceFailure) {
+    Write-Output "Write probe failed: $lastReplaceFailure"
+}
+exit 11
