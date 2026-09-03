@@ -24,6 +24,7 @@ import {
   prepareNotificationMessage,
   type NotificationIntent,
 } from "./notificationMessage";
+import { resolveNotificationErrorCode } from "./errorCodes";
 
 type NotificationAction = {
   label: string;
@@ -37,6 +38,7 @@ export type AppNotificationInput = {
   action?: NotificationAction;
   timeout?: number;
   dedupeKey?: string;
+  code?: string;
 };
 
 type AppNotification = Required<Pick<AppNotificationInput, "title" | "intent">> & {
@@ -45,6 +47,7 @@ type AppNotification = Required<Pick<AppNotificationInput, "title" | "intent">> 
   detail?: string;
   action?: NotificationAction;
   occurrences: number;
+  code?: string;
 };
 
 type AppNotificationContextValue = {
@@ -90,6 +93,13 @@ export function AppNotificationProvider({ children }: PropsWithChildren) {
     const intent = input.intent ?? "info";
     const { summary, detail } = prepareNotificationMessage(input.message ?? "", intent, locale);
     const id = input.dedupeKey ?? `${intent}:${input.title}:${summary}`;
+    const code = intent === "error"
+      ? input.code ?? resolveNotificationErrorCode({
+        title: input.title,
+        message: input.message ?? "",
+        dedupeKey: input.dedupeKey,
+      })
+      : input.code;
     const next: AppNotification = {
       id,
       title: input.title,
@@ -98,6 +108,7 @@ export function AppNotificationProvider({ children }: PropsWithChildren) {
       detail,
       action: input.action,
       occurrences: 1,
+      code,
     };
 
     setNotifications((current) => {
@@ -158,6 +169,11 @@ export function AppNotificationCenter() {
           <strong>{active.title}</strong>
           {active.summary && <span>{active.summary}</span>}
         </div>
+        {active.code && (
+          <span className="global-notification-code" title={locale === "en" ? "Error code" : "错误代码"}>
+            {active.code}
+          </span>
+        )}
         {active.occurrences > 1 && (
           <span className="global-notification-count" title={locale === "en" ? "Repeated notifications" : "重复通知"}>
             ×{active.occurrences}
@@ -170,6 +186,7 @@ export function AppNotificationCenter() {
         )}
         {active.detail && (
           <Button
+            className="global-notification-button global-notification-details-button"
             appearance="subtle"
             size="small"
             icon={detailsOpen ? <ChevronUp16Regular /> : <ChevronDown16Regular />}
@@ -180,11 +197,17 @@ export function AppNotificationCenter() {
           </Button>
         )}
         {active.action && (
-          <Button appearance="subtle" size="small" onClick={active.action.onClick}>
+          <Button
+            className="global-notification-button global-notification-action"
+            appearance="subtle"
+            size="small"
+            onClick={active.action.onClick}
+          >
             {active.action.label}
           </Button>
         )}
         <Button
+          className="global-notification-button global-notification-dismiss"
           appearance="subtle"
           size="small"
           icon={<Dismiss16Regular />}
@@ -196,7 +219,7 @@ export function AppNotificationCenter() {
         <div className="global-notification-details">
           <pre>{active.detail}</pre>
           {notifications.length > 1 && (
-            <Button appearance="subtle" size="small" onClick={clear}>
+            <Button className="global-notification-button" appearance="subtle" size="small" onClick={clear}>
               {locale === "en" ? "Clear all" : "清除全部"}
             </Button>
           )}

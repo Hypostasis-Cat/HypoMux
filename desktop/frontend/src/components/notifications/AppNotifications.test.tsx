@@ -47,6 +47,7 @@ describe("AppNotificationCenter", () => {
     const alert = screen.getByRole("alert");
     expect(alert.classList.contains("global-notification-region")).toBe(true);
     expect(alert.textContent).toContain("The operation timed out. Please try again.");
+    expect(alert.textContent).toContain("HM-E1001");
     expect(alert.textContent).not.toContain("msftconnecttest");
 
     fireEvent.click(screen.getByRole("button", { name: "Details" }));

@@ -33,8 +33,18 @@ function NotificationVisualFixture() {
   const shown = useRef(false);
 
   useEffect(() => {
-    if (shown.current || new URLSearchParams(window.location.search).get("notification") !== "error") return;
+    const fixture = new URLSearchParams(window.location.search).get("notification");
+    if (shown.current || !fixture) return;
     shown.current = true;
+    if (fixture === "success") {
+      notify({
+        title: "加速已启动",
+        message: "2 条链路已加入系统代理加速。",
+        intent: "success",
+        dedupeKey: "visual-qa:success",
+      });
+      return;
+    }
     notify({
       title: "操作未完成",
       message: "stage=tun_data_path endpoint=http://www.msftconnecttest.com/connecttest.txt, outbound=windows-tun: curl: (28) Resolving timed out after 4007 milliseconds",

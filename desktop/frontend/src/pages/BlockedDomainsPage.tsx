@@ -46,7 +46,7 @@ export function BlockedDomainsPage({ onBack }: { onBack: () => void }) {
       const next = await appServices.blockedDomains.list();
       if (mounted.current && sequence === requestSequence.current) setSnapshot(next);
     } catch (error) {
-      notify({ title: text("读取域名记录失败", "Failed to load domain records"), message: String(error), intent: "error" });
+      notify({ title: text("读取域名记录失败", "Failed to load domain records"), message: String(error), intent: "error", dedupeKey: "blocked-domains:error:load" });
     } finally {
       if (mounted.current && sequence === requestSequence.current) setLoading(false);
     }
@@ -68,7 +68,7 @@ export function BlockedDomainsPage({ onBack }: { onBack: () => void }) {
       await appServices.blockedDomains.remove(adapter, domain);
       await refresh();
     } catch (error) {
-      notify({ title: text("移除失败", "Remove failed"), message: String(error), intent: "error" });
+      notify({ title: text("移除失败", "Remove failed"), message: String(error), intent: "error", dedupeKey: "blocked-domains:error:remove" });
     }
   };
 
@@ -79,7 +79,7 @@ export function BlockedDomainsPage({ onBack }: { onBack: () => void }) {
       await refresh();
       notify({ title: text("域名隔离记录已清空", "Domain-isolation records cleared"), intent: "success" });
     } catch (error) {
-      notify({ title: text("清空失败", "Clear failed"), message: String(error), intent: "error" });
+      notify({ title: text("清空失败", "Clear failed"), message: String(error), intent: "error", dedupeKey: "blocked-domains:error:clear" });
     }
   };
 

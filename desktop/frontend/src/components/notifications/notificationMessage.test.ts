@@ -20,7 +20,7 @@ describe("prepareNotificationMessage", () => {
   it("folds long informational text into details", () => {
     const raw = "a".repeat(140);
     const result = prepareNotificationMessage(raw, "info", "en");
-    expect(result.summary).toHaveLength(118);
+    expect(result.summary).toHaveLength(70);
     expect(result.detail).toBe(raw);
   });
 });

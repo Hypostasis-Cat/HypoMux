@@ -35,6 +35,24 @@ export function conciseDiagnosticMessage(message: string, locale: NotificationLo
       ? "The service is temporarily unavailable. Please try again."
       : "服务暂时不可用，请稍后重试。";
   }
+  if (
+    lower.includes("permission") || lower.includes("access denied") ||
+    lower.includes("administrator") || lower.includes("elevated") ||
+    normalized.includes("权限") || normalized.includes("拒绝访问") || normalized.includes("管理员")
+  ) {
+    return locale === "en"
+      ? "Permission was denied. Check the app's permissions and try again."
+      : "权限不足，请检查应用权限后重试。";
+  }
+  if (
+    lower.includes("dns") || lower.includes("resolve") || lower.includes("network") ||
+    lower.includes("internet") || lower.includes("connectivity") ||
+    normalized.includes("网络") || normalized.includes("联网") || normalized.includes("解析失败")
+  ) {
+    return locale === "en"
+      ? "The network is unavailable. Check the connection and try again."
+      : "网络暂时不可用，请检查连接后重试。";
+  }
 
   const firstLine = normalized.split(/\r?\n|；|;\s/)[0].trim();
   const contextSeparators = firstLine.match(/[：:]/g)?.length ?? 0;
@@ -54,8 +72,8 @@ export function prepareNotificationMessage(
 
   const summarized = intent === "error"
     ? conciseDiagnosticMessage(detail, locale)
-    : detail.length > 120
-      ? `${detail.slice(0, 117).trimEnd()}…`
+    : detail.length > 72
+      ? `${detail.slice(0, 69).trimEnd()}…`
       : detail;
 
   return {

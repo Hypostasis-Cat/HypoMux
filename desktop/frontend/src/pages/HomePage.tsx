@@ -82,6 +82,36 @@ export function HomePage({
     [engine.adapters, engine.loading, onAdapterRuntimeChange],
   );
   useEffect(() => onEnginePhaseChange?.(engine.phase), [engine.phase, onEnginePhaseChange]);
+  const previousEnginePhase = useRef<EnginePhase>();
+  useEffect(() => {
+    const previous = previousEnginePhase.current;
+    previousEnginePhase.current = engine.phase;
+    if (previous === "starting" && engine.phase === "running") {
+      notify({
+        title: text("加速已启动", "Acceleration started"),
+        message: text(
+          `${engine.selected.length} 条链路已加入${engine.mode === "tun" ? "虚拟网卡" : "系统代理"}加速。`,
+          `${engine.selected.length} link(s) joined ${engine.mode === "tun" ? "Virtual NIC" : "System Proxy"} acceleration.`,
+        ),
+        intent: "success",
+        dedupeKey: "home:engine-started",
+      });
+    } else if (previous === "stopping" && engine.phase === "stopped") {
+      notify({
+        title: text("加速已停止", "Acceleration stopped"),
+        message: text("系统网络设置已安全恢复。", "System network settings were restored safely."),
+        intent: "info",
+        dedupeKey: "home:engine-stopped",
+      });
+    } else if (previous === "running" && engine.phase === "degraded") {
+      notify({
+        title: text("加速链路状态波动", "Acceleration link degraded"),
+        message: text("部分链路暂时不可用，正在自动调整流量。", "Some links are unavailable; traffic is being adjusted automatically."),
+        intent: "warning",
+        dedupeKey: "home:engine-degraded",
+      });
+    }
+  }, [engine.mode, engine.phase, engine.selected.length, locale, notify]);
   const preflightIssues = preflightDialog?.issues ?? [];
   const blockerCount = preflightIssues.filter((issue) => issue.level === "blocker").length;
   const warningCount = preflightIssues.filter((issue) => issue.level === "warning").length;
