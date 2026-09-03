@@ -10,12 +10,7 @@ import {
   Spinner,
   Tab,
   TabList,
-  Toast,
-  ToastBody,
-  ToastTitle,
   Tooltip,
-  useId,
-  useToastController,
 } from "@fluentui/react-components";
 import {
   ArrowSync20Regular,
@@ -23,10 +18,10 @@ import {
   Dismiss20Regular,
   HeartPulse20Regular,
   Stop20Regular,
+  Warning20Regular,
 } from "@fluentui/react-icons";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { GlassSurface } from "../components/material/GlassSurface";
-import { AppToaster } from "../components/AppToaster";
 import {
   appServices,
   type AdapterView,
@@ -42,6 +37,7 @@ import type { EnginePhase } from "../state/useEngineState";
 import { adapterListKey } from "../state/adapterRuntime";
 import { NATDetectionPage } from "./NATDetectionPage";
 import { isNATDetectionBlocked } from "./natDetectionPolicy";
+import { conciseDiagnosticMessage, type HealthNoticeIntent } from "./healthNotice";
 
 const isBrowserPreview = () => import.meta.env.DEV && !isDesktopRuntime();
 
@@ -52,6 +48,12 @@ const emptySnapshot = (): DiagnosticSnapshot => ({
   completed: 0,
   results: [],
 });
+
+type HealthNotice = {
+  title: string;
+  message: string;
+  intent: HealthNoticeIntent;
+};
 
 const previewAdapters = (): AdapterView[] => [
   {
@@ -122,8 +124,6 @@ export function HealthPage({
     dns: text("DNS 配置", "DNS configuration"),
     metric: text("路由跃点", "Route metric"),
   }), [text]);
-  const toasterId = useId("health-toaster");
-  const { dispatchToast } = useToastController(toasterId);
   const [adapters, setAdapters] = useState<AdapterView[]>([]);
   const [snapshot, setSnapshot] = useState<DiagnosticSnapshot>(emptySnapshot);
   const [loading, setLoading] = useState(true);
@@ -131,6 +131,7 @@ export function HealthPage({
   const [preview, setPreview] = useState(false);
   const [engineRunning, setEngineRunning] = useState(false);
   const [healthView, setHealthView] = useState<"link" | "nat">("link");
+  const [notice, setNotice] = useState<HealthNotice>();
   const adaptersRef = useRef<AdapterView[]>([]);
   const adapterRuntimeRef = useRef(adapterRuntime);
   const adapterRuntimeKeyRef = useRef<string>();
@@ -138,19 +139,25 @@ export function HealthPage({
   const homeSettingsRef = useRef({ mode: "proxy", weighted: false });
   const stopPoller = useRef<(() => void)>();
   const diagnosticEpoch = useRef(0);
+  const noticeTimer = useRef<ReturnType<typeof window.setTimeout>>();
   const mounted = useRef(true);
   adapterRuntimeRef.current = adapterRuntime;
   enginePhaseRef.current = enginePhase;
 
-  const notify = useCallback((title: string, message: string, intent: "success" | "error" | "warning" = "error") => {
-    dispatchToast(
-      <Toast>
-        <ToastTitle>{title}</ToastTitle>
-        <ToastBody>{message}</ToastBody>
-      </Toast>,
-      { intent, timeout: 5000 },
-    );
-  }, [dispatchToast]);
+  const notify = useCallback((title: string, message: string, intent: HealthNoticeIntent = "error") => {
+    if (noticeTimer.current !== undefined) window.clearTimeout(noticeTimer.current);
+    const conciseMessage = intent === "success"
+      ? message
+      : conciseDiagnosticMessage(message, locale);
+    if (conciseMessage !== message) console.error(`[${title}] ${message}`);
+    setNotice({ title, message: conciseMessage, intent });
+    if (intent === "success") {
+      noticeTimer.current = window.setTimeout(() => {
+        if (mounted.current) setNotice(undefined);
+        noticeTimer.current = undefined;
+      }, 3200);
+    }
+  }, [locale]);
 
   const load = useCallback(async () => {
     const runtimeTask = enginePhaseRef.current === undefined
@@ -239,6 +246,7 @@ export function HealthPage({
       mounted.current = false;
       diagnosticEpoch.current += 1;
       stopPoller.current?.();
+      if (noticeTimer.current !== undefined) window.clearTimeout(noticeTimer.current);
     };
   }, []);
 
@@ -285,6 +293,7 @@ export function HealthPage({
   }, [notify, preview, text]);
 
   const start = useCallback(async () => {
+    setNotice(undefined);
     const selected = adaptersRef.current.filter((adapter) => adapter.selected);
     if (selected.length === 0) {
       notify(
@@ -301,12 +310,21 @@ export function HealthPage({
       });
       window.setTimeout(() => {
         if (!mounted.current) return;
-        setSnapshot({
+        const final = {
           state: "completed", run_id: "browser-fixture", target_ip: "223.5.5.5",
           total: selected.length, completed: selected.length,
           results: selected.map(previewResult), started_at: new Date(Date.now() - 1500).toISOString(),
           completed_at: new Date().toISOString(),
-        });
+        } satisfies DiagnosticSnapshot;
+        setSnapshot(final);
+        notify(
+          text("网络体检完成", "Network diagnostics complete"),
+          text(
+            `已完成 ${final.completed} 张网卡的绑定链路检查。`,
+            `Bound-path checks completed for ${final.completed} adapters.`,
+          ),
+          "success",
+        );
       }, 850);
       return;
     }
@@ -380,7 +398,6 @@ export function HealthPage({
 
   return (
     <main className="health-page">
-      <AppToaster toasterId={toasterId} position="top-end" />
       <header className="health-heading">
         <div key={healthView} className="health-heading-copy">
           <span className="section-kicker">{healthView === "link"
@@ -420,6 +437,28 @@ export function HealthPage({
           <Tab value="link">{text("链路体检", "Link diagnostics")}</Tab>
           <Tab value="nat">{text("NAT 类型检测", "NAT type detection")}</Tab>
         </TabList>
+        {notice && (
+          <div
+            className={`health-inline-notice is-${notice.intent}`}
+            role={notice.intent === "error" ? "alert" : "status"}
+            aria-live={notice.intent === "error" ? "assertive" : "polite"}
+          >
+            <span className="health-inline-notice-icon" aria-hidden="true">
+              {notice.intent === "success" ? <CheckmarkCircle20Regular /> : <Warning20Regular />}
+            </span>
+            <span className="health-inline-notice-copy">
+              <strong>{notice.title}</strong>
+              <span>{notice.message}</span>
+            </span>
+            <Button
+              appearance="subtle"
+              size="small"
+              icon={<Dismiss20Regular />}
+              aria-label={text("关闭提示", "Dismiss notification")}
+              onClick={() => setNotice(undefined)}
+            />
+          </div>
+        )}
       </nav>
 
       {healthView === "link" ? (

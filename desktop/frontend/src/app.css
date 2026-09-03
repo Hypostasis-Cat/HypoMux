@@ -2083,7 +2083,7 @@ svg {
   display: flex;
   min-height: 34px;
   padding: 0 4px;
-  align-items: flex-end;
+  align-items: center;
   border-bottom: 1px solid var(--hm-outer-border);
 }
 
@@ -2108,6 +2108,73 @@ svg {
 
 .health-subnav .fui-Tab[aria-selected="true"] {
   color: var(--hm-text-primary);
+}
+
+.health-inline-notice {
+  display: grid;
+  min-width: 0;
+  max-width: min(520px, 52vw);
+  min-height: 30px;
+  margin-left: auto;
+  padding: 3px 3px 3px 9px;
+  align-items: center;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 7px;
+  border: 1px solid color-mix(in srgb, var(--hm-success) 30%, var(--hm-outer-border));
+  border-radius: 7px 7px 0 0;
+  background: color-mix(in srgb, var(--hm-success) 8%, rgb(var(--hm-surface-secondary-rgb)));
+  animation: motion-content-rise var(--hm-motion-fast) var(--hm-motion-ease-out) backwards;
+}
+
+.health-inline-notice.is-warning {
+  border-color: color-mix(in srgb, var(--hm-warning) 36%, var(--hm-outer-border));
+  background: color-mix(in srgb, var(--hm-warning) 9%, rgb(var(--hm-surface-secondary-rgb)));
+}
+
+.health-inline-notice.is-error {
+  border-color: color-mix(in srgb, var(--hm-danger) 36%, var(--hm-outer-border));
+  background: color-mix(in srgb, var(--hm-danger) 9%, rgb(var(--hm-surface-secondary-rgb)));
+}
+
+.health-inline-notice-icon {
+  display: flex;
+  color: var(--hm-success);
+}
+
+.health-inline-notice.is-warning .health-inline-notice-icon {
+  color: var(--hm-warning);
+}
+
+.health-inline-notice.is-error .health-inline-notice-icon {
+  color: var(--hm-danger);
+}
+
+.health-inline-notice-copy {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.health-inline-notice-copy strong {
+  flex: 0 0 auto;
+  color: var(--hm-text-primary);
+  font-size: 11px;
+  font-weight: 640;
+}
+
+.health-inline-notice-copy > span {
+  overflow: hidden;
+  color: var(--hm-text-secondary);
+  font-size: 10.5px;
+  text-overflow: ellipsis;
+}
+
+.health-inline-notice .fui-Button {
+  min-width: 24px;
+  width: 24px;
+  height: 24px;
 }
 
 .health-link-page {
