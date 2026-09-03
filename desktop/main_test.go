@@ -1,10 +1,12 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Hypostasis-Cat/HypoMux/desktop/internal/services"
 )
@@ -114,7 +116,9 @@ func TestRunAutoStartAccelerationUpdatesTrayStatus(t *testing.T) {
 	settings.Mode = "proxy"
 	statuses := make([]string, 0, 2)
 	err := runAutoStartAcceleration(
+		context.Background(),
 		settings,
+		nil,
 		func(mode string) (services.EngineSnapshot, error) {
 			if mode != "proxy" {
 				t.Fatalf("unexpected startup mode: %s", mode)
@@ -135,7 +139,9 @@ func TestRunAutoStartAccelerationUpdatesTrayStatus(t *testing.T) {
 	statuses = statuses[:0]
 	expected := errors.New("startup failed")
 	err = runAutoStartAcceleration(
+		context.Background(),
 		settings,
+		nil,
 		func(string) (services.EngineSnapshot, error) { return services.EngineSnapshot{}, expected },
 		func(phase string, mode string) { statuses = append(statuses, phase+":"+mode) },
 	)
@@ -144,6 +150,102 @@ func TestRunAutoStartAccelerationUpdatesTrayStatus(t *testing.T) {
 	}
 	if len(statuses) != 2 || statuses[1] != "failed:proxy" {
 		t.Fatalf("startup failure did not reach the tray: %#v", statuses)
+	}
+}
+
+func TestRunAutoStartAccelerationWaitsForAdapters(t *testing.T) {
+	settings := services.DefaultSettings()
+	settings.Mode = "tun"
+	ready := false
+	started := false
+	statuses := make([]string, 0, 2)
+	err := runAutoStartAcceleration(
+		context.Background(),
+		settings,
+		func(context.Context) error {
+			if started {
+				t.Fatal("engine started before adapters became ready")
+			}
+			ready = true
+			return nil
+		},
+		func(mode string) (services.EngineSnapshot, error) {
+			if !ready {
+				t.Fatal("engine started before readiness check completed")
+			}
+			started = true
+			return services.EngineSnapshot{Phase: "running", Mode: mode}, nil
+		},
+		func(phase string, mode string) { statuses = append(statuses, phase+":"+mode) },
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !started || len(statuses) != 2 || statuses[0] != "starting:tun" || statuses[1] != "running:tun" {
+		t.Fatalf("unexpected automatic startup: started=%t statuses=%#v", started, statuses)
+	}
+}
+
+func TestRunAutoStartAccelerationReadinessTimeoutDoesNotStart(t *testing.T) {
+	settings := services.DefaultSettings()
+	settings.Mode = "proxy"
+	expected := context.DeadlineExceeded
+	started := false
+	statuses := []string{}
+	err := runAutoStartAcceleration(
+		context.Background(),
+		settings,
+		func(context.Context) error { return expected },
+		func(string) (services.EngineSnapshot, error) {
+			started = true
+			return services.EngineSnapshot{}, nil
+		},
+		func(phase string, mode string) { statuses = append(statuses, phase+":"+mode) },
+	)
+	if !errors.Is(err, expected) || started {
+		t.Fatalf("unexpected timeout result: err=%v started=%t", err, started)
+	}
+	if len(statuses) != 1 || statuses[0] != "failed:proxy" {
+		t.Fatalf("readiness failure did not reach the tray: %#v", statuses)
+	}
+}
+
+func TestWaitForSelectedAdaptersStartsAfterMissingAdapterAppears(t *testing.T) {
+	checks := 0
+	err := waitForSelectedAdapters(
+		context.Background(),
+		[]string{"Ethernet", "WLAN"},
+		time.Millisecond,
+		func() ([]services.AdapterView, error) {
+			checks++
+			adapters := []services.AdapterView{{ID: "Ethernet"}}
+			if checks >= 2 {
+				adapters = append(adapters, services.AdapterView{ID: "WLAN"})
+			}
+			return adapters, nil
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if checks != 2 {
+		t.Fatalf("adapter checks = %d, want 2", checks)
+	}
+}
+
+func TestWaitForSelectedAdaptersReportsMissingAdaptersAtDeadline(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := waitForSelectedAdapters(
+		ctx,
+		[]string{"WLAN", "Ethernet"},
+		time.Hour,
+		func() ([]services.AdapterView, error) {
+			return []services.AdapterView{{ID: "Ethernet"}}, nil
+		},
+	)
+	if !errors.Is(err, context.Canceled) || !strings.Contains(err.Error(), "WLAN") {
+		t.Fatalf("unexpected wait error: %v", err)
 	}
 }
 

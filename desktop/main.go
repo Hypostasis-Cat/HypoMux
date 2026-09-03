@@ -7,6 +7,8 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/Hypostasis-Cat/HypoMux/desktop/internal/engineclient"
@@ -184,8 +186,22 @@ func main() {
 			startupSettings := settingsService.Get()
 			if shouldAutoStartAcceleration(startSilent, startupSettings) {
 				go func() {
+					waitCtx, waitCancel := context.WithTimeout(
+						context.Background(),
+						autoStartAdapterWaitTimeout,
+					)
+					defer waitCancel()
 					if err := runAutoStartAcceleration(
+						waitCtx,
 						startupSettings,
+						func(ctx context.Context) error {
+							return waitForSelectedAdapters(
+								ctx,
+								startupSettings.SelectedAdapterIDs,
+								autoStartAdapterPollInterval,
+								adapterService.List,
+							)
+						},
 						engineService.Start,
 						desktop.SetEngineTrayStatus,
 					); err != nil {
@@ -233,11 +249,24 @@ func shouldAutoStartAcceleration(startSilent bool, settings services.AppSettings
 	return startSilent && settings.Autostart && settings.AutoStartEngine
 }
 
+const (
+	autoStartAdapterPollInterval = 2 * time.Second
+	autoStartAdapterWaitTimeout  = 2 * time.Minute
+)
+
 func runAutoStartAcceleration(
+	ctx context.Context,
 	settings services.AppSettings,
+	waitUntilReady func(context.Context) error,
 	start func(string) (services.EngineSnapshot, error),
 	setStatus func(string, string),
 ) error {
+	if waitUntilReady != nil {
+		if err := waitUntilReady(ctx); err != nil {
+			setStatus("failed", settings.Mode)
+			return err
+		}
+	}
 	setStatus("starting", settings.Mode)
 	snapshot, err := start(settings.Mode)
 	if err != nil {
@@ -246,6 +275,62 @@ func runAutoStartAcceleration(
 	}
 	setStatus(snapshot.Phase, snapshot.Mode)
 	return nil
+}
+
+func waitForSelectedAdapters(
+	ctx context.Context,
+	selectedIDs []string,
+	pollInterval time.Duration,
+	list func() ([]services.AdapterView, error),
+) error {
+	wanted := make(map[string]struct{}, len(selectedIDs))
+	for _, id := range selectedIDs {
+		if id = strings.TrimSpace(id); id != "" {
+			wanted[id] = struct{}{}
+		}
+	}
+	if len(wanted) == 0 {
+		return nil
+	}
+	if pollInterval <= 0 {
+		pollInterval = autoStartAdapterPollInterval
+	}
+
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+	missing := make([]string, 0, len(wanted))
+	var lastListErr error
+	for {
+		adapters, err := list()
+		if err == nil {
+			lastListErr = nil
+			available := make(map[string]struct{}, len(adapters))
+			for _, adapter := range adapters {
+				available[adapter.ID] = struct{}{}
+			}
+			missing = missing[:0]
+			for id := range wanted {
+				if _, ok := available[id]; !ok {
+					missing = append(missing, id)
+				}
+			}
+			if len(missing) == 0 {
+				return nil
+			}
+			sort.Strings(missing)
+		} else {
+			lastListErr = err
+		}
+
+		select {
+		case <-ctx.Done():
+			if lastListErr != nil {
+				return fmt.Errorf("等待开机网卡就绪失败：%v：%w", lastListErr, ctx.Err())
+			}
+			return fmt.Errorf("等待开机网卡就绪超时（缺少：%s）：%w", strings.Join(missing, "、"), ctx.Err())
+		case <-ticker.C:
+		}
+	}
 }
 
 func hasArgument(arguments []string, expected string) bool {

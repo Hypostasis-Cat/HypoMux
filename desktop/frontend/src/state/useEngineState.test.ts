@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AdapterView } from "../platform/services";
 import { adapterListKey } from "./adapterRuntime";
-import { HOME_TELEMETRY_POLL_MS } from "./useEngineState";
+import { HOME_TELEMETRY_POLL_MS, shouldPollEngineSnapshot } from "./useEngineState";
 
 const adapter = (): AdapterView => ({
   id: "Ethernet",
@@ -48,5 +48,13 @@ describe("Home telemetry cadence", () => {
   it("refreshes quickly enough for the throughput display to feel live", () => {
     expect(HOME_TELEMETRY_POLL_MS).toBeLessThanOrEqual(1000);
     expect(HOME_TELEMETRY_POLL_MS).toBeGreaterThanOrEqual(500);
+  });
+
+  it("keeps polling an externally-triggered engine transition", () => {
+    expect(shouldPollEngineSnapshot(true, false, false, false)).toBe(true);
+  });
+
+  it("does not apply polling snapshots over a local engine operation", () => {
+    expect(shouldPollEngineSnapshot(true, true, false, false)).toBe(false);
   });
 });

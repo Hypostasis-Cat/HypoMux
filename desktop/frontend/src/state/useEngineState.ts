@@ -18,6 +18,13 @@ export type EngineMode = "proxy" | "tun";
 export type AdapterHealth = "idle" | "healthy" | "unstable" | "cooldown" | "probing" | "failed";
 export const HOME_TELEMETRY_POLL_MS = 800;
 
+export const shouldPollEngineSnapshot = (
+  transitioning: boolean,
+  localOperationActive: boolean,
+  preview: boolean,
+  adapterSavePending: boolean,
+) => (!transitioning || !localOperationActive) && !preview && !adapterSavePending;
+
 export type HomeAdapter = AdapterView & {
   downloadBPS: number;
   uploadBPS: number;
@@ -267,7 +274,12 @@ export function useEngineState(
     mounted.current = true;
     void load();
     const stopSnapshotPoll = startSerialPoll(async () => {
-      if (!transitionRef.current && !previewRef.current && !adapterSaveQueue.isPending()) {
+      if (shouldPollEngineSnapshot(
+        transitionRef.current,
+        operationActive.current,
+        previewRef.current,
+        adapterSaveQueue.isPending(),
+      )) {
         const requestEpoch = snapshotEpoch.current;
         const next = await appServices.engine.snapshot();
         applySnapshot(next, false, requestEpoch);
