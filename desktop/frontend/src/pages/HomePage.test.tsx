@@ -60,6 +60,7 @@ const engineState = () => ({
   phase: "stopped",
   mode: "proxy",
   weighted: false,
+  systemProxyTakeover: true,
   adapters: [adapter],
   selected: [adapter],
   totalWeight: adapter.weight,
@@ -132,6 +133,13 @@ describe("HomePage adapter interactions", () => {
     fireEvent.click(screen.getByRole("button", { name: "Increase Ethernet Weight" }));
 
     expect(onNavigate).not.toHaveBeenCalled();
+  });
+
+  it("makes local-port-only proxy mode explicit", () => {
+    mocks.useEngineState.mockReturnValue({ ...engineState(), systemProxyTakeover: false });
+    renderPage(<HomePage />);
+
+    expect(screen.getByText(/Local proxy ports only; Windows system proxy is unchanged/)).not.toBeNull();
   });
 
   it("publishes adapter readiness and engine phase to the shared runtime feed", () => {

@@ -12,6 +12,7 @@ import { isDesktopRuntime } from "../platform/runtime";
 import { adapterSaveInput, adapterSaveQueue } from "../platform/adapterSaveQueue";
 import { startSerialPoll } from "../platform/serialPoll";
 import { adapterListKey } from "./adapterRuntime";
+import { SYSTEM_PROXY_TAKEOVER_EVENT } from "./systemProxyTakeover";
 
 export type EnginePhase = "stopped" | "starting" | "running" | "degraded" | "stopping" | "failed";
 export type EngineMode = "proxy" | "tun";
@@ -161,6 +162,7 @@ export function useEngineState(
   const [refreshing, setRefreshing] = useState(false);
   const [preview, setPreview] = useState(false);
   const [ports, setPorts] = useState({ socks: 10800, http: 10801 });
+  const [systemProxyTakeover, setSystemProxyTakeover] = useState(true);
   const [history, setHistory] = useState<number[]>(Array.from({ length: 18 }, () => 0));
   const [diagnostics, setDiagnostics] = useState<DiagnosticResult[]>([]);
   const mounted = useRef(true);
@@ -218,6 +220,7 @@ export function useEngineState(
       adaptersRef.current = fixtures;
       setAdapters(fixtures);
       setPreview(true);
+      setSystemProxyTakeover(new URLSearchParams(window.location.search).get("system_proxy") !== "manual");
       const throughputFixture = browserThroughputFixture();
       if (throughputFixture) setHistory(throughputFixture.slice(0, -1));
       applySnapshot({
@@ -259,6 +262,7 @@ export function useEngineState(
       setWeightedState(settings.weighted);
       weightedRef.current = settings.weighted;
       setPorts({ socks: settings.socks_port, http: settings.http_port });
+      setSystemProxyTakeover(settings.system_proxy_takeover);
       setPreview(false);
     } catch (error) {
       if (showError) {
@@ -304,6 +308,15 @@ export function useEngineState(
       stopAdapterPoll();
     };
   }, [applySnapshot, load]);
+
+  useEffect(() => {
+    const handleTakeoverChange = (event: Event) => {
+      const enabled = (event as CustomEvent<boolean>).detail;
+      if (typeof enabled === "boolean") setSystemProxyTakeover(enabled);
+    };
+    window.addEventListener(SYSTEM_PROXY_TAKEOVER_EVENT, handleTakeoverChange);
+    return () => window.removeEventListener(SYSTEM_PROXY_TAKEOVER_EVENT, handleTakeoverChange);
+  }, []);
 
   const persistAdapters = useCallback((next: AdapterView[], nextMode = modeRef.current, nextWeighted = weightedRef.current) => {
     adaptersRef.current = next;
@@ -492,7 +505,7 @@ export function useEngineState(
     loading, refreshing, preview, transitioning: transition,
     coreConnected: snapshot.core_connected, coreVersion: snapshot.core_version ?? "—",
     coreElevated: snapshot.core_elevated,
-    ports,
+    ports, systemProxyTakeover,
     totalDownload: snapshot.download_bps,
     totalUpload: snapshot.upload_bps,
     totalConnections: snapshot.connections,

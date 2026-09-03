@@ -8,6 +8,7 @@ const settings = (patch: Record<string, unknown>): Settings => ({
   language: "zh",
   socks_port: 10800,
   http_port: 10801,
+  system_proxy_takeover: true,
   weighted: false,
   strict_route: true,
   close_to_tray: false,

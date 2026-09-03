@@ -22,6 +22,7 @@ export function EngineHero({
   weighted,
   socksPort,
   httpPort,
+  systemProxyTakeover,
   onModeChange,
   onWeightedChange,
   onToggle,
@@ -37,6 +38,7 @@ export function EngineHero({
   weighted: boolean;
   socksPort: number;
   httpPort: number;
+  systemProxyTakeover: boolean;
   onModeChange: (mode: EngineMode) => void;
   onWeightedChange: (value: boolean) => void;
   onToggle: () => void;
@@ -91,10 +93,15 @@ export function EngineHero({
         </TabList>
         <span key={mode} className="engine-mode-note motion-inline-swap">
           {mode === "proxy"
-            ? text(
-              `接管遵循 Windows 系统代理的应用流量 · HTTP ${httpPort} · SOCKS5 ${socksPort}`,
-              `Manages apps that follow the Windows system proxy · HTTP ${httpPort} · SOCKS5 ${socksPort}`,
-            )
+            ? systemProxyTakeover
+              ? text(
+                `接管遵循 Windows 系统代理的应用流量 · HTTP ${httpPort} · SOCKS5 ${socksPort}`,
+                `Manages apps that follow the Windows system proxy · HTTP ${httpPort} · SOCKS5 ${socksPort}`,
+              )
+              : text(
+                `仅开放本地代理端口，不修改 Windows 系统代理 · HTTP ${httpPort} · SOCKS5 ${socksPort}`,
+                `Local proxy ports only; Windows system proxy is unchanged · HTTP ${httpPort} · SOCKS5 ${socksPort}`,
+              )
             : text(
               "启动前执行只读路由、WFP 与权限检查；系统级资源由独立 Go Core 管理",
               "Performs read-only route, WFP, and permission checks before start; system resources are managed by the independent Go Core.",

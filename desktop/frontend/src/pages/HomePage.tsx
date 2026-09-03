@@ -100,6 +100,7 @@ export function HomePage({
         weighted={engine.weighted}
         socksPort={engine.ports.socks}
         httpPort={engine.ports.http}
+        systemProxyTakeover={engine.systemProxyTakeover}
         onModeChange={engine.setMode}
         onWeightedChange={engine.setWeighted}
         onToggle={engine.toggleEngine}

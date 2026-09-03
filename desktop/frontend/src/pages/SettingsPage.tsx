@@ -30,6 +30,7 @@ import { desktopPlatform } from "../platform/desktop";
 import { appServices, type AdapterView, type CompleteAppSettings, type ConfigMigrationStatus } from "../platform/services";
 import { SettingsSaveQueue, type SaveOutcome } from "../platform/settingsQueue";
 import { adapterListKey } from "../state/adapterRuntime";
+import { SYSTEM_PROXY_TAKEOVER_EVENT } from "../state/systemProxyTakeover";
 import { accentColours } from "../theme/appearance.presets";
 import { useAppearance } from "../theme/appearance.store";
 import { backgroundService } from "../theme/background.service";
@@ -41,6 +42,7 @@ const emptySettings: CompleteAppSettings = {
   language: "zh",
   socks_port: 10800,
   http_port: 10801,
+  system_proxy_takeover: true,
   weighted: false,
   strict_route: true,
   force_tun_connectivity_bypass: false,
@@ -288,6 +290,12 @@ export function SettingsPage({
   useEffect(() => {
     saveQueue.attach((updater) => setSettings(updater));
   }, [saveQueue]);
+
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent(SYSTEM_PROXY_TAKEOVER_EVENT, {
+      detail: settings.system_proxy_takeover,
+    }));
+  }, [settings.system_proxy_takeover]);
 
   const enqueueSave = <T,>(operation: () => Promise<SaveOutcome<T, CompleteAppSettings>>, fields: string[] | null): Promise<T> =>
     saveQueue.enqueue(operation, fields).catch((error) => {
@@ -749,6 +757,18 @@ export function SettingsPage({
               <label>SOCKS5 <Input type="number" min={1} max={65534} value={String(settings.socks_port)} onChange={(_, data) => setSettings((current) => ({ ...current, socks_port: Number(data.value) }))} /></label>
               <label>HTTP <Input type="number" min={1} max={65534} value={String(settings.http_port)} onChange={(_, data) => setSettings((current) => ({ ...current, http_port: Number(data.value) }))} /></label>
             </div>
+          </SettingRow>
+          <SettingRow title={t("settings_system_proxy_takeover")} description={t("settings_system_proxy_takeover_hint")}>
+            <SettingSwitch
+              checked={settings.system_proxy_takeover}
+              disabled={loading || saving}
+              onChange={(checked) => void patchAndSave(
+                { system_proxy_takeover: checked },
+                checked
+                  ? t("settings_system_proxy_takeover_on")
+                  : t("settings_system_proxy_takeover_off"),
+              )}
+            />
           </SettingRow>
         </GlassSurface>
 

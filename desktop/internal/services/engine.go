@@ -180,6 +180,10 @@ type coreLogEvent struct {
 	Message   string `json:"message"`
 }
 
+func shouldTakeOverSystemProxy(mode string, settings AppSettings) bool {
+	return mode == "proxy" && settings.SystemProxyTakeover
+}
+
 func NewEngineService(settings *SettingsService, adapters *AdapterService, logs ...*SupportLogStore) *EngineService {
 	return newEngineService(settings, adapters, nil, HostPrivilegeCompatibility{}, logs...)
 }
@@ -621,6 +625,8 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 		return EngineSnapshot{}, err
 	}
 	defer s.releaseLifecycle()
+	settings := s.settings.Get()
+	takeOverSystemProxy := shouldTakeOverSystemProxy(mode, settings)
 	s.mu.Lock()
 	if s.closing {
 		s.mu.Unlock()
@@ -631,7 +637,7 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 		s.mu.Unlock()
 		return EngineSnapshot{}, fmt.Errorf("系统代理状态尚未安全恢复：%s", recoveryError)
 	}
-	if mode == "proxy" && s.hostElevated && !s.elevatedProxySafe {
+	if takeOverSystemProxy && s.hostElevated && !s.elevatedProxySafe {
 		detail := s.hostPrivilegeDetail
 		s.mu.Unlock()
 		if detail == "" {
@@ -663,7 +669,6 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 	if len(selected) == 0 {
 		return EngineSnapshot{}, errors.New("请至少选择一张活动网卡")
 	}
-	settings := s.settings.Get()
 	routingRules := []RoutingRule{}
 	compatibility := compatibilityPlan{}
 	dnsEgress := tunDNSEgressDecision{}
@@ -696,11 +701,12 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 			names = append(names, adapter.Name)
 		}
 		logOwned = s.logs.Start(mode, names, map[string]any{
-			"socks_port":      settings.SOCKSPort,
-			"http_port":       settings.HTTPPort,
-			"weighted":        settings.Weighted,
-			"dns_policy":      settings.DNSPolicy,
-			"dns_egress_mode": settings.DNSEgressMode,
+			"socks_port":            settings.SOCKSPort,
+			"http_port":             settings.HTTPPort,
+			"system_proxy_takeover": settings.SystemProxyTakeover,
+			"weighted":              settings.Weighted,
+			"dns_policy":            settings.DNSPolicy,
+			"dns_egress_mode":       settings.DNSEgressMode,
 		})
 		s.logs.RecordEvent("engine", "start_requested", map[string]any{
 			"mode": mode, "adapters": names,
@@ -873,8 +879,14 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 		return EngineSnapshot{}, cause
 	}
 	if mode == "proxy" {
-		if err := enableSystemProxy(settings.HTTPPort, settings.SOCKSPort); err != nil {
-			return rollback(err)
+		if takeOverSystemProxy {
+			if err := enableSystemProxy(settings.HTTPPort, settings.SOCKSPort); err != nil {
+				return rollback(err)
+			}
+		} else if s.logs != nil {
+			s.logs.RecordEvent("system_proxy", "takeover_skipped", map[string]any{
+				"http_port": settings.HTTPPort, "socks_port": settings.SOCKSPort,
+			})
 		}
 	} else {
 		var dnsResult dnsResolveResult

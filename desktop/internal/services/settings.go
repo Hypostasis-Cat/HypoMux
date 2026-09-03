@@ -25,6 +25,7 @@ type AppSettings struct {
 	Language            string                `json:"language"`
 	SOCKSPort           int                   `json:"socks_port"`
 	HTTPPort            int                   `json:"http_port"`
+	SystemProxyTakeover bool                  `json:"system_proxy_takeover"`
 	Weighted            bool                  `json:"weighted"`
 	StrictRoute         bool                  `json:"strict_route"`
 	WFPCompatibility    WFPCompatibilityState `json:"wfp_compatibility_state,omitempty"`
@@ -55,6 +56,7 @@ func DefaultSettings() AppSettings {
 		Language:            "zh",
 		SOCKSPort:           10800,
 		HTTPPort:            10801,
+		SystemProxyTakeover: true,
 		StrictRoute:         true,
 		BlockedDomainExpiry: true,
 		CloseToTray:         false,
@@ -194,6 +196,13 @@ func (s *SettingsService) RollbackLegacyMigration() (AppSettings, error) {
 		}
 		if err := json.Unmarshal(data, &restored); err != nil {
 			return AppSettings{}, fmt.Errorf("迁移前备份格式无效：%w", err)
+		}
+		var storedFields map[string]json.RawMessage
+		if err := json.Unmarshal(data, &storedFields); err != nil {
+			return AppSettings{}, fmt.Errorf("迁移前备份格式无效：%w", err)
+		}
+		if _, exists := storedFields["system_proxy_takeover"]; !exists {
+			restored.SystemProxyTakeover = DefaultSettings().SystemProxyTakeover
 		}
 		if restored.DNSEgressMode == "" {
 			restored.DNSEgressMode = DNSEgressAuto
@@ -363,6 +372,16 @@ func (s *SettingsService) reload() error {
 		return fmt.Errorf("设置文件格式无效：%w", err)
 	}
 	defaults := DefaultSettings()
+	var storedFields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &storedFields); err != nil {
+		return fmt.Errorf("设置文件格式无效：%w", err)
+	}
+	// The option was introduced after proxy mode already took ownership by
+	// default. Preserve that behaviour for settings files written by older
+	// versions while still allowing an explicitly persisted false value.
+	if _, exists := storedFields["system_proxy_takeover"]; !exists {
+		loaded.SystemProxyTakeover = defaults.SystemProxyTakeover
+	}
 	if loaded.Mode != "proxy" && loaded.Mode != "tun" {
 		loaded.Mode = defaults.Mode
 	}

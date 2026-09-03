@@ -14,6 +14,44 @@ func TestFreshInstallDefaultsExitOnClose(t *testing.T) {
 	if settings.AutoStartEngine {
 		t.Fatal("fresh installs must not start acceleration automatically")
 	}
+	if !settings.SystemProxyTakeover {
+		t.Fatal("fresh installs must preserve automatic Windows system-proxy management")
+	}
+}
+
+func TestSystemProxyTakeoverPreferencePersists(t *testing.T) {
+	t.Setenv("HYPOMUX_DATA_DIR", t.TempDir())
+	service := NewSettingsService()
+	next := service.Get()
+	next.SystemProxyTakeover = false
+	if _, err := service.Update(next); err != nil {
+		t.Fatal(err)
+	}
+	reloaded := NewSettingsService()
+	if reloaded.Get().SystemProxyTakeover {
+		t.Fatal("manual local-proxy mode did not persist")
+	}
+}
+
+func TestOlderSettingsDefaultToSystemProxyTakeover(t *testing.T) {
+	directory := t.TempDir()
+	t.Setenv("HYPOMUX_DATA_DIR", directory)
+	path := filepath.Join(directory, "settings.json")
+	legacySettings := []byte(`{
+	  "mode": "proxy",
+	  "language": "zh",
+	  "socks_port": 10800,
+	  "http_port": 10801,
+	  "dns_server": "223.5.5.5",
+	  "dns_policy": "auto"
+	}`)
+	if err := os.WriteFile(path, legacySettings, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	service := NewSettingsService()
+	if !service.Get().SystemProxyTakeover {
+		t.Fatal("settings written before system_proxy_takeover existed changed behaviour")
+	}
 }
 
 func TestAutoStartEngineRequiresLaunchAtStartup(t *testing.T) {
