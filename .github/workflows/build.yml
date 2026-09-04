@@ -24,6 +24,7 @@ permissions:
 
 env:
   WAILS_VERSION: v3.0.0-alpha2.119
+  PNPM_VERSION: 10.34.5
   INSTALLER_PATH: desktop/bin/hypomux-amd64-installer.exe
 
 jobs:
@@ -60,18 +61,48 @@ jobs:
             engine/go.sum
             desktop/go.sum
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v6
-        with:
-          version: 10
-          run_install: false
-
       - name: Set up Node.js
         uses: actions/setup-node@v6
         with:
           node-version: 22
-          cache: pnpm
-          cache-dependency-path: desktop/frontend/pnpm-lock.yaml
+
+      - name: Restore pnpm tool cache
+        id: pnpm-tool
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/hypomux-pnpm
+          key: pnpm-tool-${{ runner.os }}-${{ runner.arch }}-${{ env.PNPM_VERSION }}-v1
+
+      - name: Install pinned pnpm
+        if: steps.pnpm-tool.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          # Install the requested version directly, without a v11 bootstrap/self-update.
+          npm install --global --prefix "$env:RUNNER_TEMP/hypomux-pnpm" "pnpm@${env:PNPM_VERSION}" --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Configure pnpm
+        id: pnpm
+        shell: pwsh
+        run: |
+          $pnpmDirectory = Join-Path $env:RUNNER_TEMP 'hypomux-pnpm'
+          $pnpmCommand = Join-Path $pnpmDirectory 'pnpm.cmd'
+          $installedVersion = & $pnpmCommand --version
+          if ($LASTEXITCODE -ne 0 -or $installedVersion -ne $env:PNPM_VERSION) {
+            throw "Expected pnpm $env:PNPM_VERSION, got $installedVersion."
+          }
+          Add-Content -LiteralPath $env:GITHUB_PATH -Value $pnpmDirectory -Encoding utf8
+          $storePath = & $pnpmCommand --dir desktop/frontend store path --silent
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "store=$storePath" -Encoding utf8
+
+      - name: Restore frontend dependency cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm.outputs.store }}
+          key: pnpm-store-${{ runner.os }}-${{ runner.arch }}-${{ env.PNPM_VERSION }}-${{ hashFiles('desktop/frontend/pnpm-lock.yaml') }}
+          restore-keys: |
+            pnpm-store-${{ runner.os }}-${{ runner.arch }}-${{ env.PNPM_VERSION }}-
 
       - name: Install Wails and NSIS
         shell: pwsh

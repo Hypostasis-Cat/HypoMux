@@ -51,7 +51,14 @@ it.each([true, false])("opens and reopens notes at the top (footer link: %s)", a
   render(<FluentProvider theme={webLightTheme}><AboutPage /></FluentProvider>);
 
   for (let attempt = 0; attempt < 3; attempt++) {
-    fireEvent.click(screen.getByRole("button", { name: "about_check_update" }));
+    // Dialog removal and Tabster releasing aria-hidden on the page are separate
+    // events. Wait for the real accessible, enabled trigger before reopening.
+    const checkButton = await waitFor(() => {
+      const button = screen.getByRole("button", { name: "about_check_update" });
+      expect(button.hasAttribute("disabled")).toBe(false);
+      return button;
+    });
+    fireEvent.click(checkButton);
     const dialog = await screen.findByRole("dialog");
     const title = within(dialog).getByText("about_update_available_title");
     const notes = dialog.querySelector<HTMLElement>(".update-notes")!;
@@ -69,6 +76,9 @@ it.each([true, false])("opens and reopens notes at the top (footer link: %s)", a
       expect(mocks.openURL).toHaveBeenCalledWith("https://github.com/Hypostasis-Cat/HypoMux/releases");
     }
     fireEvent.click(within(dialog).getByRole("button", { name: "about_update_later" }));
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull();
+      expect(screen.getByRole("button", { name: "about_check_update" })).toBe(checkButton);
+    });
   }
 });
