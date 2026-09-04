@@ -4112,7 +4112,7 @@ svg {
 }
 
 .connection-rule-menu {
-  min-width: 248px;
+  min-width: 248px !important;
   max-width: min(340px, calc(100vw - 24px));
   padding: 5px !important;
   border: 1px solid color-mix(in srgb, var(--hm-outer-border) 72%, var(--hm-accent) 14%) !important;
@@ -4126,8 +4126,24 @@ svg {
 }
 
 .connection-rule-menu .fui-MenuItem {
-  min-height: 36px;
-  border-radius: 7px;
+  min-height: 48px;
+  padding: 8px 10px;
+  border-radius: 7px !important;
+  background: transparent;
+  gap: 10px;
+}
+
+.connection-rule-menu .fui-MenuItem:hover {
+  background: var(--hm-row-hover);
+}
+
+.connection-rule-menu-heading {
+  padding: 6px 10px 9px;
+  color: var(--hm-text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  border-bottom: 1px solid var(--hm-outer-border);
+  margin-bottom: 4px;
 }
 
 .connection-rule-menu-item {
@@ -4140,7 +4156,7 @@ svg {
   overflow: hidden;
   max-width: 246px;
   color: var(--hm-text-tertiary);
-  font-size: 9.5px;
+  font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }

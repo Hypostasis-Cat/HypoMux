@@ -298,6 +298,8 @@ describe("ConnectionsPage interactions", () => {
     expect(await screen.findByRole("menuitem", { name: /Add by process/ })).not.toBeNull();
     expect(screen.getByRole("menuitem", { name: /Add by domain/ })).not.toBeNull();
     expect(screen.getByRole("menuitem", { name: /Add by ip/i })).not.toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Quick add routing rule" })).toBeNull();
+    expect(screen.getByText("Quick add routing rule")).not.toBeNull();
 
     fireEvent.click(screen.getByRole("menuitem", { name: /Add by domain/ }));
     const dialog = await screen.findByRole("dialog");
@@ -374,6 +376,8 @@ describe("ConnectionsPage interactions", () => {
       const dialog = await screen.findByRole("dialog");
       await readyDialogAction(dialog, "Add rule");
       fireEvent.click(await readyDialogAction(dialog, "Cancel"));
+      // The exiting surface must keep its contents and dimensions until unmount.
+      expect(within(dialog).getByText("ethernet.example")).not.toBeNull();
       await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     }
     expect(mocks.saveRules).not.toHaveBeenCalled();

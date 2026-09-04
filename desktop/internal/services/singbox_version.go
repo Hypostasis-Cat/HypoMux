@@ -11,7 +11,9 @@ import (
 // binary is later moved to 1.14+. 1.14 defaults TUN DNS handling to hijack,
 // which would otherwise make the explicit "system" policy intercept DNS.
 func singBoxTunDNSMode(executable, policy string) (string, error) {
-	output, err := exec.Command(executable, "version").CombinedOutput()
+	command := exec.Command(executable, "version")
+	configureBackgroundCommand(command)
+	output, err := command.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("读取 sing-box 版本失败：%w", err)
 	}

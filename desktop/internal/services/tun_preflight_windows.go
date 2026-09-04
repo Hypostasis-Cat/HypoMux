@@ -170,7 +170,7 @@ func runPreflightPowerShell(script string) ([]byte, error) {
 		powerShell, "-NoProfile", "-NonInteractive",
 		"-ExecutionPolicy", "Bypass", "-Command", script,
 	)
-	command.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	configureBackgroundCommand(command)
 	output, err := command.Output()
 	if ctx.Err() != nil {
 		return nil, fmt.Errorf("PowerShell 网络检查超过 %s：%w", tunPreflightPowerShellTimeout, ctx.Err())

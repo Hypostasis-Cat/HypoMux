@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -39,7 +38,7 @@ func probeTUNDataPathPlatform(parent context.Context, endpoints []string) tunCon
 			"--output", "NUL", "--write-out", "%{http_code}",
 			endpoint,
 		)
-		command.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+		configureBackgroundCommand(command)
 		var stdout bytes.Buffer
 		var stderr bytes.Buffer
 		command.Stdout = &stdout

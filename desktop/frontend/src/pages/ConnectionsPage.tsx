@@ -9,7 +9,8 @@ import {
   DialogTitle,
   Dropdown,
   Menu,
-  MenuDivider,
+  MenuGroup,
+  MenuGroupHeader,
   MenuItem,
   MenuList,
   MenuPopover,
@@ -152,6 +153,8 @@ export function ConnectionsPage({
   const [now, setNow] = useState(Date.now());
   const [contextMenu, setContextMenu] = useState<ConnectionContextMenu | null>(null);
   const [quickRule, setQuickRule] = useState<QuickRuleSelection | null>(null);
+  // Retain the content during Fluent's exit animation to avoid a collapsing dialog.
+  const [quickRuleOpen, setQuickRuleOpen] = useState(false);
   const [quickRuleSnapshot, setQuickRuleSnapshot] = useState<RoutingSnapshot>({ rules: [], outbounds: [] });
   const [quickRuleOutbound, setQuickRuleOutbound] = useState("");
   const [quickRulePreview, setQuickRulePreview] = useState<RoutingBatchPreview | null>(null);
@@ -310,6 +313,7 @@ export function ConnectionsPage({
     quickRuleRequest.current = request;
     setContextMenu(null);
     setQuickRule(selection);
+    setQuickRuleOpen(true);
     setQuickRuleLoading(true);
     setQuickRulePreview(null);
     try {
@@ -334,7 +338,7 @@ export function ConnectionsPage({
         intent: "error",
         dedupeKey: "connections:quick-rule-load",
       });
-      setQuickRule(null);
+      setQuickRuleOpen(false);
     } finally {
       if (quickRuleRequest.current === request) setQuickRuleLoading(false);
     }
@@ -377,7 +381,7 @@ export function ConnectionsPage({
         throw new Error(item?.message || text("规则内容无效", "The rule value is invalid"));
       }
       if (item.status === "duplicate") {
-        setQuickRule(null);
+        setQuickRuleOpen(false);
         notify({
           title: text("规则已经存在", "Rule already exists"),
           message: text("没有修改现有规则。", "Existing rules were left unchanged."),
@@ -392,7 +396,7 @@ export function ConnectionsPage({
         : [...latestRules];
       nextRules.push(item.rule);
       await appServices.routing.save(nextRules);
-      setQuickRule(null);
+      setQuickRuleOpen(false);
       notify({
         title: item.status === "conflict"
           ? text("分流规则已更新", "Routing rule updated")
@@ -675,10 +679,10 @@ export function ConnectionsPage({
       >
         <MenuPopover className="connection-rule-menu glass-surface" data-tone="primary">
           <MenuList>
-            <MenuItem disabled icon={<Add20Regular />}>
+            <MenuGroup>
+            <MenuGroupHeader className="connection-rule-menu-heading">
               {text("快速添加分流规则", "Quick add routing rule")}
-            </MenuItem>
-            <MenuDivider />
+            </MenuGroupHeader>
             {(contextMenu ? connectionRuleCandidates(contextMenu.connection) : []).map((candidate) => (
               <MenuItem
                 key={candidate.matchType}
@@ -695,16 +699,17 @@ export function ConnectionsPage({
                 </span>
               </MenuItem>
             ))}
+            </MenuGroup>
           </MenuList>
         </MenuPopover>
       </Menu>
 
       <Dialog
-        open={Boolean(quickRule)}
+        open={quickRuleOpen}
         onOpenChange={(_, data) => {
           if (!data.open && !quickRuleSaving) {
             quickRuleRequest.current += 1;
-            setQuickRule(null);
+            setQuickRuleOpen(false);
           }
         }}
       >
@@ -758,7 +763,10 @@ export function ConnectionsPage({
               )}
             </DialogContent>
             <DialogActions className="routing-batch-actions">
-              <Button disabled={quickRuleSaving} onClick={() => setQuickRule(null)}>{text("取消", "Cancel")}</Button>
+              <Button disabled={quickRuleSaving} onClick={() => {
+                quickRuleRequest.current += 1;
+                setQuickRuleOpen(false);
+              }}>{text("取消", "Cancel")}</Button>
               <Button
                 appearance="primary"
                 icon={quickRuleSaving ? <Spinner size="tiny" /> : <Add20Regular />}
