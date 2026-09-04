@@ -150,8 +150,10 @@ type RoutingBatchPreview struct {
 }
 
 type RoutingSnapshot struct {
-	Rules     []RoutingRule `json:"rules"`
-	Outbounds []Outbound    `json:"outbounds"`
+	Rules           []RoutingRule `json:"rules"`
+	Outbounds       []Outbound    `json:"outbounds"`
+	RestartRequired bool          `json:"restart_required"`
+	RestartReason   string        `json:"restart_reason,omitempty"`
 }
 
 type Outbound struct {
@@ -174,7 +176,11 @@ func (s *RoutingRuleService) Snapshot() (RoutingSnapshot, error) {
 	if err != nil {
 		return RoutingSnapshot{}, err
 	}
-	return RoutingSnapshot{Rules: rules, Outbounds: s.availableOutbounds()}, nil
+	restartRequired, restartReason := singBoxRuleSetRestartRequirement(rules)
+	return RoutingSnapshot{
+		Rules: rules, Outbounds: s.availableOutbounds(),
+		RestartRequired: restartRequired, RestartReason: restartReason,
+	}, nil
 }
 
 func (s *RoutingRuleService) availableOutbounds() []Outbound {
@@ -296,11 +302,10 @@ func (s *RoutingRuleService) Save(rules []RoutingRule) (RoutingSnapshot, error) 
 	if err := s.validateSelectedOutbounds(normalized); err != nil {
 		return RoutingSnapshot{}, err
 	}
-	if err := s.settings.saveRoutingRules(normalized); err != nil {
-		return RoutingSnapshot{}, err
-	}
-	if err := refreshSingBoxRuleSets(normalized); err != nil {
-		return RoutingSnapshot{}, fmt.Errorf("规则已保存，但热更新 sing-box 失败：%w", err)
+	if err := refreshSingBoxRuleSetsAndCommit(normalized, func() error {
+		return s.settings.saveRoutingRules(normalized)
+	}); err != nil {
+		return RoutingSnapshot{}, fmt.Errorf("保存分流规则失败；系统已尝试恢复原规则：%w", err)
 	}
 	return s.Snapshot()
 }

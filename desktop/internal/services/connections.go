@@ -29,6 +29,7 @@ type ConnectionView struct {
 
 type ConnectionListSnapshot struct {
 	Phase       string           `json:"phase"`
+	Mode        string           `json:"mode"`
 	SampledAt   time.Time        `json:"sampled_at"`
 	Connections []ConnectionView `json:"connections"`
 }
@@ -36,7 +37,7 @@ type ConnectionListSnapshot struct {
 func (s *EngineService) Connections() (ConnectionListSnapshot, error) {
 	if phase := s.currentTransition(); phase != "" {
 		return ConnectionListSnapshot{
-			Phase: phase, SampledAt: time.Now(), Connections: []ConnectionView{},
+			Phase: phase, Mode: s.settings.Get().Mode, SampledAt: time.Now(), Connections: []ConnectionView{},
 		}, nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -50,6 +51,7 @@ func (s *EngineService) Connections() (ConnectionListSnapshot, error) {
 	}
 	result := ConnectionListSnapshot{
 		Phase:       status.Engine.State,
+		Mode:        s.settings.Get().Mode,
 		SampledAt:   time.Now(),
 		Connections: []ConnectionView{},
 	}

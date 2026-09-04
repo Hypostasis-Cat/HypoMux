@@ -114,6 +114,7 @@ export type ConnectionView = {
 
 export type ConnectionListSnapshot = {
   phase: string;
+  mode: string;
   sampled_at: string;
   connections: ConnectionView[];
 };

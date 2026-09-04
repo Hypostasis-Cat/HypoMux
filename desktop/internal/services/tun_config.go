@@ -131,7 +131,8 @@ func writeSingBoxConfigWithOptions(
 			ruleSetOutbounds = append(ruleSetOutbounds, name)
 		}
 	}
-	ruleSetPlan, err := writeSingBoxRuleSetPlan(rules, ruleSetOutbounds)
+	usesFakeIP := tunDNSNeedsFakeIP(dnsPolicy, rules)
+	ruleSetPlan, err := writeSingBoxRuleSetPlan(rules, ruleSetOutbounds, usesFakeIP)
 	if err != nil {
 		return "", "", clashAPIConfig{}, err
 	}
@@ -191,7 +192,6 @@ func writeSingBoxConfigWithOptions(
 		_ = endpoint
 		outbounds = append(outbounds, socksOutbound(name, port))
 	}
-	usesFakeIP := tunDNSNeedsFakeIP(dnsPolicy, rules)
 	dnsServers := []any{upstream}
 	dnsConfig := map[string]any{
 		"servers": dnsServers,

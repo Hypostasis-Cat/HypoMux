@@ -57,6 +57,7 @@ import {
   type ConnectionSortKey,
 } from "./connectionSort";
 import { routingRuleIdentity } from "./routingBatch";
+import { routingApplyState } from "./routingEffect";
 
 type QuickRuleMatchType = "process" | "domain" | "ip";
 
@@ -108,6 +109,7 @@ export const preferredConnectionRuleOutbound = (
 
 const emptySnapshot: ConnectionListSnapshot = {
   phase: "stopped",
+  mode: "tun",
   sampled_at: "",
   connections: [],
 };
@@ -155,7 +157,11 @@ export function ConnectionsPage({
   const [quickRule, setQuickRule] = useState<QuickRuleSelection | null>(null);
   // Retain the content during Fluent's exit animation to avoid a collapsing dialog.
   const [quickRuleOpen, setQuickRuleOpen] = useState(false);
-  const [quickRuleSnapshot, setQuickRuleSnapshot] = useState<RoutingSnapshot>({ rules: [], outbounds: [] });
+  const [quickRuleSnapshot, setQuickRuleSnapshot] = useState<RoutingSnapshot>({
+    rules: [],
+    outbounds: [],
+    restart_required: false,
+  });
   const [quickRuleOutbound, setQuickRuleOutbound] = useState("");
   const [quickRulePreview, setQuickRulePreview] = useState<RoutingBatchPreview | null>(null);
   const [quickRuleLoading, setQuickRuleLoading] = useState(false);
@@ -395,17 +401,25 @@ export function ConnectionsPage({
         ? latestRules.filter((rule) => routingRuleIdentity(rule.match_type, rule.value) !== identity)
         : [...latestRules];
       nextRules.push(item.rule);
-      await appServices.routing.save(nextRules);
+      const saved = await appServices.routing.save(nextRules);
+      const applyState = routingApplyState(saved, snapshot.phase, snapshot.mode);
       setQuickRuleOpen(false);
+      const savedRule = `${matchTypeLabel(quickRule.matchType)} ${item.rule.value} ${text("已指向", "now uses ")}${outboundLabel(quickRuleOutbound, latest.outbounds ?? [])}`;
+      const applyMessage = applyState === "hot_reloaded"
+        ? text(`${savedRule}；新连接立即生效。`, `${savedRule}; new connections take effect immediately.`)
+        : applyState === "restart_required"
+          ? saved.restart_reason === "enable_fakeip"
+            ? text(`${savedRule}；请重启聚合以启用域名分流所需的 DNS 配置。`, `${savedRule}; restart aggregation to enable the DNS configuration required for domain routing.`)
+            : text(`${savedRule}；请重启聚合以完整加载这项更改。`, `${savedRule}; restart aggregation to load this change completely.`)
+          : applyState === "inactive_mode"
+            ? text(`${savedRule}；分流规则仅由 TUN 模式加载，当前系统代理流量不会切换出口。`, `${savedRule}; routing rules are loaded only in TUN mode, so current system-proxy traffic will not switch egress.`)
+            : text(`${savedRule}；将在下次启动 TUN 模式时生效。`, `${savedRule}; it will take effect the next time TUN mode starts.`);
       notify({
         title: item.status === "conflict"
           ? text("分流规则已更新", "Routing rule updated")
           : text("分流规则已添加", "Routing rule added"),
-        message: text(
-          `${matchTypeLabel(quickRule.matchType)} ${item.rule.value} 已指向${outboundLabel(quickRuleOutbound, latest.outbounds ?? [])}；新连接立即生效。`,
-          `${matchTypeLabel(quickRule.matchType)} ${item.rule.value} now uses ${outboundLabel(quickRuleOutbound, latest.outbounds ?? [])}; new connections take effect immediately.`,
-        ),
-        intent: "success",
+        message: applyMessage,
+        intent: applyState === "hot_reloaded" ? "success" : applyState === "restart_required" ? "warning" : "info",
         dedupeKey: `connections:quick-rule-saved:${identity}`,
       });
     } catch (error) {
@@ -418,7 +432,7 @@ export function ConnectionsPage({
     } finally {
       setQuickRuleSaving(false);
     }
-  }, [matchTypeLabel, notify, outboundLabel, quickRule, quickRuleOutbound, quickRuleSaving, text]);
+  }, [matchTypeLabel, notify, outboundLabel, quickRule, quickRuleOutbound, quickRuleSaving, snapshot.mode, snapshot.phase, text]);
 
   const engineRunning = snapshot.phase === "running";
   const hasViewFilter = query.trim().length > 0 || outboundFilter !== "all" || groupedByAdapter;

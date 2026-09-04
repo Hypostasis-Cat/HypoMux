@@ -15,8 +15,9 @@ import (
 )
 
 const (
-	singBoxRuleSetManifestName = "sing-box-rule-sets.json"
-	singBoxRuleSetVersion      = 3
+	singBoxRuleSetManifestName    = "sing-box-rule-sets.json"
+	singBoxRuleSetManifestVersion = 2
+	singBoxRuleSetVersion         = 3
 
 	ruleSetScopeEarlyIP = "early-ip"
 	ruleSetScopeProcess = "process"
@@ -24,11 +25,28 @@ const (
 	ruleSetScopeIP      = "ip"
 )
 
-var singBoxRuleSetMu sync.Mutex
+var (
+	singBoxRuleSetMu      sync.Mutex
+	replaceSingBoxRuleSet = replaceFileAtomically
+)
 
 type singBoxRuleSetManifest struct {
-	Version   int      `json:"version"`
-	Outbounds []string `json:"outbounds"`
+	Version    int      `json:"version"`
+	Outbounds  []string `json:"outbounds"`
+	UsesFakeIP bool     `json:"uses_fakeip"`
+}
+
+type ruleSetFile struct {
+	Path string
+	Data []byte
+	Mode os.FileMode
+}
+
+type ruleSetFileSnapshot struct {
+	Path    string
+	Data    []byte
+	Mode    os.FileMode
+	Existed bool
 }
 
 type singBoxRuleSetBinding struct {
@@ -48,20 +66,23 @@ type singBoxRuleSetPlan struct {
 // configuration as local source rule-sets. sing-box watches these files and
 // reloads them after an atomic replacement, so the pinned main configuration
 // and the TUN process can remain unchanged while user rules are edited.
-func writeSingBoxRuleSetPlan(rules []RoutingRule, outbounds []string) (singBoxRuleSetPlan, error) {
+func writeSingBoxRuleSetPlan(rules []RoutingRule, outbounds []string, usesFakeIP bool) (singBoxRuleSetPlan, error) {
 	singBoxRuleSetMu.Lock()
 	defer singBoxRuleSetMu.Unlock()
-	return writeSingBoxRuleSetPlanLocked(rules, outbounds, true)
+	plan, _, err := writeSingBoxRuleSetPlanLocked(rules, outbounds, true, usesFakeIP, replaceSingBoxRuleSet)
+	return plan, err
 }
 
 func writeSingBoxRuleSetPlanLocked(
 	rules []RoutingRule,
 	outbounds []string,
 	writeManifest bool,
-) (singBoxRuleSetPlan, error) {
+	usesFakeIP bool,
+	replace func(string, []byte, os.FileMode) error,
+) (singBoxRuleSetPlan, func() error, error) {
 	directory := filepath.Join(settingsDirectory(), "runtime", "rule-sets")
 	if err := os.MkdirAll(directory, 0o700); err != nil {
-		return singBoxRuleSetPlan{}, fmt.Errorf("创建 sing-box 规则集目录失败：%w", err)
+		return singBoxRuleSetPlan{}, nil, fmt.Errorf("创建 sing-box 规则集目录失败：%w", err)
 	}
 	outbounds = normalizedRuleSetOutbounds(outbounds, rules)
 	bindings := buildSingBoxRuleSetBindings(directory, outbounds)
@@ -70,6 +91,7 @@ func writeSingBoxRuleSetPlanLocked(
 		EarlyRouteRules: make([]any, 0, len(outbounds)),
 		UserRouteRules:  make([]any, 0, len(outbounds)*3),
 	}
+	files := make([]ruleSetFile, 0, len(bindings)+1)
 	for _, binding := range bindings {
 		sourceRules := buildSingBoxSourceRules(rules, binding)
 		payload, err := json.MarshalIndent(map[string]any{
@@ -77,12 +99,10 @@ func writeSingBoxRuleSetPlanLocked(
 			"rules":   sourceRules,
 		}, "", "  ")
 		if err != nil {
-			return singBoxRuleSetPlan{}, fmt.Errorf("编码 sing-box 规则集失败：%w", err)
+			return singBoxRuleSetPlan{}, nil, fmt.Errorf("编码 sing-box 规则集失败：%w", err)
 		}
 		payload = append(payload, '\n')
-		if err := replaceFileAtomically(binding.Path, payload, 0o600); err != nil {
-			return singBoxRuleSetPlan{}, fmt.Errorf("更新 sing-box 规则集 %s 失败：%w", binding.Tag, err)
-		}
+		files = append(files, ruleSetFile{Path: binding.Path, Data: payload, Mode: 0o600})
 		plan.Definitions = append(plan.Definitions, map[string]any{
 			"type": "local", "tag": binding.Tag, "format": "source", "path": binding.Path,
 		})
@@ -97,41 +117,144 @@ func writeSingBoxRuleSetPlanLocked(
 	}
 	if writeManifest {
 		manifest, err := json.MarshalIndent(singBoxRuleSetManifest{
-			Version: 1, Outbounds: outbounds,
+			Version: singBoxRuleSetManifestVersion, Outbounds: outbounds, UsesFakeIP: usesFakeIP,
 		}, "", "  ")
 		if err != nil {
-			return singBoxRuleSetPlan{}, fmt.Errorf("编码 sing-box 规则集清单失败：%w", err)
+			return singBoxRuleSetPlan{}, nil, fmt.Errorf("编码 sing-box 规则集清单失败：%w", err)
 		}
 		manifest = append(manifest, '\n')
-		if err := replaceFileAtomically(
-			filepath.Join(directory, singBoxRuleSetManifestName), manifest, 0o600,
-		); err != nil {
-			return singBoxRuleSetPlan{}, fmt.Errorf("更新 sing-box 规则集清单失败：%w", err)
-		}
+		files = append(files, ruleSetFile{
+			Path: filepath.Join(directory, singBoxRuleSetManifestName), Data: manifest, Mode: 0o600,
+		})
 	}
-	return plan, nil
+	rollback, err := publishRuleSetFiles(files, replace)
+	if err != nil {
+		return singBoxRuleSetPlan{}, nil, err
+	}
+	return plan, rollback, nil
 }
 
 // refreshSingBoxRuleSets updates the files referenced by the currently active
 // TUN configuration. If TUN has never been started there is no manifest and the
 // next start will create the rule-sets from the persisted settings.
 func refreshSingBoxRuleSets(rules []RoutingRule) error {
+	return refreshSingBoxRuleSetsAndCommit(rules, func() error { return nil })
+}
+
+// refreshSingBoxRuleSetsAndCommit keeps the live rule-sets and persisted
+// settings aligned. A failed replacement or commit restores every published
+// file before returning the error.
+func refreshSingBoxRuleSetsAndCommit(rules []RoutingRule, commit func() error) error {
 	singBoxRuleSetMu.Lock()
 	defer singBoxRuleSetMu.Unlock()
 	directory := filepath.Join(settingsDirectory(), "runtime", "rule-sets")
 	data, err := os.ReadFile(filepath.Join(directory, singBoxRuleSetManifestName))
 	if errors.Is(err, os.ErrNotExist) {
-		return nil
+		return commit()
 	}
 	if err != nil {
 		return fmt.Errorf("读取 sing-box 规则集清单失败：%w", err)
 	}
 	var manifest singBoxRuleSetManifest
-	if err := json.Unmarshal(data, &manifest); err != nil || manifest.Version != 1 {
+	if err := json.Unmarshal(data, &manifest); err != nil ||
+		(manifest.Version != 1 && manifest.Version != singBoxRuleSetManifestVersion) {
 		return fmt.Errorf("sing-box 规则集清单无效")
 	}
-	_, err = writeSingBoxRuleSetPlanLocked(rules, manifest.Outbounds, false)
-	return err
+	_, rollback, err := writeSingBoxRuleSetPlanLocked(
+		rules, manifest.Outbounds, false, manifest.UsesFakeIP, replaceSingBoxRuleSet,
+	)
+	if err != nil {
+		return err
+	}
+	if err := commit(); err != nil {
+		if rollbackErr := rollback(); rollbackErr != nil {
+			return fmt.Errorf("%w；恢复 sing-box 规则集失败：%v", err, rollbackErr)
+		}
+		return err
+	}
+	return nil
+}
+
+func publishRuleSetFiles(
+	files []ruleSetFile,
+	replace func(string, []byte, os.FileMode) error,
+) (func() error, error) {
+	snapshots := make([]ruleSetFileSnapshot, 0, len(files))
+	for _, file := range files {
+		snapshot := ruleSetFileSnapshot{Path: file.Path, Mode: file.Mode}
+		data, err := os.ReadFile(file.Path)
+		if err == nil {
+			snapshot.Data = data
+			snapshot.Existed = true
+			if info, statErr := os.Stat(file.Path); statErr == nil {
+				snapshot.Mode = info.Mode().Perm()
+			}
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("读取现有 sing-box 规则集失败：%w", err)
+		}
+		snapshots = append(snapshots, snapshot)
+	}
+
+	for index, file := range files {
+		if err := replace(file.Path, file.Data, file.Mode); err != nil {
+			if rollbackErr := rollbackSnapshots(snapshots[:index]); rollbackErr != nil {
+				return nil, fmt.Errorf("更新 sing-box 规则集 %s 失败：%w；回滚失败：%v", filepath.Base(file.Path), err, rollbackErr)
+			}
+			return nil, fmt.Errorf("更新 sing-box 规则集 %s 失败：%w", filepath.Base(file.Path), err)
+		}
+	}
+	return func() error { return rollbackSnapshots(snapshots) }, nil
+}
+
+func rollbackSnapshots(snapshots []ruleSetFileSnapshot) error {
+	var failures []error
+	for index := len(snapshots) - 1; index >= 0; index-- {
+		snapshot := snapshots[index]
+		var err error
+		if snapshot.Existed {
+			err = replaceFileAtomically(snapshot.Path, snapshot.Data, snapshot.Mode)
+		} else {
+			err = os.Remove(snapshot.Path)
+			if errors.Is(err, os.ErrNotExist) {
+				err = nil
+			}
+		}
+		if err != nil {
+			failures = append(failures, fmt.Errorf("恢复 %s 失败：%w", filepath.Base(snapshot.Path), err))
+		}
+	}
+	return errors.Join(failures...)
+}
+
+func singBoxRuleSetRestartRequirement(rules []RoutingRule) (bool, string) {
+	singBoxRuleSetMu.Lock()
+	defer singBoxRuleSetMu.Unlock()
+	directory := filepath.Join(settingsDirectory(), "runtime", "rule-sets")
+	data, err := os.ReadFile(filepath.Join(directory, singBoxRuleSetManifestName))
+	if err != nil {
+		return false, ""
+	}
+	var manifest singBoxRuleSetManifest
+	if json.Unmarshal(data, &manifest) != nil || manifest.Version != singBoxRuleSetManifestVersion {
+		return false, ""
+	}
+	available := make(map[string]struct{}, len(manifest.Outbounds))
+	for _, outbound := range manifest.Outbounds {
+		available[outbound] = struct{}{}
+	}
+	for _, rule := range rules {
+		if _, ok := available[rule.Outbound]; !ok {
+			return true, "outbound_changed"
+		}
+	}
+	if !manifest.UsesFakeIP {
+		for _, rule := range rules {
+			if rule.MatchType == MatchDomain {
+				return true, "enable_fakeip"
+			}
+		}
+	}
+	return false, ""
 }
 
 func normalizedRuleSetOutbounds(outbounds []string, rules []RoutingRule) []string {

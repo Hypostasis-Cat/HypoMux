@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { FluentProvider, webLightTheme } from "@fluentui/react-components";
 import type { PropsWithChildren, ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { AppNotificationProvider } from "../components/notifications/AppNotifications";
+import { AppNotificationCenter, AppNotificationProvider } from "../components/notifications/AppNotifications";
 import type { ConnectionListSnapshot, ConnectionView } from "../platform/services";
 import type { HomeAdapter } from "../state/useEngineState";
 import {
@@ -39,7 +39,10 @@ vi.mock("../i18n/i18n", () => ({
 const NotificationTestProvider = ({ children }: PropsWithChildren) => (
   // Keep menu/dialog portals in the same Fluent context used by App.tsx.
   <FluentProvider theme={webLightTheme}>
-    <AppNotificationProvider>{children}</AppNotificationProvider>
+    <AppNotificationProvider>
+      {children}
+      <AppNotificationCenter />
+    </AppNotificationProvider>
   </FluentProvider>
 );
 
@@ -54,6 +57,11 @@ const readyDialogAction = (dialog: HTMLElement, name: string) => waitFor(() => {
   expect(button.hasAttribute("disabled")).toBe(false);
   return button;
 });
+
+const expectNotificationDetail = async (message: RegExp) => {
+  fireEvent.click(await screen.findByRole("button", { name: "Details" }));
+  expect(await screen.findByText(message)).not.toBeNull();
+};
 
 const connection = (overrides: Partial<ConnectionView>): ConnectionView => ({
   id: 1,
@@ -91,6 +99,7 @@ const connections: ConnectionView[] = [
 
 const snapshot: ConnectionListSnapshot = {
   phase: "running",
+  mode: "tun",
   sampled_at: "2026-08-24T01:03:00Z",
   connections,
 };
@@ -161,7 +170,7 @@ describe("ConnectionsPage interactions", () => {
       conflict_count: 0,
       invalid_count: 0,
     });
-    mocks.saveRules.mockResolvedValue({ rules: [], outbounds: [] });
+    mocks.saveRules.mockResolvedValue({ rules: [], outbounds: [], restart_required: false });
   });
 
   afterEach(() => {
@@ -310,6 +319,38 @@ describe("ConnectionsPage interactions", () => {
       { match_type: "process", value: "Existing.exe", outbound: "direct" },
       { match_type: "domain", value: "ethernet.example", outbound: "aggregation" },
     ]));
+    await expectNotificationDetail(/new connections take effect immediately/i);
+  });
+
+  it("explains that a quick-added rule is inactive for current system-proxy traffic", async () => {
+    mocks.connections.mockResolvedValue({ ...snapshot, mode: "proxy" });
+    renderPage(<ConnectionsPage adapterRuntime={adapterRuntime} />);
+    const row = (await screen.findByText("Zulu.exe")).closest("article")!;
+
+    fireEvent.contextMenu(row);
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Add by domain/ }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(await readyDialogAction(dialog, "Add rule"));
+
+    await expectNotificationDetail(/current system-proxy traffic will not switch egress/i);
+  });
+
+  it("asks for a restart when a quick-added domain rule needs FakeIP", async () => {
+    mocks.saveRules.mockResolvedValue({
+      rules: [],
+      outbounds: [],
+      restart_required: true,
+      restart_reason: "enable_fakeip",
+    });
+    renderPage(<ConnectionsPage adapterRuntime={adapterRuntime} />);
+    const row = (await screen.findByText("Zulu.exe")).closest("article")!;
+
+    fireEvent.contextMenu(row);
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Add by domain/ }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(await readyDialogAction(dialog, "Add rule"));
+
+    await expectNotificationDetail(/restart aggregation to enable the DNS configuration required for domain routing/i);
   });
 
   it("updates only the exact conflicting rule selected from a connection", async () => {

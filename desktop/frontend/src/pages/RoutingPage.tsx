@@ -53,6 +53,7 @@ import {
   ROUTING_BATCH_MAX_VALUES,
   routingRuleIdentity,
 } from "./routingBatch";
+import { routingApplyState } from "./routingEffect";
 
 type MatchType = "process" | "domain" | "ip";
 type DraftRule = RoutingRule & {
@@ -107,6 +108,7 @@ const browserRoutingFixture = (): RoutingSnapshot | null => {
         outbound: index % 4 === 0 ? "direct" : index % 4 === 1 ? "nic_以太网" : "aggregation",
       };
     }),
+    restart_required: false,
   };
 };
 
@@ -148,7 +150,8 @@ export function RoutingPage() {
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState("");
   const [pendingSave, setPendingSave] = useState(false);
-  const [engineRunningInTun, setEngineRunningInTun] = useState(false);
+  const [engineRuntime, setEngineRuntime] = useState({ phase: "stopped", mode: "tun" });
+  const [restartRequirement, setRestartRequirement] = useState({ required: false, reason: "" });
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [processOpen, setProcessOpen] = useState(false);
   const [processes, setProcesses] = useState<RunningProcess[]>([]);
@@ -178,15 +181,47 @@ export function RoutingPage() {
   const addRuleInputRef = useRef<HTMLInputElement>(null);
   const { notify: pushNotification } = useAppNotifications();
 
-  const notify = useCallback((title: string, message: string, intent: "success" | "error" | "info" = "info") => {
+  const notify = useCallback((title: string, message: string, intent: "success" | "error" | "warning" | "info" = "info") => {
     pushNotification({ title, message, intent, dedupeKey: `routing:${intent}:${title}` });
   }, [pushNotification]);
+
+  const applyResult = useCallback((snapshot: RoutingSnapshot) => {
+    setRestartRequirement({
+      required: snapshot.restart_required,
+      reason: snapshot.restart_reason ?? "",
+    });
+    const state = routingApplyState(snapshot, engineRuntime.phase, engineRuntime.mode);
+    if (state === "hot_reloaded") {
+      return {
+        message: text("已有连接保持当前路径，新连接立即使用新规则。", "Existing connections keep their current path; new connections use the updated rules immediately."),
+        intent: "success" as const,
+      };
+    }
+    if (state === "restart_required") {
+      return {
+        message: snapshot.restart_reason === "enable_fakeip"
+          ? text("规则已保存。请重启聚合以启用域名分流所需的 DNS 配置。", "Rules were saved. Restart aggregation to enable the DNS configuration required for domain routing.")
+          : text("规则已保存。请重启聚合以完整加载这项更改。", "Rules were saved. Restart aggregation to load this change completely."),
+        intent: "warning" as const,
+      };
+    }
+    if (state === "inactive_mode") {
+      return {
+        message: text("规则已保存，但仅由 TUN 模式加载；当前系统代理流量不会切换出口。", "Rules were saved but are loaded only in TUN mode; current system-proxy traffic will not switch egress."),
+        intent: "info" as const,
+      };
+    }
+    return {
+      message: text("规则已保存，将在下次启动 TUN 模式时生效。", "Rules were saved and will take effect the next time TUN mode starts."),
+      intent: "info" as const,
+    };
+  }, [engineRuntime.mode, engineRuntime.phase, text]);
 
   const load = useCallback(async () => {
     setLoading(true);
     const engineTask = appServices.engine.snapshot()
       .then((engine) => {
-        setEngineRunningInTun(engine.phase === "running" && engine.mode === "tun");
+        setEngineRuntime({ phase: engine.phase, mode: engine.mode });
       })
       .catch(() => undefined);
     try {
@@ -204,6 +239,7 @@ export function RoutingPage() {
       rulesRef.current = nextRules;
       setRules(nextRules);
       setOutbounds(snapshot.outbounds ?? []);
+      setRestartRequirement({ required: snapshot.restart_required, reason: snapshot.restart_reason ?? "" });
       setPendingSave(false);
       setSavedAt(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
       loaded.current = true;
@@ -311,15 +347,13 @@ export function RoutingPage() {
       const savedRules = reconcileSavedDrafts(snapshot.rules ?? [], submitted);
       applyRules(savedRules);
       setOutbounds(snapshot.outbounds ?? []);
+      const applied = applyResult(snapshot);
       setSavedAt(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
       setPendingSave(false);
       if (showToast) notify(
         text("规则已保存", "Rules saved"),
-        text(
-          `已持久化 ${snapshot.rules?.length ?? 0} 条分流规则`,
-          `${snapshot.rules?.length ?? 0} routing rules were persisted`,
-        ),
-        "success",
+        applied.message,
+        applied.intent,
       );
       return true;
     } catch (error) {
@@ -330,7 +364,7 @@ export function RoutingPage() {
     } finally {
       if (queue.isCurrent(handle.revision)) setSaving(false);
     }
-  }, [applyRules, notify, text]);
+  }, [applyResult, applyRules, notify, text]);
 
   useEffect(() => {
     if (!loaded.current || !pendingSave || rules.some((rule) => rule.validating || rule.error)) {
@@ -421,16 +455,14 @@ export function RoutingPage() {
       if (!queue.isCurrent(handle.revision) || importedEditRevision !== editRevision.current) return;
       applyRules(reconcileSavedDrafts(saved.rules ?? [], imported));
       setOutbounds(saved.outbounds ?? []);
+      const applied = applyResult(saved);
       setImportPreviewOpen(false);
       setSelected(new Set());
       setPendingSave(false);
       notify(
         text("导入完成", "Import complete"),
-        text(
-          `已原子替换为 ${saved.rules?.length ?? 0} 条规则`,
-          `Atomically replaced the current list with ${saved.rules?.length ?? 0} rules`,
-        ),
-        "success",
+        applied.message,
+        applied.intent,
       );
     } catch (error) {
       if (queue.isCurrent(handle.revision) && importedEditRevision === editRevision.current) {
@@ -440,7 +472,7 @@ export function RoutingPage() {
     } finally {
       if (queue.isCurrent(handle.revision)) setSaving(false);
     }
-  }, [applyRules, importPreview, notify, text]);
+  }, [applyResult, applyRules, importPreview, notify, text]);
 
   const openBatch = useCallback(() => {
     setBatchType(activeType);
@@ -526,6 +558,7 @@ export function RoutingPage() {
       if (!queue.isCurrent(handle.revision) || batchEditRevision !== editRevision.current) return;
       applyRules(reconcileSavedDrafts(saved.rules ?? [], next));
       setOutbounds(saved.outbounds ?? []);
+      const applied = applyResult(saved);
       setSavedAt(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
       setPendingSave(false);
       setSelected(new Set());
@@ -533,11 +566,8 @@ export function RoutingPage() {
       setBatchOpen(false);
       notify(
         text("批量添加完成", "Batch added"),
-        text(
-          `新增 ${batchPreview.add_count} 条${replaceBatchConflicts && batchPreview.conflict_count > 0 ? `，更新 ${batchPreview.conflict_count} 条冲突规则` : ""}，跳过 ${batchPreview.duplicate_count} 条重复项${!replaceBatchConflicts && batchPreview.conflict_count > 0 ? `和 ${batchPreview.conflict_count} 条冲突项` : ""}。`,
-          `Added ${batchPreview.add_count}${replaceBatchConflicts && batchPreview.conflict_count > 0 ? ` and updated ${batchPreview.conflict_count} conflicts` : ""}; skipped ${batchPreview.duplicate_count} duplicates${!replaceBatchConflicts && batchPreview.conflict_count > 0 ? ` and ${batchPreview.conflict_count} conflicts` : ""}.`,
-        ),
-        "success",
+        applied.message,
+        applied.intent,
       );
     } catch (error) {
       if (queue.isCurrent(handle.revision) && batchEditRevision === editRevision.current) {
@@ -550,7 +580,7 @@ export function RoutingPage() {
         setBatchApplying(false);
       }
     }
-  }, [applyRules, batchPreview, batchType, notify, replaceBatchConflicts, text]);
+  }, [applyResult, applyRules, batchPreview, batchType, notify, replaceBatchConflicts, text]);
 
   const activeRules = useMemo(() => rules.filter((rule) => {
     if (rule.match_type !== activeType) return false;
@@ -644,14 +674,31 @@ export function RoutingPage() {
       </header>
 
       <div className="routing-notice-slot">
-        {engineRunningInTun && (
+        {engineRuntime.mode !== "tun" ? (
           <MessageBar intent="info">
             <MessageBarBody>{text(
-              "规则保存后会自动热更新；已有连接保持当前路径，新连接使用新规则。",
-              "Saved rules are hot-reloaded automatically. Existing connections keep their current path; new connections use the updated rules.",
+              "分流规则仅由 TUN 模式加载；当前系统代理流量不会根据这些规则切换出口。",
+              "Routing rules are loaded only in TUN mode; current system-proxy traffic does not switch egress based on these rules.",
             )}</MessageBarBody>
           </MessageBar>
-        )}
+        ) : (engineRuntime.phase === "running" || engineRuntime.phase === "degraded") ? (
+          <MessageBar intent={restartRequirement.required ? "warning" : "info"}>
+            <MessageBarBody>{restartRequirement.required
+              ? restartRequirement.reason === "enable_fakeip"
+                ? text(
+                    "规则已保存，但域名分流所需的 DNS 配置尚未启用；请重启聚合以完整生效。",
+                    "Rules are saved, but the DNS configuration required for domain routing is not active; restart aggregation for full effect.",
+                  )
+                : text(
+                    "规则已保存，但当前 TUN 配置无法完整加载这项更改；请重启聚合。",
+                    "Rules are saved, but the current TUN configuration cannot load this change completely; restart aggregation.",
+                  )
+              : text(
+                  "规则保存后会自动热更新；已有连接保持当前路径，新连接使用新规则。",
+                  "Saved rules are hot-reloaded automatically. Existing connections keep their current path; new connections use the updated rules.",
+                )}</MessageBarBody>
+          </MessageBar>
+        ) : null}
       </div>
 
       <GlassSurface className="routing-toolbar-surface" tone="secondary">
