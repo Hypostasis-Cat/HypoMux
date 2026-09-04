@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { FluentProvider, webLightTheme } from "@fluentui/react-components";
 import type { PropsWithChildren, ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppNotificationProvider } from "../components/notifications/AppNotifications";
@@ -36,10 +37,23 @@ vi.mock("../i18n/i18n", () => ({
 }));
 
 const NotificationTestProvider = ({ children }: PropsWithChildren) => (
-  <AppNotificationProvider>{children}</AppNotificationProvider>
+  // Keep menu/dialog portals in the same Fluent context used by App.tsx.
+  <FluentProvider theme={webLightTheme}>
+    <AppNotificationProvider>{children}</AppNotificationProvider>
+  </FluentProvider>
 );
 
 const renderPage = (ui: ReactElement) => render(ui, { wrapper: NotificationTestProvider });
+
+const readyDialogAction = (dialog: HTMLElement, name: string) => waitFor(() => {
+  // Opening a menu item also closes its popup. Wait for the dialog to own
+  // focus, not just for the asynchronous rule preview to enable its button.
+  expect(dialog.contains(document.activeElement)).toBe(true);
+  expect(dialog.getAttribute("aria-hidden")).not.toBe("true");
+  const button = within(dialog).getByRole("button", { name });
+  expect(button.hasAttribute("disabled")).toBe(false);
+  return button;
+});
 
 const connection = (overrides: Partial<ConnectionView>): ConnectionView => ({
   id: 1,
@@ -115,6 +129,18 @@ const adapterRuntime = [
 
 describe("ConnectionsPage interactions", () => {
   beforeEach(() => {
+    // jsdom has no layout: body bounds are zero and offsetParent is always
+    // null. Tabster therefore treats the whole document as hidden and can
+    // never activate a dialog through its first focusable button. Model a
+    // visible viewport while preserving hidden/detached element semantics.
+    vi.spyOn(document.body, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 1280, 800));
+    vi.spyOn(HTMLElement.prototype, "offsetParent", "get").mockImplementation(function (this: HTMLElement) {
+      if (!this.isConnected || this === document.body || getComputedStyle(this).position === "fixed") return null;
+      for (let element: HTMLElement | null = this; element; element = element.parentElement) {
+        if (element.hidden || getComputedStyle(element).display === "none") return null;
+      }
+      return this.parentElement;
+    });
     mocks.connections.mockResolvedValue(snapshot);
     mocks.routingSnapshot.mockResolvedValue({
       rules: [{ match_type: "process", value: "Existing.exe", outbound: "direct" }],
@@ -140,6 +166,7 @@ describe("ConnectionsPage interactions", () => {
 
   afterEach(() => {
     cleanup();
+    vi.restoreAllMocks();
     vi.clearAllMocks();
   });
 
@@ -275,8 +302,7 @@ describe("ConnectionsPage interactions", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: /Add by domain/ }));
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByText("ethernet.example")).not.toBeNull();
-    await waitFor(() => expect(within(dialog).getByRole("button", { name: "Add rule" }).hasAttribute("disabled")).toBe(false));
-    fireEvent.click(within(dialog).getByRole("button", { name: "Add rule" }));
+    fireEvent.click(await readyDialogAction(dialog, "Add rule"));
 
     await waitFor(() => expect(mocks.saveRules).toHaveBeenCalledWith([
       { match_type: "process", value: "Existing.exe", outbound: "direct" },
@@ -316,7 +342,7 @@ describe("ConnectionsPage interactions", () => {
     fireEvent.click(await screen.findByRole("menuitem", { name: /Add by domain/ }));
 
     const dialog = await screen.findByRole("dialog");
-    const updateButton = await within(dialog).findByRole("button", { name: "Update rule" });
+    const updateButton = await readyDialogAction(dialog, "Update rule");
     fireEvent.click(updateButton);
 
     await waitFor(() => expect(mocks.saveRules).toHaveBeenCalledWith([
@@ -337,5 +363,19 @@ describe("ConnectionsPage interactions", () => {
         { id: "nic_Ethernet", label: "Ethernet" },
       ],
     )).toBe("nic_Ethernet");
+  });
+
+  it("keeps quick-rule dialogs accessible after repeated context-menu transitions", async () => {
+    renderPage(<ConnectionsPage adapterRuntime={adapterRuntime} />);
+    const row = (await screen.findByText("Zulu.exe")).closest("article")!;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      fireEvent.contextMenu(row);
+      fireEvent.click(await screen.findByRole("menuitem", { name: /Add by domain/ }));
+      const dialog = await screen.findByRole("dialog");
+      await readyDialogAction(dialog, "Add rule");
+      fireEvent.click(await readyDialogAction(dialog, "Cancel"));
+      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    }
+    expect(mocks.saveRules).not.toHaveBeenCalled();
   });
 });
