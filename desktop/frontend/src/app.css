@@ -580,8 +580,8 @@ svg {
   --hm-island-control-hover: rgba(255, 255, 255, 0.14);
   --hm-island-divider: rgba(255, 255, 255, 0.11);
   --hm-island-shadow: rgba(0, 0, 0, 0.3);
-  position: absolute;
-  z-index: 80;
+  position: fixed;
+  z-index: var(--hm-z-toast);
   top: 14px;
   inset-inline: 0;
   width: min(520px, calc(100% - 280px));
@@ -593,26 +593,73 @@ svg {
   border: 1px solid var(--hm-island-border);
   border-radius: 22px;
   color: var(--hm-island-text);
-  background:
-    radial-gradient(circle at 18% -55%, var(--hm-island-highlight), transparent 48%),
-    var(--hm-island-surface);
+  background: transparent;
   box-shadow:
     0 14px 38px var(--hm-island-shadow),
     0 3px 10px color-mix(in srgb, var(--hm-island-shadow) 48%, transparent),
     inset 0 1px 0 var(--hm-island-highlight);
-  /*
-   * Keep the frosted surface out of a transformed compositor layer. WebView2
-   * renders the alpha correctly in that layer but can no longer sample the
-   * page behind it, which makes backdrop-filter look like plain transparency.
-   */
-  backdrop-filter: blur(28px) saturate(155%);
-  -webkit-backdrop-filter: blur(28px) saturate(155%);
   --wails-draggable: no-drag;
-  animation: dynamic-island-arrive 520ms var(--hm-motion-spring);
+  animation: dynamic-island-arrive 440ms var(--hm-motion-spring) both;
   transition:
     width 420ms var(--hm-motion-spring),
     border-radius 320ms var(--hm-motion-ease-out),
     box-shadow 320ms var(--hm-motion-ease-out);
+}
+
+.global-notification-region.is-leaving {
+  animation: dynamic-island-leave 220ms cubic-bezier(0.4, 0, 1, 1) both;
+  pointer-events: none;
+}
+
+.global-notification-frost {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  overflow: hidden;
+  border-radius: inherit;
+  background: var(--hm-island-surface);
+  backdrop-filter: blur(28px) saturate(155%);
+  -webkit-backdrop-filter: blur(28px) saturate(155%);
+  pointer-events: none;
+}
+
+/*
+ * WebView2 cannot reliably sample a wallpaper through the application shell's
+ * compositor boundary. For image and generated backgrounds, mirror the same
+ * viewport-sized wallpaper inside the island and blur that layer directly.
+ */
+.global-notification-frost::before {
+  display: none;
+  position: absolute;
+  top: -30px;
+  left: 50%;
+  width: calc(100vw + 32px);
+  height: calc(100vh + 32px);
+  background: var(--hm-wallpaper-background, var(--hm-system-background));
+  background-position: var(--hm-bg-position) !important;
+  background-size: var(--hm-bg-scale) !important;
+  content: "";
+  filter:
+    brightness(var(--hm-bg-brightness))
+    saturate(var(--hm-bg-saturation))
+    contrast(var(--hm-bg-contrast))
+    blur(28px);
+  transform: translateX(-50%) scale(1.035);
+}
+
+[data-background-source="local"] .global-notification-frost::before,
+[data-background-source="builtin"] .global-notification-frost::before,
+[data-background-source="gradient"] .global-notification-frost::before {
+  display: block;
+}
+
+.global-notification-frost::after {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 18% -55%, var(--hm-island-highlight), transparent 48%),
+    var(--hm-island-surface);
+  content: "";
 }
 
 [data-appearance="light"] .global-notification-region {
@@ -657,6 +704,8 @@ svg {
 }
 
 .global-notification-bar {
+  position: relative;
+  z-index: 1;
   display: flex;
   min-height: 34px;
   min-width: 0;
@@ -761,6 +810,8 @@ svg {
 }
 
 .global-notification-details {
+  position: relative;
+  z-index: 1;
   display: flex;
   min-width: 0;
   max-height: 170px;
@@ -798,16 +849,21 @@ svg {
 @keyframes dynamic-island-arrive {
   0% {
     opacity: 0;
-    clip-path: inset(0 42% round 22px);
+    transform: translateY(-10px) scale(0.92, 0.76);
   }
-  58% {
+  62% {
     opacity: 1;
-    clip-path: inset(0 -1.5% round 22px);
+    transform: translateY(1px) scale(1.012, 1.025);
   }
   100% {
     opacity: 1;
-    clip-path: inset(0 round 22px);
+    transform: translateY(0) scale(1);
   }
+}
+
+@keyframes dynamic-island-leave {
+  from { opacity: 1; transform: translateY(0) scale(1); }
+  to { opacity: 0; transform: translateY(-7px) scale(0.96, 0.84); }
 }
 
 @keyframes dynamic-island-details {

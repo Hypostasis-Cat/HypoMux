@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   AppNotificationCenter,
@@ -32,7 +32,10 @@ function NotificationTrigger() {
 }
 
 describe("AppNotificationCenter", () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
 
   it("shows a concise in-flow error and keeps diagnostics behind details", () => {
     render(
@@ -55,5 +58,22 @@ describe("AppNotificationCenter", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Trigger error" }));
     expect(screen.getByRole("alert").textContent).toContain("×2");
+  });
+
+  it("keeps the island mounted while its exit animation finishes", () => {
+    vi.useFakeTimers();
+    render(
+      <AppNotificationProvider>
+        <AppNotificationCenter />
+        <NotificationTrigger />
+      </AppNotificationProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Trigger error" }));
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss notification" }));
+
+    expect(screen.getByRole("alert").classList.contains("is-leaving")).toBe(true);
+    act(() => vi.advanceTimersByTime(240));
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 });

@@ -15,7 +15,9 @@ import type { EnginePhase, HomeAdapter } from "./state/useEngineState";
 import { AppearanceProvider, useAppearance } from "./theme/appearance.store";
 import { LanguageProvider } from "./i18n/i18n";
 import { desktopPlatform } from "./platform/desktop";
+import { resolveWallpaperBackground } from "./theme/wallpaper";
 import {
+  AppNotificationCenter,
   AppNotificationProvider,
   useAppNotifications,
 } from "./components/notifications/AppNotifications";
@@ -75,7 +77,7 @@ function HypoMuxWindow() {
   const [connectionAdapters, setConnectionAdapters] = useState<HomeAdapter[] | undefined>(undefined);
   const [enginePhase, setEnginePhase] = useState<EnginePhase | undefined>(undefined);
   const [startupRevealed, setStartupRevealed] = useState(false);
-  const { fluentTheme } = useAppearance();
+  const { fluentTheme, settings } = useAppearance();
   const pageOrder: AppPage[] = [
     "home",
     "routing",
@@ -119,6 +121,7 @@ function HypoMuxWindow() {
         {import.meta.env.DEV && <NotificationVisualFixture />}
         <div className={`startup-reveal${startupRevealed ? " is-ready" : ""}`} aria-hidden="true" />
         <WallpaperLayer />
+        <AppNotificationCenter wallpaperBackground={resolveWallpaperBackground(settings)} />
         <AppShell
           page={page}
           onPageChange={navigate}

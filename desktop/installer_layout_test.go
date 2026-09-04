@@ -822,14 +822,17 @@ func TestNotificationIslandKeepsWebViewBackdropSampling(t *testing.T) {
 		`inset-inline: 0`,
 		`margin-inline: auto`,
 		`backdrop-filter: blur(28px) saturate(155%)`,
-		`clip-path: inset(0 42% round 22px)`,
+		`.global-notification-frost::before`,
+		`var(--hm-wallpaper-background, var(--hm-system-background))`,
+		`.global-notification-region.is-leaving`,
+		`@keyframes dynamic-island-leave`,
 	} {
 		if !strings.Contains(css, required) {
 			t.Fatalf("notification island compositor-safe frosting is missing %q", required)
 		}
 	}
-	if strings.Contains(css, `transform: translateX(-50%)`) {
-		t.Fatal("notification island still uses a transformed compositor layer that disables WebView2 backdrop sampling")
+	if strings.Contains(css, `clip-path: inset(0 42% round 22px)`) {
+		t.Fatal("notification island still uses the flashing clip-path entrance animation")
 	}
 }
 

@@ -18,6 +18,7 @@ import {
   useState,
   type PropsWithChildren,
   type ReactNode,
+  type CSSProperties,
 } from "react";
 import { useI18n } from "../../i18n/i18n";
 import {
@@ -146,37 +147,66 @@ export function AppNotificationProvider({ children }: PropsWithChildren) {
   );
 }
 
-export function AppNotificationCenter() {
+export function AppNotificationCenter({ wallpaperBackground }: { wallpaperBackground?: string }) {
   const context = useContext(AppNotificationContext);
-  const { locale } = useI18n();
   if (!context) throw new Error("AppNotificationCenter must be used inside AppNotificationProvider");
+
+  return <AppNotificationViewport context={context} wallpaperBackground={wallpaperBackground} />;
+}
+
+function AppNotificationViewport({
+  context,
+  wallpaperBackground,
+}: {
+  context: AppNotificationContextValue;
+  wallpaperBackground?: string;
+}) {
+  const { locale } = useI18n();
   const { notifications, detailsOpen, setDetailsOpen, dismiss, clear } = context;
   const active = notifications[0];
-  if (!active) return null;
+  const [rendered, setRendered] = useState<AppNotification | undefined>(active);
 
+  useEffect(() => {
+    if (active) {
+      setRendered(active);
+      return;
+    }
+    if (!rendered) return;
+    const timer = window.setTimeout(() => setRendered(undefined), 240);
+    return () => window.clearTimeout(timer);
+  }, [active, rendered]);
+
+  const shown = active ?? rendered;
+  if (!shown) return null;
+  const isLeaving = !active;
+  const islandStyle = wallpaperBackground
+    ? { "--hm-wallpaper-background": wallpaperBackground } as CSSProperties
+    : undefined;
   return (
     <section
-      className={`global-notification-region is-${active.intent}${detailsOpen ? " is-expanded" : ""}`}
-      role={active.intent === "error" ? "alert" : "status"}
-      aria-live={active.intent === "error" ? "assertive" : "polite"}
+      className={`global-notification-region is-${shown.intent}${detailsOpen ? " is-expanded" : ""}${isLeaving ? " is-leaving" : ""}`}
+      style={islandStyle}
+      role={shown.intent === "error" ? "alert" : "status"}
+      aria-live={shown.intent === "error" ? "assertive" : "polite"}
       aria-atomic="true"
     >
+      <span className="global-notification-frost" aria-hidden="true" />
       <div className="global-notification-bar">
         <span className="global-notification-icon" aria-hidden="true">
-          {notificationIcon(active.intent)}
+          {notificationIcon(shown.intent)}
         </span>
         <div className="global-notification-copy">
-          <strong>{active.title}</strong>
-          {active.summary && <span>{active.summary}</span>}
+          <strong>{shown.title}</strong>
+          {shown.summary && <span>{shown.summary}</span>}
         </div>
-        {active.code && (
+        {shown.code && (
           <span className="global-notification-code" title={locale === "en" ? "Error code" : "错误代码"}>
-            {active.code}
+            {shown.code}
           </span>
         )}
-        {active.occurrences > 1 && (
+        {shown.occurrences > 1 && (
           <span className="global-notification-count" title={locale === "en" ? "Repeated notifications" : "重复通知"}>
-            ×{active.occurrences}
+            ×{shown.occurrences}
           </span>
         )}
         {notifications.length > 1 && (
@@ -184,7 +214,7 @@ export function AppNotificationCenter() {
             {locale === "en" ? `${notifications.length} notices` : `${notifications.length} 条通知`}
           </span>
         )}
-        {active.detail && (
+        {shown.detail && (
           <Button
             className="global-notification-button global-notification-details-button"
             appearance="subtle"
@@ -196,14 +226,14 @@ export function AppNotificationCenter() {
             {detailsOpen ? (locale === "en" ? "Hide" : "收起") : (locale === "en" ? "Details" : "详情")}
           </Button>
         )}
-        {active.action && (
+        {shown.action && (
           <Button
             className="global-notification-button global-notification-action"
             appearance="subtle"
             size="small"
-            onClick={active.action.onClick}
+            onClick={shown.action.onClick}
           >
-            {active.action.label}
+            {shown.action.label}
           </Button>
         )}
         <Button
@@ -212,12 +242,12 @@ export function AppNotificationCenter() {
           size="small"
           icon={<Dismiss16Regular />}
           aria-label={locale === "en" ? "Dismiss notification" : "关闭通知"}
-          onClick={() => dismiss(active.id)}
+          onClick={() => dismiss(shown.id)}
         />
       </div>
-      {detailsOpen && active.detail && (
+      {detailsOpen && shown.detail && (
         <div className="global-notification-details">
-          <pre>{active.detail}</pre>
+          <pre>{shown.detail}</pre>
           {notifications.length > 1 && (
             <Button className="global-notification-button" appearance="subtle" size="small" onClick={clear}>
               {locale === "en" ? "Clear all" : "清除全部"}
