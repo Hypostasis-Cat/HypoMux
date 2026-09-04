@@ -299,6 +299,9 @@ func (s *RoutingRuleService) Save(rules []RoutingRule) (RoutingSnapshot, error) 
 	if err := s.settings.saveRoutingRules(normalized); err != nil {
 		return RoutingSnapshot{}, err
 	}
+	if err := refreshSingBoxRuleSets(normalized); err != nil {
+		return RoutingSnapshot{}, fmt.Errorf("规则已保存，但热更新 sing-box 失败：%w", err)
+	}
 	return s.Snapshot()
 }
 

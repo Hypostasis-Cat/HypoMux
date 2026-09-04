@@ -645,10 +645,10 @@ export function RoutingPage() {
 
       <div className="routing-notice-slot">
         {engineRunningInTun && (
-          <MessageBar intent="warning">
+          <MessageBar intent="info">
             <MessageBarBody>{text(
-              "规则会立即保存，但当前 sing-box 不热重载路由；停止并重新启动聚合后生效。",
-              "Rules are saved immediately, but sing-box does not hot-reload routing. Stop and restart aggregation to apply them.",
+              "规则保存后会自动热更新；已有连接保持当前路径，新连接使用新规则。",
+              "Saved rules are hot-reloaded automatically. Existing connections keep their current path; new connections use the updated rules.",
             )}</MessageBarBody>
           </MessageBar>
         )}

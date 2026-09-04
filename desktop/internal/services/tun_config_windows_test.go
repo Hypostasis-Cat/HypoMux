@@ -43,9 +43,100 @@ func TestGeneratedTunConfigPassesBundledSingBoxCheck(t *testing.T) {
 	if err := json.Unmarshal(data, &config); err != nil {
 		t.Fatalf("generated config is invalid JSON: %v", err)
 	}
+	expectedDNSMode, err := singBoxTunDNSMode(executable, "auto")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if expectedDNSMode == "" && strings.Contains(string(data), `"dns_mode"`) {
+		t.Fatalf("pre-1.14 config contains a 1.14-only dns_mode field: %s", data)
+	}
+	if expectedDNSMode != "" && !strings.Contains(string(data), `"dns_mode": "`+expectedDNSMode+`"`) {
+		t.Fatalf("TUN DNS mode is not pinned for this sing-box version: %s", data)
+	}
 	command := exec.Command(executable, "check", "--disable-color", "-c", configPath)
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("sing-box check failed: %v\n%s", err, output)
+	}
+}
+
+func TestGeneratedTunConfigWithHotRuleSetsPassesBundledAndFutureSingBoxCheck(t *testing.T) {
+	t.Setenv("HYPOMUX_DATA_DIR", t.TempDir())
+	endpoints := map[string]string{
+		"nic_ethernet": "127.0.0.1:19111",
+		"nic_wifi":     "127.0.0.1:19112",
+		"aggregation":  "127.0.0.1:19113",
+	}
+	rules, err := normalizeRulesStrict([]RoutingRule{
+		{MatchType: MatchProcess, Value: "game.exe", Outbound: "nic_wifi"},
+		{MatchType: MatchDomain, Value: "a.example.com", Outbound: "nic_wifi"},
+		{MatchType: MatchDomain, Value: "example.com", Outbound: "direct"},
+		{MatchType: MatchIP, Value: "10.0.0.1/32", Outbound: "nic_wifi"},
+		{MatchType: MatchIP, Value: "10.0.0.0/24", Outbound: "direct"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	executable, configPath, _, err := writeSingBoxConfig(
+		endpoints,
+		AdapterView{Name: "Ethernet", Address: "192.0.2.10"},
+		dnsResolveResult{Transport: "udp", Server: "1.1.1.1"},
+		rules,
+		normalizedCompatibilityPlan(nil, nil),
+		true,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkSingBoxConfig(t, executable, configPath)
+	if future := strings.TrimSpace(os.Getenv("HYPOMUX_FUTURE_SING_BOX")); future != "" {
+		_, futureConfigPath, _, futureErr := writeSingBoxConfigWithOptions(
+			endpoints,
+			AdapterView{Name: "Ethernet", Address: "192.0.2.10"},
+			dnsResolveResult{Transport: "udp", Server: "1.1.1.1"},
+			rules,
+			normalizedCompatibilityPlan(nil, nil),
+			true,
+			tunConfigOptions{DNSPolicy: "auto", IPv6Available: true, ConfigName: "sing-box-future.json", Executable: future},
+		)
+		if futureErr != nil {
+			t.Fatal(futureErr)
+		}
+		futureData, readErr := os.ReadFile(futureConfigPath)
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if !strings.Contains(string(futureData), `"dns_mode": "hijack"`) {
+			t.Fatalf("future sing-box config does not pin TUN DNS behavior: %s", futureData)
+		}
+		checkSingBoxConfig(t, future, futureConfigPath)
+		_, systemConfigPath, _, systemErr := writeSingBoxConfigWithOptions(
+			endpoints,
+			AdapterView{Name: "Ethernet", Address: "192.0.2.10"},
+			dnsResolveResult{},
+			rules,
+			normalizedCompatibilityPlan(nil, nil),
+			true,
+			tunConfigOptions{DNSPolicy: "system", IPv6Available: true, ConfigName: "sing-box-future-system.json", Executable: future},
+		)
+		if systemErr != nil {
+			t.Fatal(systemErr)
+		}
+		systemData, readErr := os.ReadFile(systemConfigPath)
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if !strings.Contains(string(systemData), `"dns_mode": "disabled"`) {
+			t.Fatalf("future system DNS policy was not preserved: %s", systemData)
+		}
+		checkSingBoxConfig(t, future, systemConfigPath)
+	}
+}
+
+func checkSingBoxConfig(t *testing.T, executable, configPath string) {
+	t.Helper()
+	command := exec.Command(executable, "check", "--disable-color", "-c", configPath)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("sing-box check failed for %s: %v\n%s", executable, err, output)
 	}
 }
 
@@ -79,13 +170,17 @@ func TestTunRouteResolvesFakeIPBeforeUserCIDRRules(t *testing.T) {
 	if err := json.Unmarshal(data, &config); err != nil {
 		t.Fatal(err)
 	}
-	resolveAt, cidrAt, compatibilityAt := -1, -1, -1
+	resolveAt, userIPAt, compatibilityAt := -1, -1, -1
 	for index, rule := range config.Route.Rules {
 		if rule["action"] == "resolve" {
 			resolveAt = index
 		}
-		if _, ok := rule["ip_cidr"]; ok {
-			cidrAt = index
+		if tags, ok := rule["rule_set"].([]any); ok {
+			for _, tag := range tags {
+				if strings.HasPrefix(tag.(string), "hypomux-ip-") {
+					userIPAt = index
+				}
+			}
 		}
 		if names, ok := rule["process_name"].([]any); ok {
 			for _, name := range names {
@@ -95,8 +190,8 @@ func TestTunRouteResolvesFakeIPBeforeUserCIDRRules(t *testing.T) {
 			}
 		}
 	}
-	if compatibilityAt < 0 || resolveAt <= compatibilityAt || cidrAt <= resolveAt {
-		t.Fatalf("unexpected compatibility/resolve/user order: compatibility=%d resolve=%d cidr=%d", compatibilityAt, resolveAt, cidrAt)
+	if compatibilityAt < 0 || resolveAt <= compatibilityAt || userIPAt <= resolveAt {
+		t.Fatalf("unexpected compatibility/resolve/user order: compatibility=%d resolve=%d user_ip=%d", compatibilityAt, resolveAt, userIPAt)
 	}
 }
 
@@ -134,14 +229,20 @@ func TestExplicitAdapterIPRuleOverridesProxyCompatibilityFallback(t *testing.T) 
 		t.Fatal(err)
 	}
 	compatibilityAt, compatibilityPathAt, resolveAt := -1, -1, -1
-	adapterIPRules := []int{}
+	earlyAdapterAt, userAdapterAt := -1, -1
 	for index, rule := range config.Route.Rules {
 		if rule["action"] == "resolve" {
 			resolveAt = index
 		}
 		if rule["outbound"] == "nic_wifi" {
-			if cidrs, ok := rule["ip_cidr"].([]any); ok && len(cidrs) == 1 && cidrs[0] == "203.0.113.7/32" {
-				adapterIPRules = append(adapterIPRules, index)
+			if tags, ok := rule["rule_set"].([]any); ok && len(tags) == 1 {
+				tag, _ := tags[0].(string)
+				switch {
+				case strings.HasPrefix(tag, "hypomux-early-ip-"):
+					earlyAdapterAt = index
+				case strings.HasPrefix(tag, "hypomux-ip-"):
+					userAdapterAt = index
+				}
 			}
 		}
 		if names, ok := rule["process_name"].([]any); ok {
@@ -159,11 +260,11 @@ func TestExplicitAdapterIPRuleOverridesProxyCompatibilityFallback(t *testing.T) 
 			}
 		}
 	}
-	if len(adapterIPRules) != 2 || compatibilityAt < 0 || compatibilityPathAt < 0 || resolveAt < 0 {
-		t.Fatalf("missing adapter override, compatibility, or resolved rule: adapter=%v compatibility=%d path=%d resolve=%d", adapterIPRules, compatibilityAt, compatibilityPathAt, resolveAt)
+	if earlyAdapterAt < 0 || userAdapterAt < 0 || compatibilityAt < 0 || compatibilityPathAt < 0 || resolveAt < 0 {
+		t.Fatalf("missing adapter override, compatibility, or resolved rule: early=%d user=%d compatibility=%d path=%d resolve=%d", earlyAdapterAt, userAdapterAt, compatibilityAt, compatibilityPathAt, resolveAt)
 	}
-	if adapterIPRules[0] >= compatibilityAt || adapterIPRules[0] >= compatibilityPathAt || adapterIPRules[1] <= resolveAt {
-		t.Fatalf("unexpected adapter override order: adapter=%v compatibility=%d path=%d resolve=%d", adapterIPRules, compatibilityAt, compatibilityPathAt, resolveAt)
+	if earlyAdapterAt >= compatibilityAt || earlyAdapterAt >= compatibilityPathAt || userAdapterAt <= resolveAt {
+		t.Fatalf("unexpected adapter override order: early=%d user=%d compatibility=%d path=%d resolve=%d", earlyAdapterAt, userAdapterAt, compatibilityAt, compatibilityPathAt, resolveAt)
 	}
 }
 

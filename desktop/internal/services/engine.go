@@ -898,6 +898,7 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 		}
 		s.recordStartStage("dns_validated", nil)
 		configOptions := tunConfigOptions{
+			Stack:         settings.TUNStack,
 			DNSPolicy:     effectiveDNSPolicy,
 			IPv6Available: selectedAdaptersHaveIPv6(selected),
 			ConfigName:    "sing-box.json",
@@ -944,6 +945,7 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 				"server":             dnsResult.Server,
 				"route_exclusions":   dnsBootstrapRouteExclusions(dnsResult),
 				"ipv6_available":     configOptions.IPv6Available,
+				"tun_stack":          configOptions.Stack,
 				"ipv4_fallback_file": ipv4FallbackPath,
 			})
 		}

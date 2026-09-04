@@ -6,14 +6,28 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppNotificationProvider } from "../components/notifications/AppNotifications";
 import type { ConnectionListSnapshot, ConnectionView } from "../platform/services";
 import type { HomeAdapter } from "../state/useEngineState";
-import { ConnectionsPage } from "./ConnectionsPage";
+import {
+  connectionRuleCandidates,
+  ConnectionsPage,
+  preferredConnectionRuleOutbound,
+} from "./ConnectionsPage";
 
 const mocks = vi.hoisted(() => ({
   connections: vi.fn(),
+  routingSnapshot: vi.fn(),
+  previewBatch: vi.fn(),
+  saveRules: vi.fn(),
 }));
 
 vi.mock("../platform/services", () => ({
-  appServices: { engine: { connections: mocks.connections } },
+  appServices: {
+    engine: { connections: mocks.connections },
+    routing: {
+      snapshot: mocks.routingSnapshot,
+      previewBatch: mocks.previewBatch,
+      save: mocks.saveRules,
+    },
+  },
   withServiceTimeout: <T,>(request: Promise<T>) => request,
 }));
 
@@ -102,6 +116,26 @@ const adapterRuntime = [
 describe("ConnectionsPage interactions", () => {
   beforeEach(() => {
     mocks.connections.mockResolvedValue(snapshot);
+    mocks.routingSnapshot.mockResolvedValue({
+      rules: [{ match_type: "process", value: "Existing.exe", outbound: "direct" }],
+      outbounds: [
+        { id: "aggregation", label: "Aggregated" },
+        { id: "direct", label: "Direct / bypass" },
+        { id: "nic_Ethernet", label: "Ethernet" },
+      ],
+    });
+    mocks.previewBatch.mockResolvedValue({
+      items: [{
+        input: "ethernet.example",
+        status: "add",
+        rule: { match_type: "domain", value: "ethernet.example", outbound: "aggregation" },
+      }],
+      add_count: 1,
+      duplicate_count: 0,
+      conflict_count: 0,
+      invalid_count: 0,
+    });
+    mocks.saveRules.mockResolvedValue({ rules: [], outbounds: [] });
   });
 
   afterEach(() => {
@@ -226,5 +260,82 @@ describe("ConnectionsPage interactions", () => {
 
     fireEvent.click(screen.getByRole("combobox", { name: "Filter by egress policy" }));
     expect(await screen.findByRole("option", { name: "Single-NIC routing" })).not.toBeNull();
+  });
+
+  it("quick-adds a domain rule from a connection context menu without dropping existing rules", async () => {
+    renderPage(<ConnectionsPage adapterRuntime={adapterRuntime} />);
+    const row = (await screen.findByText("Zulu.exe")).closest("article");
+    expect(row).not.toBeNull();
+
+    fireEvent.contextMenu(row!);
+    expect(await screen.findByRole("menuitem", { name: /Add by process/ })).not.toBeNull();
+    expect(screen.getByRole("menuitem", { name: /Add by domain/ })).not.toBeNull();
+    expect(screen.getByRole("menuitem", { name: /Add by ip/i })).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("menuitem", { name: /Add by domain/ }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText("ethernet.example")).not.toBeNull();
+    await waitFor(() => expect(within(dialog).getByRole("button", { name: "Add rule" }).hasAttribute("disabled")).toBe(false));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Add rule" }));
+
+    await waitFor(() => expect(mocks.saveRules).toHaveBeenCalledWith([
+      { match_type: "process", value: "Existing.exe", outbound: "direct" },
+      { match_type: "domain", value: "ethernet.example", outbound: "aggregation" },
+    ]));
+  });
+
+  it("updates only the exact conflicting rule selected from a connection", async () => {
+    const existingRules = [
+      { match_type: "process", value: "Existing.exe", outbound: "direct" },
+      { match_type: "domain", value: "ethernet.example", outbound: "direct" },
+      { match_type: "domain", value: "other.example", outbound: "direct" },
+    ];
+    mocks.routingSnapshot.mockResolvedValue({
+      rules: existingRules,
+      outbounds: [
+        { id: "aggregation", label: "Aggregated" },
+        { id: "direct", label: "Direct / bypass" },
+      ],
+    });
+    mocks.previewBatch.mockResolvedValue({
+      items: [{
+        input: "ethernet.example",
+        status: "conflict",
+        rule: { match_type: "domain", value: "ethernet.example", outbound: "aggregation" },
+        existing_outbound: "direct",
+      }],
+      add_count: 0,
+      duplicate_count: 0,
+      conflict_count: 1,
+      invalid_count: 0,
+    });
+
+    renderPage(<ConnectionsPage adapterRuntime={adapterRuntime} />);
+    const row = (await screen.findByText("Zulu.exe")).closest("article");
+    fireEvent.contextMenu(row!);
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Add by domain/ }));
+
+    const dialog = await screen.findByRole("dialog");
+    const updateButton = await within(dialog).findByRole("button", { name: "Update rule" });
+    fireEvent.click(updateButton);
+
+    await waitFor(() => expect(mocks.saveRules).toHaveBeenCalledWith([
+      existingRules[0],
+      existingRules[2],
+      { match_type: "domain", value: "ethernet.example", outbound: "aggregation" },
+    ]));
+  });
+
+  it("derives only usable identities and preserves the current single-NIC egress", () => {
+    expect(connectionRuleCandidates(connection({ process: "", domain: "", remote_ip: "2001:db8::8" }))).toEqual([
+      { matchType: "ip", value: "2001:db8::8" },
+    ]);
+    expect(preferredConnectionRuleOutbound(
+      connection({ outbound: "adapter", outbound_detail: "Ethernet" }),
+      [
+        { id: "aggregation", label: "Aggregated" },
+        { id: "nic_Ethernet", label: "Ethernet" },
+      ],
+    )).toBe("nic_Ethernet");
   });
 });

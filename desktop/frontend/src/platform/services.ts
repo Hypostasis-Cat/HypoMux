@@ -39,6 +39,7 @@ export type {
 };
 
 export type CompleteAppSettings = AppSettings & {
+  tun_stack: string;
   language: "zh" | "en";
   force_tun_connectivity_bypass: boolean;
   blocked_domain_bypass: boolean;

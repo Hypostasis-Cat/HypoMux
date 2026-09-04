@@ -28,6 +28,7 @@ type AppSettings struct {
 	SystemProxyTakeover bool                  `json:"system_proxy_takeover"`
 	Weighted            bool                  `json:"weighted"`
 	StrictRoute         bool                  `json:"strict_route"`
+	TUNStack            string                `json:"tun_stack"`
 	WFPCompatibility    WFPCompatibilityState `json:"wfp_compatibility_state,omitempty"`
 	ForceTUNBypass      bool                  `json:"force_tun_connectivity_bypass"`
 	BlockedDomainBypass bool                  `json:"blocked_domain_bypass"`
@@ -58,6 +59,7 @@ func DefaultSettings() AppSettings {
 		HTTPPort:            10801,
 		SystemProxyTakeover: true,
 		StrictRoute:         true,
+		TUNStack:            "system",
 		BlockedDomainExpiry: true,
 		CloseToTray:         false,
 		DNSServer:           "223.5.5.5",
@@ -400,6 +402,11 @@ func (s *SettingsService) reload() error {
 	if loaded.DNSEgressMode == "" {
 		loaded.DNSEgressMode = defaults.DNSEgressMode
 	}
+	if stack, err := normalizeTunStack(loaded.TUNStack); err == nil {
+		loaded.TUNStack = stack
+	} else {
+		loaded.TUNStack = defaults.TUNStack
+	}
 	loaded.DNSAdapterID = strings.TrimSpace(loaded.DNSAdapterID)
 	if loaded.Language != "zh" && loaded.Language != "en" {
 		loaded.Language = defaults.Language
@@ -528,6 +535,9 @@ func (s *SettingsService) ClearWFPCompatibilityFailure() error {
 }
 
 func validateSettings(value AppSettings) error {
+	if _, err := normalizeTunStack(value.TUNStack); err != nil {
+		return err
+	}
 	if value.Mode != "proxy" && value.Mode != "tun" {
 		return fmt.Errorf("不支持的运行模式：%s", value.Mode)
 	}
@@ -587,6 +597,11 @@ func (s *SettingsService) commitLocked(next AppSettings) error {
 		return fmt.Errorf("设置文件尚未成功加载，拒绝覆盖原文件：%w", s.loadErr)
 	}
 	next = cloneSettings(next)
+	stack, err := normalizeTunStack(next.TUNStack)
+	if err != nil {
+		return err
+	}
+	next.TUNStack = stack
 	if err := writeSettingsFile(s.path, next); err != nil {
 		return err
 	}

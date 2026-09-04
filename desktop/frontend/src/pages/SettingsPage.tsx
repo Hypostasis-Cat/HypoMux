@@ -45,6 +45,7 @@ const emptySettings: CompleteAppSettings = {
   system_proxy_takeover: true,
   weighted: false,
   strict_route: true,
+  tun_stack: "system",
   force_tun_connectivity_bypass: false,
   blocked_domain_bypass: false,
   blocked_domain_expiry: true,
@@ -822,6 +823,36 @@ export function SettingsPage({
 
         <GlassSurface className="settings-section" id="settings-advanced">
           <h2>{t("settings_advanced_network")}</h2>
+          <SettingRow
+            title={text("TUN 协议栈", "TUN stack")}
+            description={text(
+              "System 使用系统协议栈；Mixed 使用系统 TCP + gVisor UDP；gVisor 使用完整用户态协议栈。遇到兼容性问题时可切换尝试，保存后下次启动 TUN 生效。",
+              "System uses the OS stack; Mixed uses system TCP + gVisor UDP; gVisor uses a full userspace stack. Try another stack for compatibility issues. Applies the next time TUN starts.",
+            )}
+          >
+            <SettingDropdown
+              value={settings.tun_stack || "system"}
+              disabled={loading || saving}
+              options={[
+                { value: "system", label: text("System（默认）", "System (default)") },
+                { value: "mixed", label: text("Mixed（混合）", "Mixed (hybrid)") },
+                { value: "gvisor", label: text("gVisor（用户态）", "gVisor (userspace)") },
+              ]}
+              onChange={(value) => void patchAndSave(
+                { tun_stack: value },
+                text("TUN 协议栈已保存，下次启动 TUN 生效", "TUN stack saved; applies the next time TUN starts"),
+              )}
+            />
+          </SettingRow>
+          <SettingRow
+            title={text("FakeIP 与规则集缓存", "FakeIP and rule-set cache")}
+            description={text(
+              "已自动启用持久化缓存，保留 FakeIP 映射；远程规则集接入后也可复用。缓存位于配置目录下的 cache/sing-box.db，不随 TUN 重启清除。",
+              "Persistent caching is enabled automatically for FakeIP mappings and future remote rule sets. Stored at cache/sing-box.db inside the configuration directory and retained across TUN restarts.",
+            )}
+          >
+            <span>{text("已启用", "Enabled")}</span>
+          </SettingRow>
           <SettingRow
             title={t("settings_force_tun")}
             description={t("settings_force_tun_hint")}

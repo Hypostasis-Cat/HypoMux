@@ -55,6 +55,25 @@ pnpm run build
 
 Engine 测试与构建在仓库根目录的 `engine/` 模块执行。
 
+## TUN 协议栈与持久化缓存
+
+“设置 → 高级网络 → TUN 协议栈”支持 `system`（默认）、`mixed`
+（系统 TCP + gVisor UDP）和 `gvisor`（完整用户态协议栈）。选择保存为
+`tun_stack`，下次启动 TUN 生效；IPv4 回退配置保留同一选择。旧设置缺少该字段时
+仍使用 `system`，不额外修改 endpoint-independent NAT 参数。
+
+sing-box 默认启用 `experimental.cache_file`；使用 FakeIP 时同时启用
+`store_fakeip`。缓存固定保存在 HypoMux 数据目录下的 `cache/sing-box.db`
+（默认 `%USERPROFILE%\.hypomux\cache\sing-box.db`，支持 `HYPOMUX_DATA_DIR`），
+不会因运行配置重新生成、IPv4 回退或 TUN 重启而清除。该文件包含域名映射，属于本地隐私数据。
+远程规则集接入后可使用同一缓存机制；当前本地规则集仍使用原有文件更新流程，未增加远程下载或自动更新。
+
+Windows 测试覆盖三种栈的内置 sing-box 配置检查，以及仅绑定本机 UDP、无 TUN/系统 DNS
+改动的 FakeIP 缓存恢复测试。sing-box 缓存写入是异步的，刚分配但尚未落盘的映射在强制终止时仍可能丢失。
+
+字段语义参考 [缓存文件文档](https://sing-box.sagernet.org/configuration/experimental/cache-file/)
+与 [TUN 文档](https://sing-box.sagernet.org/configuration/inbound/tun/)。
+
 ## Windows 生产构建
 
 ```powershell
