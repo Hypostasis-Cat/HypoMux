@@ -79,6 +79,9 @@ func New(input io.Reader, output io.Writer, metadata Metadata) *Server {
 // standard error.
 func (s *Server) Run(ctx context.Context) error {
 	defer s.stopProxyForHostExit()
+	// A service context can outlive many client sessions. Give the reader its
+	// own lifetime so every Run exit also releases queued request delivery.
+	ctx, cancel := context.WithCancel(ctx)
 	scanner := bufio.NewScanner(s.input)
 	scanner.Buffer(make([]byte, 64*1024), protocol.MaxMessageBytes)
 
@@ -99,17 +102,14 @@ func (s *Server) Run(ctx context.Context) error {
 		close(lines)
 	}()
 
-	// ctx 取消后，上面的扫描协程可能仍阻塞在 Scan 上。若输入流可关闭，
-	// 主动关闭它让 Scan 返回，避免该协程泄漏到进程退出。
-	if closer, ok := s.input.(io.Closer); ok {
-		defer func() {
-			select {
-			case <-ctx.Done():
-				_ = closer.Close()
-			default:
-			}
-		}()
-	}
+	// Cancel before closing: the reader may be waiting either on lines or in
+	// Scan. Do both on normal shutdown and errors, not only service cancellation.
+	defer func() {
+		cancel()
+		if closer, ok := s.input.(io.Closer); ok {
+			_ = closer.Close()
+		}
+	}()
 
 	for {
 		var raw []byte

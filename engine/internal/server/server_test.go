@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -869,6 +870,103 @@ func TestRunCancellationInterruptsBlockedInputRead(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("the blocked scanner read was not interrupted after cancellation")
 	}
+}
+
+func TestRunExitReleasesQueuedRequestReaders(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		method  string
+		output  io.Writer
+		wantErr bool
+	}{
+		{name: "shutdown", method: "host.shutdown", output: io.Discard},
+		{name: "write failure", method: "engine.status", output: failingSessionWriter{}, wantErr: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			// Keep the service context alive across sessions, as the Windows
+			// service does. Closing a transport cannot unblock a channel send.
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			before := countSessionReaders()
+			for i := 0; i < 8; i++ {
+				input := io.NopCloser(strings.NewReader(fmt.Sprintf(
+					"{\"protocol\":1,\"id\":\"first\",\"method\":%q}\n"+
+						"{\"protocol\":1,\"id\":\"queued\",\"method\":\"engine.status\"}\n", test.method,
+				)))
+				err := New(input, test.output, Metadata{}).Run(ctx)
+				_ = input.Close()
+				if (err != nil) != test.wantErr {
+					t.Fatalf("Run() = %v, wantErr=%v", err, test.wantErr)
+				}
+			}
+			deadline := time.Now().Add(2 * time.Second)
+			for countSessionReaders() > before && time.Now().Before(deadline) {
+				time.Sleep(10 * time.Millisecond)
+			}
+			if remaining := countSessionReaders() - before; remaining > 0 {
+				t.Fatalf("%d scanner goroutines remain after 8 completed sessions", remaining)
+			}
+			if ctx.Err() != nil {
+				t.Fatal("ending a session must not cancel the service context")
+			}
+		})
+	}
+}
+
+func countSessionReaders() int {
+	buffer := make([]byte, 1024*1024)
+	n := runtime.Stack(buffer, true)
+	// Match Run's closures without depending on compiler-assigned numbering.
+	return strings.Count(string(buffer[:n]), "server.(*Server).Run.func")
+}
+
+type failingSessionWriter struct{}
+
+func (failingSessionWriter) Write([]byte) (int, error) {
+	return 0, io.ErrClosedPipe
+}
+
+func TestRunShutdownClosesInputWithBlockedRead(t *testing.T) {
+	blocked := &blockingReadCloser{
+		readStarted: make(chan struct{}, 1), readReturned: make(chan struct{}, 1), closed: make(chan struct{}),
+	}
+	defer blocked.Close()
+	input := &sessionReadCloser{
+		Reader: io.MultiReader(strings.NewReader("{\"protocol\":1,\"id\":\"shutdown\",\"method\":\"host.shutdown\"}\n"), blocked),
+		Closer: blocked,
+	}
+	// Hold the response until the scanner is blocked waiting for more input.
+	output := &waitForSessionReadWriter{started: blocked.readStarted}
+	if err := New(input, output, Metadata{}).Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-blocked.readReturned:
+	case <-time.After(time.Second):
+		t.Fatal("shutdown did not close and release the blocked input read")
+	}
+}
+
+type sessionReadCloser struct {
+	io.Reader
+	io.Closer
+}
+
+type waitForSessionReadWriter struct {
+	started <-chan struct{}
+	ready   bool
+}
+
+func (w *waitForSessionReadWriter) Write(data []byte) (int, error) {
+	if !w.ready {
+		select {
+		case <-w.started:
+			w.ready = true
+		case <-time.After(time.Second):
+			return 0, errors.New("scanner did not reach the blocked read")
+		}
+	}
+	return len(data), nil
 }
 
 func decodeMessages(t *testing.T, output string) []map[string]any {
