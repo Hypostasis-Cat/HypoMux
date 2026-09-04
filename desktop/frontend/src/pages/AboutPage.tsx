@@ -81,6 +81,7 @@ export function AboutPage() {
     // release-note link is far down the Markdown, that focus can scroll both
     // the dialog content and its nested notes pane to the bottom. Anchor focus
     // at the title and reset both scroll containers before the frame is shown.
+    // The title must also be tabbable so Fluent's later autofocus keeps it here.
     updateDialogTitleRef.current?.focus({ preventScroll: true });
     if (updateDialogContentRef.current) {
       updateDialogContentRef.current.scrollTop = 0;
@@ -228,7 +229,7 @@ export function AboutPage() {
       >
         <DialogSurface className="update-dialog">
           <DialogBody>
-            <DialogTitle ref={updateDialogTitleRef} tabIndex={-1}>{t("about_update_available_title")}</DialogTitle>
+            <DialogTitle ref={updateDialogTitleRef} tabIndex={0}>{t("about_update_available_title")}</DialogTitle>
             <DialogContent ref={updateDialogContentRef}>
               <p className="update-summary">
                 {text("当前版本", "Current version")}: v{update?.current_version}<br />
