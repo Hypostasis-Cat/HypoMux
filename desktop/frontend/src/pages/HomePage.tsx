@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Badge,
   Button,
+  Checkbox,
   Dialog,
   DialogActions,
   DialogBody,
@@ -26,6 +27,7 @@ import type { AppPage } from "../components/shell/CompactNavigation";
 import type { TunPreflightSnapshot } from "../platform/services";
 import { useI18n } from "../i18n/i18n";
 import { useAppNotifications } from "../components/notifications/AppNotifications";
+import { canDismissStartupWarnings, dismissStartupWarningsToday, startupWarningsDismissedToday } from "../state/startupWarningReminder";
 
 const formatBytes = (value: number) => {
   if (value >= 1024 ** 3) return `${(value / 1024 ** 3).toFixed(2)} GB`;
@@ -48,6 +50,7 @@ export function HomePage({
   const [preflightDialog, setPreflightDialog] = useState<TunPreflightSnapshot | null>(null);
   const [preflightDialogOpen, setPreflightDialogOpen] = useState(false);
   const [showPreflightDetails, setShowPreflightDetails] = useState(false);
+  const [dismissWarningsToday, setDismissWarningsToday] = useState(false);
   const preflightResolver = useRef<((confirmed: boolean) => void) | null>(null);
   const { notify } = useAppNotifications();
   const notifyError = useCallback((message: string, retry?: () => void) => {
@@ -61,20 +64,29 @@ export function HomePage({
     });
   }, [locale, notify, t]);
   const handleTunPreflight = useCallback((snapshot: TunPreflightSnapshot) => {
+    if (canDismissStartupWarnings(snapshot) && startupWarningsDismissedToday()) {
+      return Promise.resolve(true);
+    }
     return new Promise<boolean>((resolve) => {
       preflightResolver.current?.(false);
       preflightResolver.current = resolve;
       setShowPreflightDetails(false);
+      setDismissWarningsToday(false);
       setPreflightDialog(snapshot);
       setPreflightDialogOpen(true);
     });
   }, []);
   const closeTunPreflight = useCallback((confirmed: boolean) => {
+    if (confirmed && dismissWarningsToday && preflightDialog && canDismissStartupWarnings(preflightDialog)) {
+      if (!dismissStartupWarningsToday()) {
+        notifyError(text("无法保存今日免提醒设置，本次仍将继续启动。", "Could not save today's reminder preference. Startup will still continue."));
+      }
+    }
     const resolve = preflightResolver.current;
     preflightResolver.current = null;
     setPreflightDialogOpen(false);
     resolve?.(confirmed);
-  }, []);
+  }, [dismissWarningsToday, preflightDialog, notifyError, locale]);
   useEffect(() => () => preflightResolver.current?.(false), []);
   const engine = useEngineState(notifyError, handleTunPreflight);
   useEffect(
@@ -269,6 +281,19 @@ export function HomePage({
                       </div>
                     ))}
                   </div>
+                  {canDismissStartupWarnings(preflightDialog) && (
+                    <div>
+                      <Checkbox
+                        checked={dismissWarningsToday}
+                        onChange={(_, data) => setDismissWarningsToday(data.checked === true)}
+                        label={text("今日内不再提醒", "Don't remind me again today")}
+                      />
+                      <p className="tun-preflight-reminder-hint">{text(
+                        "勾选并点击“继续”后，今日不再弹出启动风险提示；明日自动恢复。启动检查和阻断性错误不受影响。",
+                        "Check this and choose Continue to hide startup risk prompts for today. Reminders return tomorrow; startup checks and blocking errors remain enabled.",
+                      )}</p>
+                    </div>
+                  )}
                 </div>
               )}
             </DialogContent>

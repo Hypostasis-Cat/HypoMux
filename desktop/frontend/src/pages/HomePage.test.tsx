@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { PropsWithChildren, ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppNotificationProvider } from "../components/notifications/AppNotifications";
 import type { HomeAdapter } from "../state/useEngineState";
 import { HomePage } from "./HomePage";
+import { dismissStartupWarningsToday, startupWarningsDismissedToday } from "../state/startupWarningReminder";
 
 const mocks = vi.hoisted(() => ({
   useEngineState: vi.fn(),
@@ -88,6 +89,7 @@ const engineState = () => ({
 
 describe("HomePage adapter interactions", () => {
   beforeEach(() => {
+    localStorage.clear();
     mocks.useEngineState.mockReturnValue(engineState());
   });
 
@@ -166,5 +168,57 @@ describe("HomePage adapter interactions", () => {
 
     expect(onAdapterRuntimeChange).toHaveBeenLastCalledWith([]);
     expect(onEnginePhaseChange).toHaveBeenLastCalledWith("stopped");
+  });
+
+  const warningSnapshot = {
+    ready: true,
+    issues: [{ code: "foreign_network_risk", level: "warning", title: "Third-party network risk", detail: "Test risk" }],
+  };
+  const preflight = () => mocks.useEngineState.mock.calls[mocks.useEngineState.mock.calls.length - 1][1];
+
+  it("remembers the checkbox only after Continue and suppresses warnings after remount", async () => {
+    const page = renderPage(<HomePage />);
+    let result: Promise<boolean>;
+    act(() => { result = preflight()(warningSnapshot); });
+    expect(screen.getByText("Startup risks detected")).toBeTruthy();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Don't remind me again today" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    await expect(result!).resolves.toBe(true);
+    expect(startupWarningsDismissedToday()).toBe(true);
+    page.unmount();
+    renderPage(<HomePage />);
+    await act(async () => {
+      expect(await preflight()(warningSnapshot)).toBe(true);
+    });
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("does not remember the checkbox when the user goes back", async () => {
+    renderPage(<HomePage />);
+    let result: Promise<boolean>;
+    act(() => { result = preflight()(warningSnapshot); });
+    fireEvent.click(screen.getByRole("checkbox", { name: "Don't remind me again today" }));
+    fireEvent.click(screen.getByRole("button", { name: "Go back" }));
+    await expect(result!).resolves.toBe(false);
+    expect(startupWarningsDismissedToday()).toBe(false);
+    act(() => { result = preflight()(warningSnapshot); });
+    expect(screen.getByRole<HTMLInputElement>("checkbox", { name: "Don't remind me again today" }).checked).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    await expect(result!).resolves.toBe(true);
+    expect(startupWarningsDismissedToday()).toBe(false);
+  });
+
+  it("still shows blockers and disables Continue even when today's warnings are muted", async () => {
+    dismissStartupWarningsToday();
+    renderPage(<HomePage />);
+    let result: Promise<boolean>;
+    act(() => {
+      result = preflight()({ ready: false, issues: [{ code: "missing_core", level: "blocker", title: "Missing core", detail: "Test" }] });
+    });
+    expect(screen.getByText("Virtual NIC cannot start yet")).toBeTruthy();
+    expect(screen.queryByRole("checkbox", { name: "Don't remind me again today" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Continue" }).hasAttribute("disabled")).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Go back" }));
+    await expect(result!).resolves.toBe(false);
   });
 });

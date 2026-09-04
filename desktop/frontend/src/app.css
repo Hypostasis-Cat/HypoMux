@@ -2191,6 +2191,13 @@ svg {
   gap: 14px;
 }
 
+.tun-preflight-reminder-hint {
+  margin: 0 0 0 8px;
+  color: var(--hm-text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .tun-preflight-summary {
   display: flex;
   align-items: center;
