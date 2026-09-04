@@ -262,6 +262,7 @@ HypoMux 是一个完全出于技术热情、由作者在业余时间独立开发
 #### ☕ 咖啡支持
 
 <p align="center">
+  <a href="https://github.com/Hypostasis-Cat/HypoMux"><img alt="姜虞，咖啡支持 ¥6.66" src="https://img.shields.io/static/v1?label=%E5%A7%9C%E8%99%9E&message=%C2%A56.66&color=orange&style=for-the-badge&logo=coffeescript&logoColor=white" /></a>
   <a href="https://github.com/Hypostasis-Cat/HypoMux"><img alt="Shout_bb，咖啡支持 ¥6.66" src="https://img.shields.io/static/v1?label=Shout_bb&message=%C2%A56.66&color=orange&style=for-the-badge&logo=coffeescript&logoColor=white" /></a>
   <a href="https://github.com/Hypostasis-Cat/HypoMux"><img alt="鲸鱼，咖啡支持" src="https://img.shields.io/badge/%E9%B2%B8%E9%B1%BC-%E8%AF%B7%E5%96%9D%E5%92%96%E5%95%A1-orange?style=for-the-badge&logo=coffeescript&logoColor=white" /></a>
   <a href="https://github.com/Hypostasis-Cat/HypoMux"><img alt="匿名，咖啡支持" src="https://img.shields.io/badge/%E5%8C%BF%E5%90%8D-%E8%AF%B7%E5%96%9D%E5%92%96%E5%95%A1-orange?style=for-the-badge&logo=coffeescript&logoColor=white" /></a>
