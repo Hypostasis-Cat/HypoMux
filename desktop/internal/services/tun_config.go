@@ -124,7 +124,6 @@ func writeSingBoxConfigWithOptions(
 			processPaths = append(processPaths, absolute)
 		}
 	}
-	compatibilityPaths := append([]string(nil), compatibility.ProcessPaths...)
 	ruleSetOutbounds := []string{"nic_ethernet", "nic_wifi", "aggregation", "direct"}
 	for name := range endpoints {
 		if strings.HasPrefix(name, "nic_") {
@@ -144,27 +143,15 @@ func writeSingBoxConfigWithOptions(
 			"outbound":     "system-direct",
 		},
 	}
-	// A user may deliberately pin an upstream proxy server to a hotspot or
-	// another selected adapter. Match that literal destination before the
-	// third-party proxy compatibility fallback, otherwise the process-name
-	// bypass would silently force the connection back to the system default
-	// route. The rule is repeated after DNS resolution below so regular TUN
-	// traffic still retains FakeIP-aware CIDR matching.
-	routeRules = append(routeRules, ruleSetPlan.EarlyRouteRules...)
-	if len(compatibilityPaths) > 0 {
-		routeRules = append(routeRules, map[string]any{
-			"process_path": compatibilityPaths, "outbound": "system-direct",
-		})
-	}
-	if len(compatibility.ProcessNames) > 0 {
-		routeRules = append(routeRules, map[string]any{
-			"process_name": compatibility.ProcessNames, "outbound": "system-direct",
-		})
-	}
 	if dnsPolicy != "system" {
 		routeRules = append(routeRules,
 			map[string]any{"port": []int{53}, "action": "hijack-dns"},
 			map[string]any{"protocol": []string{"dns"}, "action": "hijack-dns"},
+		)
+	}
+	routeRules = append(routeRules, singBoxCompatibilityRouteRules(compatibility, ruleSetPlan)...)
+	if dnsPolicy != "system" {
+		routeRules = append(routeRules,
 			map[string]any{"action": "resolve", "server": "dns-local", "strategy": "prefer_ipv4"},
 		)
 	}
@@ -279,6 +266,39 @@ func writeSingBoxConfigWithOptions(
 		return "", "", clashAPIConfig{}, fmt.Errorf("提交 TUN 配置失败：%w", err)
 	}
 	return singBox, path, clashAPI, nil
+}
+
+// Adapter IP overrides are an exception for known third-party proxy processes,
+// never a global IP priority layer. Both overrides and the compatibility bypass
+// yield to explicit process/domain rules, including rules added by hot reload.
+// DNS interception is placed before this block by the caller.
+func singBoxCompatibilityRouteRules(compatibility compatibilityPlan, plan singBoxRuleSetPlan) []any {
+	processes := []any{}
+	if len(compatibility.ProcessPaths) > 0 {
+		processes = append(processes, map[string]any{"process_path": compatibility.ProcessPaths})
+	}
+	if len(compatibility.ProcessNames) > 0 {
+		processes = append(processes, map[string]any{"process_name": compatibility.ProcessNames})
+	}
+	if len(processes) == 0 {
+		return nil
+	}
+	guard := []any{map[string]any{"type": "logical", "mode": "or", "rules": processes}}
+	if len(plan.PriorityRuleSets) > 0 {
+		guard = append(guard, map[string]any{"rule_set": plan.PriorityRuleSets, "invert": true})
+	}
+	result := []any{}
+	for _, raw := range plan.EarlyRouteRules {
+		reference := raw.(map[string]any)
+		conditions := append([]any{}, guard...)
+		conditions = append(conditions, map[string]any{"rule_set": reference["rule_set"]})
+		result = append(result, map[string]any{
+			"type": "logical", "mode": "and", "rules": conditions, "outbound": reference["outbound"],
+		})
+	}
+	return append(result, map[string]any{
+		"type": "logical", "mode": "and", "rules": guard, "outbound": "system-direct",
+	})
 }
 
 func reserveClashAPI() (clashAPIConfig, error) {

@@ -57,9 +57,10 @@ type singBoxRuleSetBinding struct {
 }
 
 type singBoxRuleSetPlan struct {
-	Definitions     []any
-	EarlyRouteRules []any
-	UserRouteRules  []any
+	Definitions      []any
+	EarlyRouteRules  []any
+	UserRouteRules   []any
+	PriorityRuleSets []string
 }
 
 // writeSingBoxRuleSetPlan materializes the mutable part of the TUN routing
@@ -113,6 +114,9 @@ func writeSingBoxRuleSetPlanLocked(
 			plan.EarlyRouteRules = append(plan.EarlyRouteRules, reference)
 		} else {
 			plan.UserRouteRules = append(plan.UserRouteRules, reference)
+			if binding.Scope == ruleSetScopeProcess || binding.Scope == ruleSetScopeDomain {
+				plan.PriorityRuleSets = append(plan.PriorityRuleSets, binding.Tag)
+			}
 		}
 	}
 	if writeManifest {
@@ -293,8 +297,8 @@ func buildSingBoxRuleSetBindings(directory string, outbounds []string) []singBox
 			bindings = append(bindings, newSingBoxRuleSetBinding(directory, scope, outbound))
 		}
 	}
-	// Literal adapter pinning must be evaluated before the third-party proxy
-	// compatibility bypass. Keep it in its own hot-reloadable rule-set layer.
+	// These sets are only used inside the process-scoped compatibility rules.
+	// Keep stable files for every adapter so later edits can be hot-reloaded.
 	early := make([]singBoxRuleSetBinding, 0, len(outbounds))
 	for _, outbound := range outbounds {
 		if strings.HasPrefix(outbound, "nic_") {
@@ -319,12 +323,8 @@ func buildSingBoxSourceRules(rules []RoutingRule, binding singBoxRuleSetBinding)
 	matchType := binding.Scope
 	if binding.Scope == ruleSetScopeEarlyIP {
 		matchType = MatchIP
-		candidates = make([]RoutingRule, 0, len(rules))
-		for _, rule := range rules {
-			if rule.MatchType == MatchIP && strings.HasPrefix(rule.Outbound, "nic_") {
-				candidates = append(candidates, rule)
-			}
-		}
+		// Include other outbounds when computing exclusions: a more specific
+		// direct/aggregation rule must not be swallowed by an adapter catch-all.
 	}
 	result := []any{}
 	for index, rule := range candidates {

@@ -182,7 +182,7 @@ func TestTunRouteResolvesFakeIPBeforeUserCIDRRules(t *testing.T) {
 				}
 			}
 		}
-		if names, ok := rule["process_name"].([]any); ok {
+		if names := nestedRouteValues(rule, "process_name"); rule["outbound"] == "system-direct" && len(names) > 0 {
 			for _, name := range names {
 				if name == "mihomo.exe" {
 					compatibilityAt = index
@@ -235,8 +235,8 @@ func TestExplicitAdapterIPRuleOverridesProxyCompatibilityFallback(t *testing.T) 
 			resolveAt = index
 		}
 		if rule["outbound"] == "nic_wifi" {
-			if tags, ok := rule["rule_set"].([]any); ok && len(tags) == 1 {
-				tag, _ := tags[0].(string)
+			for _, value := range nestedRouteValues(rule, "rule_set") {
+				tag, _ := value.(string)
 				switch {
 				case strings.HasPrefix(tag, "hypomux-early-ip-"):
 					earlyAdapterAt = index
@@ -245,14 +245,14 @@ func TestExplicitAdapterIPRuleOverridesProxyCompatibilityFallback(t *testing.T) 
 				}
 			}
 		}
-		if names, ok := rule["process_name"].([]any); ok {
+		if names := nestedRouteValues(rule, "process_name"); rule["outbound"] == "system-direct" && len(names) > 0 {
 			for _, name := range names {
 				if name == "verge-mihomo.exe" {
 					compatibilityAt = index
 				}
 			}
 		}
-		if paths, ok := rule["process_path"].([]any); ok {
+		if paths := nestedRouteValues(rule, "process_path"); rule["outbound"] == "system-direct" && len(paths) > 0 {
 			for _, path := range paths {
 				if path == `C:\Program Files\Clash Verge\verge-mihomo.exe` {
 					compatibilityPathAt = index
