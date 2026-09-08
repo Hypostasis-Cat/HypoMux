@@ -260,6 +260,7 @@ Thanks to all supporters who have injected energy into HypoMux:
 #### ☕ Coffee Support
 
 <p align="center">
+  <a href="https://github.com/Hypostasis-Cat/HypoMux"><img alt="Anonymous, ¥5 coffee support" src="https://img.shields.io/static/v1?label=Anonymous&message=%C2%A55&color=orange&style=for-the-badge&logo=coffeescript&logoColor=white" /></a>
   <a href="https://github.com/Hypostasis-Cat/HypoMux"><img alt="Shout_bb, ¥6.66 coffee support" src="https://img.shields.io/static/v1?label=Shout_bb&message=%C2%A56.66&color=orange&style=for-the-badge&logo=coffeescript&logoColor=white" /></a>
   <a href="https://github.com/Hypostasis-Cat/HypoMux"><img src="https://img.shields.io/badge/Whale-%20Buy%20a%20Coffee-orange?style=for-the-badge&logo=coffeescript&logoColor=white" alt="Whale, coffee support"></a>
   <a href="https://github.com/Hypostasis-Cat/HypoMux"><img alt="Anonymous, coffee support" src="https://img.shields.io/badge/%E5%8C%BF%E5%90%8D-%E8%AF%B7%E5%96%9D%E5%92%96%E5%95%A1-orange?style=for-the-badge&logo=coffeescript&logoColor=white" /></a>
