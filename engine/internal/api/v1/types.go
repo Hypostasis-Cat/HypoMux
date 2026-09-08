@@ -18,20 +18,21 @@ import (
 )
 
 const (
-	MethodEngineHello     = "engine.hello"
-	MethodEngineStatus    = "engine.status"
-	MethodEngineStart     = "engine.start"
-	MethodEngineStop      = "engine.stop"
-	MethodEngineTelemetry = "engine.telemetry"
-	MethodTunActivate     = "tun.activate"
-	MethodTunStatus       = "tun.status"
-	MethodTunDeactivate   = "tun.deactivate"
-	MethodDNSResolve      = "dns.resolve"
-	MethodDNSStatus       = "dns.status"
-	MethodHealthCheck     = "health.check"
-	MethodDiagnosticRun   = "diagnostic.run"
-	MethodWFPInspect      = "wfp.inspect"
-	MethodHostShutdown    = "host.shutdown"
+	MethodEngineHello       = "engine.hello"
+	MethodEngineStatus      = "engine.status"
+	MethodEngineStart       = "engine.start"
+	MethodEngineStop        = "engine.stop"
+	MethodEngineTelemetry   = "engine.telemetry"
+	MethodSteamCDNConfigure = "steam_cdn.configure"
+	MethodTunActivate       = "tun.activate"
+	MethodTunStatus         = "tun.status"
+	MethodTunDeactivate     = "tun.deactivate"
+	MethodDNSResolve        = "dns.resolve"
+	MethodDNSStatus         = "dns.status"
+	MethodHealthCheck       = "health.check"
+	MethodDiagnosticRun     = "diagnostic.run"
+	MethodWFPInspect        = "wfp.inspect"
+	MethodHostShutdown      = "host.shutdown"
 
 	EventEngineStateChanged  = "engine.state_changed"
 	EventDNSFallbackRequired = "dns.fallback_required"
@@ -46,6 +47,7 @@ var capabilities = []string{
 	MethodEngineStart,
 	MethodEngineStop,
 	MethodEngineTelemetry,
+	MethodSteamCDNConfigure,
 	MethodTunActivate,
 	MethodTunStatus,
 	MethodTunDeactivate,
@@ -164,6 +166,7 @@ func (p DiagnosticRunParams) Config() diagnostic.Config {
 }
 
 type EngineStartParams struct {
+	SteamCDNEnabled       bool                         `json:"steam_cdn_enabled,omitempty"`
 	Mode                  string                       `json:"mode"`
 	ListenHost            string                       `json:"listen_host"`
 	SOCKSPort             int                          `json:"socks_port"`
@@ -204,6 +207,7 @@ func (p EngineStartParams) ProxyConfig() proxy.Config {
 		domainIsolationExpiry = *p.DomainIsolationExpiry
 	}
 	return proxy.Config{
+		SteamCDNEnabled:       p.SteamCDNEnabled,
 		ListenHost:            p.ListenHost,
 		SOCKSPort:             p.SOCKSPort,
 		HTTPPort:              p.HTTPPort,

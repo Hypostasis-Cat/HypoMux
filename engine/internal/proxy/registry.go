@@ -50,6 +50,7 @@ type ConnectionSnapshot struct {
 }
 
 type TelemetrySnapshot struct {
+	SteamCDN          SteamCDNStatus              `json:"steam_cdn"`
 	StartedAt         time.Time                   `json:"started_at"`
 	SampledAt         time.Time                   `json:"sampled_at"`
 	TCPProfile        string                      `json:"tcp_profile,omitempty"`
@@ -72,13 +73,15 @@ type adapterCounters struct {
 }
 
 type connection struct {
-	id         uint64
-	protocol   string
-	channel    string
-	client     string
-	listener   string
-	startedAt  time.Time
-	clientConn net.Conn
+	cdnKey        cdnKey
+	cdnGeneration uint64
+	id            uint64
+	protocol      string
+	channel       string
+	client        string
+	listener      string
+	startedAt     time.Time
+	clientConn    net.Conn
 
 	mu        sync.RWMutex
 	upstream  net.Conn

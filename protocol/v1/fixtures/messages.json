@@ -850,5 +850,35 @@
         "reason": "requested"
       }
     }
+  },
+  {
+    "name": "steam_cdn_configure_request",
+    "kind": "request",
+    "method": "steam_cdn.configure",
+    "message": {
+      "protocol": 1,
+      "id": "cdn-1",
+      "method": "steam_cdn.configure",
+      "params": {
+        "enabled": true,
+        "reset": false
+      }
+    }
+  },
+  {
+    "name": "steam_cdn_configure_response",
+    "kind": "response",
+    "method": "steam_cdn.configure",
+    "message": {
+      "protocol": 1,
+      "id": "cdn-1",
+      "result": {
+        "enabled": true,
+        "probing": 0,
+        "replacements": 0,
+        "fallbacks": 0,
+        "entries": []
+      }
+    }
   }
 ]

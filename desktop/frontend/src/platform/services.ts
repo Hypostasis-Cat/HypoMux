@@ -40,6 +40,7 @@ export type {
 export type AdapterView = GeneratedAdapterView & { is_virtual?: boolean };
 
 export type CompleteAppSettings = AppSettings & {
+  steam_cdn_enabled?: boolean;
   hide_virtual_adapters?: boolean;
   tun_stack: string;
   language: "zh" | "en";
@@ -48,6 +49,11 @@ export type CompleteAppSettings = AppSettings & {
   blocked_domain_expiry: boolean;
   autostart: boolean;
   auto_start_engine: boolean;
+};
+
+export type SteamCDNStatus = {
+ available: boolean; enabled: boolean; probing: number; replacements: number; fallbacks: number;
+ entries: Array<{adapter: string; domain: string; port: string; ip: string; download_bps: number; samples: number; selections: number; cooldown_until: string; expires_at: string}>;
 };
 
 export type BlockedDomainEntry = {
@@ -216,6 +222,8 @@ export const appServices = {
       AdapterService.SaveSelection(mode, weighted, adapters),
   },
   engine: {
+    steamCDNStatus: (reset = false) => Call.ByName(engineMethod("SteamCDNStatus"), reset) as Promise<SteamCDNStatus>,
+    setSteamCDNEnabled: (enabled: boolean) => Call.ByName(engineMethod("SetSteamCDNEnabled"), enabled) as Promise<CompleteAppSettings>,
     snapshot: () => EngineService.Snapshot(),
     connections: () =>
       Call.ByName(engineMethod("Connections")) as Promise<ConnectionListSnapshot>,

@@ -43,6 +43,12 @@
       "cancellation": "not_applicable"
     },
     {
+      "name": "steam_cdn.configure",
+      "idempotency": "safe_retry",
+      "privilege": "none",
+      "cancellation": "not_applicable"
+    },
+    {
       "name": "tun.activate",
       "idempotency": "state_guarded",
       "privilege": "administrator",

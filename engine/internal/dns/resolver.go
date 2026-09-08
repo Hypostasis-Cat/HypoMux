@@ -35,6 +35,7 @@ type Query struct {
 }
 
 type Result struct {
+	Addresses  []string   `json:"addresses,omitempty"`
 	Domain     string     `json:"domain"`
 	Address    string     `json:"address"`
 	RecordType RecordType `json:"record_type"`
@@ -166,6 +167,7 @@ func (r *Resolver) Resolve(ctx context.Context, query Query) (Result, error) {
 	r.removeExpiredLocked(now)
 	if entry, ok := r.cache[key]; ok {
 		result := entry.result
+		result.Addresses = append([]string(nil), result.Addresses...)
 		result.Cached = true
 		r.mu.Unlock()
 		r.cacheHits.Add(1)
@@ -182,6 +184,7 @@ func (r *Resolver) Resolve(ctx context.Context, query Query) (Result, error) {
 	select {
 	case <-call.done:
 		result := call.result
+		result.Addresses = append([]string(nil), result.Addresses...)
 		return result, call.err
 	case <-ctx.Done():
 		return Result{}, ctx.Err()
@@ -429,6 +432,7 @@ func (r *Resolver) queryUDP(
 	}
 	return Result{
 		Address:   answer.Address,
+		Addresses: append([]string(nil), answer.Addresses...),
 		Transport: "udp",
 		Server:    address,
 	}, answer.TTL, nil
@@ -475,6 +479,7 @@ func (r *Resolver) queryTCP(
 	}
 	return Result{
 		Address:   answer.Address,
+		Addresses: append([]string(nil), answer.Addresses...),
 		Transport: "tcp",
 		Server:    address,
 	}, answer.TTL, nil
@@ -550,6 +555,7 @@ func (r *Resolver) queryDoH(
 	}
 	return Result{
 		Address:   answer.Address,
+		Addresses: append([]string(nil), answer.Addresses...),
 		Transport: "doh",
 		Server:    endpoint.Host + "@" + address,
 	}, answer.TTL, nil

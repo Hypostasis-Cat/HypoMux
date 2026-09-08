@@ -36,6 +36,7 @@ type Channel struct {
 }
 
 type Config struct {
+	SteamCDNEnabled       bool                   `json:"steam_cdn_enabled,omitempty"`
 	ListenHost            string                 `json:"listen_host"`
 	SOCKSPort             int                    `json:"socks_port"`
 	HTTPPort              int                    `json:"http_port"`

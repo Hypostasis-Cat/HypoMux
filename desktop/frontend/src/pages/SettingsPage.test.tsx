@@ -12,10 +12,13 @@ const mocks = vi.hoisted(() => ({
   locale: "en",
   translate: (key: string) => key,
   setLocale: vi.fn(),
+  setSteamCDNEnabled: vi.fn(),
+  steamCDNStatus: vi.fn(),
 }));
 
 vi.mock("../platform/services", () => ({
   appServices: {
+    engine: { setSteamCDNEnabled: mocks.setSteamCDNEnabled, steamCDNStatus: mocks.steamCDNStatus },
     settings: {
       get: mocks.get,
       update: mocks.update,
@@ -45,6 +48,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.locale = "en";
   mocks.get.mockResolvedValue(initial);
+  mocks.setSteamCDNEnabled.mockImplementation(async (enabled) => ({ ...initial, steam_cdn_enabled: enabled }));
+  mocks.steamCDNStatus.mockResolvedValue({available: true, enabled: false, probing: 0, replacements: 0, fallbacks: 0, entries: []});
   mocks.update.mockImplementation(async (settings) => settings);
   class Observer {
     observe() {}
@@ -61,6 +66,19 @@ afterEach(() => {
 });
 
 describe("TUN settings", () => {
+  it("defaults Steam CDN off and uses the runtime-aware toggle", async () => {
+    render(<SettingsPage adapterRuntime={[]} onOpenBlockedDomains={() => {}} />);
+    const toggle = await screen.findByRole("switch", { name: "Steam CDN optimization (experimental)" });
+    await waitFor(() => expect(toggle.hasAttribute("disabled")).toBe(false));
+    expect((toggle as HTMLInputElement).checked).toBe(false);
+    fireEvent.click(toggle);
+    await waitFor(() => expect(mocks.setSteamCDNEnabled).toHaveBeenCalledWith(true));
+    await waitFor(() => expect(toggle.hasAttribute("disabled")).toBe(false));
+    fireEvent.click(toggle);
+    await waitFor(() => expect(mocks.setSteamCDNEnabled).toHaveBeenCalledWith(false));
+    expect(mocks.update).not.toHaveBeenCalled();
+  });
+
   it("defaults to hiding virtual adapters and persists turning it off", async () => {
     render(<SettingsPage adapterRuntime={[]} onOpenBlockedDomains={() => {}} />);
     const toggle = await screen.findByRole("switch", { name: "Hide virtual adapters on Home" });

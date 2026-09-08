@@ -15,6 +15,7 @@ import (
 )
 
 type Server struct {
+	cdn              *steamCDN
 	config           Config
 	tcpTuningMode    tcpTuningMode
 	scheduler        *scheduler
@@ -114,6 +115,7 @@ func (s *Server) Start() (Endpoints, error) {
 	}
 	resolver.SetFallbackHandler(s.dnsFallbackHandler)
 	s.resolver = resolver
+	s.cdn = newSteamCDN(s.ctx, s.config.SteamCDNEnabled)
 
 	if len(s.config.Channels) > 0 {
 		return s.startChannelListeners()
@@ -225,6 +227,7 @@ func (s *Server) Endpoints() Endpoints {
 func (s *Server) Snapshot(includeConnections bool) TelemetrySnapshot {
 	result := s.registry.Snapshot(includeConnections)
 	result.TCPProfile = s.tcpProfileName()
+	result.SteamCDN = s.cdn.snapshot()
 	health, quarantines := s.health.snapshot()
 	for index := range result.Adapters {
 		item := health[result.Adapters[index].Name]
@@ -461,9 +464,26 @@ func (s *Server) relay(clientReader io.Reader, client net.Conn, upstream net.Con
 		defer relay.Done()
 		pooled, buffer := acquireTCPRelayBuffer()
 		defer releaseTCPRelayBuffer(pooled)
+		sampleAt := time.Now()
+		var sampleBytes uint64
+		observe := func() {
+			if session.cdnKey.domain != "" {
+				s.cdn.observe(session.cdnKey, session.cdnGeneration, sampleBytes, time.Since(sampleAt))
+			}
+			sampleAt, sampleBytes = time.Now(), 0
+		}
+		defer observe()
 		_, _ = io.CopyBuffer(accountingWriter{
 			Writer: client,
-			add:    func(amount uint64) { s.registry.AddDown(session, amount) },
+			add: func(amount uint64) {
+				s.registry.AddDown(session, amount)
+				if session.cdnKey.domain != "" {
+					sampleBytes += amount
+					if time.Since(sampleAt) >= time.Second {
+						observe()
+					}
+				}
+			},
 		}, upstream, buffer)
 		closeWrite(client)
 	}()

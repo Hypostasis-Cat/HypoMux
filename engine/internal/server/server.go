@@ -193,6 +193,8 @@ func (s *Server) handle(ctx context.Context, line []byte) (protocol.Response, bo
 		return s.startProxy(request), false
 	case api.MethodEngineStop:
 		return s.stopProxy(request.ID), false
+	case api.MethodSteamCDNConfigure:
+		return s.configureSteamCDN(request), false
 	case api.MethodEngineTelemetry:
 		return s.proxyTelemetry(request), false
 	case api.MethodTunActivate:

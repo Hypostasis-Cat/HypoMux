@@ -22,8 +22,9 @@ const (
 )
 
 type wireAnswer struct {
-	Address string
-	TTL     time.Duration
+	Addresses []string
+	Address   string
+	TTL       time.Duration
 }
 
 type truncatedResponseError struct{}
@@ -159,9 +160,12 @@ func parseResponse(packet []byte, queryID uint16, recordType uint16) (wireAnswer
 		if ip == nil {
 			continue
 		}
+		if len(best.Addresses) < 32 {
+			best.Addresses = append(best.Addresses, ip.String())
+		}
 		ttl := time.Duration(ttlSeconds) * time.Second
 		if best.Address == "" || ttl < best.TTL {
-			best = wireAnswer{Address: ip.String(), TTL: ttl}
+			best.Address, best.TTL = ip.String(), ttl
 		}
 	}
 	if best.Address == "" {

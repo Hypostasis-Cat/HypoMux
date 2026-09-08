@@ -36,9 +36,11 @@ import { accentColours } from "../theme/appearance.presets";
 import { useAppearance } from "../theme/appearance.store";
 import { backgroundService } from "../theme/background.service";
 import type { AccentPreset, AppearanceMode, MotionMode, PanelMaterial, WindowMaterial } from "../theme/appearance.types";
+import { SteamCDNPanel } from "../components/SteamCDNPanel";
 import { useI18n } from "../i18n/i18n";
 
 const emptySettings: CompleteAppSettings = {
+  steam_cdn_enabled: false,
   mode: "tun",
   language: "zh",
   socks_port: 10800,
@@ -380,6 +382,21 @@ export function SettingsPage({
 
   const patchAndSave = (patch: Partial<CompleteAppSettings>, success?: string) =>
     save({ ...settings, ...patch }, success, Object.keys(patch));
+
+  const setSteamCDNEnabled = (enabled: boolean): Promise<void> => {
+    setSettings((current) => ({ ...current, steam_cdn_enabled: enabled }));
+    return enqueueSave(async () => {
+      setSaving(true);
+      try {
+        const persisted = await appServices.engine.setSteamCDNEnabled(enabled);
+        notify(text("下载优选已更新", "Download optimization updated"), text("已保存，作用于新连接。", "Saved; applies to new connections."));
+        return { ok: true as const, value: undefined, authoritative: persisted };
+      } catch (error) {
+        notify(text("下载优选设置失败", "Failed to update download optimization"), String(error), "error");
+        return { ok: false as const, error: error instanceof Error ? error : new Error(String(error)), restore: await appServices.settings.get().catch(() => null) };
+      } finally { setSaving(false); }
+    }, ["steam_cdn_enabled"]);
+  };
 
   const setAutostart = (enabled: boolean): Promise<void> => {
     // Optimistically mirror the backend semantics: disabling autostart also
@@ -881,6 +898,10 @@ export function SettingsPage({
           <SettingRow title={t("settings_wfp_repair")} description={wfpStatus || t("settings_wfp_repair_unknown")}>
             <Button icon={<ArrowSync20Regular />} onClick={inspectWfp}>{t("settings_wfp_repair_button")}</Button>
           </SettingRow>
+          <SettingRow title={text("Steam 下载节点优选（实验性）", "Steam CDN optimization (experimental)")} description={text("系统代理和 TUN 通用。按网卡验证节点并从真实下载学习；开关立即作用于新连接，已建立连接继续传输。", "Works in proxy and TUN modes. Validates CDN nodes per adapter and learns from real downloads. Changes apply to new connections; existing transfers continue.")}>
+            <SettingSwitch checked={settings.steam_cdn_enabled ?? false} disabled={saving || loading} onChange={setSteamCDNEnabled} />
+          </SettingRow>
+          <SteamCDNPanel enabled={settings.steam_cdn_enabled ?? false} saving={saving} />
           <SettingRow title={t("blocked_enable")} description={t("blocked_enable_hint")}>
             <SettingSwitch checked={settings.blocked_domain_bypass} onChange={(checked) => patchAndSave({ blocked_domain_bypass: checked })} />
           </SettingRow>

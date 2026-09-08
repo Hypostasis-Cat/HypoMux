@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -780,6 +781,9 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 		})
 		return EngineSnapshot{}, err
 	}
+	if settings.SteamCDNEnabled && !slices.Contains(hello.Capabilities, "steam_cdn.configure") {
+		return EngineSnapshot{}, errors.New("当前 Core 不支持 Steam 下载优选，请更新核心或关闭此功能")
+	}
 	s.recordStartStage("core_connected", map[string]any{
 		"version": hello.EngineVersion, "elevated": hello.Elevated,
 		"launcher": hello.Launcher, "fallback": hello.Fallback,
@@ -808,6 +812,7 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 			"cache_ttl_ms": 60000, "query_timeout_ms": 4000,
 		},
 		"adapters":                engineAdapters(selected),
+		"steam_cdn_enabled":       settings.SteamCDNEnabled,
 		"domain_isolation":        settings.BlockedDomainBypass,
 		"domain_isolation_expiry": settings.BlockedDomainExpiry,
 	}

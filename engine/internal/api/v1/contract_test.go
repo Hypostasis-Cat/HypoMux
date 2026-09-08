@@ -197,6 +197,11 @@ func decodeRequestParams(t *testing.T, request protocol.Request) {
 	t.Helper()
 	var target any
 	switch request.Method {
+	case MethodSteamCDNConfigure:
+		target = &struct {
+			Enabled *bool `json:"enabled"`
+			Reset   bool  `json:"reset"`
+		}{}
 	case MethodEngineStart:
 		target = &EngineStartParams{}
 	case MethodEngineTelemetry:
@@ -237,6 +242,8 @@ func decodeResult(t *testing.T, method string, payload json.RawMessage) {
 		target = &HelloResult{}
 	case MethodEngineStatus:
 		target = &StatusResult{}
+	case MethodSteamCDNConfigure:
+		target = &proxy.SteamCDNStatus{}
 	case MethodEngineStart:
 		target = &EngineStartResult{}
 	case MethodEngineStop:

@@ -21,6 +21,7 @@ const (
 )
 
 type AppSettings struct {
+	SteamCDNEnabled     bool                  `json:"steam_cdn_enabled"`
 	Mode                string                `json:"mode"`
 	Language            string                `json:"language"`
 	SOCKSPort           int                   `json:"socks_port"`

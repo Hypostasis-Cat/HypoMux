@@ -71,6 +71,11 @@ func (s *Server) handleSOCKS(reader *bufio.Reader, client net.Conn, session *con
 		_ = upstream.Close()
 		return nil
 	}
+	cdnHost := host
+	if net.ParseIP(host) != nil && session.channel != ChannelDirect && s.cdn.active() {
+		cdnHost = sniffSteamHost(reader, client, strconv.Itoa(port))
+	}
+	upstream = s.prepareSteamCDN(session, upstream, adapter, cdnHost, strconv.Itoa(port))
 	s.relay(reader, client, upstream, session)
 	return &adapter
 }

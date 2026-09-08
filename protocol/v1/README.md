@@ -1,5 +1,21 @@
 # HypoMux engine protocol v1
 
+## Optional Steam CDN optimization
+
+`engine.start.steam_cdn_enabled` defaults to false in both `proxy` and
+`tun_tcp_pool` modes. `engine.telemetry.steam_cdn` reports the runtime state,
+verified per-adapter candidates, observed rates, replacements and dial fallbacks.
+
+Check `engine.hello.capabilities` for `steam_cdn.configure` before using it.
+Its optional `enabled` boolean changes the running pool; `reset: true` clears
+learning. Omit `enabled` and use `reset: false` for a read-only snapshot.
+Disabling cancels discovery and clears learning; existing streams continue.
+With no pool, it returns an inactive empty snapshot and does not start an engine.
+Preference persistence belongs to the desktop. DNS results additionally expose
+optional `addresses` while retaining the existing `address` field semantics.
+
+See [implementation plan and validation](../../docs/steam-cdn-optimization.md).
+
 This directory is the language-neutral contract shared by the Go engine and
 the production Wails desktop client.
 
