@@ -134,10 +134,14 @@ type HostPrivilegeCompatibility struct {
 }
 
 type telemetrySample struct {
-	at       time.Time
-	down     int64
-	up       int64
-	adapters map[string][2]int64
+	startedAt    time.Time
+	at           time.Time
+	down         int64
+	up           int64
+	adapters     map[string][2]int64
+	downloadBPS  float64
+	uploadBPS    float64
+	adapterRates map[string][2]float64
 }
 
 type EngineService struct {
@@ -426,28 +430,18 @@ func (s *EngineService) Snapshot() (EngineSnapshot, error) {
 	snapshot.Connections = telemetry.Total.Connections
 	snapshot.SessionBytes = telemetry.Total.BytesDown + telemetry.Total.BytesUp
 	s.mu.Lock()
-	elapsed := telemetry.SampledAt.Sub(s.last.at).Seconds()
-	if elapsed > 0 && elapsed < 30 {
-		snapshot.DownloadBPS = float64(max64(0, telemetry.Total.BytesDown-s.last.down)) / elapsed
-		snapshot.UploadBPS = float64(max64(0, telemetry.Total.BytesUp-s.last.up)) / elapsed
-	}
-	current := telemetrySample{
-		at: telemetry.SampledAt, down: telemetry.Total.BytesDown, up: telemetry.Total.BytesUp,
-		adapters: map[string][2]int64{},
-	}
+	s.last.update(telemetry)
+	snapshot.DownloadBPS = s.last.downloadBPS
+	snapshot.UploadBPS = s.last.uploadBPS
 	for _, item := range telemetry.Adapters {
 		runtime := AdapterRuntime{
 			ID: item.Name, Connections: item.Connections, BytesDown: item.BytesDown,
 			BytesUp: item.BytesUp, HealthState: item.HealthState,
 		}
-		if previous, ok := s.last.adapters[item.Name]; ok && elapsed > 0 && elapsed < 30 {
-			runtime.DownloadBPS = float64(max64(0, item.BytesDown-previous[0])) / elapsed
-			runtime.UploadBPS = float64(max64(0, item.BytesUp-previous[1])) / elapsed
-		}
-		current.adapters[item.Name] = [2]int64{item.BytesDown, item.BytesUp}
+		rates := s.last.adapterRates[item.Name]
+		runtime.DownloadBPS, runtime.UploadBPS = rates[0], rates[1]
 		snapshot.Adapters = append(snapshot.Adapters, runtime)
 	}
-	s.last = current
 	performanceNow := time.Now()
 	shouldLogPerformance := shouldRecordPerformance(
 		performanceNow,
