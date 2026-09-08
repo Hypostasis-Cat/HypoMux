@@ -36,6 +36,7 @@ const renderAdapter = (disabled = false) => {
   const onSelectedChange = vi.fn();
   render(
     <NetworkAdapterItem
+      weighted={true}
       adapter={adapter}
       percentage={100}
       disabled={disabled}

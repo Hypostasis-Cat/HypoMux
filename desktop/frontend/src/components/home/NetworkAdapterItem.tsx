@@ -22,6 +22,7 @@ const formatRate = (bytesPerSecond: number) => {
 export function NetworkAdapterItem({
   adapter,
   percentage,
+  weighted,
   disabled,
   onOpenConnections,
   onSelectedChange,
@@ -29,6 +30,7 @@ export function NetworkAdapterItem({
 }: {
   adapter: HomeAdapter;
   percentage: number;
+  weighted: boolean;
   disabled: boolean;
   onOpenConnections: () => void;
   onSelectedChange: (checked: boolean) => void;
@@ -95,9 +97,10 @@ export function NetworkAdapterItem({
       </div>
 
       <div className="adapter-weight" onClick={(event) => event.stopPropagation()}>
+        {weighted ? <>
         <div>
           <span>{t("home_bw_column")}</span>
-          <strong>{percentage}% {text("份额", "share")}</strong>
+          <strong>{percentage}% {text("新连接占比", "of new connections")}</strong>
         </div>
         <Tooltip content={`${t("home_bw_column_hint")}${text("（可用 ↑↓ 键调整）", " (Use ↑↓ keys to adjust)")}`} relationship="description">
           <Input
@@ -147,6 +150,10 @@ export function NetworkAdapterItem({
             }}
           />
         </Tooltip>
+        </> : <div>
+          <span>{text("自动分配连接", "Automatic connection distribution")}</span>
+          <span>{text("无需设置权重", "No weights needed")}</span>
+        </div>}
       </div>
     </article>
   );

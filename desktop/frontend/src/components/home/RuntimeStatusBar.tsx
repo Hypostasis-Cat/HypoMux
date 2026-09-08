@@ -1,3 +1,4 @@
+import { getSchedulingStrategy } from "./schedulingStrategies";
 import { Button } from "@fluentui/react-components";
 import {
   AppsListDetail20Regular,
@@ -67,7 +68,7 @@ export function RuntimeStatusBar({
       />
       <StatusItem icon={<PlugConnected20Regular />} label={t("home_metric_connections")} value={connections} />
       <StatusItem icon={<DataUsage20Regular />} label={text("会话流量", "Session traffic")} value={sessionTraffic} />
-      <StatusItem icon={<ArrowRouting20Regular />} label={text("调度策略", "Scheduling")} value={weighted ? text("动态加权", "Weighted") : text("轮询", "Round-robin")} />
+      <StatusItem icon={<ArrowRouting20Regular />} label={text("调度策略", "Scheduling")} value={getSchedulingStrategy(weighted).label[locale === "en" ? "en" : "zh"]} />
       <Button appearance="primary" size="small" icon={<AppsListDetail20Regular />} onClick={onOpenConnections}>
         {text("活动连接", "Connections")}
       </Button>

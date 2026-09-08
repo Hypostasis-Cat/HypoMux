@@ -213,8 +213,9 @@ export function HomePage({
             <NetworkAdapterItem
               key={adapter.id}
               adapter={adapter}
+              weighted={engine.weighted}
               percentage={adapter.selected ? Math.round((adapter.weight / engine.totalWeight) * 100) || 0 : 0}
-              disabled={engine.transitioning || engine.phase === "running"}
+              disabled={engine.transitioning || engine.phase === "running" || engine.phase === "degraded"}
               onOpenConnections={() => onNavigate?.("connections", adapter.name)}
               onSelectedChange={(checked) => engine.toggleAdapter(adapter.id, checked)}
               onWeightChange={(value) => engine.updateWeight(adapter.id, value)}

@@ -1173,6 +1173,7 @@ svg {
 
 .engine-control-row {
   display: flex;
+  flex-wrap: nowrap;
   width: fit-content;
   min-height: 40px;
   margin-top: 13px;
@@ -1180,14 +1181,41 @@ svg {
   gap: 14px;
 }
 
-.weighted-switch {
+.scheduling-selector {
+  display: flex;
   flex: 0 0 auto;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
 }
 
-.weighted-switch .fui-Switch__label {
-  min-width: 68px;
+.scheduling-selector label {
   color: var(--hm-text-secondary);
   font-size: 12px;
+}
+
+.scheduling-selector .scheduling-dropdown {
+  width: 132px;
+  min-width: 132px;
+  max-width: 132px;
+  min-height: 32px;
+}
+
+.scheduling-dropdown .fui-Dropdown__button {
+  min-height: 30px;
+  height: 30px;
+  padding: 5px 8px;
+  column-gap: 4px;
+  white-space: nowrap;
+}
+
+.scheduling-hint {
+  max-width: 410px;
+  margin: 8px 0 0;
+  color: var(--hm-text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .throughput-display {

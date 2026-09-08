@@ -1,4 +1,6 @@
-import { Badge, Button, Spinner, Switch, Tab, TabList } from "@fluentui/react-components";
+import { useId } from "react";
+import { getSchedulingStrategy, schedulingStrategies } from "./schedulingStrategies";
+import { Badge, Button, Spinner, Dropdown, Option, Tab, TabList } from "@fluentui/react-components";
 import {
   Navigation20Regular,
   Play20Filled,
@@ -45,6 +47,10 @@ export function EngineHero({
 }) {
   const { locale, t } = useI18n();
   const text = (zh: string, en: string) => locale === "en" ? en : zh;
+  const strategyId = useId();
+  const strategyHintId = useId();
+  const strategy = getSchedulingStrategy(weighted);
+  const language = locale === "en" ? "en" : "zh";
   const active = phase === "running" || phase === "degraded" || phase === "starting";
   const actionLabel = phase === "starting"
     ? text("正在启动", "Starting")
@@ -117,14 +123,30 @@ export function EngineHero({
           >
             <span key={phase} className="engine-action-label motion-inline-swap">{actionLabel}</span>
           </Button>
-          <Switch
-            className="weighted-switch"
-            checked={weighted}
-            disabled={transitioning || phase === "running" || phase === "degraded"}
-            onChange={(_, data) => onWeightedChange(data.checked)}
-            label={weighted ? text("权重调度", "Weighted") : text("轮询调度", "Round-robin")}
-          />
+          <div className="scheduling-selector">
+            <label htmlFor={strategyId}>{text("调度策略", "Scheduling strategy")}</label>
+            <Dropdown
+              className="scheduling-dropdown"
+              id={strategyId}
+              aria-describedby={strategyHintId}
+              value={strategy.label[language]}
+              selectedOptions={[strategy.id]}
+              disabled={transitioning || active}
+              onOptionSelect={(_, data) => {
+                const next = schedulingStrategies.find((item) => item.id === data.optionValue);
+                if (next) onWeightedChange(next.weighted);
+              }}
+            >
+              {schedulingStrategies.map((item) => (
+                <Option key={item.id} value={item.id}>{item.label[language]}</Option>
+              ))}
+            </Dropdown>
+          </div>
         </div>
+        <p id={strategyHintId} className="scheduling-hint">
+          {strategy.description[language]}
+          {(transitioning || active) && <> {text("停止聚合后可切换策略。", "Stop aggregation to change strategy.")}</>}
+        </p>
       </div>
       <ThroughputDisplay download={download} upload={upload} connections={connections} history={history} active={active} />
     </GlassSurface>

@@ -101,6 +101,32 @@ describe("HomePage adapter interactions", () => {
     vi.clearAllMocks();
   });
 
+  it("switches strategies and only exposes weights for weighted scheduling", () => {
+    const state = engineState();
+    mocks.useEngineState.mockReturnValue(state);
+    const { rerender } = renderPage(<HomePage />);
+    const selector = screen.getByRole("combobox", { name: "Scheduling strategy" });
+    expect(selector.textContent).toContain("Maximum speed first");
+    expect(screen.queryByRole("textbox", { name: "Ethernet Weight" })).toBeNull();
+    fireEvent.click(selector);
+    fireEvent.click(screen.getByRole("option", { name: "Schedule by weight" }));
+    expect(state.setWeighted).toHaveBeenLastCalledWith(true);
+    mocks.useEngineState.mockReturnValue({ ...state, weighted: true });
+    rerender(<HomePage />);
+    expect((screen.getByRole("textbox", { name: "Ethernet Weight" }) as HTMLInputElement).value).toBe("3");
+    fireEvent.click(screen.getByRole("button", { name: "Increase Ethernet Weight" }));
+    expect(state.updateWeight).toHaveBeenCalledWith("Ethernet", 4);
+    fireEvent.click(selector);
+    fireEvent.click(screen.getByRole("option", { name: "Maximum speed first" }));
+    expect(state.setWeighted).toHaveBeenLastCalledWith(false);
+  });
+
+  it.each(["starting", "running", "degraded", "stopping"])("locks the strategy while %s", (phase) => {
+    mocks.useEngineState.mockReturnValue({ ...engineState(), phase, transitioning: phase === "starting" || phase === "stopping" });
+    renderPage(<HomePage />);
+    expect((screen.getByRole("combobox", { name: "Scheduling strategy" }) as HTMLSelectElement).disabled).toBe(true);
+  });
+
   it("explains hidden adapters and keeps the shared runtime list complete", () => {
     const virtual = { ...adapter, id: "vmware", name: "VMware", is_virtual: true };
     mocks.useEngineState.mockReturnValue({ ...engineState(), adapters: [virtual], selected: [virtual], visibleAdapters: [], hiddenAdapterCount: 1, hiddenSelectedCount: 1 });
@@ -144,6 +170,7 @@ describe("HomePage adapter interactions", () => {
   });
 
   it("keeps adapter controls from triggering connection navigation", () => {
+    mocks.useEngineState.mockReturnValue({ ...engineState(), weighted: true });
     const onNavigate = vi.fn();
     renderPage(<HomePage onNavigate={onNavigate} />);
 
