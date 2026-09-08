@@ -31,6 +31,7 @@ import { appServices, type AdapterView, type CompleteAppSettings, type ConfigMig
 import { SettingsSaveQueue, type SaveOutcome } from "../platform/settingsQueue";
 import { adapterListKey } from "../state/adapterRuntime";
 import { SYSTEM_PROXY_TAKEOVER_EVENT } from "../state/systemProxyTakeover";
+import { ADAPTER_VISIBILITY_EVENT } from "../state/adapterVisibility";
 import { accentColours } from "../theme/appearance.presets";
 import { useAppearance } from "../theme/appearance.store";
 import { backgroundService } from "../theme/background.service";
@@ -50,6 +51,7 @@ const emptySettings: CompleteAppSettings = {
   blocked_domain_bypass: false,
   blocked_domain_expiry: true,
   close_to_tray: false,
+  hide_virtual_adapters: true,
   autostart: false,
   auto_start_engine: false,
   dns_server: "223.5.5.5",
@@ -297,6 +299,12 @@ export function SettingsPage({
       detail: settings.system_proxy_takeover,
     }));
   }, [settings.system_proxy_takeover]);
+
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent(ADAPTER_VISIBILITY_EVENT, {
+      detail: settings.hide_virtual_adapters ?? true,
+    }));
+  }, [settings.hide_virtual_adapters]);
 
   const enqueueSave = <T,>(operation: () => Promise<SaveOutcome<T, CompleteAppSettings>>, fields: string[] | null): Promise<T> =>
     saveQueue.enqueue(operation, fields).catch((error) => {
@@ -735,6 +743,13 @@ export function SettingsPage({
                 void patchAndSave({ language: nextLocale }, t("settings_lang_saved"));
               }}
             />
+          </SettingRow>
+          <SettingRow title={text("首页隐藏虚拟网卡", "Hide virtual adapters on Home")} description={text(
+            "默认隐藏 VMware、Hyper-V 等虚拟网卡。关闭后显示全部网卡；已有网卡选择保持不变。",
+            "Hide virtual adapters such as VMware and Hyper-V by default. Turn off to show all adapters. Existing selections are preserved.",
+          )}>
+            <SettingSwitch checked={settings.hide_virtual_adapters ?? true} disabled={loading || saving}
+              onChange={(checked) => patchAndSave({ hide_virtual_adapters: checked })} />
           </SettingRow>
           <SettingRow title={t("settings_close_behavior")} description={text(
             "关闭主窗口时隐藏到托盘，或直接退出并恢复运行状态",

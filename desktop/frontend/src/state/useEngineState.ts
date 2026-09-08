@@ -13,6 +13,7 @@ import { adapterSaveInput, adapterSaveQueue } from "../platform/adapterSaveQueue
 import { startSerialPoll } from "../platform/serialPoll";
 import { adapterListKey } from "./adapterRuntime";
 import { SYSTEM_PROXY_TAKEOVER_EVENT } from "./systemProxyTakeover";
+import { ADAPTER_VISIBILITY_EVENT, selectVisibleAdapters, visibleHomeAdapters } from "./adapterVisibility";
 
 export type EnginePhase = "stopped" | "starting" | "running" | "degraded" | "stopping" | "failed";
 export type EngineMode = "proxy" | "tun";
@@ -163,6 +164,7 @@ export function useEngineState(
   const [preview, setPreview] = useState(false);
   const [ports, setPorts] = useState({ socks: 10800, http: 10801 });
   const [systemProxyTakeover, setSystemProxyTakeover] = useState(true);
+  const [hideVirtualAdapters, setHideVirtualAdapters] = useState(true);
   const [history, setHistory] = useState<number[]>(Array.from({ length: 18 }, () => 0));
   const [diagnostics, setDiagnostics] = useState<DiagnosticResult[]>([]);
   const mounted = useRef(true);
@@ -263,6 +265,7 @@ export function useEngineState(
       weightedRef.current = settings.weighted;
       setPorts({ socks: settings.socks_port, http: settings.http_port });
       setSystemProxyTakeover(settings.system_proxy_takeover);
+      setHideVirtualAdapters(settings.hide_virtual_adapters ?? true);
       setPreview(false);
     } catch (error) {
       if (showError) {
@@ -318,6 +321,15 @@ export function useEngineState(
     return () => window.removeEventListener(SYSTEM_PROXY_TAKEOVER_EVENT, handleTakeoverChange);
   }, []);
 
+  useEffect(() => {
+    const onVisibilityChange = (event: Event) => {
+      const enabled = (event as CustomEvent<boolean>).detail;
+      if (typeof enabled === "boolean") setHideVirtualAdapters(enabled);
+    };
+    window.addEventListener(ADAPTER_VISIBILITY_EVENT, onVisibilityChange);
+    return () => window.removeEventListener(ADAPTER_VISIBILITY_EVENT, onVisibilityChange);
+  }, []);
+
   const persistAdapters = useCallback((next: AdapterView[], nextMode = modeRef.current, nextWeighted = weightedRef.current) => {
     adaptersRef.current = next;
     setAdapters(next);
@@ -358,8 +370,8 @@ export function useEngineState(
   }, [persistAdapters]);
 
   const selectAll = useCallback((checked: boolean) => {
-    void persistAdapters(adaptersRef.current.map((adapter) => ({ ...adapter, selected: checked })));
-  }, [persistAdapters]);
+    void persistAdapters(selectVisibleAdapters(adaptersRef.current, hideVirtualAdapters, checked));
+  }, [persistAdapters, hideVirtualAdapters]);
 
   const refreshAdapters = useCallback(async () => {
     setRefreshing(true);
@@ -491,16 +503,20 @@ export function useEngineState(
         bytesDown: runtime?.bytes_down ?? 0,
         bytesUp: runtime?.bytes_up ?? 0,
         health: diagnosticHealth ?? healthValue(runtime?.health_state),
-        latencyMS: diagnostic?.avg_latency_ms,
-        jitterMS: diagnostic?.jitter_ms,
-        lossRate: diagnostic?.loss_rate,
+        latencyMS: diagnostic && diagnostic.received > 0 ? diagnostic.avg_latency_ms : undefined,
+        jitterMS: diagnostic && diagnostic.received > 1 ? diagnostic.jitter_ms : undefined,
+        lossRate: diagnostic && diagnostic.sent > 0 && diagnostic.loss_rate >= 0 ? diagnostic.loss_rate : undefined,
       };
     }),
     [adapters, diagnosticByID, runtimeByID],
   );
   const totalWeight = selected.reduce((sum, adapter) => sum + adapter.weight, 0);
+  const visibleAdapters = useMemo(() => visibleHomeAdapters(homeAdapters, hideVirtualAdapters), [homeAdapters, hideVirtualAdapters]);
 
   return {
+    visibleAdapters,
+    hiddenAdapterCount: homeAdapters.length - visibleAdapters.length,
+    hiddenSelectedCount: hideVirtualAdapters ? selected.filter((adapter) => adapter.is_virtual).length : 0,
     phase, mode, weighted, adapters: homeAdapters, selected, totalWeight, history,
     loading, refreshing, preview, transitioning: transition,
     coreConnected: snapshot.core_connected, coreVersion: snapshot.core_version ?? "—",

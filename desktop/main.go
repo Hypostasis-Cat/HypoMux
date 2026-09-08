@@ -123,7 +123,7 @@ func main() {
 			"HypoMux - 配置加载失败",
 			fmt.Sprintf(
 				"无法安全加载设置文件：\n%s\n\n%v\n\n为避免覆盖现有配置，HypoMux 已停止启动。请备份并修复或重命名该文件后重试。",
-				settingsService.ConfigPath(),
+				settingsService.StartupErrorPath(),
 				err,
 			),
 		)

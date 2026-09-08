@@ -669,6 +669,9 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 	if len(selected) == 0 {
 		return EngineSnapshot{}, errors.New("请至少选择一张活动网卡")
 	}
+	if err := validateAdapterSources(selected); err != nil {
+		return EngineSnapshot{}, err
+	}
 	routingRules := []RoutingRule{}
 	compatibility := compatibilityPlan{}
 	dnsEgress := tunDNSEgressDecision{}

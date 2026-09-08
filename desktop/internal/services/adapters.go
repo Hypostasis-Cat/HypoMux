@@ -24,6 +24,7 @@ type AdapterView struct {
 	Weight       int      `json:"weight"`
 	Kind         string   `json:"kind"`
 	Operational  bool     `json:"operational"`
+	IsVirtual    bool     `json:"is_virtual,omitempty"`
 }
 
 type AdapterService struct {
@@ -98,6 +99,9 @@ func (s *AdapterService) List() ([]AdapterView, error) {
 		if !hasDetails {
 			details = adapterMetadata{Metric: -1, AutoMetric: true}
 		}
+		if details.Description != "" {
+			description = details.Description
+		}
 		result = append(result, AdapterView{
 			ID:           id,
 			Name:         item.Name,
@@ -115,6 +119,7 @@ func (s *AdapterService) List() ([]AdapterView, error) {
 			Weight:       weight,
 			Kind:         kind,
 			Operational:  true,
+			IsVirtual:    isVirtualAdapter(item.Name, description),
 		})
 	}
 	sort.SliceStable(result, func(i, j int) bool {
@@ -128,6 +133,43 @@ func (s *AdapterService) List() ([]AdapterView, error) {
 
 func isHypoMuxManagedAdapter(name string) bool {
 	return strings.EqualFold(strings.TrimSpace(name), "HypoMux-Tun")
+}
+
+// Use driver descriptions as well as aliases: Windows users can rename a
+// VMware/Hyper-V interface to an ordinary Ethernet name. This is a display
+// classification, never a reason to remove an interface from the engine.
+func isVirtualAdapter(name, description string) bool {
+	value := strings.ToLower(name + " " + description)
+	for _, marker := range []string{
+		"vmware", "vmnet", "hyper-v", "hyperv", "vethernet", "virtualbox", "vbox",
+		"virtual ethernet", "virtual adapter", "virtual network", "virtual nic",
+		"wintun", "wireguard", "tailscale", "zerotier", "tap-windows", "tap-win32",
+		"vpn client adapter", "docker", "wsl", "loopback adapter", "虚拟",
+	} {
+		if strings.Contains(value, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+// Validate before starting either mode; the core still enforces this invariant.
+func validateAdapterSources(adapters []AdapterView) error {
+	seen := make(map[string]AdapterView)
+	for _, adapter := range adapters {
+		for _, address := range []string{adapter.Address, adapter.SourceIPv6} {
+			ip := net.ParseIP(strings.TrimSpace(address))
+			if ip == nil {
+				continue
+			}
+			key := ip.String()
+			if previous, exists := seen[key]; exists {
+				return fmt.Errorf("%s（接口 %d）与 %s（接口 %d）使用相同的源 IP %s，无法同时参与聚合。请先只选择其中一张网卡；若 Windows 显示的地址不同，请重新扫描网卡并导出支持日志", previous.Name, previous.IfIndex, adapter.Name, adapter.IfIndex, key)
+			}
+			seen[key] = adapter
+		}
+	}
+	return nil
 }
 
 func (s *AdapterService) Refresh() ([]AdapterView, error) {

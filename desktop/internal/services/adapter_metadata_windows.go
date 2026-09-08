@@ -52,8 +52,9 @@ func adapterPlatformMetadata() map[int]adapterMetadata {
 			continue
 		}
 		details := adapterMetadata{
-			Metric:     int(current.Ipv4Metric),
-			AutoMetric: true,
+			Description: windows.UTF16PtrToString(current.Description),
+			Metric:      int(current.Ipv4Metric),
+			AutoMetric:  true,
 		}
 		for gateway := current.FirstGatewayAddress; gateway != nil; gateway = gateway.Next {
 			if ip := gateway.Address.IP(); ip != nil {

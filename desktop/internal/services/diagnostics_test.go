@@ -65,11 +65,22 @@ func TestDiagnosticsUsesBoundTCPAsAuthoritativeResult(t *testing.T) {
 		t.Fatalf("unexpected snapshot: %+v", snapshot)
 	}
 	result := snapshot.Results[0]
-	if result.Status != "available" || result.LossRate != 0 || result.AvgLatencyMS != 42 || result.JitterMS != 140 {
+	if result.Status != "available" || result.LossRate != 20 || result.AvgLatencyMS != 42 || result.JitterMS != 140 {
 		t.Fatalf("v2.2.0 result semantics changed: %+v", result)
 	}
 	if len(result.Checks) != 4 || result.Checks[1].Level != "pass" {
 		t.Fatalf("configuration checks missing: %+v", result.Checks)
+	}
+}
+
+func TestTCPFailureDoesNotInventICMPLoss(t *testing.T) {
+	service := newTestDiagnostics(t, &fakeDiagnosticProbe{
+		icmp:  icmpProbeResult{Status: "available", Sent: 5, Received: 5, LossRate: 0},
+		tcpOK: false, tcpDetail: "bind failed",
+	})
+	result := service.runAdapter(context.Background(), AdapterView{})
+	if result.Status != "unavailable" || result.LossRate != 0 {
+		t.Fatalf("TCP status overwrote ICMP measurements: %+v", result)
 	}
 }
 

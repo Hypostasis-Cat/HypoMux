@@ -7,7 +7,7 @@ import * as TunService from "../../bindings/github.com/Hypostasis-Cat/HypoMux/de
 import { Call } from "@wailsio/runtime";
 import type {
   AppSettings,
-  AdapterView,
+  AdapterView as GeneratedAdapterView,
   DiagnosticResult,
   DiagnosticSnapshot,
   EngineSnapshot,
@@ -23,7 +23,6 @@ import type {
 } from "../../bindings/github.com/Hypostasis-Cat/HypoMux/desktop/internal/services/models";
 
 export type {
-  AdapterView,
   DiagnosticResult,
   DiagnosticSnapshot,
   EngineSnapshot,
@@ -38,7 +37,10 @@ export type {
   TunPreflightSnapshot,
 };
 
+export type AdapterView = GeneratedAdapterView & { is_virtual?: boolean };
+
 export type CompleteAppSettings = AppSettings & {
+  hide_virtual_adapters?: boolean;
   tun_stack: string;
   language: "zh" | "en";
   force_tun_connectivity_bypass: boolean;

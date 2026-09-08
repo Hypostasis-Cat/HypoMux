@@ -147,6 +147,9 @@ func (s *TunService) evaluateSelected(selected []AdapterView, reusableForStartup
 		snapshot.SelectedAdapterIDs = append(snapshot.SelectedAdapterIDs, adapter.ID)
 	}
 	sort.Strings(snapshot.SelectedAdapterIDs)
+	if err := validateAdapterSources(selected); err != nil {
+		snapshot.Issues = append(snapshot.Issues, tunBlocker("duplicate_source_ip", "所选网卡源 IP 重复", err.Error()))
+	}
 	if len(selected) == 0 {
 		snapshot.Issues = append(snapshot.Issues, tunBlocker(
 			"no_adapter", "未选择活动网卡", "请至少选择一张具有有效 IPv4 地址的活动网卡。",
@@ -195,17 +198,17 @@ func (s *TunService) evaluateSelected(selected []AdapterView, reusableForStartup
 		}
 	}
 	if platform.RouteScanError != "" {
-		snapshot.Issues = append(snapshot.Issues, tunWarning(
-			"route_scan_failed", "未能完成默认路由检查", platform.RouteScanError,
+		snapshot.Issues = append(snapshot.Issues, tunInfo(
+			"route_scan_failed", "部分网络检查未完成", platform.RouteScanError+"；检查未完成不代表网络存在冲突，已完成的检查结果仍然有效。",
 		))
 	}
 	for _, detail := range snapshot.NetworkRisks {
 		if strings.TrimSpace(detail) == "" {
 			continue
 		}
-		snapshot.Issues = append(snapshot.Issues, tunWarning(
-			"foreign_network_risk", "检测到第三方网络接管风险",
-			detail+"；HypoMux 仅提供只读诊断，不会修改第三方网络设置。",
+		snapshot.Issues = append(snapshot.Issues, tunInfo(
+			"foreign_network_risk", "检测到虚拟网络或网络共享环境",
+			detail+"；此信息不代表已发生网络接管冲突，无需仅因此关闭虚拟网卡或共享服务。",
 		))
 	}
 	if settings.StrictRoute && !platform.WFPReady {

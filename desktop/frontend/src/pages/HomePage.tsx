@@ -155,12 +155,12 @@ export function HomePage({
             <h1 id="network-section-title">{text("网络适配器", "Network adapters")}</h1>
           </div>
           <div className="network-section-actions">
-            <span>{engine.selected.length} / {engine.adapters.length} {text("已启用", "enabled")}</span>
+            <span>{engine.visibleAdapters.filter((adapter) => adapter.selected).length} / {engine.visibleAdapters.length} {text("已启用", "enabled")}</span>
             <Button
               size="small"
               appearance="subtle"
               icon={<CheckmarkCircle20Regular />}
-              disabled={engine.loading || engine.transitioning || engine.adapters.length === 0}
+              disabled={engine.loading || engine.transitioning || engine.visibleAdapters.length === 0}
               onClick={() => engine.selectAll(true)}
             >
               {t("home_select_all")}
@@ -169,7 +169,7 @@ export function HomePage({
               size="small"
               appearance="subtle"
               icon={<Dismiss20Regular />}
-              disabled={engine.loading || engine.transitioning || engine.selected.length === 0}
+              disabled={engine.loading || engine.transitioning || !engine.visibleAdapters.some((adapter) => adapter.selected)}
               onClick={() => engine.selectAll(false)}
             >
               {t("home_deselect_all")}
@@ -185,13 +185,23 @@ export function HomePage({
             </Button>
           </div>
         </div>
+        {engine.hiddenAdapterCount > 0 && (
+          <p className="section-kicker">
+            {text(
+              `已隐藏 ${engine.hiddenAdapterCount} 张虚拟网卡${engine.hiddenSelectedCount ? `，其中 ${engine.hiddenSelectedCount} 张已选中` : ""}。可在设置中关闭“首页隐藏虚拟网卡”以显示。`,
+              `${engine.hiddenAdapterCount} virtual adapter(s) hidden${engine.hiddenSelectedCount ? `, including ${engine.hiddenSelectedCount} selected` : ""}. Turn off “Hide virtual adapters on Home” in Settings to show them.`,
+            )}
+          </p>
+        )}
         <div className="network-adapter-list">
           {engine.loading ? (
             <div className="adapter-empty hm-card"><Spinner label={text("正在扫描活动网络适配器", "Scanning active network adapters")} /></div>
-          ) : engine.adapters.length === 0 ? (
+          ) : engine.visibleAdapters.length === 0 ? (
             <div className="adapter-empty hm-card">
-              <strong>{text("未发现可参与聚合的活动网卡", "No active adapters can participate in aggregation")}</strong>
-              <span>{text(
+              <strong>{engine.hiddenAdapterCount > 0
+                ? text("当前活动网卡均已隐藏", "All active adapters are hidden")
+                : text("未发现可参与聚合的活动网卡", "No active adapters can participate in aggregation")}</strong>
+              <span>{engine.hiddenAdapterCount > 0 ? text("请在设置中关闭“首页隐藏虚拟网卡”以查看和选择。", "Turn off “Hide virtual adapters on Home” in Settings to view and select adapters.") : text(
                 "请检查网卡是否已连接并具有可用 IPv4 地址，然后重新扫描。",
                 "Check that an adapter is connected and has a usable IPv4 address, then scan again.",
               )}</span>
@@ -199,7 +209,7 @@ export function HomePage({
                 {t("home_refresh_tip")}
               </Button>
             </div>
-          ) : engine.adapters.map((adapter) => (
+          ) : engine.visibleAdapters.map((adapter) => (
             <NetworkAdapterItem
               key={adapter.id}
               adapter={adapter}

@@ -1,8 +1,9 @@
 package services
 
 type adapterMetadata struct {
-	Gateway    string
-	DNSServers []string
-	Metric     int
-	AutoMetric bool
+	Description string
+	Gateway     string
+	DNSServers  []string
+	Metric      int
+	AutoMetric  bool
 }

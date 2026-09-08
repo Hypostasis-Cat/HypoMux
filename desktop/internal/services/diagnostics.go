@@ -26,7 +26,7 @@ type DiagnosticResult struct {
 	Name           string            `json:"name"`
 	Address        string            `json:"address"`
 	Status         string            `json:"status"`
-	LossRate       int               `json:"loss_rate"`
+	LossRate       int               `json:"loss_rate"` // -1 means no valid ICMP loss measurement.
 	AvgLatencyMS   int               `json:"avg_latency_ms"`
 	JitterMS       int               `json:"jitter_ms"`
 	Sent           int               `json:"sent"`
@@ -419,10 +419,8 @@ func (s *DiagnosticsService) runAdapter(ctx context.Context, adapter AdapterView
 	// result. ICMP remains visible as latency/jitter evidence.
 	if tcpOK {
 		result.Status = "available"
-		result.LossRate = 0
 	} else {
 		result.Status = "unavailable"
-		result.LossRate = 100
 	}
 	result.Checks = buildDiagnosticChecks(adapter, result)
 	return result

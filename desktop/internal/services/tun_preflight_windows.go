@@ -3,9 +3,11 @@
 package services
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os/exec"
 	"strings"
 	"syscall"
@@ -16,7 +18,7 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-const tunPreflightPowerShellTimeout = 4 * time.Second
+const tunPreflightPowerShellTimeout = 8 * time.Second
 
 func inspectTunPlatform(checkWFP bool) tunPlatformSnapshot {
 	snapshot := tunPlatformSnapshot{
@@ -66,6 +68,13 @@ $ErrorActionPreference = 'Stop'
 $inspectionErrors = @()
 $aliases = @()
 $risks = @()
+function Write-InspectionSnapshot {
+  ConvertTo-Json -InputObject @{
+    aliases = @($aliases)
+    risks = @($risks)
+    errors = @($inspectionErrors)
+  } -Compress
+}
 try {
   $routePattern = 'meta|clash|mihomo|tun|wintun|wireguard|tailscale|vpn|tap'
   $aliases = @(Get-NetRoute -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' -ErrorAction Stop |
@@ -74,6 +83,7 @@ try {
 } catch {
   $inspectionErrors += ('默认路由检查失败：' + $_.Exception.Message)
 }
+Write-InspectionSnapshot
 try {
   $adapterPattern = '(?i)(tun|tap|wintun|wireguard|tailscale|vpn|virtual|vgate)'
   $adapters = @(Get-NetAdapter -ErrorAction Stop)
@@ -86,6 +96,7 @@ try {
 } catch {
   $inspectionErrors += ('虚拟网卡检查失败：' + $_.Exception.Message)
 }
+Write-InspectionSnapshot
 try {
   $forwarding = @(Get-NetIPInterface -AddressFamily IPv4 -ErrorAction Stop |
     Where-Object { $_.Forwarding -eq 'Enabled' -and $_.InterfaceAlias -ne 'HypoMux-Tun' })
@@ -95,6 +106,7 @@ try {
 } catch {
   $inspectionErrors += ('IPv4 转发检查失败：' + $_.Exception.Message)
 }
+Write-InspectionSnapshot
 try {
   $ics = Get-Service -Name SharedAccess -ErrorAction SilentlyContinue
   if ($null -ne $ics -and $ics.Status -eq 'Running') {
@@ -103,23 +115,41 @@ try {
 } catch {
   $inspectionErrors += ('网络共享检查失败：' + $_.Exception.Message)
 }
-ConvertTo-Json -InputObject @{
-  aliases = @($aliases)
-  risks = @($risks)
-  errors = @($inspectionErrors)
-} -Compress
+Write-InspectionSnapshot
 `
 	output, err := runPreflightPowerShell(script)
-	if err != nil {
-		return []string{}, []string{}, fmt.Sprintf("网络接管风险检查失败：%v", err)
-	}
-	var payload struct {
+	return decodeNetworkInspection(output, err)
+}
+
+// Each completed section publishes a snapshot, so a later timeout cannot
+// erase an already detected default-route conflict.
+func decodeNetworkInspection(output []byte, inspectionErr error) ([]string, []string, string) {
+	type inspectionPayload struct {
 		Aliases []string `json:"aliases"`
 		Risks   []string `json:"risks"`
 		Errors  []string `json:"errors"`
 	}
-	if err := json.Unmarshal(output, &payload); err != nil {
-		return []string{}, []string{}, fmt.Sprintf("网络接管风险检查结果无效：%v", err)
+	var payload inspectionPayload
+	completed := false
+	decoder := json.NewDecoder(bytes.NewReader(output))
+	for {
+		var next inspectionPayload
+		err := decoder.Decode(&next)
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			inspectionErr = fmt.Errorf("网络检查结果不完整：%v；执行状态：%v", err, inspectionErr)
+			break
+		}
+		payload = next
+		completed = true
+	}
+	if !completed && inspectionErr == nil {
+		inspectionErr = fmt.Errorf("网络检查未返回结果")
+	}
+	if inspectionErr != nil {
+		payload.Errors = append(payload.Errors, fmt.Sprintf("网络检查未完成：%v", inspectionErr))
 	}
 	aliases := make([]string, 0, len(payload.Aliases))
 	seen := map[string]struct{}{}
@@ -173,7 +203,7 @@ func runPreflightPowerShell(script string) ([]byte, error) {
 	configureBackgroundCommand(command)
 	output, err := command.Output()
 	if ctx.Err() != nil {
-		return nil, fmt.Errorf("PowerShell 网络检查超过 %s：%w", tunPreflightPowerShellTimeout, ctx.Err())
+		return output, fmt.Errorf("PowerShell 网络检查超过 %s：%w", tunPreflightPowerShellTimeout, ctx.Err())
 	}
 	return output, err
 }

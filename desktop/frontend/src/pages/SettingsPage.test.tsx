@@ -61,6 +61,14 @@ afterEach(() => {
 });
 
 describe("TUN settings", () => {
+  it("defaults to hiding virtual adapters and persists turning it off", async () => {
+    render(<SettingsPage adapterRuntime={[]} onOpenBlockedDomains={() => {}} />);
+    const toggle = await screen.findByRole("switch", { name: "Hide virtual adapters on Home" });
+    await waitFor(() => expect(toggle.hasAttribute("disabled")).toBe(false));
+    expect((toggle as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(toggle);
+    await waitFor(() => expect(mocks.update).toHaveBeenCalledWith(expect.objectContaining({ hide_virtual_adapters: false })));
+  });
   it.each([
     ["Mixed (hybrid)", "mixed"],
     ["gVisor (userspace)", "gvisor"],

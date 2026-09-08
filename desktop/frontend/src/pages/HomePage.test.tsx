@@ -63,6 +63,9 @@ const engineState = () => ({
   weighted: false,
   systemProxyTakeover: true,
   adapters: [adapter],
+  visibleAdapters: [adapter],
+  hiddenAdapterCount: 0,
+  hiddenSelectedCount: 0,
   selected: [adapter],
   totalWeight: adapter.weight,
   history: Array.from({ length: 18 }, () => 0),
@@ -98,6 +101,18 @@ describe("HomePage adapter interactions", () => {
     vi.clearAllMocks();
   });
 
+  it("explains hidden adapters and keeps the shared runtime list complete", () => {
+    const virtual = { ...adapter, id: "vmware", name: "VMware", is_virtual: true };
+    mocks.useEngineState.mockReturnValue({ ...engineState(), adapters: [virtual], selected: [virtual], visibleAdapters: [], hiddenAdapterCount: 1, hiddenSelectedCount: 1 });
+    const onAdapterRuntimeChange = vi.fn();
+    renderPage(<HomePage onAdapterRuntimeChange={onAdapterRuntimeChange} />);
+    expect(screen.getByText("All active adapters are hidden")).toBeTruthy();
+    expect(screen.getByText(/1 virtual adapter\(s\) hidden, including 1 selected/)).toBeTruthy();
+    expect(screen.queryByRole("article")).toBeNull();
+    expect((screen.getByRole("button", { name: "Select all" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(onAdapterRuntimeChange).toHaveBeenCalledWith([virtual]);
+  });
+
   it("opens active connections for the clicked adapter", () => {
     const onNavigate = vi.fn();
     renderPage(<HomePage onNavigate={onNavigate} />);
@@ -113,6 +128,7 @@ describe("HomePage adapter interactions", () => {
     const inactiveEngine = {
       ...engineState(),
       adapters: [inactiveAdapter],
+      visibleAdapters: [inactiveAdapter],
       selected: [],
       totalWeight: 0,
     };

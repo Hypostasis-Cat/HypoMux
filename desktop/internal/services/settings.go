@@ -34,6 +34,7 @@ type AppSettings struct {
 	BlockedDomainBypass bool                  `json:"blocked_domain_bypass"`
 	BlockedDomainExpiry bool                  `json:"blocked_domain_expiry"`
 	CloseToTray         bool                  `json:"close_to_tray"`
+	HideVirtualAdapters bool                  `json:"hide_virtual_adapters"`
 	Autostart           bool                  `json:"autostart"`
 	AutoStartEngine     bool                  `json:"auto_start_engine"`
 	DNSServer           string                `json:"dns_server"`
@@ -62,6 +63,7 @@ func DefaultSettings() AppSettings {
 		TUNStack:            "system",
 		BlockedDomainExpiry: true,
 		CloseToTray:         false,
+		HideVirtualAdapters: true,
 		DNSServer:           "223.5.5.5",
 		DNSPolicy:           "auto",
 		DNSEgressMode:       DNSEgressAuto,
@@ -76,6 +78,7 @@ type SettingsService struct {
 	settings         AppSettings
 	migration        ConfigMigrationStatus
 	loadErr          error
+	loadErrorPath    string
 	setAutostart     func(bool) error
 	autostartEnabled func() (bool, error)
 }
@@ -110,6 +113,16 @@ func (s *SettingsService) StartupError() error {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.loadErr
+}
+
+// StartupErrorPath identifies the input that actually failed, including legacy migration.
+func (s *SettingsService) StartupErrorPath() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.loadErrorPath != "" {
+		return s.loadErrorPath
+	}
+	return s.path
 }
 
 func settingsDirectory() string {
@@ -205,6 +218,9 @@ func (s *SettingsService) RollbackLegacyMigration() (AppSettings, error) {
 		}
 		if _, exists := storedFields["system_proxy_takeover"]; !exists {
 			restored.SystemProxyTakeover = DefaultSettings().SystemProxyTakeover
+		}
+		if _, exists := storedFields["hide_virtual_adapters"]; !exists {
+			restored.HideVirtualAdapters = true
 		}
 		if restored.DNSEgressMode == "" {
 			restored.DNSEgressMode = DNSEgressAuto
@@ -355,7 +371,8 @@ func (s *SettingsService) reload() error {
 		}
 		migrated, migrationErr := migrateLegacySettings(legacyData)
 		if migrationErr != nil {
-			return migrationErr
+			s.loadErrorPath = legacyPath
+			return fmt.Errorf("旧配置迁移未完成，原文件未修改；可修复下述配置，或备份并重命名此旧文件后使用默认设置启动：%w", migrationErr)
 		}
 		if err := s.commitLocked(migrated); err != nil {
 			return err
@@ -383,6 +400,9 @@ func (s *SettingsService) reload() error {
 	// versions while still allowing an explicitly persisted false value.
 	if _, exists := storedFields["system_proxy_takeover"]; !exists {
 		loaded.SystemProxyTakeover = defaults.SystemProxyTakeover
+	}
+	if _, exists := storedFields["hide_virtual_adapters"]; !exists {
+		loaded.HideVirtualAdapters = defaults.HideVirtualAdapters
 	}
 	if loaded.Mode != "proxy" && loaded.Mode != "tun" {
 		loaded.Mode = defaults.Mode
@@ -554,7 +574,7 @@ func validateSettings(value AppSettings) error {
 		return errors.New("HTTP 端口必须在 1–65534 之间")
 	}
 	if value.SOCKSPort == value.HTTPPort {
-		return errors.New("SOCKS5 与 HTTP 端口不能相同")
+		return fmt.Errorf("SOCKS5 与 HTTP 端口不能相同（socks_port=%d，http_port=%d）；请将两个端口设为不同值，例如 10800 和 10801", value.SOCKSPort, value.HTTPPort)
 	}
 	ip := net.ParseIP(value.DNSServer)
 	if ip == nil || ip.To4() == nil {

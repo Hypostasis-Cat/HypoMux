@@ -15,4 +15,5 @@ export const adapterListKey = (items: readonly AdapterView[]) => JSON.stringify(
   weight: item.weight,
   kind: item.kind,
   operational: item.operational,
+  isVirtual: item.is_virtual,
 })));

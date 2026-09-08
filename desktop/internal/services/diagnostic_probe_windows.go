@@ -53,11 +53,11 @@ func (windowsDiagnosticProbe) ICMP(ctx context.Context, source string, target st
 	sourceIP := net.ParseIP(source).To4()
 	targetIP := net.ParseIP(target).To4()
 	if sourceIP == nil || targetIP == nil {
-		return icmpProbeResult{Status: "unavailable", LossRate: 100, Note: "invalid IPv4 address"}
+		return icmpProbeResult{Status: "unavailable", LossRate: -1, Note: "invalid IPv4 address"}
 	}
 	handle, _, _ := icmpCreateFileProc.Call()
 	if handle == 0 || handle == ^uintptr(0) {
-		return icmpProbeResult{Status: "unavailable", LossRate: 100, Note: "IcmpCreateFile failed"}
+		return icmpProbeResult{Status: "unavailable", LossRate: -1, Note: "IcmpCreateFile failed"}
 	}
 	defer icmpCloseHandleProc.Call(handle)
 
@@ -65,6 +65,7 @@ func (windowsDiagnosticProbe) ICMP(ctx context.Context, source string, target st
 	reply := make([]byte, int(unsafe.Sizeof(icmpEchoReply{}))+len(payload)+16)
 	var rtts []int
 	bindFailed := false
+	note := ""
 	for index := 0; index < diagnosticProbeCount; index++ {
 		select {
 		case <-ctx.Done():
@@ -83,16 +84,21 @@ func (windowsDiagnosticProbe) ICMP(ctx context.Context, source string, target st
 			if response.Status == 0 {
 				rtts = append(rtts, int(response.RoundTripTime))
 			}
-		} else if errno, ok := callErr.(syscall.Errno); ok && (errno == 1231 || errno == 1214) {
-			bindFailed = true
+		} else if errno, ok := callErr.(syscall.Errno); ok {
+			note = fmt.Sprintf("ICMP failed (WinError %d): %s", uint32(errno), errno.Error())
+			// Timeouts represent unanswered probes; other API failures do not
+			// establish that a packet was sent and must not become packet loss.
+			if errno != 11010 {
+				bindFailed = true
+			}
 		}
 	}
-	return summarizeICMP(rtts, diagnosticProbeCount, bindFailed, "")
+	return summarizeICMP(rtts, diagnosticProbeCount, bindFailed, note)
 }
 
 func summarizeICMP(rtts []int, sent int, bindFailed bool, note string) icmpProbeResult {
 	if sent <= 0 {
-		return icmpProbeResult{Status: "unavailable", LossRate: 100, Note: note}
+		return icmpProbeResult{Status: "unavailable", LossRate: -1, Note: note}
 	}
 	received, total, minimum, maximum := len(rtts), 0, 0, 0
 	for index, value := range rtts {
@@ -117,7 +123,7 @@ func summarizeICMP(rtts []int, sent int, bindFailed bool, note string) icmpProbe
 		status = "unstable"
 	}
 	if bindFailed {
-		note = "source bind failed (WinError 1231)"
+		loss = -1
 	}
 	return icmpProbeResult{
 		Status: status, LossRate: loss, AvgLatencyMS: average, JitterMS: jitter,

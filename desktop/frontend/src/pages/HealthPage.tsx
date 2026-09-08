@@ -534,9 +534,9 @@ export function HealthPage({
                   <div><strong>{result.name}</strong><span>{result.address} → {result.target_ip}</span></div>
                 </div>
                 <div className="health-metrics">
-                  <span><small>{text("丢包", "Loss")}</small><strong>{result.loss_rate}%</strong></span>
-                  <span><small>{text("平均延迟", "Average latency")}</small><strong>{result.avg_latency_ms} ms</strong></span>
-                  <span><small>{text("抖动", "Jitter")}</small><strong>{result.jitter_ms} ms</strong></span>
+                  <span><small>{text("ICMP 丢包", "ICMP loss")}</small><strong>{result.sent > 0 && result.loss_rate >= 0 ? `${result.loss_rate}%` : "—"}</strong></span>
+                  <span><small>{text("平均延迟", "Average latency")}</small><strong>{result.received > 0 ? `${result.avg_latency_ms} ms` : "—"}</strong></span>
+                  <span><small>{text("抖动", "Jitter")}</small><strong>{result.received > 1 ? `${result.jitter_ms} ms` : "—"}</strong></span>
                 </div>
                 <div className="health-result-summary">
                   <strong>{meta.description}</strong>
