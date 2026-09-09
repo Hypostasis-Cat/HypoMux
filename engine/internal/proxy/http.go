@@ -29,6 +29,11 @@ func (s *Server) handleHTTP(reader *bufio.Reader, client net.Conn, session *conn
 		return nil
 	}
 	upstream = s.prepareSteamCDN(session, upstream, adapter, request.host, strconv.Itoa(request.port), steamChunkPath(request.forwardHeader))
+	session.cdnObserver = s.newSteamObserver(session)
+	defer session.cdnObserver.close()
+	if !request.connect {
+		session.cdnObserver.feed(true, request.forwardHeader)
+	}
 	if request.connect {
 		if _, err := client.Write([]byte("HTTP/1.1 200 Connection Established\r\nProxy-Agent: HypoMux\r\n\r\n")); err != nil {
 			_ = upstream.Close()

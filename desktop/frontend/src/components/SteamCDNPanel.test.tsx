@@ -22,4 +22,17 @@ describe("Steam diagnostics", () => {
     expect(await screen.findByText(/Optimization is inactive/)).toBeTruthy();
     expect(screen.getByRole("button", { name: "Re-evaluate nodes" }).hasAttribute("disabled")).toBe(true);
   });
+  it("distinguishes original observation from a verified candidate and shows totals", async () => {
+    mocks.status.mockResolvedValue({ available: true, enabled: true, recognized: 8, probing: 0, replacements: 1, effective_replacements: 1, fallbacks: 0, stage_counts: { http_signed_eligible: 4, verified: 1 }, entries: [
+      { adapter: "Ethernet", domain: "xz.sycontroller.com", port: "80", ip: "1.2.3.4", validated: false, preferred: false, active_connections: 2, total_bps: 20971520, download_bps: 1024, samples: 99, cooldown_until: "0001-01-01T00:00:00Z", expires_at: "2099-01-01T00:00:00Z" },
+      { adapter: "Ethernet", domain: "xz.sycontroller.com", port: "80", ip: "5.6.7.8", validated: true, preferred: false, active_connections: 0, total_bps: 0, samples: 0, cooldown_until: "0001-01-01T00:00:00Z", expires_at: "2099-01-01T00:00:00Z" },
+    ] });
+    render(<SteamCDNPanel enabled saving={false} />);
+    expect(await screen.findByText("Original node · observation only")).toBeTruthy();
+    expect(screen.getByText("Verified candidate")).toBeTruthy();
+    expect(screen.getByText("20.00 MiB/s")).toBeTruthy();
+    expect(screen.getByText(/1 connections switched · 1 transferred data/)).toBeTruthy();
+    expect(screen.getByText("Eligible chunk requests: 4 · Candidate validations passed: 1")).toBeTruthy();
+  });
+
 });

@@ -52,10 +52,11 @@ export type CompleteAppSettings = AppSettings & {
 };
 
 export type SteamCDNStatus = {
+ stage_counts?: Record<string,number>; effective_replacements?: number;
  recognized?: number;
  diagnostics?: Array<{domain: string; adapter: string; ip: string; stage: string; at: string}>;
  available: boolean; enabled: boolean; probing: number; replacements: number; fallbacks: number;
- entries: Array<{adapter: string; domain: string; port: string; ip: string; download_bps: number; samples: number; selections: number; cooldown_until: string; expires_at: string}>;
+ entries: Array<{validated?: boolean; preferred?: boolean; total_bps?: number; active_connections?: number; successful_connections?: number; effective_bytes?: number; adapter: string; domain: string; port: string; ip: string; download_bps: number; samples: number; selections: number; cooldown_until: string; expires_at: string}>;
 };
 
 export type BlockedDomainEntry = {

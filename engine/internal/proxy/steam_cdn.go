@@ -30,6 +30,17 @@ func (s *Server) ConfigureSteamCDN(enabled *bool, reset bool) SteamCDNStatus {
 }
 
 type SteamCDNEntry struct {
+	EffectiveBytes        uint64 `json:"effective_bytes"`
+	SuccessfulConnections uint64 `json:"successful_connections"`
+	Preferred             bool   `json:"preferred"`
+	advantageWindows      int
+	lastScoreWindow       int64
+	lastSample            time.Time
+	scoredSamples         uint64
+	Validated             bool    `json:"validated"`
+	TotalBPS              float64 `json:"total_bps"`
+	ActiveConnections     int     `json:"active_connections"`
+
 	Adapter       string    `json:"adapter"`
 	Domain        string    `json:"domain"`
 	Port          string    `json:"port"`
@@ -50,6 +61,9 @@ type SteamCDNDiagnostic struct {
 }
 
 type SteamCDNStatus struct {
+	StageCounts           map[string]uint64 `json:"stage_counts"`
+	EffectiveReplacements uint64            `json:"effective_replacements"`
+
 	Recognized   uint64               `json:"recognized"`
 	Diagnostics  []SteamCDNDiagnostic `json:"diagnostics"`
 	Enabled      bool                 `json:"enabled"`
@@ -68,6 +82,14 @@ type cdnCandidate struct {
 // All mutable learning state belongs to one engine run. A generation prevents
 // cancelled probes and old connections from repopulating a reset/disabled pool.
 type steamCDN struct {
+	observers                   int
+	traffic                     map[cdnKey]*cdnTraffic
+	decisions                   map[string]uint64
+	stageCounts                 map[string]uint64
+	effective                   uint64
+	budgetAt                    time.Time
+	budgetBytes, budgetAttempts int
+
 	recognized              uint64
 	diagnostics             []SteamCDNDiagnostic
 	mu                      sync.Mutex
@@ -102,6 +124,10 @@ func (c *steamCDN) configure(enabled, reset bool) {
 	c.enabled = enabled
 	c.generation++
 	c.entries = make(map[cdnKey]*SteamCDNEntry)
+	c.traffic = make(map[cdnKey]*cdnTraffic)
+	c.decisions = make(map[string]uint64)
+	c.stageCounts = make(map[string]uint64)
+	c.effective = 0
 	c.discovery = make(map[string]time.Time)
 	c.probing = 0
 	c.recognized = 0
@@ -141,7 +167,7 @@ func steamDownloadHost(host string) bool {
 		host == "cdn-ws.content.steamchina.com" ||
 		host == "cdn-qc.content.steamchina.com" ||
 		host == "cdn-ali.content.steamchina.com" ||
-		host == "xz.pphimalayanrt.com" || host == "st.dl.eccdnx.com" || host == "dl.steam.clngaa.com"
+		host == "xz.sycontroller.com" || host == "gstore.val.manlaxy.com" || host == "xz.pphimalayanrt.com" || host == "st.dl.eccdnx.com" || host == "dl.steam.clngaa.com"
 }
 
 func publicCDNIP(value string) bool {
@@ -161,6 +187,14 @@ func (c *steamCDN) pruneLocked() {
 	for key, entry := range c.entries {
 		if !entry.ExpiresAt.After(now) {
 			delete(c.entries, key)
+			if t := c.traffic[key]; t == nil || t.active == 0 && t.trials == 0 {
+				delete(c.traffic, key)
+			}
+		}
+	}
+	for key, t := range c.traffic {
+		if c.entries[key] == nil && t.active == 0 && t.trials == 0 {
+			delete(c.traffic, key)
 		}
 	}
 	for key, expiry := range c.discovery {
@@ -180,10 +214,25 @@ func (c *steamCDN) snapshot() SteamCDNStatus {
 	c.pruneLocked()
 	result.Enabled, result.Probing = c.enabled, c.probing
 	result.Recognized = c.recognized
+	result.EffectiveReplacements = c.effective
+	result.StageCounts = make(map[string]uint64, len(c.stageCounts))
+	for k, v := range c.stageCounts {
+		result.StageCounts[k] = v
+	}
 	result.Diagnostics = append([]SteamCDNDiagnostic(nil), c.diagnostics...)
 	result.Replacements, result.Fallbacks = c.replacements, c.fallbacks
-	for _, entry := range c.entries {
-		result.Entries = append(result.Entries, *entry)
+	for key, entry := range c.entries {
+		copyEntry := *entry
+		if traffic := c.traffic[key]; traffic != nil {
+			copyEntry.ActiveConnections = traffic.active
+			sec := c.now().Unix()
+			for _, slot := range traffic.slots {
+				if sec-slot.second >= 0 && sec-slot.second < 5 {
+					copyEntry.TotalBPS += float64(slot.bytes) / 5
+				}
+			}
+		}
+		result.Entries = append(result.Entries, copyEntry)
 	}
 	sort.Slice(result.Entries, func(i, j int) bool {
 		a, b := result.Entries[i], result.Entries[j]
@@ -253,6 +302,7 @@ func (c *steamCDN) observe(key cdnKey, generation uint64, bytes uint64, elapsed 
 		entry.DownloadBPS = entry.DownloadBPS*0.75 + bps*0.25
 	}
 	entry.Samples++
+	entry.lastSample = c.now()
 }
 
 func (c *steamCDN) outcome(key cdnKey, generation uint64, success bool) {
@@ -282,7 +332,7 @@ func (s *Server) discoverSteamCDN(host, port string, paths ...string) {
 	if len(paths) > 0 {
 		path = paths[0]
 	}
-	if port == "80" && !steamChunkPattern.MatchString(path) {
+	if port == "80" && !validSteamProbeURI(host, path) {
 		c.mu.Lock()
 		generation := c.generation
 		c.mu.Unlock()
@@ -366,8 +416,9 @@ func (s *Server) probeSteamCandidates(ctx context.Context, generation uint64, ho
 				entryKey := cdnKey{adapter.Name, host, port, candidate.ip}
 				if old := c.entries[entryKey]; old != nil {
 					old.ExpiresAt = candidate.expires
+					old.Validated = true
 				} else {
-					c.entries[entryKey] = &SteamCDNEntry{Adapter: adapter.Name, Domain: host, Port: port, IP: candidate.ip, ExpiresAt: candidate.expires}
+					c.entries[entryKey] = &SteamCDNEntry{Adapter: adapter.Name, Domain: host, Port: port, IP: candidate.ip, Validated: true, ExpiresAt: candidate.expires}
 				}
 				if expiry := c.discovery[key]; candidate.expires.After(expiry) {
 					c.discovery[key] = candidate.expires
@@ -471,12 +522,21 @@ func (s *Server) prepareSteamCDN(session *connection, original net.Conn, adapter
 	}
 	s.cdn.mu.Unlock()
 	s.cdn.note(generationNow, host, adapter.Name, originalIP, "recognized")
-	s.discoverSteamCDN(host, port, paths...)
-	if port == "80" && (len(paths) == 0 || !steamChunkPattern.MatchString(paths[0])) {
+	if port == "443" {
+		s.discoverSteamCDN(host, port)
+	}
+	if port == "80" && (len(paths) == 0 || !validSteamProbeURI(host, paths[0])) {
 		session.cdnKey, session.cdnGeneration = key, generationNow
 		return original
 	}
-	ip, generation := s.cdn.choose(adapter.Name, host, port)
+	ip, generation := s.cdn.useTrial(adapter.Name, host, port, originalIP)
+	if ip != "" {
+		defer func() {
+			if !session.cdnTrial {
+				s.cdn.releaseTrial(cdnKey{adapter.Name, host, port, ip}, generation)
+			}
+		}()
+	}
 	actualIP := originalIP
 	if ip != "" && ip != originalIP {
 		key := cdnKey{adapter.Name, host, port, ip}
@@ -505,6 +565,7 @@ func (s *Server) prepareSteamCDN(session *connection, original net.Conn, adapter
 			if usable {
 				_ = original.Close()
 				original, actualIP = replacement, ip
+				session.cdnTrial = true
 				s.cdn.outcome(key, generation, true)
 			} else {
 				_ = replacement.Close()

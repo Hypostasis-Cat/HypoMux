@@ -5,9 +5,11 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -20,13 +22,11 @@ var steamChunkPattern = regexp.MustCompile(`^/depot/[0-9]+/chunk/[a-fA-F0-9]{40}
 // may be replayed as bounded probes. Never forward application headers.
 func steamChunkPath(header []byte) string {
 	req, err := http.ReadRequest(bufio.NewReader(bytes.NewReader(header)))
-	if err != nil || req.Method != "GET" || req.ContentLength > 0 || len(req.TransferEncoding) > 0 || req.Header.Get("Authorization") != "" || req.Header.Get("Cookie") != "" {
+	if err != nil {
 		return ""
 	}
-	if req.URL.RawQuery != "" || req.URL.RawPath != "" || !steamChunkPattern.MatchString(req.URL.Path) {
-		return ""
-	}
-	return req.URL.Path
+	uri, _ := steamRequestURI(req)
+	return uri
 }
 func peekSteamChunkPath(reader *bufio.Reader) string {
 	n := min(reader.Buffered(), steamSniffLimit)
@@ -37,8 +37,43 @@ func peekSteamChunkPath(reader *bufio.Reader) string {
 	return ""
 }
 func (s *Server) probeSteamHTTP(ctx context.Context, adapter Adapter, host, ip, path string) ([]byte, error) {
-	if !steamDownloadHost(host) || !publicCDNIP(ip) || !steamChunkPattern.MatchString(path) {
+	return s.probeSteamHTTPRange(ctx, adapter, host, ip, path, 4096, 0)
+}
+func steamProbeReason(err error) string {
+	if err == nil {
+		return "verified"
+	}
+	switch err.Error() {
+	case "http_budget", "http_signature_rejected", "http_range_unsupported", "http_redirect_observed":
+		return err.Error()
+	}
+	return "http_probe_failed"
+}
+func (s *Server) probeSteamHTTPRange(ctx context.Context, adapter Adapter, host, ip, path string, size int, totalExpected int64) ([]byte, error) {
+	if !steamDownloadHost(host) || !publicCDNIP(ip) || !validSteamProbeURI(host, path) || size < 1 || size > 4096 {
 		return nil, errors.New("invalid probe scope")
+	}
+	if ctx.Err() != nil {
+		return nil, errors.New("http_probe_cancelled")
+	}
+	if s.cdn != nil {
+		c := s.cdn
+		c.mu.Lock()
+		now := c.now()
+		if now.Sub(c.budgetAt) >= time.Minute {
+			c.budgetAt = now
+			c.budgetBytes = 0
+			c.budgetAttempts = 0
+		}
+		allowed := c.enabled && c.budgetBytes+size+1 <= 256*1024 && c.budgetAttempts < 64
+		if allowed {
+			c.budgetBytes += size + 1
+			c.budgetAttempts++
+		}
+		c.mu.Unlock()
+		if !allowed {
+			return nil, errors.New("http_budget")
+		}
 	}
 	ctx, cancel := context.WithTimeout(ctx, 1500*time.Millisecond)
 	defer cancel()
@@ -56,26 +91,33 @@ func (s *Server) probeSteamHTTP(ctx context.Context, adapter Adapter, host, ip, 
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Range", "bytes=0-4095")
+	req.Header.Set("Range", fmt.Sprintf("bytes=0-%d", size-1))
 	req.Header.Set("Accept-Encoding", "identity")
 	response, err := client.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, errors.New("http_probe_failed")
 	}
 	defer response.Body.Close()
+	if response.StatusCode == 401 || response.StatusCode == 403 {
+		return nil, errors.New("http_signature_rejected")
+	}
+	if response.StatusCode >= 300 && response.StatusCode < 400 {
+		return nil, errors.New("http_redirect_observed")
+	}
 	if response.StatusCode != http.StatusPartialContent || response.Header.Get("Content-Encoding") != "" {
-		return nil, errors.New("range unsupported or invalid response")
+		return nil, errors.New("http_range_unsupported")
 	}
 	if response.Header.Get("Content-Range") == "" {
 		return nil, errors.New("missing content range")
 	}
 	// Require an exact 4 KiB prefix; short chunks simply retain original routing.
-	total, parseErr := strconv.ParseUint(strings.TrimPrefix(response.Header.Get("Content-Range"), "bytes 0-4095/"), 10, 64)
-	if !strings.HasPrefix(response.Header.Get("Content-Range"), "bytes 0-4095/") || parseErr != nil || total < 4096 {
+	rangePrefix := fmt.Sprintf("bytes 0-%d/", size-1)
+	total, parseErr := strconv.ParseUint(strings.TrimPrefix(response.Header.Get("Content-Range"), rangePrefix), 10, 64)
+	if !strings.HasPrefix(response.Header.Get("Content-Range"), rangePrefix) || parseErr != nil || total < uint64(size) || totalExpected > 0 && total != uint64(totalExpected) {
 		return nil, errors.New("unexpected range")
 	}
-	data, err := io.ReadAll(io.LimitReader(response.Body, 4097))
-	if err != nil || len(data) != 4096 {
+	data, err := io.ReadAll(io.LimitReader(response.Body, int64(size+1)))
+	if err != nil || len(data) != size {
 		return nil, errors.New("invalid body length")
 	}
 	return data, nil
@@ -87,6 +129,7 @@ func (c *steamCDN) note(generation uint64, host, adapter, ip, stage string) {
 		return
 	}
 	now := c.now()
+	c.stageCounts[stage]++
 	for _, previous := range c.diagnostics {
 		if previous.Domain == host && previous.Adapter == adapter && previous.IP == ip && previous.Stage == stage && now.Sub(previous.At) < 30*time.Second {
 			return
@@ -96,4 +139,13 @@ func (c *steamCDN) note(generation uint64, host, adapter, ip, stage string) {
 		c.diagnostics = c.diagnostics[1:]
 	}
 	c.diagnostics = append(c.diagnostics, SteamCDNDiagnostic{Domain: host, Adapter: adapter, IP: ip, Stage: stage, At: now})
+}
+
+func validSteamProbeURI(host, uri string) bool {
+	u, e := url.ParseRequestURI(uri)
+	if e != nil || u.IsAbs() || u.Host != "" {
+		return false
+	}
+	value, _ := steamRequestURI(&http.Request{Method: "GET", Host: host, URL: u, Header: make(http.Header)})
+	return value != ""
 }

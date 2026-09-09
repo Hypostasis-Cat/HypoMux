@@ -63,7 +63,7 @@ func sniffSteamHost(reader *bufio.Reader, client net.Conn, port string) string {
 			},
 		})
 		_ = parser.Handshake()
-	} else if port == "80" && (first[0] == 'G' || first[0] == 'H') {
+	} else if port == "80" && (first[0] >= 'A' && first[0] <= 'Z') {
 		for n := 1; n <= steamSniffLimit; {
 			data, peekErr := reader.Peek(n)
 			if peekErr != nil {
@@ -71,7 +71,7 @@ func sniffSteamHost(reader *bufio.Reader, client net.Conn, port string) string {
 			}
 			if end := bytes.Index(data, []byte("\r\n\r\n")); end >= 0 {
 				request, parseErr := http.ReadRequest(bufio.NewReader(bytes.NewReader(data[:end+4])))
-				if parseErr == nil && (request.Method == "GET" || request.Method == "HEAD") {
+				if parseErr == nil && request.Method != "CONNECT" {
 					host = request.Host
 					if strings.Contains(host, ":") {
 						var explicitPort string

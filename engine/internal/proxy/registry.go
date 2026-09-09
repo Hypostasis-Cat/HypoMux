@@ -73,15 +73,18 @@ type adapterCounters struct {
 }
 
 type connection struct {
-	cdnKey        cdnKey
-	cdnGeneration uint64
-	id            uint64
-	protocol      string
-	channel       string
-	client        string
-	listener      string
-	startedAt     time.Time
-	clientConn    net.Conn
+	cdnResponseFailed bool
+	cdnTrial          bool
+	cdnObserver       *steamHTTPObserver
+	cdnKey            cdnKey
+	cdnGeneration     uint64
+	id                uint64
+	protocol          string
+	channel           string
+	client            string
+	listener          string
+	startedAt         time.Time
+	clientConn        net.Conn
 
 	mu        sync.RWMutex
 	upstream  net.Conn

@@ -8,6 +8,13 @@ import (
 )
 
 type SteamCDNEntry struct {
+	Validated             bool    `json:"validated"`
+	Preferred             bool    `json:"preferred"`
+	TotalBPS              float64 `json:"total_bps"`
+	ActiveConnections     int     `json:"active_connections"`
+	SuccessfulConnections uint64  `json:"successful_connections"`
+	EffectiveBytes        uint64  `json:"effective_bytes"`
+
 	Adapter       string    `json:"adapter"`
 	Domain        string    `json:"domain"`
 	Port          string    `json:"port"`
@@ -27,6 +34,9 @@ type SteamCDNDiagnostic struct {
 	At      time.Time `json:"at"`
 }
 type SteamCDNStatus struct {
+	StageCounts           map[string]uint64 `json:"stage_counts"`
+	EffectiveReplacements uint64            `json:"effective_replacements"`
+
 	Recognized   uint64               `json:"recognized"`
 	Diagnostics  []SteamCDNDiagnostic `json:"diagnostics"`
 	Available    bool                 `json:"available"`

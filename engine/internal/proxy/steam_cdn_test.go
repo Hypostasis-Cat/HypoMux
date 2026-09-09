@@ -29,8 +29,10 @@ func seedCDN(c *steamCDN, adapter, port, ip string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.entries[cdnKey{adapter, testSteamHost, port, ip}] = &SteamCDNEntry{
-		Adapter: adapter, Domain: testSteamHost, Port: port, IP: ip, ExpiresAt: time.Now().Add(time.Minute),
+		Adapter: adapter, Domain: testSteamHost, Port: port, IP: ip, Validated: true, ExpiresAt: time.Now().Add(time.Minute),
 	}
+	// Exercise the next scheduled exploratory connection.
+	c.decisions[adapter+"/"+testSteamHost+":"+port] = 7
 	c.discovery[net.JoinHostPort(testSteamHost, port)] = time.Now().Add(time.Minute)
 }
 
@@ -195,7 +197,7 @@ func TestSteamSniffPreservesHTTPAndMalformedBytes(t *testing.T) {
 		{"GET / HTTP/1.1\r\nHost: " + testSteamHost + ":80\r\n\r\n", testSteamHost},
 		{"GET / HTTP/1.1\r\nHost: " + testSteamHost + ":81\r\n\r\n", ""},
 		{"GET / HTTP/1.1\r\nHost: " + testSteamHost + "\r\nHost: evil.test\r\n\r\n", ""},
-		{"POST / HTTP/1.1\r\nHost: " + testSteamHost + "\r\n\r\n", ""},
+		{"POST / HTTP/1.1\r\nHost: " + testSteamHost + "\r\n\r\n", testSteamHost},
 		{"GET / HTTP/1.1\r\nHost: example.com\r\n\r\n", ""},
 		{"garbage", ""},
 	} {

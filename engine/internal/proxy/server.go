@@ -379,6 +379,11 @@ func (s *Server) acceptLoop(listener net.Listener, protocol string, channel stri
 func (s *Server) handleClient(protocol string, client net.Conn, session *connection) {
 	defer s.wg.Done()
 	defer client.Close()
+	defer func() {
+		if session.cdnTrial {
+			s.cdn.releaseTrial(session.cdnKey, session.cdnGeneration)
+		}
+	}()
 	defer s.registry.Finish(session)
 
 	reader := bufio.NewReaderSize(client, 64*1024)
@@ -448,14 +453,26 @@ func (s *Server) dialDirectTCP(ctx context.Context, target string) (net.Conn, er
 }
 
 func (s *Server) relay(clientReader io.Reader, client net.Conn, upstream net.Conn, session *connection) {
+	if session.cdnObserver == nil {
+		session.cdnObserver = s.newSteamObserver(session)
+	}
+	defer session.cdnObserver.close()
+	if session.cdnKey.domain != "" {
+		s.cdn.trafficChange(session.cdnKey, session.cdnGeneration, 1, 0, false)
+		defer s.cdn.trafficChange(session.cdnKey, session.cdnGeneration, -1, 0, false)
+	}
 	var relay sync.WaitGroup
 	relay.Add(2)
 	go func() {
 		defer relay.Done()
 		pooled, buffer := acquireTCPRelayBuffer()
 		defer releaseTCPRelayBuffer(pooled)
+		var writer io.Writer = upstream
+		if session.cdnObserver != nil {
+			writer = steamObserverWriter{Writer: upstream, observer: session.cdnObserver, up: true}
+		}
 		_, _ = io.CopyBuffer(accountingWriter{
-			Writer: upstream,
+			Writer: writer,
 			add:    func(amount uint64) { s.registry.AddUp(session, amount) },
 		}, readerOnly{Reader: clientReader}, buffer)
 		closeWrite(upstream)
@@ -466,25 +483,50 @@ func (s *Server) relay(clientReader io.Reader, client net.Conn, upstream net.Con
 		defer releaseTCPRelayBuffer(pooled)
 		sampleAt := time.Now()
 		var sampleBytes uint64
+		effectiveRecorded := false
+		var transferBytes uint64
+		var blocked time.Duration
 		observe := func() {
 			if session.cdnKey.domain != "" {
-				s.cdn.observe(session.cdnKey, session.cdnGeneration, sampleBytes, time.Since(sampleAt))
+				if blocked < time.Since(sampleAt)/2 {
+					s.cdn.observe(session.cdnKey, session.cdnGeneration, sampleBytes, time.Since(sampleAt))
+				} else {
+					s.cdn.note(session.cdnGeneration, session.cdnKey.domain, session.cdnKey.adapter, session.cdnKey.ip, "client_backpressure")
+				}
+				blocked = 0
 			}
 			sampleAt, sampleBytes = time.Now(), 0
 		}
 		defer observe()
-		_, _ = io.CopyBuffer(accountingWriter{
-			Writer: client,
+		var writer io.Writer = client
+		if session.cdnKey.domain != "" {
+			writer = steamTimedWriter{Writer: steamObserverWriter{Writer: client, observer: session.cdnObserver}, blocked: &blocked}
+		}
+		_, copyErr := io.CopyBuffer(accountingWriter{
+			Writer: writer,
 			add: func(amount uint64) {
 				s.registry.AddDown(session, amount)
 				if session.cdnKey.domain != "" {
+					s.cdn.trafficChange(session.cdnKey, session.cdnGeneration, 0, amount, false)
 					sampleBytes += amount
+					transferBytes += amount
+					if session.cdnTrial && !effectiveRecorded && transferBytes >= 64*1024 {
+						s.cdn.mu.Lock()
+						if s.cdn.generation == session.cdnGeneration {
+							s.cdn.effective++
+						}
+						s.cdn.mu.Unlock()
+						effectiveRecorded = true
+					}
 					if time.Since(sampleAt) >= time.Second {
 						observe()
 					}
 				}
 			},
 		}, upstream, buffer)
+		if session.cdnKey.domain != "" {
+			s.cdn.finishTransfer(session.cdnKey, session.cdnGeneration, transferBytes, (copyErr != nil || session.cdnResponseFailed) && session.cdnTrial)
+		}
 		closeWrite(client)
 	}()
 	relay.Wait()
@@ -512,4 +554,19 @@ func closeWrite(connection net.Conn) {
 
 func listenAddress(host string, port int) string {
 	return net.JoinHostPort(host, strconv.Itoa(port))
+}
+
+type steamTimedWriter struct {
+	io.Writer
+	blocked *time.Duration
+}
+
+func (w steamTimedWriter) Write(p []byte) (int, error) {
+	start := time.Now()
+	n, e := w.Writer.Write(p)
+	elapsed := time.Since(start)
+	if elapsed > 20*time.Millisecond {
+		*w.blocked += elapsed
+	}
+	return n, e
 }
