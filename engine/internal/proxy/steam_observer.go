@@ -47,13 +47,18 @@ func steamRequestURI(req *http.Request) (string, string) {
 			if q.Get("auth_key") == "" {
 				return "", "http_query"
 			}
-			allowed = map[string]bool{"auth_key": true, "reqhost": true}
-		case "st.dl.eccdnx.com", "gstore.val.manlaxy.com":
+			allowed = map[string]bool{"auth_key": true, "reqhost": true, "reqaidabccty": true}
+		case "st.dl.eccdnx.com", "gstore.val.manlaxy.com", "gstore-y.bal.manlaxy.com":
 			allowed = map[string]bool{"expiration_time": true, "token": true}
+		case "dl.steam.clngaa.com", "dl1.steam.clngaa.com":
+			if q.Get("t") == "" || q.Get("k") == "" {
+				return "", "http_query"
+			}
+			allowed = map[string]bool{"t": true, "k": true, "rdkey": true}
 		default:
 			return "", "http_query"
 		}
-		if (q.Get("auth_key") == "" && len(q) != len(allowed)) || len(q) == 0 {
+		if (q.Get("auth_key") == "" && q.Get("t") == "" && len(q) != len(allowed)) || len(q) == 0 {
 			return "", "http_query"
 		}
 		for k, v := range q {
@@ -63,7 +68,11 @@ func steamRequestURI(req *http.Request) (string, string) {
 		}
 		// Allow only these observed content-token profiles; a server rejection
 		// is reported rather than assuming token reuse succeeds. Never normalize signed bytes.
-		if v := q.Get("expiration_time"); v != "" {
+		expiry := q.Get("expiration_time")
+		if q.Get("t") != "" {
+			expiry = q.Get("t")
+		}
+		if v := expiry; v != "" {
 			n, e := strconv.ParseInt(v, 10, 64)
 			if e != nil || n <= time.Now().Unix() {
 				return "", "http_signature_expired"
@@ -344,8 +353,16 @@ func (o *steamHTTPObserver) feed(up bool, p []byte) {
 			o.prefix = nil
 			if r.StatusCode >= 300 && r.StatusCode < 400 {
 				stage := "http_redirect_unsupported"
-				if u, e := url.Parse(r.Header.Get("Location")); e == nil && u.Scheme == "http" && steamDownloadHost(u.Hostname()) {
-					stage = "http_redirect_observed"
+				if u, e := url.Parse(r.Header.Get("Location")); e == nil {
+					if u.Scheme == "" && u.Host == "" {
+						stage = "http_redirect_observed"
+					} else if u.Scheme == "http" && (u.Port() == "" || u.Port() == "80") {
+						if publicCDNIP(u.Hostname()) {
+							stage = "http_redirect_ip"
+						} else if steamDownloadHost(u.Hostname()) {
+							stage = "http_redirect_observed"
+						}
+					}
 				}
 				o.note(stage)
 			}

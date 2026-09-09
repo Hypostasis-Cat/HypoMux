@@ -160,7 +160,7 @@ func (c *steamCDN) useTrial(adapter, host, port, original string) (string, uint6
 		window := c.now().Unix() / 5
 		if e.lastScoreWindow != window {
 			e.lastScoreWindow = window
-			if c.now().Sub(e.lastSample) < 10*time.Second && baseline != nil && c.now().Sub(baseline.lastSample) < 10*time.Second && e.Samples > e.scoredSamples && e.SuccessfulConnections >= 3 && e.EffectiveBytes >= 8*1024*1024 && baseline != nil && baseline.Samples >= 3 && baseline.DownloadBPS > 0 && e.DownloadBPS > baseline.DownloadBPS*1.15 {
+			if c.now().Sub(e.lastSample) < 10*time.Second && baseline != nil && c.now().Sub(baseline.lastSample) < 10*time.Second && e.Samples > e.scoredSamples && e.Samples >= 5 && e.EffectiveBytes >= 8*1024*1024 && baseline != nil && baseline.Samples >= 3 && baseline.DownloadBPS > 0 && e.DownloadBPS > baseline.DownloadBPS*1.15 {
 				e.advantageWindows++
 			} else {
 				e.advantageWindows = 0
@@ -219,7 +219,6 @@ func (c *steamCDN) finishTransfer(key cdnKey, gen uint64, amount uint64, failed 
 		return
 	}
 	if amount >= 64*1024 {
-		e.EffectiveBytes += amount
 		e.SuccessfulConnections++
 	}
 }

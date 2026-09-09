@@ -162,3 +162,15 @@ HTTP 代理、SOCKS 域名、TUN 的 SOCKS IP 入口共用：
 实现文件：steam_observer.go（分类及旁路 framing）、steam_observed_probe.go（原响应基准、预算接入、节点流量及试用）、steam_http_probe.go（有界 HTTP 范围校验）、steam_cdn.go（节点身份及状态），两种代理入口共用。
 
 本次验证：前端 25 文件 / 105 项测试及生产构建通过；桌面 Go 全量测试与 vet 通过；引擎 Go 测试及 vet 通过（排除此前在未修改基线也复现的 TestTUNTCPPoolRelaysLiteralIPv6WithBoundSource、TestSOCKSUDPRelaysLiteralIPv6WithStableFlow 两项本机 IPv6 环境失败）。真实 Steam 效果尚待用户测试。
+
+
+## 10. 实机反馈后的覆盖与长连接优化
+
+用户报告关闭时约 55 MB/s；第三版实机出现了候选切换及数据传输，但不同时间段的速度不能直接作为净收益结论。
+本次增加精确目标 dl1.steam.clngaa.com、gstore-y.bal.manlaxy.com，兼容 t+k（可带 rdkey）、expiration_time+token，以及原 xz 主机的可选 reqaidabccty。保留原始签名字节、原网卡绑定和所有校验限制。未知字段、重复字段、过期的 t/expiration_time 仍拒绝主动探测。
+
+直接 IP 重定向单独标记“交由 Steam 原路下载，没有同域名 DNS 候选”，不再笼统计作未知重定向，也不擅自把该 IP 加入其他主机的候选池。
+
+原晋升门槛依赖 3 条连接正常结束，对持续复用连接会迟迟不生效。现在使用传输过程中的至少 5 个有效评分样本、累计 8 MiB 有效采样字节，以及两个观察窗口的更新样本和 15% 优势；不再要求连接先结束。EffectiveBytes 定义相应改为有效评分样本累计字节，结束时不重复累加。保留 1/8 探索、每候选 1 条试用/晋升后最多 4 条并发、背压过滤、样本过期撤销和失败冷却。
+
+按用户要求仅在本地做代码检查，推送 main 后由 Build Desktop Actions 生成安装包，不在本地打包，不运行真实 Steam 效果测试。

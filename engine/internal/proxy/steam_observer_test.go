@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -228,10 +229,9 @@ func TestSteamPreferredRequiresFreshRepeatedEvidence(t *testing.T) {
 	now := time.Now()
 	c.now = func() time.Time { return now }
 	c.decisions["a/"+testSteamHost+":80"] = 0
-	for range 3 {
+	for range 5 {
 		c.observe(k, c.generation, 4*1024*1024, time.Second)
 		c.observe(base, c.generation, 1024*1024, time.Second)
-		c.finishTransfer(k, c.generation, 4*1024*1024, false)
 	}
 	if ip, _ := c.useTrial("a", testSteamHost, "80", "1.2.3.4"); ip != "" {
 		t.Fatal("promoted after one window")
@@ -241,6 +241,9 @@ func TestSteamPreferredRequiresFreshRepeatedEvidence(t *testing.T) {
 	c.observe(base, c.generation, 1024*1024, time.Second)
 	if ip, _ := c.useTrial("a", testSteamHost, "80", "1.2.3.4"); ip != "5.6.7.8" || !c.entries[k].Preferred {
 		t.Fatal("fresh advantage not promoted")
+	}
+	if c.entries[k].SuccessfulConnections != 0 {
+		t.Fatal("test must promote while connections remain open")
 	}
 	c.releaseTrial(k, c.generation)
 	now = now.Add(11 * time.Second)
@@ -363,5 +366,53 @@ func TestSteamTrialHTTPFailureCoolsCandidate(t *testing.T) {
 	}
 	if s.cdn.snapshot().StageCounts["http_signature_rejected"] != 1 {
 		t.Fatal("missing rejection reason")
+	}
+}
+
+func TestSteamAdditionalSignedCDNProfiles(t *testing.T) {
+	expiry := strconv.FormatInt(time.Now().Add(time.Hour).Unix(), 10)
+	for _, tc := range []struct {
+		host, query string
+		allowed     bool
+	}{
+		{"dl1.steam.clngaa.com", "k=Fake%2BKey&t=" + expiry, true},
+		{"dl.steam.clngaa.com", "t=" + expiry + "&k=Fake&rdkey=Fake%3D", true},
+		{"gstore-y.bal.manlaxy.com", "token=Fake&expiration_time=" + expiry, true},
+		{"xz.pphimalayanrt.com", "reqaidabccty=Fake&auth_key=1788931770-123-0-Fake&reqhost=ctgslb", true},
+		{"dl1.steam.clngaa.com", "k=Fake&t=1", false},
+		{"dl1.steam.clngaa.com", "k=Fake", false},
+		{"dl1.steam.clngaa.com", "k=Fake&t=" + expiry + "&extra=Fake", false},
+		{"dl1.steam.clngaa.com", "k=Fake&t=" + expiry + "&k=duplicate", false},
+		{"gstore-y.bal.manlaxy.com", "token=Fake", false},
+		{"dl1.steam.clngaa.com.evil.test", "k=Fake&t=" + expiry, false},
+	} {
+		uri := testSteamChunk + "?" + tc.query
+		r, e := http.ReadRequest(bufio.NewReader(strings.NewReader("GET " + uri + " HTTP/1.1\r\nHost: " + tc.host + "\r\n\r\n")))
+		if e != nil {
+			t.Fatal(e)
+		}
+		got, _ := steamRequestURI(r)
+		if (got != "") != tc.allowed {
+			t.Fatalf("profile %s allowed=%v", tc.host, tc.allowed)
+		}
+		if tc.allowed && (!steamDownloadHost(tc.host) || got != uri || !validSteamProbeURI(tc.host, uri)) {
+			t.Fatal("host or signed bytes changed")
+		}
+	}
+}
+func TestSteamIPRedirectIsExplicitObservationOnly(t *testing.T) {
+	s, o := observerFixture(t)
+	o.feed(true, []byte("GET "+testSteamChunk+" HTTP/1.1\r\nHost: "+testSteamHost+"\r\n\r\n"))
+	o.feed(false, []byte("HTTP/1.1 302 Found\r\nContent-Length: 0\r\nLocation: http://58.19.174.176"+testSteamChunk+"?auth_key=FakeSecret\r\n\r\n"))
+	status := s.cdn.snapshot()
+	if status.StageCounts["http_redirect_ip"] != 1 || status.StageCounts["http_reference_ready"] != 0 {
+		t.Fatal(status.StageCounts)
+	}
+	raw, _ := json.Marshal(status)
+	if bytes.Contains(raw, []byte("FakeSecret")) {
+		t.Fatal("redirect signature leaked")
+	}
+	if steamDownloadHost("58.19.174.176") {
+		t.Fatal("literal IP accepted as CDN domain")
 	}
 }

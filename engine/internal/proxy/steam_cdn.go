@@ -167,7 +167,7 @@ func steamDownloadHost(host string) bool {
 		host == "cdn-ws.content.steamchina.com" ||
 		host == "cdn-qc.content.steamchina.com" ||
 		host == "cdn-ali.content.steamchina.com" ||
-		host == "xz.sycontroller.com" || host == "gstore.val.manlaxy.com" || host == "xz.pphimalayanrt.com" || host == "st.dl.eccdnx.com" || host == "dl.steam.clngaa.com"
+		host == "dl1.steam.clngaa.com" || host == "gstore-y.bal.manlaxy.com" || host == "xz.sycontroller.com" || host == "gstore.val.manlaxy.com" || host == "xz.pphimalayanrt.com" || host == "st.dl.eccdnx.com" || host == "dl.steam.clngaa.com"
 }
 
 func publicCDNIP(value string) bool {
@@ -301,6 +301,7 @@ func (c *steamCDN) observe(key cdnKey, generation uint64, bytes uint64, elapsed 
 	} else {
 		entry.DownloadBPS = entry.DownloadBPS*0.75 + bps*0.25
 	}
+	entry.EffectiveBytes += bytes
 	entry.Samples++
 	entry.lastSample = c.now()
 }
