@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"net"
@@ -40,12 +41,22 @@ type SteamCDNEntry struct {
 	ExpiresAt     time.Time `json:"expires_at"`
 }
 
+type SteamCDNDiagnostic struct {
+	Domain  string    `json:"domain"`
+	Adapter string    `json:"adapter"`
+	IP      string    `json:"ip"`
+	Stage   string    `json:"stage"`
+	At      time.Time `json:"at"`
+}
+
 type SteamCDNStatus struct {
-	Enabled      bool            `json:"enabled"`
-	Probing      int             `json:"probing"`
-	Replacements uint64          `json:"replacements"`
-	Fallbacks    uint64          `json:"fallbacks"`
-	Entries      []SteamCDNEntry `json:"entries"`
+	Recognized   uint64               `json:"recognized"`
+	Diagnostics  []SteamCDNDiagnostic `json:"diagnostics"`
+	Enabled      bool                 `json:"enabled"`
+	Probing      int                  `json:"probing"`
+	Replacements uint64               `json:"replacements"`
+	Fallbacks    uint64               `json:"fallbacks"`
+	Entries      []SteamCDNEntry      `json:"entries"`
 }
 
 type cdnKey struct{ adapter, domain, port, ip string }
@@ -57,6 +68,8 @@ type cdnCandidate struct {
 // All mutable learning state belongs to one engine run. A generation prevents
 // cancelled probes and old connections from repopulating a reset/disabled pool.
 type steamCDN struct {
+	recognized              uint64
+	diagnostics             []SteamCDNDiagnostic
 	mu                      sync.Mutex
 	root                    context.Context
 	ctx                     context.Context
@@ -91,6 +104,8 @@ func (c *steamCDN) configure(enabled, reset bool) {
 	c.entries = make(map[cdnKey]*SteamCDNEntry)
 	c.discovery = make(map[string]time.Time)
 	c.probing = 0
+	c.recognized = 0
+	c.diagnostics = nil
 	c.replacements, c.fallbacks = 0, 0
 	if !enabled {
 		c.cancel()
@@ -125,7 +140,8 @@ func steamDownloadHost(host string) bool {
 		host == "cdn.mileweb.cs.steampowered.com.8686c.com" ||
 		host == "cdn-ws.content.steamchina.com" ||
 		host == "cdn-qc.content.steamchina.com" ||
-		host == "cdn-ali.content.steamchina.com"
+		host == "cdn-ali.content.steamchina.com" ||
+		host == "xz.pphimalayanrt.com" || host == "st.dl.eccdnx.com" || host == "dl.steam.clngaa.com"
 }
 
 func publicCDNIP(value string) bool {
@@ -163,6 +179,8 @@ func (c *steamCDN) snapshot() SteamCDNStatus {
 	defer c.mu.Unlock()
 	c.pruneLocked()
 	result.Enabled, result.Probing = c.enabled, c.probing
+	result.Recognized = c.recognized
+	result.Diagnostics = append([]SteamCDNDiagnostic(nil), c.diagnostics...)
 	result.Replacements, result.Fallbacks = c.replacements, c.fallbacks
 	for _, entry := range c.entries {
 		result.Entries = append(result.Entries, *entry)
@@ -255,9 +273,20 @@ func (c *steamCDN) outcome(key cdnKey, generation uint64, success bool) {
 	}
 }
 
-func (s *Server) discoverSteamCDN(host, port string) {
+func (s *Server) discoverSteamCDN(host, port string, paths ...string) {
 	c := s.cdn
 	if !c.active() {
+		return
+	}
+	path := ""
+	if len(paths) > 0 {
+		path = paths[0]
+	}
+	if port == "80" && !steamChunkPattern.MatchString(path) {
+		c.mu.Lock()
+		generation := c.generation
+		c.mu.Unlock()
+		c.note(generation, host, "", "", "http_wait_chunk")
 		return
 	}
 	c.mu.Lock()
@@ -287,34 +316,66 @@ func (s *Server) discoverSteamCDN(host, port string) {
 		if err != nil {
 			return
 		}
-		candidates := s.steamCandidates(ctx, host, probeResolver)
-		for _, adapter := range s.config.Adapters {
-			for _, candidate := range candidates {
-				if ctx.Err() != nil {
-					return
-				}
-				if !adapterSupportsNetwork(adapter, networkForIP("tcp", net.ParseIP(candidate.ip))) {
-					continue
-				}
-				if !s.verifySteamCandidate(ctx, adapter, host, candidate.ip) {
-					continue
-				}
-				c.mu.Lock()
-				if c.enabled && generation == c.generation && len(c.entries) < 512 && candidate.expires.After(c.now()) {
-					entryKey := cdnKey{adapter.Name, host, port, candidate.ip}
-					if old := c.entries[entryKey]; old != nil {
-						old.ExpiresAt = candidate.expires
-					} else {
-						c.entries[entryKey] = &SteamCDNEntry{Adapter: adapter.Name, Domain: host, Port: port, IP: candidate.ip, ExpiresAt: candidate.expires}
-					}
-					if expiry := c.discovery[key]; candidate.expires.After(expiry) {
-						c.discovery[key] = candidate.expires
-					}
-				}
-				c.mu.Unlock()
+		s.probeSteamCandidates(ctx, generation, host, port, path, probeResolver)
+	}()
+}
+
+func (s *Server) probeSteamCandidates(ctx context.Context, generation uint64, host, port, path string, probeResolver *dns.Resolver) {
+	c := s.cdn
+	key := net.JoinHostPort(host, port)
+	candidates := s.steamCandidates(ctx, host, probeResolver)
+	if len(candidates) == 0 {
+		c.note(generation, host, "", "", "dns_no_candidates")
+	}
+	for _, adapter := range s.config.Adapters {
+		var baseline []byte
+		if port == "80" {
+			answer, e := probeResolver.Resolve(ctx, dns.Query{Domain: host, RecordType: dns.RecordA, Binding: adapterDNSBinding(adapter)})
+			if e == nil && publicCDNIP(answer.Address) {
+				baseline, e = s.probeSteamHTTP(ctx, adapter, host, answer.Address, path)
+			}
+			if e != nil || len(baseline) == 0 {
+				c.note(generation, host, adapter.Name, "", "http_baseline_failed")
+				continue
 			}
 		}
-	}()
+		for _, candidate := range candidates {
+			if ctx.Err() != nil {
+				return
+			}
+			if !adapterSupportsNetwork(adapter, networkForIP("tcp", net.ParseIP(candidate.ip))) {
+				continue
+			}
+			stage := "verified"
+			if port == "80" {
+				sample, e := s.probeSteamHTTP(ctx, adapter, host, candidate.ip, path)
+				if e != nil {
+					stage = "http_probe_failed"
+				} else if !bytes.Equal(sample, baseline) {
+					stage = "http_content_mismatch"
+				}
+			} else if !s.verifySteamCandidate(ctx, adapter, host, candidate.ip) {
+				stage = "tls_validation_failed"
+			}
+			c.note(generation, host, adapter.Name, candidate.ip, stage)
+			if stage != "verified" {
+				continue
+			}
+			c.mu.Lock()
+			if c.enabled && generation == c.generation && len(c.entries) < 512 && candidate.expires.After(c.now()) {
+				entryKey := cdnKey{adapter.Name, host, port, candidate.ip}
+				if old := c.entries[entryKey]; old != nil {
+					old.ExpiresAt = candidate.expires
+				} else {
+					c.entries[entryKey] = &SteamCDNEntry{Adapter: adapter.Name, Domain: host, Port: port, IP: candidate.ip, ExpiresAt: candidate.expires}
+				}
+				if expiry := c.discovery[key]; candidate.expires.After(expiry) {
+					c.discovery[key] = candidate.expires
+				}
+			}
+			c.mu.Unlock()
+		}
+	}
 }
 
 func (s *Server) steamCandidates(ctx context.Context, host string, resolver *dns.Resolver) []cdnCandidate {
@@ -390,7 +451,7 @@ func (s *Server) verifySteamCandidate(ctx context.Context, adapter Adapter, host
 
 // prepareSteamCDN retains the working original connection until a verified
 // candidate connects. It never replays application data or changes the NIC.
-func (s *Server) prepareSteamCDN(session *connection, original net.Conn, adapter Adapter, host, port string) net.Conn {
+func (s *Server) prepareSteamCDN(session *connection, original net.Conn, adapter Adapter, host, port string, paths ...string) net.Conn {
 	if session.channel == ChannelDirect || !s.cdn.active() || (port != "80" && port != "443") || !steamDownloadHost(host) {
 		return original
 	}
@@ -401,7 +462,20 @@ func (s *Server) prepareSteamCDN(session *connection, original net.Conn, adapter
 	if !publicCDNIP(originalIP) {
 		return original
 	}
-	s.discoverSteamCDN(host, port)
+	s.cdn.mu.Lock()
+	s.cdn.recognized++
+	generationNow := s.cdn.generation
+	key := cdnKey{adapter.Name, host, port, originalIP}
+	if s.cdn.enabled && len(s.cdn.entries) < 512 && s.cdn.entries[key] == nil {
+		s.cdn.entries[key] = &SteamCDNEntry{Adapter: adapter.Name, Domain: host, Port: port, IP: originalIP, Selections: 1, ExpiresAt: time.Now().Add(cdnLifetime)}
+	}
+	s.cdn.mu.Unlock()
+	s.cdn.note(generationNow, host, adapter.Name, originalIP, "recognized")
+	s.discoverSteamCDN(host, port, paths...)
+	if port == "80" && (len(paths) == 0 || !steamChunkPattern.MatchString(paths[0])) {
+		session.cdnKey, session.cdnGeneration = key, generationNow
+		return original
+	}
 	ip, generation := s.cdn.choose(adapter.Name, host, port)
 	actualIP := originalIP
 	if ip != "" && ip != originalIP {

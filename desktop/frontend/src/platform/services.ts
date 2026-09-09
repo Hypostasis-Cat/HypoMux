@@ -52,6 +52,8 @@ export type CompleteAppSettings = AppSettings & {
 };
 
 export type SteamCDNStatus = {
+ recognized?: number;
+ diagnostics?: Array<{domain: string; adapter: string; ip: string; stage: string; at: string}>;
  available: boolean; enabled: boolean; probing: number; replacements: number; fallbacks: number;
  entries: Array<{adapter: string; domain: string; port: string; ip: string; download_bps: number; samples: number; selections: number; cooldown_until: string; expires_at: string}>;
 };

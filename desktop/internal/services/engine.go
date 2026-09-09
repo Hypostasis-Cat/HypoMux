@@ -73,6 +73,7 @@ type connectionTelemetry struct {
 }
 
 type telemetryResult struct {
+	SteamCDN          SteamCDNStatus        `json:"steam_cdn"`
 	StartedAt         time.Time             `json:"started_at"`
 	SampledAt         time.Time             `json:"sampled_at"`
 	TCPProfile        string                `json:"tcp_profile,omitempty"`
@@ -154,6 +155,7 @@ type EngineService struct {
 	logs                   *SupportLogStore
 	tun                    *TunService
 	last                   telemetrySample
+	lastCDNLog             time.Time
 	lastPerformanceLog     time.Time
 	lastTUNHealthCheck     time.Time
 	tunHealthFailures      int
@@ -416,6 +418,7 @@ func (s *EngineService) Snapshot() (EngineSnapshot, error) {
 	}
 	if status.Engine.State != "running" {
 		s.last = telemetrySample{}
+		s.lastCDNLog = time.Time{}
 		s.lastPerformanceLog = time.Time{}
 		s.mu.Unlock()
 		return snapshot, nil
@@ -424,6 +427,15 @@ func (s *EngineService) Snapshot() (EngineSnapshot, error) {
 	var telemetry telemetryResult
 	if err := s.client.Request(ctx, "engine.telemetry", map[string]any{"include_connections": false}, &telemetry); err != nil {
 		return EngineSnapshot{}, fmt.Errorf("读取聚合遥测失败：%w", err)
+	}
+	s.mu.Lock()
+	logCDN := s.logs != nil && telemetry.SteamCDN.Enabled && time.Since(s.lastCDNLog) >= 10*time.Second
+	if logCDN {
+		s.lastCDNLog = time.Now()
+	}
+	s.mu.Unlock()
+	if logCDN {
+		s.logs.RecordEvent("steam_cdn", "runtime", map[string]any{"status": telemetry.SteamCDN})
 	}
 	snapshot.SampledAt = telemetry.SampledAt
 	snapshot.TCPProfile = telemetry.TCPProfile
@@ -1019,6 +1031,7 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 	}
 	s.mu.Lock()
 	s.last = telemetrySample{}
+	s.lastCDNLog = time.Time{}
 	s.lastPerformanceLog = time.Time{}
 	s.lastTUNHealthCheck = time.Now()
 	s.tunHealthFailures = 0
@@ -1098,6 +1111,12 @@ func (s *EngineService) Stop() (EngineSnapshot, error) {
 	hello, ensureErr := s.client.Ensure(ctx)
 	var firstError error
 	if ensureErr == nil {
+		if slices.Contains(hello.Capabilities, "steam_cdn.configure") && s.logs != nil {
+			var status SteamCDNStatus
+			if err := s.client.Request(ctx, "steam_cdn.configure", map[string]any{}, &status); err == nil {
+				s.logs.RecordEvent("steam_cdn", "before_stop", map[string]any{"status": status})
+			}
+		}
 		var tunResult tunLifecycleResult
 		if err := s.client.Request(ctx, "tun.deactivate", nil, &tunResult); err != nil {
 			var remote *engineclient.RemoteError
@@ -1120,6 +1139,7 @@ func (s *EngineService) Stop() (EngineSnapshot, error) {
 	}
 	s.mu.Lock()
 	s.last = telemetrySample{}
+	s.lastCDNLog = time.Time{}
 	s.lastPerformanceLog = time.Time{}
 	s.clashAPI = clashAPIConfig{}
 	s.tunAggregationEndpoint = ""

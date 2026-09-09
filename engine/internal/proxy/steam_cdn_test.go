@@ -21,6 +21,8 @@ import (
 	"github.com/Hypostasis-Cat/HypoMux/engine/internal/dns"
 )
 
+const testSteamChunk = "/depot/123/chunk/0123456789012345678901234567890123456789"
+
 const testSteamHost = "cache1.steamcontent.com"
 
 func seedCDN(c *steamCDN, adapter, port, ip string) {
@@ -130,7 +132,9 @@ func TestSteamCDNDisableDuringCandidateConnectKeepsOriginal(t *testing.T) {
 		return cdnRemoteConn{replacement, "5.6.7.8:80"}, nil
 	}
 	result := make(chan net.Conn, 1)
-	go func() { result <- s.prepareSteamCDN(session, original, s.config.Adapters[0], testSteamHost, "80") }()
+	go func() {
+		result <- s.prepareSteamCDN(session, original, s.config.Adapters[0], testSteamHost, "80", testSteamChunk)
+	}()
 	<-started
 	s.cdn.configure(false, false)
 	close(release)
@@ -187,7 +191,7 @@ func TestSteamCandidatesUseEachNICDNSAndExcludeLocalAddresses(t *testing.T) {
 
 func TestSteamSniffPreservesHTTPAndMalformedBytes(t *testing.T) {
 	for _, test := range []struct{ payload, host string }{
-		{"GET /depot/test HTTP/1.1\r\nHost: " + testSteamHost + "\r\n\r\nbody", testSteamHost},
+		{"GET " + testSteamChunk + " HTTP/1.1\r\nHost: " + testSteamHost + "\r\n\r\nbody", testSteamHost},
 		{"GET / HTTP/1.1\r\nHost: " + testSteamHost + ":80\r\n\r\n", testSteamHost},
 		{"GET / HTTP/1.1\r\nHost: " + testSteamHost + ":81\r\n\r\n", ""},
 		{"GET / HTTP/1.1\r\nHost: " + testSteamHost + "\r\nHost: evil.test\r\n\r\n", ""},
@@ -359,9 +363,9 @@ func TestSteamCDNProxyAndTUNRelayFallbackAndDirect(t *testing.T) {
 			}
 			defer client.Close()
 			_ = client.SetDeadline(time.Now().Add(3 * time.Second))
-			payload := "GET /depot/test HTTP/1.1\r\nHost: " + testSteamHost + "\r\n\r\n"
+			payload := "GET " + testSteamChunk + " HTTP/1.1\r\nHost: " + testSteamHost + "\r\n\r\n"
 			if mode == "http" {
-				_, _ = io.WriteString(client, "GET http://"+testSteamHost+"/depot/test HTTP/1.1\r\nHost: "+testSteamHost+"\r\n\r\n")
+				_, _ = io.WriteString(client, "GET http://"+testSteamHost+testSteamChunk+" HTTP/1.1\r\nHost: "+testSteamHost+"\r\n\r\n")
 			} else if mode == "connect" {
 				_, _ = io.WriteString(client, "CONNECT "+testSteamHost+":443 HTTP/1.1\r\nHost: "+testSteamHost+"\r\n\r\n")
 				r := bufio.NewReader(client)
@@ -482,7 +486,7 @@ func TestSteamTUNPreservesEndToEndTLS(t *testing.T) {
 	if err := secure.Handshake(); err != nil {
 		t.Fatal(err)
 	}
-	_, _ = io.WriteString(secure, "GET /depot/test HTTP/1.1\r\nHost: "+testSteamHost+"\r\nConnection: close\r\n\r\n")
+	_, _ = io.WriteString(secure, "GET "+testSteamChunk+" HTTP/1.1\r\nHost: "+testSteamHost+"\r\nConnection: close\r\n\r\n")
 	response, err := http.ReadResponse(bufio.NewReader(secure), nil)
 	if err != nil {
 		t.Fatal(err)

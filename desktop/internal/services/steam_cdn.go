@@ -19,18 +19,32 @@ type SteamCDNEntry struct {
 	ExpiresAt     time.Time `json:"expires_at"`
 }
 
+type SteamCDNDiagnostic struct {
+	Domain  string    `json:"domain"`
+	Adapter string    `json:"adapter"`
+	IP      string    `json:"ip"`
+	Stage   string    `json:"stage"`
+	At      time.Time `json:"at"`
+}
 type SteamCDNStatus struct {
-	Available    bool            `json:"available"`
-	Enabled      bool            `json:"enabled"`
-	Probing      int             `json:"probing"`
-	Replacements uint64          `json:"replacements"`
-	Fallbacks    uint64          `json:"fallbacks"`
-	Entries      []SteamCDNEntry `json:"entries"`
+	Recognized   uint64               `json:"recognized"`
+	Diagnostics  []SteamCDNDiagnostic `json:"diagnostics"`
+	Available    bool                 `json:"available"`
+	Enabled      bool                 `json:"enabled"`
+	Probing      int                  `json:"probing"`
+	Replacements uint64               `json:"replacements"`
+	Fallbacks    uint64               `json:"fallbacks"`
+	Entries      []SteamCDNEntry      `json:"entries"`
 }
 
 func (s *EngineService) SteamCDNStatus(reset bool) (SteamCDNStatus, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if reset && s.logs != nil {
+		if status, err := s.configureSteamCDNLocked(nil, false); err == nil {
+			s.logs.RecordEvent("steam_cdn", "before_reset", map[string]any{"status": status})
+		}
+	}
 	return s.configureSteamCDNLocked(nil, reset)
 }
 
@@ -46,6 +60,11 @@ func (s *EngineService) SetSteamCDNEnabled(enabled bool) (AppSettings, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	previous := s.settings.Get().SteamCDNEnabled
+	if s.logs != nil {
+		if status, e := s.configureSteamCDNLocked(nil, false); e == nil {
+			s.logs.RecordEvent("steam_cdn", "before_toggle", map[string]any{"status": status, "next_enabled": enabled})
+		}
+	}
 	if _, err := s.configureSteamCDNLocked(&enabled, false); err != nil {
 		return AppSettings{}, err
 	}
