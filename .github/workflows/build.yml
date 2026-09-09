@@ -19,7 +19,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
-  actions: read
+  actions: write
   contents: read
 
 env:
