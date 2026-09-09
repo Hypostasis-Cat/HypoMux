@@ -8,11 +8,12 @@ import {
   Info24Regular,
   PlugConnected24Regular,
   Settings24Regular,
+  Toolbox24Regular,
 } from "@fluentui/react-icons";
 import { useLayoutEffect, useRef, useState } from "react";
 import { useI18n } from "../../i18n/i18n";
 
-export type AppPage = "home" | "routing" | "health" | "connections" | "settings" | "blocked-domains" | "about" | "appearance";
+export type AppPage = "tools" | "home" | "routing" | "health" | "connections" | "settings" | "blocked-domains" | "about" | "appearance";
 
 export function CompactNavigation({
   page,
@@ -31,6 +32,7 @@ export function CompactNavigation({
     { id: "routing", label: t("nav_routing"), icon: <BranchFork24Regular /> },
     { id: "health", label: t("nav_tools"), icon: <HeartPulse24Regular /> },
     { id: "connections", label: locale === "en" ? "Connections" : "活动连接", icon: <PlugConnected24Regular /> },
+    { id: "tools", label: locale === "en" ? "Toolbox" : "工具箱", icon: <Toolbox24Regular /> },
     { id: "settings", label: t("nav_settings"), icon: <Settings24Regular /> },
   ];
 

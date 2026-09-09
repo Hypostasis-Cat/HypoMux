@@ -55,16 +55,22 @@ export function SteamCDNPanel({ enabled, saving }: { enabled: boolean; saving: b
       : (status.recognized ?? 0) > 0 && status.replacements === 0 ? (en ? "Steam traffic recognized; using original nodes while candidates are evaluated. See details below." : "已识别 Steam 流量，当前仍使用原节点；候选验证结果见下方详情。")
       : entries.length === 0 ? (en ? "Waiting for Steam downloads. No verified candidates yet; using the original connection." : "等待 Steam 下载；暂无验证通过的候选，沿用原连接。")
       : (en ? `${status.replacements} connections switched · ${status.effective_replacements ?? 0} transferred data · ${status.fallbacks} connection fallbacks` : `已切换 ${status.replacements} 条连接 · ${status.effective_replacements ?? 0} 条已传输数据 · 连接回退 ${status.fallbacks} 次`))}</p>
-    <p>{en ? "Uses DNS candidates for the same domain and observed download rates. HTTP verification reads bounded 4 KiB samples. Improvement depends on available CDN nodes; disable if performance worsens." : "使用同域名 DNS 候选及真实下载观测速率，HTTP 校验只读取受限的 4 KiB 样本。效果取决于可用节点，效果不好可关闭。"}</p>
-    <p>{en ? `Recognized downloads: ${status?.recognized ?? 0}` : `已识别下载连接：${status?.recognized ?? 0}`}</p>
-    <p>{en ? `Eligible chunk requests: ${eligible} · Candidate validations passed: ${counts.verified ?? 0}` : `可评估内容块请求：${eligible} · 候选校验通过：${counts.verified ?? 0}`}</p>
-    {!!status?.diagnostics?.length && <details><summary>{en ? "Discovery and verification details" : "发现与验证详情"}</summary>
-      <p>{Object.entries(counts).map(([key,value])=>`${stages[key] ?? key}: ${value}`).join(" · ")}</p>
-      <ul>{status.diagnostics.slice(-12).map((item,index)=><li key={index}>{new Date(item.at).toLocaleTimeString()} · {item.domain} · {item.adapter} {item.ip} · {stages[item.stage] ?? item.stage}</li>)}</ul>
-    </details>}
-    <Button disabled={!status?.enabled || saving || resetting} onClick={() => void reset()}>{en ? "Re-evaluate nodes" : "重新评估节点"}</Button>
-    {entries.length > 0 && <div style={{ overflowX: "auto", maxHeight: 280 }}>
-      <table style={{ width: "100%", textAlign: "left", borderSpacing: "12px 8px" }}>
+    <p className="tool-description">{en ? "Uses DNS candidates for the same domain and observed download rates. HTTP verification reads bounded 4 KiB samples. Improvement depends on available CDN nodes; disable if performance worsens." : "使用同域名 DNS 候选及真实下载观测速率，HTTP 校验只读取受限的 4 KiB 样本。效果取决于可用节点，效果不好可关闭。"}</p>
+    <div className="tool-metrics" aria-label={en ? "Download activity" : "下载概览"}>
+      {[
+        [en ? "Connections switched" : "已切换连接", status?.replacements ?? 0],
+        [en ? "Transferred data" : "已传输数据", status?.effective_replacements ?? 0],
+        [en ? "Preferred nodes" : "优先候选", entries.filter(entry => entry.preferred).length],
+        [en ? "Connection fallbacks" : "连接回退", status?.fallbacks ?? 0],
+      ].map(([label, value]) => <div className="tool-metric" key={label}><span>{label}</span><strong>{value}</strong></div>)}
+    </div>
+    <div className="tool-activity">
+      <span>{en ? `Recognized downloads: ${status?.recognized ?? 0}` : `已识别下载连接：${status?.recognized ?? 0}`}</span>
+      <span>{en ? `Eligible chunk requests: ${eligible} · Candidate validations passed: ${counts.verified ?? 0}` : `可评估内容块请求：${eligible} · 候选校验通过：${counts.verified ?? 0}`}</span>
+    </div>
+    <div className="tool-actions"><Button disabled={!status?.enabled || saving || resetting} onClick={() => void reset()}>{en ? "Re-evaluate nodes" : "重新评估节点"}</Button></div>
+    {entries.length > 0 && <div className="tool-node-table" tabIndex={0} role="region" aria-label={en ? "Download nodes" : "下载节点"}>
+      <table>
         <caption>{en ? "Original and verified nodes (observed throughput, not link capacity)" : "原节点与已验证候选（观测吞吐，不代表线路带宽）"}</caption>
         <thead><tr>{(en ? ["Adapter", "Domain", "IP", "Total rate (5s)", "Active connections", "State"] : ["网卡", "域名", "IP", "节点总吞吐（5秒）", "活跃连接", "状态"]).map(label => <th scope="col" key={label}>{label}</th>)}</tr></thead>
         <tbody>{entries.map(entry => <tr key={`${entry.adapter}/${entry.domain}/${entry.port}/${entry.ip}`}>
@@ -74,5 +80,9 @@ export function SteamCDNPanel({ enabled, saving }: { enabled: boolean; saving: b
         </tr>)}</tbody>
       </table>
     </div>}
+    {!!status?.diagnostics?.length && <details className="tool-diagnostics"><summary>{en ? "Discovery and verification details" : "发现与验证详情"}</summary>
+      <p>{Object.entries(counts).map(([key,value])=>`${stages[key] ?? key}: ${value}`).join(" · ")}</p>
+      <ul>{status.diagnostics.slice(-12).map((item,index)=><li key={index}>{new Date(item.at).toLocaleTimeString()} · {item.domain} · {item.adapter} {item.ip} · {stages[item.stage] ?? item.stage}</li>)}</ul>
+    </details>}
   </div>;
 }

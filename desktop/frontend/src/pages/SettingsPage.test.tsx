@@ -3,6 +3,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { defaultAppearance } from "../theme/appearance.presets";
+import { ToolsPage } from "./ToolsPage";
 import { SettingsPage } from "./SettingsPage";
 
 const mocks = vi.hoisted(() => ({
@@ -66,9 +67,9 @@ afterEach(() => {
 });
 
 describe("TUN settings", () => {
-  it("defaults Steam CDN off and uses the runtime-aware toggle", async () => {
-    render(<SettingsPage adapterRuntime={[]} onOpenBlockedDomains={() => {}} />);
-    const toggle = await screen.findByRole("switch", { name: "Steam CDN optimization (experimental)" });
+  it("toolbox defaults Steam CDN off and uses the runtime-aware toggle", async () => {
+    render(<ToolsPage />);
+    const toggle = await screen.findByRole("switch", { name: "Steam download optimization" });
     await waitFor(() => expect(toggle.hasAttribute("disabled")).toBe(false));
     expect((toggle as HTMLInputElement).checked).toBe(false);
     fireEvent.click(toggle);
@@ -76,6 +77,19 @@ describe("TUN settings", () => {
     await waitFor(() => expect(toggle.hasAttribute("disabled")).toBe(false));
     fireEvent.click(toggle);
     await waitFor(() => expect(mocks.setSteamCDNEnabled).toHaveBeenCalledWith(false));
+    expect(mocks.update).not.toHaveBeenCalled();
+  });
+
+  it("restores the saved toolbox preference when a toggle fails", async () => {
+    mocks.get.mockResolvedValue({ ...initial, steam_cdn_enabled: true });
+    mocks.setSteamCDNEnabled.mockRejectedValueOnce(new Error("Core unavailable"));
+    render(<ToolsPage />);
+    const toggle = await screen.findByRole("switch", { name: "Steam download optimization" });
+    await waitFor(() => expect(toggle.hasAttribute("disabled")).toBe(false));
+    fireEvent.click(toggle);
+    await waitFor(() => expect(mocks.notify).toHaveBeenCalledWith(expect.objectContaining({ intent: "error" })));
+    await waitFor(() => expect(toggle.hasAttribute("disabled")).toBe(false));
+    expect((toggle as HTMLInputElement).checked).toBe(true);
     expect(mocks.update).not.toHaveBeenCalled();
   });
 

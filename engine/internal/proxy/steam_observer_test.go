@@ -229,6 +229,7 @@ func TestSteamPreferredRequiresFreshRepeatedEvidence(t *testing.T) {
 	now := time.Now()
 	c.now = func() time.Time { return now }
 	c.decisions["a/"+testSteamHost+":80"] = 0
+	c.traffic[k] = &cdnTraffic{trials: 1}
 	for range 5 {
 		c.observe(k, c.generation, 4*1024*1024, time.Second)
 		c.observe(base, c.generation, 1024*1024, time.Second)
@@ -244,6 +245,14 @@ func TestSteamPreferredRequiresFreshRepeatedEvidence(t *testing.T) {
 	}
 	if c.entries[k].SuccessfulConnections != 0 {
 		t.Fatal("test must promote while connections remain open")
+	}
+	for range 2 {
+		if ip, _ := c.useTrial("a", testSteamHost, "80", "1.2.3.4"); ip == "" {
+			t.Fatal("preferred candidate not admitted below limit")
+		}
+	}
+	if ip, _ := c.useTrial("a", testSteamHost, "80", "1.2.3.4"); ip != "" {
+		t.Fatal("preferred candidate exceeded four concurrent trials")
 	}
 	c.releaseTrial(k, c.generation)
 	now = now.Add(11 * time.Second)

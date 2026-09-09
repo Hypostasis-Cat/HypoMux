@@ -28,6 +28,7 @@ const BlockedDomainsPage = lazy(() => import("./pages/BlockedDomainsPage").then(
 const HealthPage = lazy(() => import("./pages/HealthPage").then((module) => ({ default: module.HealthPage })));
 const ConnectionsPage = lazy(() => import("./pages/ConnectionsPage").then((module) => ({ default: module.ConnectionsPage })));
 const RoutingPage = lazy(() => import("./pages/RoutingPage").then((module) => ({ default: module.RoutingPage })));
+const ToolsPage = lazy(() => import("./pages/ToolsPage").then((module) => ({ default: module.ToolsPage })));
 const SettingsPage = lazy(() => import("./pages/SettingsPage").then((module) => ({ default: module.SettingsPage })));
 
 function NotificationVisualFixture() {
@@ -63,7 +64,7 @@ function HypoMuxWindow() {
   const [page, setPage] = useState<AppPage>(() => {
     const requested = new URLSearchParams(window.location.search).get("page");
     if (import.meta.env.DEV && (
-      requested === "appearance" || requested === "routing" ||
+      requested === "tools" || requested === "appearance" || requested === "routing" ||
       requested === "health" || requested === "connections" || requested === "settings" ||
       requested === "blocked-domains" || requested === "about"
     )) {
@@ -83,6 +84,7 @@ function HypoMuxWindow() {
     "routing",
     "health",
     "connections",
+    "tools",
     "settings",
     "blocked-domains",
     "about",
@@ -141,6 +143,8 @@ function HypoMuxWindow() {
             ? <AppearanceLab />
             : page === "about"
               ? <AboutPage />
+              : page === "tools"
+                ? <ToolsPage />
               : page === "settings"
                 ? <SettingsPage
                   adapterRuntime={connectionAdapters}

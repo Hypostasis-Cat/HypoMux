@@ -151,9 +151,6 @@ func (c *steamCDN) useTrial(adapter, host, port, original string) (string, uint6
 		if k.adapter != adapter || k.domain != host || k.port != port || k.ip == original || !e.Validated || e.CooldownUntil.After(c.now()) {
 			continue
 		}
-		if t := c.traffic[k]; t != nil && ((!e.Preferred && t.trials > 0) || (e.Preferred && t.trials >= 4)) {
-			continue
-		}
 		if c.traffic[k] == nil && len(c.traffic) >= 512 {
 			continue
 		}
@@ -170,6 +167,11 @@ func (c *steamCDN) useTrial(adapter, host, port, original string) (string, uint6
 			if e.advantageWindows >= 2 {
 				e.Preferred = true
 			}
+		}
+		// Score active trials before enforcing admission limits: a long download
+		// must be able to earn promotion without first closing its connection.
+		if t := c.traffic[k]; t != nil && ((!e.Preferred && t.trials > 0) || (e.Preferred && t.trials >= 4)) {
+			continue
 		}
 		if !explore && !e.Preferred {
 			continue
