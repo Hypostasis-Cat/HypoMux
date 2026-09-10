@@ -51,8 +51,8 @@ export function ToolsPage() {
       <header className="tool-card-heading">
         <span className="tool-icon" aria-hidden="true"><Games24Regular /></span>
         <div className="tool-card-copy">
-          <div className="tool-title"><h2 id="steam-tool-title">{text("Steam 下载优选", "Steam download optimization")}</h2><Badge appearance="tint">{text("实验性", "Experimental")}</Badge></div>
-          <p id="steam-tool-hint">{text("从真实下载中寻找更快的节点，支持系统代理与 TUN。可随时关闭，开关作用于新连接。", "Learns faster nodes from real downloads in proxy and TUN modes. Toggle any time; changes apply to new connections.")}</p>
+          <div className="tool-title"><h2 id="steam-tool-title">{text("Steam 下载优选", "Steam download optimization")}</h2><Badge appearance="tint">{text("实验性", "Experimental")}</Badge><Badge appearance="outline">{text("全球网络", "Global networks")}</Badge></div>
+          <p id="steam-tool-hint">{text("跟随 Steam 下载域名和当前 DNS，按网卡学习全球节点；支持 IPv4 / IPv6、系统代理与 TUN。开关作用于新连接。", "Learns nodes per adapter using Steam download hosts and your DNS. Supports IPv4 / IPv6, proxy and TUN modes. Changes apply to new connections.")}</p>
         </div>
         <Switch aria-labelledby="steam-tool-title" aria-describedby="steam-tool-hint" checked={enabled} disabled={loading || saving || !!error} onChange={(_, data) => void toggle(data.checked)} />
       </header>

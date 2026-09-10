@@ -431,39 +431,95 @@ func (s *Server) probeSteamCandidates(ctx context.Context, generation uint64, ho
 }
 
 func (s *Server) steamCandidates(ctx context.Context, host string, resolver *dns.Resolver) []cdnCandidate {
-	var groups [][]cdnCandidate
-	for _, adapter := range s.config.Adapters {
-		var group []cdnCandidate
+	return collectSteamCandidates(ctx, host, s.config.Adapters, resolver.Resolve)
+}
+
+// Bound discovery latency independently of the number of interfaces. Results
+// keep configuration order, never DNS response arrival order or country bias.
+func collectSteamCandidates(parent context.Context, host string, adapters []Adapter, resolve func(context.Context, dns.Query) (dns.Result, error)) []cdnCandidate {
+	ctx, cancel := context.WithTimeout(parent, 4*time.Second)
+	defer cancel()
+	type job struct {
+		index int
+		query dns.Query
+	}
+	var jobs []job
+	for _, adapter := range adapters {
 		for _, record := range []dns.RecordType{dns.RecordA, dns.RecordAAAA} {
-			if ctx.Err() != nil {
-				break
-			}
-			if record == dns.RecordAAAA && adapter.SourceIPv6 == "" {
+			if record == dns.RecordA && adapter.SourceIP == "" || record == dns.RecordAAAA && adapter.SourceIPv6 == "" {
 				continue
 			}
-			queryCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-			answer, err := resolver.Resolve(queryCtx, dns.Query{Domain: host, RecordType: record, Binding: adapterDNSBinding(adapter)})
-			cancel()
-			if err != nil || answer.ExpiresAt == nil {
-				continue
-			}
-			expiry := time.Now().Add(cdnLifetime)
-			if answer.ExpiresAt.Before(expiry) {
-				expiry = *answer.ExpiresAt
-			}
-			seen := map[string]bool{}
-			for _, ip := range append([]string{answer.Address}, answer.Addresses...) {
-				if !publicCDNIP(ip) || seen[ip] {
+			jobs = append(jobs, job{len(jobs), dns.Query{Domain: host, RecordType: record, Binding: adapterDNSBinding(adapter)}})
+		}
+	}
+	groups := make([][]cdnCandidate, len(jobs))
+	queue := make(chan job)
+	var workers sync.WaitGroup
+	for range min(4, len(jobs)) {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			for task := range queue {
+				if ctx.Err() != nil {
 					continue
 				}
-				seen[ip] = true
-				group = append(group, cdnCandidate{ip, expiry})
+				queryCtx, done := context.WithTimeout(ctx, 2*time.Second)
+				answer, err := resolve(queryCtx, task.query)
+				done()
+				if err != nil || answer.ExpiresAt == nil {
+					continue
+				}
+				expiry := time.Now().Add(cdnLifetime)
+				if answer.ExpiresAt.Before(expiry) {
+					expiry = *answer.ExpiresAt
+				}
+				if !expiry.After(time.Now()) {
+					continue
+				}
+				seen := map[string]bool{}
+				for _, value := range append([]string{answer.Address}, answer.Addresses...) {
+					ip := net.ParseIP(value)
+					if !publicCDNIP(value) || (ip.To4() != nil) != (task.query.RecordType == dns.RecordA) {
+						continue
+					}
+					canonical := ip.String()
+					if seen[canonical] {
+						continue
+					}
+					seen[canonical] = true
+					groups[task.index] = append(groups[task.index], cdnCandidate{canonical, expiry})
+					if len(groups[task.index]) == 64 {
+						break
+					}
+				}
+			}
+		}()
+	}
+	for _, task := range jobs {
+		select {
+		case queue <- task:
+		case <-ctx.Done():
+		}
+	}
+	close(queue)
+	workers.Wait()
+	if parent.Err() != nil {
+		return nil
+	}
+	return mergeSteamCandidates(groups)
+}
+
+func mergeSteamCandidates(groups [][]cdnCandidate) []cdnCandidate {
+	// A large A answer must not crowd out AAAA or another adapter. Use the
+	// shortest observed TTL when the same address occurs in several answers.
+	expires := map[string]time.Time{}
+	for _, group := range groups {
+		for _, c := range group {
+			if old, ok := expires[c.ip]; !ok || c.expires.Before(old) {
+				expires[c.ip] = c.expires
 			}
 		}
-		groups = append(groups, group)
 	}
-	// Interleave NIC-local answers so a large first answer cannot exclude the
-	// other networks' CDN choices from the bounded candidate pool.
 	var result []cdnCandidate
 	seen := map[string]bool{}
 	for index := 0; index < 64 && len(result) < 8; index++ {
@@ -476,6 +532,7 @@ func (s *Server) steamCandidates(ctx context.Context, host string, resolver *dns
 				continue
 			}
 			seen[candidate.ip] = true
+			candidate.expires = expires[candidate.ip]
 			result = append(result, candidate)
 			if len(result) == 8 {
 				break

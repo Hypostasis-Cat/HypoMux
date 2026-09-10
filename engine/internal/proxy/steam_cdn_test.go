@@ -502,3 +502,90 @@ func TestSteamTUNPreservesEndToEndTLS(t *testing.T) {
 		t.Fatal("TUN TLS did not use preferred IP")
 	}
 }
+
+func TestSteamGlobalDualStackDiscovery(t *testing.T) {
+	adapters := []Adapter{{Name: "HK", SourceIP: "192.0.2.1", SourceIPv6: "2001:db8::1"}, {Name: "Tokyo", SourceIP: "192.0.2.2", SourceIPv6: "2001:db8::2"}}
+	started := make(chan dns.Query, 4)
+	release := make(chan struct{})
+	expiry := time.Now().Add(time.Minute)
+	resolve := func(ctx context.Context, q dns.Query) (dns.Result, error) {
+		started <- q
+		select {
+		case <-release:
+		case <-ctx.Done():
+			return dns.Result{}, ctx.Err()
+		}
+		if q.RecordType == dns.RecordAAAA {
+			return dns.Result{Address: "2606:4700::1111", ExpiresAt: &expiry}, nil
+		}
+		addresses := []string{"1.1.1.1", "1.1.1.2", "1.1.1.3", "1.1.1.4", "1.1.1.5", "1.1.1.6", "1.1.1.7", "1.1.1.8"}
+		if q.Binding.Name == "Tokyo" {
+			addresses[0] = "8.8.8.8"
+		}
+		return dns.Result{Address: addresses[0], Addresses: addresses, ExpiresAt: &expiry}, nil
+	}
+	done := make(chan []cdnCandidate, 1)
+	go func() { done <- collectSteamCandidates(context.Background(), testSteamHost, adapters, resolve) }()
+	for range 4 {
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			close(release)
+			t.Fatal("DNS families/interfaces were serialized")
+		}
+	}
+	close(release)
+	candidates := <-done
+	if len(candidates) != 8 || candidates[0].ip != "1.1.1.1" || candidates[1].ip != "2606:4700::1111" || candidates[2].ip != "8.8.8.8" {
+		t.Fatalf("family or NIC starved: %+v", candidates)
+	}
+}
+
+func TestSteamCandidateCancellationAndTTL(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	got := collectSteamCandidates(ctx, testSteamHost, []Adapter{{Name: "US", SourceIPv6: "2001:db8::1"}}, func(ctx context.Context, q dns.Query) (dns.Result, error) {
+		t.Error("cancelled discovery queried DNS")
+		return dns.Result{}, ctx.Err()
+	})
+	if len(got) != 0 {
+		t.Fatal("cancelled discovery returned candidates")
+	}
+	soon := time.Now().Add(time.Second)
+	later := soon.Add(time.Minute)
+	got = mergeSteamCandidates([][]cdnCandidate{{{"1.1.1.1", later}}, {{"1.1.1.1", soon}}})
+	if len(got) != 1 || !got[0].expires.Equal(soon) {
+		t.Fatal("duplicate extended DNS lifetime", got)
+	}
+}
+
+func TestSteamGlobalHostScope(t *testing.T) {
+	// Synthetic region labels exercise the wildcard policy; they are not a
+	// hardcoded list of servers and are never resolved by this test.
+	for _, region := range []string{"hkg", "tyo", "lax", "fra", "syd", "gru"} {
+		host := "cache1-" + region + "1.steamcontent.com"
+		if !steamDownloadHost(host) {
+			t.Fatal("global region rejected", host)
+		}
+		req, _ := http.NewRequest("GET", "http://"+host+testSteamChunk, nil)
+		if uri, reason := steamRequestURI(req); uri != testSteamChunk || reason != "http_eligible" {
+			t.Fatal("global chunk rejected", reason)
+		}
+		if steamDownloadHost(host + ".example.com") {
+			t.Fatal("lookalike accepted")
+		}
+	}
+}
+
+func TestSteamIPv6OnlyDiscoveryFiltersInvalidAnswers(t *testing.T) {
+	expiry := time.Now().Add(time.Minute)
+	got := collectSteamCandidates(context.Background(), testSteamHost, []Adapter{{Name: "IPv6 only", SourceIPv6: "2001:db8::1"}}, func(ctx context.Context, q dns.Query) (dns.Result, error) {
+		if q.RecordType != dns.RecordAAAA || q.Binding.Name != "IPv6 only" {
+			t.Errorf("unexpected query: %+v", q)
+		}
+		return dns.Result{Addresses: []string{"::1", "fd00::1", "bad", "1.1.1.1", "2606:4700:0:0:0:0:0:1111", "2606:4700::1111"}, ExpiresAt: &expiry}, nil
+	})
+	if len(got) != 1 || got[0].ip != "2606:4700::1111" {
+		t.Fatal("invalid family/private address or duplicate accepted", got)
+	}
+}

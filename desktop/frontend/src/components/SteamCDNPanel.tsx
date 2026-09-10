@@ -55,6 +55,7 @@ export function SteamCDNPanel({ enabled, saving }: { enabled: boolean; saving: b
       : (status.recognized ?? 0) > 0 && status.replacements === 0 ? (en ? "Steam traffic recognized; using original nodes while candidates are evaluated. See details below." : "已识别 Steam 流量，当前仍使用原节点；候选验证结果见下方详情。")
       : entries.length === 0 ? (en ? "Waiting for Steam downloads. No verified candidates yet; using the original connection." : "等待 Steam 下载；暂无验证通过的候选，沿用原连接。")
       : (en ? `${status.replacements} connections switched · ${status.effective_replacements ?? 0} transferred data · ${status.fallbacks} connection fallbacks` : `已切换 ${status.replacements} 条连接 · ${status.effective_replacements ?? 0} 条已传输数据 · 连接回退 ${status.fallbacks} 次`))}</p>
+    <p className="tool-description">{en ? "No fixed country or public DNS override. Single-address hosts, LAN caches and unsupported authentication keep their original route; encrypted downloads are not decrypted." : "不固定国家节点，不覆盖你的 DNS。仅有一个地址、局域网缓存或不支持的鉴权继续沿用原路；不解密加密下载。"}</p>
     <p className="tool-description">{en ? "Uses DNS candidates for the same domain and observed download rates. HTTP verification reads bounded 4 KiB samples. Improvement depends on available CDN nodes; disable if performance worsens." : "使用同域名 DNS 候选及真实下载观测速率，HTTP 校验只读取受限的 4 KiB 样本。效果取决于可用节点，效果不好可关闭。"}</p>
     <div className="tool-metrics" aria-label={en ? "Download activity" : "下载概览"}>
       {[
@@ -72,9 +73,9 @@ export function SteamCDNPanel({ enabled, saving }: { enabled: boolean; saving: b
     {entries.length > 0 && <div className="tool-node-table" tabIndex={0} role="region" aria-label={en ? "Download nodes" : "下载节点"}>
       <table>
         <caption>{en ? "Original and verified nodes (observed throughput, not link capacity)" : "原节点与已验证候选（观测吞吐，不代表线路带宽）"}</caption>
-        <thead><tr>{(en ? ["Adapter", "Domain", "IP", "Total rate (5s)", "Active connections", "State"] : ["网卡", "域名", "IP", "节点总吞吐（5秒）", "活跃连接", "状态"]).map(label => <th scope="col" key={label}>{label}</th>)}</tr></thead>
+        <thead><tr>{(en ? ["Adapter", "Domain", "IP", "Network", "Total rate (5s)", "Active connections", "State"] : ["网卡", "域名", "IP", "网络", "节点总吞吐（5秒）", "活跃连接", "状态"]).map(label => <th scope="col" key={label}>{label}</th>)}</tr></thead>
         <tbody>{entries.map(entry => <tr key={`${entry.adapter}/${entry.domain}/${entry.port}/${entry.ip}`}>
-          <td>{entry.adapter}</td><td>{entry.domain}:{entry.port}</td><td>{entry.ip}</td>
+          <td>{entry.adapter}</td><td>{entry.domain}:{entry.port}</td><td>{entry.ip}</td><td>{entry.ip.includes(":") ? "IPv6" : "IPv4"}</td>
           <td>{entry.active_connections ? `${((entry.total_bps ?? 0) / 1024 / 1024).toFixed(2)} MiB/s` : (en ? "Idle" : "空闲")}</td><td>{entry.active_connections ?? "—"}</td>
           <td>{Date.parse(entry.cooldown_until) > Date.now() ? (en ? "Cooling down" : "冷却中") : entry.preferred ? (en ? "Preferred" : "优先候选") : entry.validated ? (en ? "Verified candidate" : "验证通过的候选") : (en ? "Original node · observation only" : "原节点 · 仅观察")}</td>
         </tr>)}</tbody>
