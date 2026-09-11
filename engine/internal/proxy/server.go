@@ -458,8 +458,8 @@ func (s *Server) relay(clientReader io.Reader, client net.Conn, upstream net.Con
 	}
 	defer session.cdnObserver.close()
 	if session.cdnKey.domain != "" {
-		s.cdn.trafficChange(session.cdnKey, session.cdnGeneration, 1, 0, false)
-		defer s.cdn.trafficChange(session.cdnKey, session.cdnGeneration, -1, 0, false)
+		s.cdn.trafficChange(session.cdnKey, session.cdnGeneration, 1, 0, false, session.cdnTrial)
+		defer s.cdn.trafficChange(session.cdnKey, session.cdnGeneration, -1, 0, false, session.cdnTrial)
 	}
 	var relay sync.WaitGroup
 	relay.Add(2)
@@ -507,7 +507,7 @@ func (s *Server) relay(clientReader io.Reader, client net.Conn, upstream net.Con
 			add: func(amount uint64) {
 				s.registry.AddDown(session, amount)
 				if session.cdnKey.domain != "" {
-					s.cdn.trafficChange(session.cdnKey, session.cdnGeneration, 0, amount, false)
+					s.cdn.trafficChange(session.cdnKey, session.cdnGeneration, 0, amount, false, session.cdnTrial)
 					sampleBytes += amount
 					transferBytes += amount
 					if session.cdnTrial && !effectiveRecorded && transferBytes >= 64*1024 {
@@ -525,6 +525,7 @@ func (s *Server) relay(clientReader io.Reader, client net.Conn, upstream net.Con
 			},
 		}, upstream, buffer)
 		if session.cdnKey.domain != "" {
+			s.cdn.accountTransfer(session.cdnKey, session.cdnGeneration, 0, 0, session.cdnTrial, (copyErr != nil || session.cdnResponseFailed) && session.cdnTrial)
 			s.cdn.finishTransfer(session.cdnKey, session.cdnGeneration, transferBytes, (copyErr != nil || session.cdnResponseFailed) && session.cdnTrial)
 		}
 		closeWrite(client)

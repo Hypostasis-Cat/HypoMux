@@ -30,6 +30,17 @@ func (s *Server) ConfigureSteamCDN(enabled *bool, reset bool) SteamCDNStatus {
 }
 
 type SteamCDNEntry struct {
+	sampleLoad       int
+	AdmissionReason  string    `json:"admission_reason,omitempty"`
+	Source           string    `json:"source,omitempty"`
+	EvaluatedAt      time.Time `json:"evaluated_at"`
+	SwitchedBytes    uint64    `json:"switched_bytes"`
+	OriginalBytes    uint64    `json:"original_bytes"`
+	SwitchedBPS      float64   `json:"switched_bps"`
+	SwitchedActive   int       `json:"switched_active"`
+	TransferFailures uint64    `json:"transfer_failures"`
+
+	DecisionReason        string `json:"decision_reason,omitempty"`
 	EffectiveBytes        uint64 `json:"effective_bytes"`
 	SuccessfulConnections uint64 `json:"successful_connections"`
 	Preferred             bool   `json:"preferred"`
@@ -61,6 +72,13 @@ type SteamCDNDiagnostic struct {
 }
 
 type SteamCDNStatus struct {
+	AccountingVersion int       `json:"accounting_version"`
+	StartedAt         time.Time `json:"started_at"`
+	SampledAt         time.Time `json:"sampled_at"`
+	SwitchedBytes     uint64    `json:"switched_bytes"`
+	OriginalBytes     uint64    `json:"original_bytes"`
+	TransferFailures  uint64    `json:"transfer_failures"`
+
 	StageCounts           map[string]uint64 `json:"stage_counts"`
 	EffectiveReplacements uint64            `json:"effective_replacements"`
 
@@ -82,6 +100,11 @@ type cdnCandidate struct {
 // All mutable learning state belongs to one engine run. A generation prevents
 // cancelled probes and old connections from repopulating a reset/disabled pool.
 type steamCDN struct {
+	startedAt                                      time.Time
+	switchedBytes, originalBytes, transferFailures uint64
+	observed                                       map[cdnKey]time.Time
+	failures                                       map[string]*steamFailureWindow
+
 	observers                   int
 	traffic                     map[cdnKey]*cdnTraffic
 	decisions                   map[string]uint64
@@ -123,6 +146,10 @@ func (c *steamCDN) configure(enabled, reset bool) {
 	c.ctx, c.cancel = context.WithCancel(c.root)
 	c.enabled = enabled
 	c.generation++
+	c.startedAt = c.now()
+	c.switchedBytes, c.originalBytes, c.transferFailures = 0, 0, 0
+	c.observed = make(map[cdnKey]time.Time)
+	c.failures = make(map[string]*steamFailureWindow)
 	c.entries = make(map[cdnKey]*SteamCDNEntry)
 	c.traffic = make(map[cdnKey]*cdnTraffic)
 	c.decisions = make(map[string]uint64)
@@ -184,8 +211,25 @@ func publicCDNIP(value string) bool {
 
 func (c *steamCDN) pruneLocked() {
 	now := c.now()
+	for key, expiry := range c.observed {
+		if !expiry.After(now) {
+			delete(c.observed, key)
+		}
+	}
+	for key, state := range c.failures {
+		if !state.until.After(now) && now.Sub(state.at) > time.Minute {
+			delete(c.failures, key)
+		}
+	}
 	for key, entry := range c.entries {
 		if !entry.ExpiresAt.After(now) {
+			if t := c.traffic[key]; t != nil && (t.active > 0 || t.trials > 0) {
+				entry.Validated = false
+				entry.Preferred = false
+				entry.advantageWindows = 0
+				entry.DecisionReason = "validation_expired"
+				continue
+			}
 			delete(c.entries, key)
 			if t := c.traffic[key]; t == nil || t.active == 0 && t.trials == 0 {
 				delete(c.traffic, key)
@@ -212,6 +256,9 @@ func (c *steamCDN) snapshot() SteamCDNStatus {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.pruneLocked()
+	result.AccountingVersion = 1
+	result.StartedAt, result.SampledAt = c.startedAt, c.now()
+	result.SwitchedBytes, result.OriginalBytes, result.TransferFailures = c.switchedBytes, c.originalBytes, c.transferFailures
 	result.Enabled, result.Probing = c.enabled, c.probing
 	result.Recognized = c.recognized
 	result.EffectiveReplacements = c.effective
@@ -223,12 +270,37 @@ func (c *steamCDN) snapshot() SteamCDNStatus {
 	result.Replacements, result.Fallbacks = c.replacements, c.fallbacks
 	for key, entry := range c.entries {
 		copyEntry := *entry
+		paused := c.failures[steamFailureKey(key)]
+		if paused != nil && paused.until.After(c.now()) {
+			copyEntry.DecisionReason = "route_paused"
+			copyEntry.Preferred = false
+		} else if entry.CooldownUntil.After(c.now()) {
+			copyEntry.DecisionReason = "cooldown"
+		} else if entry.DecisionReason != "validation_expired" {
+			if copyEntry.DecisionReason == "route_paused" {
+				copyEntry.DecisionReason = "stale_samples"
+				copyEntry.Preferred = false
+			}
+			if entry.Samples == 0 && entry.Validated {
+				copyEntry.DecisionReason = "waiting_trial"
+			} else if entry.Validated && c.now().Sub(entry.lastSample) >= 10*time.Second {
+				copyEntry.DecisionReason = "stale_samples"
+				copyEntry.Preferred = false
+			}
+		}
 		if traffic := c.traffic[key]; traffic != nil {
 			copyEntry.ActiveConnections = traffic.active
+			copyEntry.SwitchedActive = traffic.switchedActive
+			if traffic.trials > 0 && !copyEntry.Preferred || traffic.trials >= 4 {
+				copyEntry.AdmissionReason = "concurrency_limit"
+			}
+			copyEntry.SwitchedBytes, copyEntry.OriginalBytes = traffic.switchedBytes, traffic.originalBytes
+			copyEntry.TransferFailures = traffic.failures
 			sec := c.now().Unix()
 			for _, slot := range traffic.slots {
 				if sec-slot.second >= 0 && sec-slot.second < 5 {
 					copyEntry.TotalBPS += float64(slot.bytes) / 5
+					copyEntry.SwitchedBPS += float64(slot.switched) / 5
 				}
 			}
 		}
@@ -260,7 +332,7 @@ func (c *steamCDN) choose(adapter, domain, port string) (string, uint64) {
 	var best, explore *SteamCDNEntry
 	var selections uint64
 	for _, entry := range c.entries {
-		if entry.Adapter != adapter || entry.Domain != domain || entry.Port != port || entry.CooldownUntil.After(c.now()) {
+		if entry.Adapter != adapter || entry.Domain != domain || entry.Port != port || !entry.Validated || entry.CooldownUntil.After(c.now()) {
 			continue
 		}
 		selections += entry.Selections
@@ -295,6 +367,19 @@ func (c *steamCDN) observe(key cdnKey, generation uint64, bytes uint64, elapsed 
 	if entry == nil || !entry.ExpiresAt.After(c.now()) {
 		return
 	}
+	load := 1
+	if traffic := c.traffic[key]; traffic != nil {
+		load = max(1, traffic.active)
+	}
+	if entry.sampleLoad > 0 && entry.sampleLoad != load {
+		entry.Samples = 0
+		entry.scoredSamples = 0
+		entry.EffectiveBytes = 0
+		entry.advantageWindows = 0
+		entry.Preferred = false
+		entry.DecisionReason = "load_mismatch"
+	}
+	entry.sampleLoad = load
 	bps := float64(bytes) / elapsed.Seconds()
 	if entry.Samples == 0 {
 		entry.DownloadBPS = bps
@@ -374,7 +459,10 @@ func (s *Server) discoverSteamCDN(host, port string, paths ...string) {
 func (s *Server) probeSteamCandidates(ctx context.Context, generation uint64, host, port, path string, probeResolver *dns.Resolver) {
 	c := s.cdn
 	key := net.JoinHostPort(host, port)
-	candidates := s.steamCandidates(ctx, host, probeResolver)
+	c.mu.Lock()
+	observed := c.observedCandidatesLocked(host, port)
+	c.mu.Unlock()
+	candidates, sources := mergeSteamSources(s.steamCandidates(ctx, host, probeResolver), observed)
 	if len(candidates) == 0 {
 		c.note(generation, host, "", "", "dns_no_candidates")
 	}
@@ -418,8 +506,12 @@ func (s *Server) probeSteamCandidates(ctx context.Context, generation uint64, ho
 				if old := c.entries[entryKey]; old != nil {
 					old.ExpiresAt = candidate.expires
 					old.Validated = true
+					old.Source = sources[candidate.ip]
+					if old.DecisionReason == "validation_expired" {
+						old.DecisionReason = "stale_samples"
+					}
 				} else {
-					c.entries[entryKey] = &SteamCDNEntry{Adapter: adapter.Name, Domain: host, Port: port, IP: candidate.ip, Validated: true, ExpiresAt: candidate.expires}
+					c.entries[entryKey] = &SteamCDNEntry{Adapter: adapter.Name, Domain: host, Port: port, IP: candidate.ip, Source: sources[candidate.ip], Validated: true, ExpiresAt: candidate.expires}
 				}
 				if expiry := c.discovery[key]; candidate.expires.After(expiry) {
 					c.discovery[key] = candidate.expires
@@ -575,6 +667,9 @@ func (s *Server) prepareSteamCDN(session *connection, original net.Conn, adapter
 	s.cdn.recognized++
 	generationNow := s.cdn.generation
 	key := cdnKey{adapter.Name, host, port, originalIP}
+	if s.cdn.enabled && (len(s.cdn.observed) < 512 || !s.cdn.observed[key].IsZero()) {
+		s.cdn.observed[key] = s.cdn.now().Add(2 * time.Minute)
+	}
 	if s.cdn.enabled && len(s.cdn.entries) < 512 && s.cdn.entries[key] == nil {
 		s.cdn.entries[key] = &SteamCDNEntry{Adapter: adapter.Name, Domain: host, Port: port, IP: originalIP, Selections: 1, ExpiresAt: time.Now().Add(cdnLifetime)}
 	}

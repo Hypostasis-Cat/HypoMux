@@ -143,14 +143,14 @@ func TestSteamObservedSignedProbeBindsAndKeepsURI(t *testing.T) {
 		}()
 		return a, nil
 	}
-	s.validateObservedSteam(context.Background(), s.cdn.generation, s.config.Adapters[0], host, "1.2.3.4", uri, []byte("data"), 4, []cdnCandidate{{"5.6.7.8", time.Now().Add(time.Minute)}})
+	s.validateObservedSteam(context.Background(), s.cdn.generation, s.config.Adapters[0], host, "1.2.3.4", uri, []byte("data"), 4, []cdnCandidate{{"5.6.7.8", time.Now().Add(time.Minute)}}, map[string]string{"5.6.7.8": "session"})
 	entries := s.cdn.snapshot().Entries
-	if len(entries) != 1 || !entries[0].Validated || entries[0].Adapter != "a" {
+	if len(entries) != 1 || !entries[0].Validated || entries[0].Adapter != "a" || entries[0].Source != "session" {
 		t.Fatal(entries)
 	}
 	// A different prefix must not be admitted.
 	s.cdn.configure(true, true)
-	s.validateObservedSteam(context.Background(), s.cdn.generation, s.config.Adapters[0], host, "1.2.3.4", uri, []byte("evil"), 4, []cdnCandidate{{"5.6.7.8", time.Now().Add(time.Minute)}})
+	s.validateObservedSteam(context.Background(), s.cdn.generation, s.config.Adapters[0], host, "1.2.3.4", uri, []byte("evil"), 4, []cdnCandidate{{"5.6.7.8", time.Now().Add(time.Minute)}}, map[string]string{"5.6.7.8": "session"})
 	if len(s.cdn.snapshot().Entries) != 0 || s.cdn.snapshot().StageCounts["http_content_mismatch"] != 1 {
 		t.Fatal("mismatched content admitted")
 	}
@@ -423,5 +423,59 @@ func TestSteamIPRedirectIsExplicitObservationOnly(t *testing.T) {
 	}
 	if steamDownloadHost("58.19.174.176") {
 		t.Fatal("literal IP accepted as CDN domain")
+	}
+}
+
+func TestSteamActiveExpiryRetainsStatisticsWithoutAdmission(t *testing.T) {
+	c := newSteamCDN(context.Background(), true)
+	defer c.cancel()
+	seedCDN(c, "a", "80", "5.6.7.8")
+	key := cdnKey{"a", testSteamHost, "80", "5.6.7.8"}
+	c.traffic[key] = &cdnTraffic{active: 1, trials: 1}
+	c.entries[key].Samples = 9
+	c.entries[key].EffectiveBytes = 20 * 1024 * 1024
+	c.entries[key].Preferred = true
+	c.entries[key].ExpiresAt = time.Now().Add(-time.Second)
+	status := c.snapshot()
+	if len(status.Entries) != 1 || status.Entries[0].Samples != 9 || status.Entries[0].Validated || status.Entries[0].Preferred || status.Entries[0].DecisionReason != "validation_expired" {
+		t.Fatal("active expiry lost data or retained eligibility", status.Entries)
+	}
+	if ip, _ := c.useTrial("a", testSteamHost, "80", "1.2.3.4"); ip != "" {
+		t.Fatal("expired candidate selected", ip)
+	}
+	if ip, _ := c.choose("a", testSteamHost, "80"); ip != "" {
+		t.Fatal("legacy selection reused expired candidate", ip)
+	}
+	c.traffic[key].active = 0
+	c.traffic[key].trials = 0
+	if len(c.snapshot().Entries) != 0 {
+		t.Fatal("idle expired record retained")
+	}
+}
+
+func TestSteamPromotionDiagnosticReasons(t *testing.T) {
+	now := time.Now()
+	base := SteamCDNEntry{Samples: 5, DownloadBPS: 100, lastSample: now}
+	good := SteamCDNEntry{Samples: 5, EffectiveBytes: 8 * 1024 * 1024, DownloadBPS: 116, lastSample: now}
+	for _, test := range []struct {
+		name     string
+		modify   func(*SteamCDNEntry)
+		baseline *SteamCDNEntry
+		reason   string
+	}{
+		{"fresh", func(*SteamCDNEntry) {}, &base, "advantage_window"},
+		{"small", func(e *SteamCDNEntry) { e.EffectiveBytes-- }, &base, "insufficient_samples"},
+		{"stale", func(e *SteamCDNEntry) { e.lastSample = now.Add(-11 * time.Second) }, &base, "stale_samples"},
+		{"unchanged", func(e *SteamCDNEntry) { e.scoredSamples = e.Samples }, &base, "stale_samples"},
+		{"no baseline", func(*SteamCDNEntry) {}, nil, "baseline_missing"},
+		{"slow", func(e *SteamCDNEntry) { e.DownloadBPS = 110 }, &base, "advantage_insufficient"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			e := good
+			test.modify(&e)
+			if got := steamPromotionReason(now, &e, test.baseline); got != test.reason {
+				t.Fatalf("%s != %s", got, test.reason)
+			}
+		})
 	}
 }

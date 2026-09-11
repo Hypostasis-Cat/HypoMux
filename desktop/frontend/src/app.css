@@ -5229,3 +5229,18 @@ svg {
   .tool-card-heading { flex-wrap: wrap; gap: 12px; }
   .tool-icon { display: none; }
 }
+.steam-transfer-summary { display: flex; flex-wrap: wrap; gap: 16px 32px; padding: 4px 0 20px; margin-bottom: 16px; border-bottom: 1px solid var(--hm-outer-border); }
+.steam-transfer-summary > span { display: flex; align-items: baseline; gap: 10px; color: var(--hm-text-secondary); font-size: 12px; }
+.steam-transfer-summary strong { color: var(--hm-text-primary); font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.steam-transfer-summary small { font-size: 11px; font-weight: 400; color: var(--hm-text-secondary); }
+.steam-node-heading { justify-content: space-between; align-items: center; gap: 12px; margin: 24px 0 12px; }
+.steam-node-heading h3 { margin: 0; font-size: 14px; font-weight: 600; }
+.tool-node-table .steam-node-identity { min-width: 180px; max-width: 280px; white-space: normal; overflow-wrap: anywhere; }
+.steam-node-identity strong, .steam-node-identity span, .steam-node-identity small { display: block; }
+.steam-node-identity strong { font-weight: 600; }
+.steam-node-identity span { margin-top: 4px; color: var(--hm-text-secondary); }
+.steam-node-identity small { margin-top: 6px; color: var(--hm-text-tertiary); font-size: 11px; }
+.tool-node-table .steam-node-state { min-width: 150px; max-width: 230px; white-space: normal; line-height: 1.6; }
+.steam-node-state strong { display: block; font-weight: 500; }
+.steam-node-state span, .steam-node-state div { display: block; color: var(--hm-text-secondary); font-size: 11px; }
+.tool-node-table td { vertical-align: top; }

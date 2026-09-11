@@ -8,6 +8,16 @@ import (
 )
 
 type SteamCDNEntry struct {
+	AdmissionReason  string    `json:"admission_reason,omitempty"`
+	Source           string    `json:"source,omitempty"`
+	EvaluatedAt      time.Time `json:"evaluated_at"`
+	SwitchedBytes    uint64    `json:"switched_bytes"`
+	OriginalBytes    uint64    `json:"original_bytes"`
+	SwitchedBPS      float64   `json:"switched_bps"`
+	SwitchedActive   int       `json:"switched_active"`
+	TransferFailures uint64    `json:"transfer_failures"`
+
+	DecisionReason        string  `json:"decision_reason,omitempty"`
 	Validated             bool    `json:"validated"`
 	Preferred             bool    `json:"preferred"`
 	TotalBPS              float64 `json:"total_bps"`
@@ -34,6 +44,17 @@ type SteamCDNDiagnostic struct {
 	At      time.Time `json:"at"`
 }
 type SteamCDNStatus struct {
+	CoreVersion    string `json:"core_version,omitempty"`
+	CoreCommit     string `json:"core_commit,omitempty"`
+	ConfiguredMode string `json:"configured_mode,omitempty"`
+
+	AccountingVersion int       `json:"accounting_version"`
+	StartedAt         time.Time `json:"started_at"`
+	SampledAt         time.Time `json:"sampled_at"`
+	SwitchedBytes     uint64    `json:"switched_bytes"`
+	OriginalBytes     uint64    `json:"original_bytes"`
+	TransferFailures  uint64    `json:"transfer_failures"`
+
 	StageCounts           map[string]uint64 `json:"stage_counts"`
 	EffectiveReplacements uint64            `json:"effective_replacements"`
 
@@ -111,6 +132,8 @@ func (s *EngineService) configureSteamCDNLocked(enabled *bool, reset bool) (Stea
 	if err := s.client.Request(ctx, "steam_cdn.configure", params, &result); err != nil {
 		return result, err
 	}
+	result.CoreVersion, result.CoreCommit = hello.EngineVersion, hello.Commit
+	result.ConfiguredMode = s.settings.Get().Mode
 	result.Available = true
 	return result, nil
 }
