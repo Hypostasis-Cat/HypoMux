@@ -30,15 +30,24 @@ func (s *Server) ConfigureSteamCDN(enabled *bool, reset bool) SteamCDNStatus {
 }
 
 type SteamCDNEntry struct {
-	sampleLoad       int
-	AdmissionReason  string    `json:"admission_reason,omitempty"`
-	Source           string    `json:"source,omitempty"`
-	EvaluatedAt      time.Time `json:"evaluated_at"`
-	SwitchedBytes    uint64    `json:"switched_bytes"`
-	OriginalBytes    uint64    `json:"original_bytes"`
-	SwitchedBPS      float64   `json:"switched_bps"`
-	SwitchedActive   int       `json:"switched_active"`
-	TransferFailures uint64    `json:"transfer_failures"`
+	probeAttemptAt      time.Time
+	ProbeBPS            float64   `json:"probe_bps"`
+	ProbedAt            time.Time `json:"probed_at"`
+	loadSamples         map[int]steamLoadSample
+	baselineIP          string
+	slowSince           time.Time
+	slowWindows         int
+	performanceCooldown bool
+	slowSampleEligible  bool
+	sampleLoad          int
+	AdmissionReason     string    `json:"admission_reason,omitempty"`
+	Source              string    `json:"source,omitempty"`
+	EvaluatedAt         time.Time `json:"evaluated_at"`
+	SwitchedBytes       uint64    `json:"switched_bytes"`
+	OriginalBytes       uint64    `json:"original_bytes"`
+	SwitchedBPS         float64   `json:"switched_bps"`
+	SwitchedActive      int       `json:"switched_active"`
+	TransferFailures    uint64    `json:"transfer_failures"`
 
 	DecisionReason        string `json:"decision_reason,omitempty"`
 	EffectiveBytes        uint64 `json:"effective_bytes"`
@@ -72,6 +81,8 @@ type SteamCDNDiagnostic struct {
 }
 
 type SteamCDNStatus struct {
+	SpeedProbeBytes   int       `json:"speed_probe_bytes"`
+	SpeedProbeLimit   int       `json:"speed_probe_limit"`
 	AccountingVersion int       `json:"accounting_version"`
 	StartedAt         time.Time `json:"started_at"`
 	SampledAt         time.Time `json:"sampled_at"`
@@ -100,6 +111,8 @@ type cdnCandidate struct {
 // All mutable learning state belongs to one engine run. A generation prevents
 // cancelled probes and old connections from repopulating a reset/disabled pool.
 type steamCDN struct {
+	speedBudgetAt                                  time.Time
+	speedBudgetBytes, speedBudgetAttempts          int
 	startedAt                                      time.Time
 	switchedBytes, originalBytes, transferFailures uint64
 	observed                                       map[cdnKey]time.Time
@@ -162,6 +175,8 @@ func (c *steamCDN) configure(enabled, reset bool) {
 	c.replacements, c.fallbacks = 0, 0
 	if !enabled {
 		c.cancel()
+	} else {
+		go c.runEvaluation(c.ctx, c.generation)
 	}
 }
 
@@ -257,6 +272,10 @@ func (c *steamCDN) snapshot() SteamCDNStatus {
 	defer c.mu.Unlock()
 	c.pruneLocked()
 	result.AccountingVersion = 1
+	result.SpeedProbeLimit = steamSpeedProbeBudget
+	if c.now().Sub(c.speedBudgetAt) < time.Minute {
+		result.SpeedProbeBytes = c.speedBudgetBytes
+	}
 	result.StartedAt, result.SampledAt = c.startedAt, c.now()
 	result.SwitchedBytes, result.OriginalBytes, result.TransferFailures = c.switchedBytes, c.originalBytes, c.transferFailures
 	result.Enabled, result.Probing = c.enabled, c.probing
@@ -268,6 +287,12 @@ func (c *steamCDN) snapshot() SteamCDNStatus {
 	}
 	result.Diagnostics = append([]SteamCDNDiagnostic(nil), c.diagnostics...)
 	result.Replacements, result.Fallbacks = c.replacements, c.fallbacks
+	groupTrials := make(map[string]int)
+	for key, traffic := range c.traffic {
+		if entry := c.entries[key]; entry == nil || !entry.Preferred {
+			groupTrials[steamFailureKey(key)] += traffic.trials
+		}
+	}
 	for key, entry := range c.entries {
 		copyEntry := *entry
 		paused := c.failures[steamFailureKey(key)]
@@ -276,6 +301,9 @@ func (c *steamCDN) snapshot() SteamCDNStatus {
 			copyEntry.Preferred = false
 		} else if entry.CooldownUntil.After(c.now()) {
 			copyEntry.DecisionReason = "cooldown"
+			if entry.performanceCooldown {
+				copyEntry.DecisionReason = "slow_candidate"
+			}
 		} else if entry.DecisionReason != "validation_expired" {
 			if copyEntry.DecisionReason == "route_paused" {
 				copyEntry.DecisionReason = "stale_samples"
@@ -288,7 +316,14 @@ func (c *steamCDN) snapshot() SteamCDNStatus {
 				copyEntry.Preferred = false
 			}
 		}
+		copyEntry.AdmissionReason = ""
+		if copyEntry.Validated && !copyEntry.Preferred && groupTrials[steamFailureKey(key)] >= 2 {
+			copyEntry.AdmissionReason = "group_trial_limit"
+		}
 		if traffic := c.traffic[key]; traffic != nil {
+			if traffic.trials > 0 && copyEntry.DecisionReason == "waiting_trial" {
+				copyEntry.DecisionReason = "trial_active"
+			}
 			copyEntry.ActiveConnections = traffic.active
 			copyEntry.SwitchedActive = traffic.switchedActive
 			if traffic.trials > 0 && !copyEntry.Preferred || traffic.trials >= 4 {
@@ -372,14 +407,23 @@ func (c *steamCDN) observe(key cdnKey, generation uint64, bytes uint64, elapsed 
 		load = max(1, traffic.active)
 	}
 	if entry.sampleLoad > 0 && entry.sampleLoad != load {
-		entry.Samples = 0
-		entry.scoredSamples = 0
-		entry.EffectiveBytes = 0
+		c.saveLoadLocked(entry)
+		sample := entry.loadSamples[load]
+		if c.now().Sub(sample.at) >= 10*time.Second {
+			sample = steamLoadSample{}
+		}
+		entry.Samples, entry.EffectiveBytes, entry.DownloadBPS = sample.samples, sample.bytes, sample.bps
+		entry.scoredSamples = entry.Samples
 		entry.advantageWindows = 0
+		entry.slowWindows = 0
+		entry.slowSince = time.Time{}
 		entry.Preferred = false
 		entry.DecisionReason = "load_mismatch"
 	}
 	entry.sampleLoad = load
+	// Long gaps can be request pacing rather than a slow upstream. They may
+	// contribute to conservative ranking, but must not trigger slow cooling.
+	entry.slowSampleEligible = elapsed <= 2*time.Second
 	bps := float64(bytes) / elapsed.Seconds()
 	if entry.Samples == 0 {
 		entry.DownloadBPS = bps
@@ -389,6 +433,7 @@ func (c *steamCDN) observe(key cdnKey, generation uint64, bytes uint64, elapsed 
 	entry.EffectiveBytes += bytes
 	entry.Samples++
 	entry.lastSample = c.now()
+	c.saveLoadLocked(entry)
 }
 
 func (c *steamCDN) outcome(key cdnKey, generation uint64, success bool) {
@@ -523,12 +568,12 @@ func (s *Server) probeSteamCandidates(ctx context.Context, generation uint64, ho
 }
 
 func (s *Server) steamCandidates(ctx context.Context, host string, resolver *dns.Resolver) []cdnCandidate {
-	return collectSteamCandidates(ctx, host, s.config.Adapters, resolver.Resolve)
+	return collectSteamCandidates(ctx, host, s.config.Adapters, resolver.Resolve, int(time.Now().Unix()/30))
 }
 
 // Bound discovery latency independently of the number of interfaces. Results
 // keep configuration order, never DNS response arrival order or country bias.
-func collectSteamCandidates(parent context.Context, host string, adapters []Adapter, resolve func(context.Context, dns.Query) (dns.Result, error)) []cdnCandidate {
+func collectSteamCandidates(parent context.Context, host string, adapters []Adapter, resolve func(context.Context, dns.Query) (dns.Result, error), rotations ...int) []cdnCandidate {
 	ctx, cancel := context.WithTimeout(parent, 4*time.Second)
 	defer cancel()
 	type job struct {
@@ -597,6 +642,11 @@ func collectSteamCandidates(parent context.Context, host string, adapters []Adap
 	workers.Wait()
 	if parent.Err() != nil {
 		return nil
+	}
+	if len(rotations) > 0 {
+		for i := range groups {
+			groups[i] = rotateSteamCandidates(groups[i], rotations[0])
+		}
 	}
 	return mergeSteamCandidates(groups)
 }

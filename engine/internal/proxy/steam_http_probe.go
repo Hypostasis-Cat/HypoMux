@@ -50,13 +50,27 @@ func steamProbeReason(err error) string {
 	return "http_probe_failed"
 }
 func (s *Server) probeSteamHTTPRange(ctx context.Context, adapter Adapter, host, ip, path string, size int, totalExpected int64) ([]byte, error) {
-	if !steamDownloadHost(host) || !publicCDNIP(ip) || !validSteamProbeURI(host, path) || size < 1 || size > 4096 {
+	return s.probeSteamRange(ctx, adapter, host, ip, path, size, totalExpected, false)
+}
+
+// Extended requests are only used after content-prefix verification. They use
+// a separate, persistent budget and never contribute to real-transfer scores.
+func (s *Server) probeSteamRange(ctx context.Context, adapter Adapter, host, ip, path string, size int, totalExpected int64, extended bool) ([]byte, error) {
+	limit := 4096
+	if extended {
+		limit = steamSpeedProbeSize
+	}
+	if !steamDownloadHost(host) || !publicCDNIP(ip) || !validSteamProbeURI(host, path) || size < 1 || size > limit {
 		return nil, errors.New("invalid probe scope")
 	}
 	if ctx.Err() != nil {
 		return nil, errors.New("http_probe_cancelled")
 	}
-	if s.cdn != nil {
+	if extended {
+		if s.cdn == nil || !s.cdn.reserveSpeedProbe(size+1) {
+			return nil, errors.New("http_speed_budget")
+		}
+	} else if s.cdn != nil {
 		c := s.cdn
 		c.mu.Lock()
 		now := c.now()
@@ -110,7 +124,7 @@ func (s *Server) probeSteamHTTPRange(ctx context.Context, adapter Adapter, host,
 	if response.Header.Get("Content-Range") == "" {
 		return nil, errors.New("missing content range")
 	}
-	// Require an exact 4 KiB prefix; short chunks simply retain original routing.
+	// Require exactly the requested range and the observed total object length.
 	rangePrefix := fmt.Sprintf("bytes 0-%d/", size-1)
 	total, parseErr := strconv.ParseUint(strings.TrimPrefix(response.Header.Get("Content-Range"), rangePrefix), 10, 64)
 	if !strings.HasPrefix(response.Header.Get("Content-Range"), rangePrefix) || parseErr != nil || total < uint64(size) || totalExpected > 0 && total != uint64(totalExpected) {

@@ -1,5 +1,6 @@
 # HypoMux 文档
 
+- [算法与性能优化方案](algorithm-performance-plan.md)：分阶段路线、第一阶段实现与微基准结果。
 - [Steam 下载节点优选](steam-cdn-optimization.md)：双模式实现方案、开关行为和验证结果。
 
 - `architecture/`：Engine、TUN、DNS、双栈出口与 Windows 资格验证的架构记录。

@@ -1,10 +1,8 @@
 package dns
 
 import (
-	"bufio"
 	"bytes"
 	"context"
-	"crypto/tls"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -17,6 +15,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/Hypostasis-Cat/HypoMux/engine/internal/expiry"
 )
 
 const maxDNSMessageBytes = 64 * 1024
@@ -94,10 +94,16 @@ type Resolver struct {
 
 	mu              sync.Mutex
 	cache           map[cacheKey]cacheEntry
+	cacheExpiry     expiry.Index[cacheKey]
 	inflight        map[cacheKey]*lookup
 	strictFailures  map[string]int
 	fallbackEmitted map[string]bool
 	onFallback      func(FallbackEvent)
+
+	dohMu         sync.Mutex
+	dohTransports map[dohPoolKey]*dohPoolEntry
+	dohClosed     bool
+	dohSequence   uint64
 
 	queries            atomic.Uint64
 	cacheHits          atomic.Uint64
@@ -119,7 +125,7 @@ func New(root context.Context, config Config, dial DialFunc) (*Resolver, error) 
 	if err != nil {
 		return nil, err
 	}
-	return &Resolver{
+	resolver := &Resolver{
 		root:            root,
 		config:          normalized,
 		dial:            dial,
@@ -128,7 +134,9 @@ func New(root context.Context, config Config, dial DialFunc) (*Resolver, error) 
 		inflight:        make(map[cacheKey]*lookup),
 		strictFailures:  make(map[string]int),
 		fallbackEmitted: make(map[string]bool),
-	}, nil
+	}
+	context.AfterFunc(root, resolver.closeDoHTransports)
+	return resolver, nil
 }
 
 func (r *Resolver) SetFallbackHandler(handler func(FallbackEvent)) {
@@ -164,14 +172,18 @@ func (r *Resolver) Resolve(ctx context.Context, query Query) (Result, error) {
 
 	now := r.now().UTC()
 	r.mu.Lock()
-	r.removeExpiredLocked(now)
 	if entry, ok := r.cache[key]; ok {
-		result := entry.result
-		result.Addresses = append([]string(nil), result.Addresses...)
-		result.Cached = true
-		r.mu.Unlock()
-		r.cacheHits.Add(1)
-		return result, nil
+		if !entry.expiresAt.After(now) {
+			delete(r.cache, key)
+			r.cacheExpiry.Delete(key)
+		} else {
+			result := entry.result
+			result.Addresses = append([]string(nil), result.Addresses...)
+			result.Cached = true
+			r.mu.Unlock()
+			r.cacheHits.Add(1)
+			return result, nil
+		}
 	}
 	call := r.inflight[key]
 	if call == nil {
@@ -237,6 +249,7 @@ func (r *Resolver) runLookup(key cacheKey, binding Binding, call *lookup) {
 	if err == nil && result.ExpiresAt != nil {
 		r.makeCacheRoomLocked(r.now().UTC())
 		r.cache[key] = cacheEntry{result: result, expiresAt: *result.ExpiresAt}
+		r.cacheExpiry.Set(key, *result.ExpiresAt)
 	}
 	call.result = result
 	call.err = err
@@ -520,20 +533,6 @@ func (r *Resolver) queryDoH(
 		return Result{}, 0, err
 	}
 	address := net.JoinHostPort(endpoint.IP, "443")
-	connection, err := r.dial(ctx, "tcp4", address, binding)
-	if err != nil {
-		return Result{}, 0, err
-	}
-	defer connection.Close()
-	setContextDeadline(connection, ctx)
-
-	tlsConnection := tls.Client(connection, &tls.Config{
-		MinVersion: tls.VersionTLS12,
-		ServerName: endpoint.Host,
-	})
-	if err := tlsConnection.HandshakeContext(ctx); err != nil {
-		return Result{}, 0, err
-	}
 	request, err := http.NewRequestWithContext(
 		ctx,
 		http.MethodPost,
@@ -547,11 +546,12 @@ func (r *Resolver) queryDoH(
 	request.Header.Set("Accept", "application/dns-message")
 	request.Header.Set("Content-Type", "application/dns-message")
 	request.Header.Set("User-Agent", "HypoMux-Engine/1")
-	request.Close = true
-	if err := request.Write(tlsConnection); err != nil {
+	transport, err := r.doHTransport(binding, endpoint)
+	if err != nil {
 		return Result{}, 0, err
 	}
-	response, err := http.ReadResponse(bufio.NewReader(tlsConnection), request)
+	// RoundTrip does not follow redirects to unconfigured resolvers.
+	response, err := transport.RoundTrip(request)
 	if err != nil {
 		return Result{}, 0, err
 	}
@@ -612,29 +612,23 @@ func (r *Resolver) recordStrictFailure(binding Binding, failure error) {
 }
 
 func (r *Resolver) removeExpiredLocked(now time.Time) {
-	for key, entry := range r.cache {
-		if !entry.expiresAt.After(now) {
-			delete(r.cache, key)
+	for {
+		key, ok := r.cacheExpiry.PopExpired(now)
+		if !ok {
+			return
 		}
+		delete(r.cache, key)
 	}
 }
 
 func (r *Resolver) makeCacheRoomLocked(now time.Time) {
 	r.removeExpiredLocked(now)
 	for len(r.cache) >= r.config.MaxCacheEntries {
-		var oldestKey cacheKey
-		var oldest time.Time
-		first := true
-		for key, entry := range r.cache {
-			if first || entry.expiresAt.Before(oldest) {
-				first = false
-				oldestKey = key
-				oldest = entry.expiresAt
-			}
-		}
-		if first {
+		oldestKey, _, ok := r.cacheExpiry.First()
+		if !ok {
 			return
 		}
+		r.cacheExpiry.Delete(oldestKey)
 		delete(r.cache, oldestKey)
 	}
 }

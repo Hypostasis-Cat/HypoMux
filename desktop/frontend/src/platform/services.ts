@@ -52,13 +52,15 @@ export type CompleteAppSettings = AppSettings & {
 };
 
 export type SteamCDNStatus = {
+
+ speed_probe_bytes?: number; speed_probe_limit?: number;
  core_version?: string; core_commit?: string; configured_mode?: string;
  accounting_version?: number; started_at?: string; sampled_at?: string; switched_bytes?: number; original_bytes?: number; transfer_failures?: number;
  stage_counts?: Record<string,number>; effective_replacements?: number;
  recognized?: number;
  diagnostics?: Array<{domain: string; adapter: string; ip: string; stage: string; at: string}>;
  available: boolean; enabled: boolean; probing: number; replacements: number; fallbacks: number;
- entries: Array<{admission_reason?: string; source?: string; evaluated_at?: string; switched_bytes?: number; original_bytes?: number; switched_bps?: number; switched_active?: number; transfer_failures?: number; decision_reason?: string; validated?: boolean; preferred?: boolean; total_bps?: number; active_connections?: number; successful_connections?: number; effective_bytes?: number; adapter: string; domain: string; port: string; ip: string; download_bps: number; samples: number; selections: number; cooldown_until: string; expires_at: string}>;
+ entries: Array<{probe_bps?: number; probed_at?: string; admission_reason?: string; source?: string; evaluated_at?: string; switched_bytes?: number; original_bytes?: number; switched_bps?: number; switched_active?: number; transfer_failures?: number; decision_reason?: string; validated?: boolean; preferred?: boolean; total_bps?: number; active_connections?: number; successful_connections?: number; effective_bytes?: number; adapter: string; domain: string; port: string; ip: string; download_bps: number; samples: number; selections: number; cooldown_until: string; expires_at: string}>;
 };
 
 export type BlockedDomainEntry = {

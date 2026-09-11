@@ -7,6 +7,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/Hypostasis-Cat/HypoMux/engine/internal/expiry"
 )
 
 const (
@@ -30,6 +32,7 @@ type adapterHealth struct {
 	lastFailureAt       time.Time
 	cooldownUntil       time.Time
 	domains             map[string]*domainHealth
+	domainExpiry        expiry.Index[string]
 }
 
 type domainHealth struct {
@@ -89,8 +92,14 @@ func newHealthTableConfigured(
 		if state == nil {
 			continue
 		}
-		state.domains[normalizeDomain(seed.Domain)] = &domainHealth{
+		domain := normalizeDomain(seed.Domain)
+		state.domains[domain] = &domainHealth{
 			evidence: domainFailureThreshold, expiresAt: seed.ExpiresAt.UTC(),
+		}
+		if !seed.ExpiresAt.IsZero() {
+			state.domainExpiry.Set(domain, seed.ExpiresAt.UTC())
+		} else {
+			state.domainExpiry.Delete(domain)
 		}
 	}
 	return table
@@ -179,7 +188,9 @@ func (h *healthTable) recordSuccess(name string, domain string) {
 	state.consecutiveFailures = 0
 	state.cooldownUntil = time.Time{}
 	state.lastSuccessAt = now
-	delete(state.domains, normalizeDomain(domain))
+	domain = normalizeDomain(domain)
+	delete(state.domains, domain)
+	state.domainExpiry.Delete(domain)
 }
 
 func (h *healthTable) recordComparativeDomainFailure(
@@ -200,6 +211,7 @@ func (h *healthTable) recordComparativeDomainFailure(
 		return
 	}
 	now := h.now().UTC()
+	h.pruneExpiredDomains(state, now)
 	entry := state.domains[domain]
 	if entry == nil || (!entry.expiresAt.IsZero() && !entry.expiresAt.After(now)) {
 		entry = &domainHealth{}
@@ -215,6 +227,7 @@ func (h *healthTable) recordComparativeDomainFailure(
 	} else {
 		entry.expiresAt = now.Add(domainEvidenceTTL)
 	}
+	state.domainExpiry.Set(domain, entry.expiresAt)
 }
 
 func (h *healthTable) snapshot() (
@@ -289,10 +302,12 @@ func (h *healthTable) pruneExpiredDomains(
 	state *adapterHealth,
 	now time.Time,
 ) {
-	for domain, entry := range state.domains {
-		if !entry.expiresAt.IsZero() && !entry.expiresAt.After(now) {
-			delete(state.domains, domain)
+	for {
+		domain, ok := state.domainExpiry.PopExpired(now)
+		if !ok {
+			return
 		}
+		delete(state.domains, domain)
 	}
 }
 

@@ -54,6 +54,7 @@ func (s *Server) validateObservedSteam(ctx context.Context, gen uint64, adapter 
 		return
 	}
 	alternatives := 0
+	var verified []cdnCandidate
 	for _, candidate := range candidates {
 		if candidate.ip == originalIP || !adapterSupportsNetwork(adapter, networkForIP("tcp", net.ParseIP(candidate.ip))) {
 			continue
@@ -71,6 +72,18 @@ func (s *Server) validateObservedSteam(ctx context.Context, gen uint64, adapter 
 		}
 		c.note(gen, host, adapter.Name, candidate.ip, stage)
 		if stage != "verified" {
+			if stage == "http_content_mismatch" {
+				c.mu.Lock()
+				if c.enabled && gen == c.generation {
+					if entry := c.entries[cdnKey{adapter.Name, host, "80", candidate.ip}]; entry != nil {
+						entry.Validated = false
+						entry.Preferred = false
+						entry.ProbeBPS = 0
+						entry.DecisionReason = "content_mismatch"
+					}
+				}
+				c.mu.Unlock()
+			}
 			continue
 		}
 		c.mu.Lock()
@@ -92,10 +105,12 @@ func (s *Server) validateObservedSteam(ctx context.Context, gen uint64, adapter 
 			entry.ExpiresAt = candidate.expires
 		}
 		c.mu.Unlock()
+		verified = append(verified, candidate)
 	}
 	if alternatives == 0 {
 		c.note(gen, host, adapter.Name, originalIP, "only_original")
 	}
+	s.measureSteamCandidates(ctx, gen, adapter, host, uri, baseline, total, verified)
 }
 
 type cdnTraffic struct {
@@ -166,6 +181,7 @@ func (c *steamCDN) useTrial(adapter, host, port, original string) (string, uint6
 	explore := c.decisions[key]%8 == 0
 	baseline := c.entries[cdnKey{adapter, host, port, original}]
 
+	groupTrials := c.groupTrialsLocked(adapter, host, port)
 	var selected *SteamCDNEntry
 	for k, e := range c.entries {
 		if k.adapter != adapter || k.domain != host || k.port != port || k.ip == original || !e.Validated || e.CooldownUntil.After(c.now()) {
@@ -178,32 +194,24 @@ func (c *steamCDN) useTrial(adapter, host, port, original string) (string, uint6
 			e.DecisionReason = "route_paused"
 			continue
 		}
-		window := c.now().Unix() / 5
-		if e.lastScoreWindow != window {
-			e.lastScoreWindow = window
-			e.EvaluatedAt = c.now()
-			e.DecisionReason = steamPromotionReason(c.now(), e, baseline)
-			if e.DecisionReason == "advantage_window" {
-				e.advantageWindows++
-			} else {
-				e.advantageWindows = 0
-				e.Preferred = false
-			}
-			e.scoredSamples = e.Samples
-			if e.advantageWindows >= 2 {
-				e.Preferred = true
-				e.DecisionReason = "preferred"
-			}
-		}
+		e.baselineIP = original
+		c.evaluateEntryLocked(k, e, baseline, c.now())
 		// Score active trials before enforcing admission limits: a long download
 		// must be able to earn promotion without first closing its connection.
 		if t := c.traffic[k]; t != nil && ((!e.Preferred && t.trials > 0) || (e.Preferred && t.trials >= 4)) {
 			continue
 		}
+		if !e.Preferred && groupTrials >= 2 {
+			e.AdmissionReason = "group_trial_limit"
+			continue
+		}
+		if e.CooldownUntil.After(c.now()) {
+			continue
+		}
 		if !explore && !e.Preferred {
 			continue
 		}
-		if selected == nil || explore && (e.Selections < selected.Selections || e.Selections == selected.Selections && e.IP < selected.IP) || !explore && e.DownloadBPS > selected.DownloadBPS {
+		if selected == nil || explore && steamExploreBefore(e, selected, c.now()) || !explore && e.DownloadBPS > selected.DownloadBPS {
 			selected = e
 		}
 	}

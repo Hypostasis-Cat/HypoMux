@@ -67,6 +67,27 @@ afterEach(() => {
 });
 
 describe("TUN settings", () => {
+  it("opens tool details separately and restores focus when returning", async () => {
+    render(<ToolsPage />);
+    const entry = await screen.findByRole("button", { name: "View Steam download optimization details" });
+    expect(screen.queryByRole("button", { name: "Re-evaluate nodes" })).toBeNull();
+    expect(screen.queryByText("Global networks")).toBeNull();
+    fireEvent.click(entry);
+    expect(await screen.findByRole("button", { name: "Re-evaluate nodes" })).toBeTruthy();
+    expect(document.activeElement).toBe(screen.getByRole("heading", { level: 1, name: "Steam download optimization" }));
+    fireEvent.click(screen.getByRole("button", { name: "Back to toolbox" }));
+    expect(screen.queryByRole("button", { name: "Re-evaluate nodes" })).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "View Steam download optimization details" }));
+  });
+  it("distinguishes enabled preference from waiting for the engine", async () => {
+    mocks.get.mockResolvedValue({ ...initial, steam_cdn_enabled: true });
+    render(<ToolsPage />);
+    expect(await screen.findByText("Enabled · waiting for engine")).toBeTruthy();
+    const toggle = screen.getByRole("switch", { name: "Steam download optimization" });
+    fireEvent.click(toggle);
+    expect(await screen.findByText("Off")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Back to toolbox" })).toBeNull();
+  });
   it("toolbox defaults Steam CDN off and uses the runtime-aware toggle", async () => {
     render(<ToolsPage />);
     const toggle = await screen.findByRole("switch", { name: "Steam download optimization" });

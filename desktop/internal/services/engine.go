@@ -435,6 +435,9 @@ func (s *EngineService) Snapshot() (EngineSnapshot, error) {
 	}
 	s.mu.Unlock()
 	if logCDN {
+		telemetry.SteamCDN.CoreVersion, telemetry.SteamCDN.CoreCommit = hello.EngineVersion, hello.Commit
+		telemetry.SteamCDN.ConfiguredMode = settings.Mode
+		telemetry.SteamCDN.Available = slices.Contains(hello.Capabilities, "steam_cdn.configure")
 		s.logs.RecordEvent("steam_cdn", "runtime", map[string]any{"status": telemetry.SteamCDN})
 	}
 	snapshot.SampledAt = telemetry.SampledAt
@@ -1125,6 +1128,8 @@ func (s *EngineService) Stop() (EngineSnapshot, error) {
 		if slices.Contains(hello.Capabilities, "steam_cdn.configure") && s.logs != nil {
 			var status SteamCDNStatus
 			if err := s.client.Request(ctx, "steam_cdn.configure", map[string]any{}, &status); err == nil {
+				status.CoreVersion, status.CoreCommit = hello.EngineVersion, hello.Commit
+				status.ConfiguredMode, status.Available = s.settings.Get().Mode, true
 				s.logs.RecordEvent("steam_cdn", "before_stop", map[string]any{"status": status})
 			}
 		}

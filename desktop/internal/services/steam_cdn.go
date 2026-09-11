@@ -8,6 +8,8 @@ import (
 )
 
 type SteamCDNEntry struct {
+	ProbeBPS         float64   `json:"probe_bps"`
+	ProbedAt         time.Time `json:"probed_at"`
 	AdmissionReason  string    `json:"admission_reason,omitempty"`
 	Source           string    `json:"source,omitempty"`
 	EvaluatedAt      time.Time `json:"evaluated_at"`
@@ -44,9 +46,11 @@ type SteamCDNDiagnostic struct {
 	At      time.Time `json:"at"`
 }
 type SteamCDNStatus struct {
-	CoreVersion    string `json:"core_version,omitempty"`
-	CoreCommit     string `json:"core_commit,omitempty"`
-	ConfiguredMode string `json:"configured_mode,omitempty"`
+	SpeedProbeBytes int    `json:"speed_probe_bytes"`
+	SpeedProbeLimit int    `json:"speed_probe_limit"`
+	CoreVersion     string `json:"core_version,omitempty"`
+	CoreCommit      string `json:"core_commit,omitempty"`
+	ConfiguredMode  string `json:"configured_mode,omitempty"`
 
 	AccountingVersion int       `json:"accounting_version"`
 	StartedAt         time.Time `json:"started_at"`

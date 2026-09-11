@@ -1,0 +1,86 @@
+/* Shared control surfaces. Keep Fluent's appearance, validation and keyboard
+ * behavior; customize its neutral tokens without flattening primary buttons. */
+:root {
+  --hm-control-radius: 8px;
+  --hm-control-fill: color-mix(in srgb, rgba(var(--hm-surface-rgb), 0.28) 92%, var(--hm-accent));
+  --hm-control-hover: color-mix(in srgb, var(--hm-control-fill) 78%, var(--hm-accent-muted));
+  --hm-control-pressed: color-mix(in srgb, var(--hm-control-fill) 62%, var(--hm-accent-muted));
+  --hm-control-border: color-mix(in srgb, var(--hm-text-secondary) 22%, transparent);
+  --hm-control-border-hover: color-mix(in srgb, var(--hm-accent) 48%, var(--hm-control-border));
+}
+
+.fui-Button,
+.fui-Dropdown,
+.fui-Combobox,
+.fui-Input,
+.fui-Textarea,
+.fui-Select,
+.fui-SpinButton {
+  --colorNeutralBackground1: var(--hm-control-fill);
+  --colorNeutralBackground1Hover: var(--hm-control-hover);
+  --colorNeutralBackground1Pressed: var(--hm-control-pressed);
+  --colorNeutralBackground1Selected: var(--hm-control-pressed);
+  --colorNeutralBackground3: var(--hm-control-fill);
+  --colorNeutralBackground3Hover: var(--hm-control-hover);
+  --colorNeutralBackground3Pressed: var(--hm-control-pressed);
+  --colorNeutralStroke1: var(--hm-control-border);
+  --colorNeutralStroke1Hover: var(--hm-control-border-hover);
+  --colorNeutralStroke1Pressed: var(--hm-accent);
+  --colorNeutralStrokeAccessible: var(--hm-control-border);
+  --colorNeutralStrokeAccessibleHover: var(--hm-control-border-hover);
+  --colorNeutralStrokeAccessiblePressed: var(--hm-accent);
+  --colorNeutralBackgroundDisabled: color-mix(in srgb, var(--hm-text-primary) 4%, transparent);
+  --colorNeutralStrokeDisabled: var(--hm-outer-border);
+  --borderRadiusMedium: var(--hm-control-radius);
+}
+
+/* Repeated class specificity wins over generated single-class Fluent styles. */
+.fui-Button.fui-Button,
+.fui-Dropdown.fui-Dropdown,
+.fui-Combobox.fui-Combobox,
+.fui-Input.fui-Input,
+.fui-Textarea.fui-Textarea,
+.fui-Select.fui-Select,
+.fui-SpinButton.fui-SpinButton {
+  border-radius: var(--hm-control-radius);
+  transition: background-color var(--hm-motion-fast) var(--hm-motion-ease),
+    border-color var(--hm-motion-fast) var(--hm-motion-ease),
+    box-shadow var(--hm-motion-fast) var(--hm-motion-ease);
+}
+
+.fui-Listbox.fui-Listbox,
+.fui-MenuPopover.fui-MenuPopover {
+  padding: 6px;
+  border: 1px solid var(--hm-control-border);
+  border-radius: 10px;
+  background: color-mix(in srgb, rgb(var(--hm-surface-rgb)) 96%, var(--hm-accent));
+  color: var(--hm-text-primary);
+  box-shadow: 0 12px 32px rgba(var(--hm-shadow-colour), 0.24);
+}
+
+.fui-Option.fui-Option,
+.fui-MenuItem.fui-MenuItem {
+  border-radius: 6px;
+}
+
+.fui-Option.fui-Option:hover,
+.fui-MenuItem.fui-MenuItem:hover {
+  background: var(--hm-control-hover);
+}
+
+.fui-Option.fui-Option[aria-selected="true"] {
+  background: var(--hm-accent-soft);
+}
+
+@media (forced-colors: active) {
+  .fui-Listbox.fui-Listbox,
+  .fui-MenuPopover.fui-MenuPopover {
+    background: Canvas;
+    color: CanvasText;
+    border-color: ButtonText;
+  }
+  .fui-Option.fui-Option[aria-selected="true"] {
+    background: Highlight;
+    color: HighlightText;
+  }
+}

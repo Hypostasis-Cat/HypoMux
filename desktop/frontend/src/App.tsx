@@ -6,6 +6,7 @@ import "./theme/semantic.tokens.css";
 import "./theme/typography.tokens.css";
 import "./theme/motion.tokens.css";
 import "./app.css";
+import "./theme/controls.css";
 import { WallpaperLayer } from "./components/material/WallpaperLayer";
 import { AppShell } from "./components/shell/AppShell";
 import type { AppPage } from "./components/shell/CompactNavigation";

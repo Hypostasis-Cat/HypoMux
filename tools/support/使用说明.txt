@@ -1,0 +1,28 @@
+HypoMux 升级检查与修复工具
+
+1. 保持本文件夹中的文件在一起，双击 Start-HypoMux-Repair.cmd。
+2. 输入 1：检查环境，生成诊断日志，不修改进程、服务或网络。
+3. 输入 2：修复清理。先取消并关闭所有 HypoMux 安装器，尽量正常停止加速。
+4. 按提示允许管理员权限；必须使用平时运行 HypoMux 的同一 Windows 账户，
+   不要输入另一位管理员的账户凭据。若当前账户无法提升，请先联系维护者。
+5. 修复前需要输入“确认”。修复会结束已核实路径的 HypoMux 进程、停止 Core，
+   使用官方签名程序自带命令恢复 HypoMux 的网络设置，清除 Core 文件只读属性，
+   并检查文件能否写入；可能导致正在进行的下载断开。
+6. 提示完成后重新运行官方安装包；若失败，将窗口显示的报告文件夹打包给维护者。
+
+安全边界
+- 不删除配置、分流规则、缓存、安装文件或服务。
+- 不修改目录权限，不全局重置 DNS/Winsock，不关闭 Clash 或安全软件。
+- 不会为了绕过报错而强行继续；服务停不下来、文件被锁、路径不匹配时停止。
+- 自动恢复仅接受数字签名有效且发布者组织为 SignPath Foundation 的程序。
+  未签名测试版、证书验证失败、残缺安装或旧版 Python 版本请把日志交给维护者。
+- 本工具不保证解除安全软件或第三方程序的占用，也不代表安装验收已通过。
+- Core 在修复后可能保持停止；若此前被安装器禁用，仅重启电脑也不会启用它。
+  请完成覆盖安装。没有完成安装时，不要自行删除服务或系统文件。
+- 日志可能包含 Windows 用户名和安装路径，发送前可检查并遮盖这些信息。
+
+命令行（可选）：
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Repair-HypoMuxUpgrade.ps1 -Mode Check
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Repair-HypoMuxUpgrade.ps1 -Mode Repair -InstallDir "D:\Apps\HypoMux"
+
+PowerShell 执行策略只对本次启动临时设置，不修改系统永久执行策略。

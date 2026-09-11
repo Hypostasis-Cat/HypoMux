@@ -70,7 +70,7 @@ func (c *steamCDN) observedCandidatesLocked(host, port string) []cdnCandidate {
 		}
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].ip < result[j].ip })
-	return mergeSteamCandidates([][]cdnCandidate{result})
+	return mergeSteamCandidates([][]cdnCandidate{rotateSteamCandidates(result, int(c.now().Unix()/30))})
 }
 
 func mergeSteamSources(dnsCandidates, observed []cdnCandidate) ([]cdnCandidate, map[string]string) {

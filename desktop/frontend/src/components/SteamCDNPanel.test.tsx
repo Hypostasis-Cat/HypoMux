@@ -8,6 +8,17 @@ vi.mock("../i18n/i18n", () => ({ useI18n: () => ({ locale: "en" }) }));
 afterEach(cleanup);
 beforeEach(() => { vi.clearAllMocks(); mocks.status.mockReset(); });
 describe("Steam diagnostics", () => {
+  it("keeps short-test references separate from actual transfer and displays the budget", async () => {
+    mocks.status.mockResolvedValue({ available: true, enabled: true, recognized: 8, probing: 0, replacements: 0, fallbacks: 0, speed_probe_bytes: 524288, speed_probe_limit: 4194304, stage_counts: { http_speed_sampled: 1 }, entries: [
+      { adapter: "Ethernet", domain: "cache1.steamcontent.com", port: "80", ip: "5.6.7.8", source: "dns", validated: false, preferred: false, decision_reason: "content_mismatch", probe_bps: 10485760, probed_at: "2020-01-01T00:00:00Z", active_connections: 0, cooldown_until: "0001-01-01T00:00:00Z", expires_at: "2099-01-01T00:00:00Z" },
+    ] });
+    render(<SteamCDNPanel enabled saving={false} />);
+    expect(await screen.findByText(/Short tests: 0.50 \/ 4 MiB/)).toBeTruthy();
+    expect(screen.getByText("Candidate unavailable")).toBeTruthy();
+    expect(screen.getByText("Content check failed; candidate withdrawn")).toBeTruthy();
+    expect(screen.getByLabelText("Short-test references").textContent).toContain("not actual download rate · expired");
+    expect(screen.getByText("Idle")).toBeTruthy();
+  });
   it("shows recognized downloads and a concrete verification failure", async () => {
     mocks.status.mockResolvedValue({ available: true, enabled: true, recognized: 5, probing: 0, replacements: 0, fallbacks: 0, entries: [], diagnostics: [{ domain: "st.dl.eccdnx.com", adapter: "Ethernet", ip: "1.2.3.4", stage: "http_content_mismatch", at: new Date().toISOString() }] });
     render(<SteamCDNPanel enabled saving={false} />);

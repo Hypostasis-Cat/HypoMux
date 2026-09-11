@@ -1907,7 +1907,7 @@ svg {
   min-height: 32px;
   border: 1px solid transparent !important;
   border-radius: 8px !important;
-  background: color-mix(in srgb, var(--hm-row-hover) 42%, transparent) !important;
+  background: var(--hm-control-fill) !important;
   box-shadow: none !important;
   transition:
     border-color var(--hm-motion-fast) var(--hm-motion-ease-out),
@@ -1918,13 +1918,13 @@ svg {
 .routing-row:hover .routing-cell-input,
 .routing-row:hover .routing-cell-dropdown {
   border-color: color-mix(in srgb, var(--hm-outer-border) 82%, transparent) !important;
-  background: color-mix(in srgb, rgb(var(--hm-surface-secondary-rgb)) 54%, transparent) !important;
+  background: var(--hm-control-hover) !important;
 }
 
 .routing-cell-input:focus-within,
 .routing-cell-dropdown:focus-within {
   border-color: var(--hm-accent) !important;
-  background: rgba(var(--hm-surface-rgb), 0.85) !important;
+  background: var(--hm-control-pressed) !important;
   box-shadow: 0 0 0 3px var(--hm-focus-ring) !important;
 }
 
@@ -3010,15 +3010,8 @@ svg {
 .nat-adapter-dropdown {
   width: 100%;
   min-height: 34px;
-  border-color: var(--hm-outer-border);
-  background: color-mix(in srgb, var(--hm-row-hover) 62%, transparent);
-  box-shadow: none;
 }
 
-.nat-adapter-dropdown:focus-within {
-  border-color: var(--hm-outer-border);
-  box-shadow: none;
-}
 
 .nat-adapter-option strong {
   font-size: 12px;
@@ -3051,15 +3044,8 @@ svg {
 .nat-stun-mode > .fui-Input {
   min-width: 0;
   min-height: 34px;
-  border-color: var(--hm-outer-border);
-  background: color-mix(in srgb, var(--hm-row-hover) 62%, transparent);
-  box-shadow: none;
 }
 
-.nat-stun-mode > .fui-Input:focus-within {
-  border-color: var(--hm-outer-border);
-  box-shadow: none;
-}
 
 .nat-stun-mode > .fui-Button {
   min-width: 32px;
@@ -3084,9 +3070,9 @@ svg {
   border: 1px solid color-mix(in srgb, var(--hm-outer-border) 82%, transparent) !important;
   border-radius: 10px !important;
   overflow-x: hidden !important;
-  background: color-mix(in srgb, rgb(var(--hm-surface-secondary-rgb)) 94%, transparent) !important;
-  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.24), 0 3px 10px rgba(0, 0, 0, 0.14) !important;
-  backdrop-filter: blur(22px) saturate(125%);
+
+
+
 }
 
 .nat-stun-listbox .fui-Option {
@@ -3279,16 +3265,7 @@ svg {
   gap: 7px;
 }
 
-.nat-server-add .fui-Input {
-  border-color: var(--hm-outer-border);
-  background: color-mix(in srgb, var(--hm-row-hover) 62%, transparent);
-  box-shadow: none;
-}
 
-.nat-server-add .fui-Input:focus-within {
-  border-color: var(--hm-outer-border);
-  box-shadow: none;
-}
 
 .nat-server-panel > p {
   margin: 0;
@@ -3812,22 +3789,6 @@ svg {
 .connection-view-controls .fui-Dropdown {
   min-width: 128px;
   min-height: 30px;
-  border: 1px solid color-mix(in srgb, var(--hm-outer-border) 82%, transparent) !important;
-  border-radius: 7px !important;
-  background: rgba(var(--hm-surface-rgb), 0.42) !important;
-  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--hm-inner-highlight) 55%, transparent) !important;
-}
-
-.connection-view-controls .fui-Dropdown::after {
-  border-bottom: 0 !important;
-  transform: none !important;
-}
-
-.connection-view-controls .fui-Dropdown:focus-within {
-  border-color: color-mix(in srgb, var(--hm-text-secondary) 34%, var(--hm-outer-border)) !important;
-  box-shadow:
-    inset 0 1px 0 color-mix(in srgb, var(--hm-inner-highlight) 55%, transparent),
-    inset 0 0 0 1px color-mix(in srgb, var(--hm-text-secondary) 7%, transparent) !important;
 }
 
 .connection-view-controls label:first-child .fui-Dropdown {
@@ -4583,11 +4544,6 @@ svg {
 
 .settings-dropdown {
   min-height: 34px;
-  border-radius: 8px !important;
-  border-color: color-mix(in srgb, var(--hm-text-tertiary) 25%, transparent) !important;
-  color: var(--hm-text-secondary) !important;
-  background: color-mix(in srgb, rgba(var(--hm-surface-rgb), 0.78) 88%, var(--hm-accent-soft)) !important;
-  box-shadow: inset 0 1px 0 var(--hm-inner-highlight);
 }
 
 .port-controls {
@@ -5200,6 +5156,25 @@ svg {
   }
 }
 .tools-page .tool-card { padding: clamp(16px, 2.5vw, 28px); }
+.tool-view { display: grid; align-content: start; gap: 24px; min-width: 0; }
+.toolbox-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; max-width: 1100px; }
+.toolbox-tile { position: relative; min-width: 0; padding: 24px; }
+.toolbox-tile-open { display: flex; flex-direction: column; align-items: flex-start; gap: 16px; width: 100%; padding: 0; border: 0; background: transparent; color: var(--hm-text-primary); font: inherit; text-align: start; cursor: pointer; }
+.toolbox-tile-open::after { content: ""; position: absolute; inset: 0; border-radius: inherit; }
+.toolbox-tile:has(.toolbox-tile-open:hover) { border-color: var(--hm-accent); }
+.toolbox-tile-open:focus-visible { outline: none; }
+.toolbox-tile-open:focus-visible::after { outline: 2px solid var(--hm-accent); outline-offset: 3px; }
+.toolbox-tile-open h2 { margin: 0; font-size: 18px; line-height: 1.4; }
+.toolbox-tile-description { color: var(--hm-text-secondary); font-size: 13px; line-height: 1.7; }
+.toolbox-tile-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; margin-top: 8px; }
+.toolbox-tile-footer > span:last-child { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--hm-accent); }
+.toolbox-tile-switch { position: absolute; top: 24px; right: 18px; z-index: 1; }
+.toolbox-tile-status { display: flex; align-items: center; gap: 8px; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--hm-outer-border); color: var(--hm-text-secondary); font-size: 12px; min-height: 34px; }
+.toolbox-state-dot { flex: 0 0 6px; height: 6px; border-radius: 50%; background: var(--hm-text-secondary); }
+.toolbox-state-dot[data-active="true"] { background: var(--hm-accent); }
+.toolbox-tile .tool-load-error { position: relative; z-index: 1; margin-top: 12px; }
+.toolbox-tile .tool-icon { display: grid; width: 48px; }
+@media (max-width: 760px) { .toolbox-grid { grid-template-columns: minmax(0, 1fr); } }
 .tool-card-heading { display: flex; align-items: center; gap: 16px; padding-bottom: 20px; border-bottom: 1px solid var(--hm-outer-border); }
 .tool-icon { display: grid; place-items: center; flex: 0 0 48px; height: 48px; border-radius: 14px; background: var(--hm-accent-soft); color: var(--hm-accent); }
 .tool-card-copy { flex: 1; min-width: 0; }

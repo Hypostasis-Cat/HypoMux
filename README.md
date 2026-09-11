@@ -252,6 +252,7 @@ HypoMux 是一个完全出于技术热情、由作者在业余时间独立开发
 #### ✨ 特别鸣谢
 
 <p align="center">
+  <a href="https://github.com/Hypostasis-Cat/HypoMux"><img alt="海心，特别鸣谢 ¥50" src="https://img.shields.io/static/v1?label=%E6%B5%B7%E5%BF%83&message=%C2%A550&color=DCD0FF&labelColor=E6E6FA&style=for-the-badge&logo=github-sponsors&logoColor=6A5ACD" /></a>
   <a href="https://github.com/Hypostasis-Cat/HypoMux"><img alt="匿名，特别鸣谢" src="https://img.shields.io/badge/%E5%8C%BF%E5%90%8D-%E7%BB%99%E7%8C%AB%E5%92%AA%E5%8F%91%E7%94%B5-DCD0FF?style=for-the-badge&logo=github-sponsors&logoColor=6A5ACD&labelColor=E6E6FA" /></a>
   <a href="https://github.com/Hypostasis-Cat/HypoMux"><img alt="匿名，特别鸣谢" src="https://img.shields.io/badge/%E5%8C%BF%E5%90%8D-%E7%BB%99%E7%8C%AB%E5%92%AA%E5%8F%91%E7%94%B5-DCD0FF?style=for-the-badge&logo=github-sponsors&logoColor=6A5ACD&labelColor=E6E6FA" /></a>
   <a href="https://github.com/Hypostasis-Cat/HypoMux"><img alt="六花 DY，特别鸣谢" src="https://img.shields.io/static/v1?label=%E5%85%AD%E8%8A%B1%20DY&message=%E7%BB%99%E7%8C%AB%E5%92%AA%E5%8F%91%E7%94%B5&color=DCD0FF&labelColor=E6E6FA&style=for-the-badge&logo=github-sponsors&logoColor=6A5ACD" /></a>
