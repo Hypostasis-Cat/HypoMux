@@ -253,7 +253,15 @@ func (r *Resolver) resolveUncached(
 ) (Result, time.Duration, error) {
 	_, wireType, _ := normalizeRecordType(recordType)
 	if r.config.Policy != PolicyOff && r.config.Policy != PolicySystem {
-		result, ttl, err := r.resolveDoH(ctx, domain, wireType, binding)
+		// Auto must leave a real deadline budget for source-bound traditional
+		// DNS when HTTPS resolvers silently drop packets.
+		dohCtx := ctx
+		cancelDoH := func() {}
+		if r.config.Policy == PolicyAuto {
+			dohCtx, cancelDoH = context.WithTimeout(ctx, remainingQueryBudget(ctx, r.config.QueryTimeout)/2)
+		}
+		result, ttl, err := r.resolveDoH(dohCtx, domain, wireType, binding)
+		cancelDoH()
 		if err == nil {
 			r.recordDoHSuccess(binding)
 			return result, ttl, nil
@@ -299,7 +307,7 @@ func (r *Resolver) resolveDoH(
 	// budget while blocked, starving later (possibly healthy) endpoints of any
 	// attempt; per-batch budgets guarantee every batch gets a real chance.
 	batchCount := (len(endpoints) + maxDoHRace - 1) / maxDoHRace
-	batchBudget := r.config.QueryTimeout / time.Duration(batchCount)
+	batchBudget := remainingQueryBudget(ctx, r.config.QueryTimeout) / time.Duration(batchCount)
 	var failures []error
 	for start := 0; start < len(endpoints); start += maxDoHRace {
 		end := start + maxDoHRace
@@ -376,14 +384,22 @@ func (r *Resolver) resolveLegacy(
 	binding Binding,
 ) (Result, time.Duration, error) {
 	var failures []error
-	for _, server := range LegacyServers(r.config, binding) {
-		result, ttl, err := r.queryUDP(ctx, domain, recordType, binding, server)
+	servers := LegacyServers(r.config, binding)
+	for index, server := range servers {
+		// Reserve time for TCP and later servers even when the first DNS
+		// server drops UDP instead of returning an error.
+		attemptBudget := remainingQueryBudget(ctx, r.config.QueryTimeout) / time.Duration(2*(len(servers)-index))
+		udpCtx, cancelUDP := context.WithTimeout(ctx, attemptBudget)
+		result, ttl, err := r.queryUDP(udpCtx, domain, recordType, binding, server)
+		cancelUDP()
 		if err == nil {
 			r.legacySuccesses.Add(1)
 			return result, ttl, nil
 		}
 		failures = append(failures, fmt.Errorf("udp/%s: %w", server, err))
-		result, ttl, err = r.queryTCP(ctx, domain, recordType, binding, server)
+		tcpCtx, cancelTCP := context.WithTimeout(ctx, attemptBudget)
+		result, ttl, err = r.queryTCP(tcpCtx, domain, recordType, binding, server)
+		cancelTCP()
 		if err == nil {
 			r.legacySuccesses.Add(1)
 			return result, ttl, nil
@@ -398,6 +414,13 @@ func (r *Resolver) resolveLegacy(
 	}
 	r.legacyFailures.Add(1)
 	return Result{}, 0, errors.Join(failures...)
+}
+
+func remainingQueryBudget(ctx context.Context, fallback time.Duration) time.Duration {
+	if deadline, ok := ctx.Deadline(); ok {
+		return max(0, time.Until(deadline))
+	}
+	return fallback
 }
 
 func (r *Resolver) queryUDP(

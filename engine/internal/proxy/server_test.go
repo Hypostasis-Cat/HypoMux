@@ -355,6 +355,7 @@ func TestTUNTCPPoolRejectsDomainAndIPv6WithoutBoundSource(t *testing.T) {
 }
 
 func TestTUNTCPPoolRelaysLiteralIPv6WithBoundSource(t *testing.T) {
+	requireIPv6Loopback(t, "tcp6")
 	echoAddress, stopEcho := startEchoServerIPv6(t)
 	defer stopEcho()
 	server, err := New(Config{

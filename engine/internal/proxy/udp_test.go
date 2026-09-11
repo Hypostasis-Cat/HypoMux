@@ -335,6 +335,7 @@ func TestParseAndPackSOCKSUDPIPv6(t *testing.T) {
 }
 
 func TestSOCKSUDPRelaysLiteralIPv6WithStableFlow(t *testing.T) {
+	requireIPv6Loopback(t, "udp6")
 	echoAddress, packets, stopEcho := startUDPEchoServerIPv6(t)
 	defer stopEcho()
 	server, err := New(Config{

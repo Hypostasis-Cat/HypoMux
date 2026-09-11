@@ -67,13 +67,23 @@ func TestSupervisorActivatesStopsAndCleansExactRun(t *testing.T) {
 
 func TestSupervisorReturnsWhenTunInterfaceIsReady(t *testing.T) {
 	supervisor, _, _ := testSupervisor(t, "stable")
-	supervisor.startupReady = func() bool { return true }
+	var observedAddress string
+	supervisor.startupReady = func(address string) bool {
+		observedAddress = address
+		return address == "10.255.255.1"
+	}
 	supervisor.readyStableFor = 20 * time.Millisecond
 	config := testConfig(t)
+	if err := os.WriteFile(config.ConfigPath, []byte(`{"inbounds":[{"type":"tun","interface_name":"HypoMux-Tun","address":["10.255.255.1/30","fdfe:dcba:9876::1/126"]}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	config.StartupTimeout = 900 * time.Millisecond
 	started := time.Now()
 	if _, err := supervisor.Activate(context.Background(), config); err != nil {
 		t.Fatalf("Activate() failed: %v", err)
+	}
+	if observedAddress != "10.255.255.1" {
+		t.Fatalf("readiness address = %q", observedAddress)
 	}
 	if elapsed := time.Since(started); elapsed >= 500*time.Millisecond {
 		t.Fatalf("ready activation took %v", elapsed)
@@ -85,7 +95,7 @@ func TestSupervisorReturnsWhenTunInterfaceIsReady(t *testing.T) {
 
 func TestSupervisorTreatsStartupTimeoutAsFailure(t *testing.T) {
 	supervisor, cleanupCalls, _ := testSupervisor(t, "stable")
-	supervisor.startupReady = func() bool { return false }
+	supervisor.startupReady = func(string) bool { return false }
 	config := testConfig(t)
 	config.StartupTimeout = 140 * time.Millisecond
 	status, err := supervisor.Activate(context.Background(), config)
@@ -97,6 +107,18 @@ func TestSupervisorTreatsStartupTimeoutAsFailure(t *testing.T) {
 	}
 	if cleanupCalls.Load() != 2 {
 		t.Fatalf("timeout cleanup calls = %d, want preflight + failed-run cleanup", cleanupCalls.Load())
+	}
+}
+
+func TestSupervisorRejectsMissingOwnedAddressBeforeCleanup(t *testing.T) {
+	supervisor, cleanupCalls, _ := testSupervisor(t, "stable")
+	config := testConfig(t)
+	if err := os.WriteFile(config.ConfigPath, []byte(`{"inbounds":[{"type":"tun","interface_name":"other-tun","address":["10.255.255.1/30"]}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	status, err := supervisor.Activate(context.Background(), config)
+	if err == nil || status.State != StateFailed || cleanupCalls.Load() != 0 {
+		t.Fatalf("status=%#v err=%v cleanup=%d", status, err, cleanupCalls.Load())
 	}
 }
 
@@ -201,10 +223,10 @@ func testSupervisor(
 		return config.ConfigPath, func() {}, nil
 	}
 	if mode == "stable" {
-		supervisor.startupReady = func() bool { return true }
+		supervisor.startupReady = func(string) bool { return true }
 		supervisor.readyStableFor = 10 * time.Millisecond
 	} else {
-		supervisor.startupReady = func() bool { return false }
+		supervisor.startupReady = func(string) bool { return false }
 	}
 	supervisor.command = func(
 		ctx context.Context,
@@ -234,7 +256,7 @@ func testConfig(t *testing.T) Config {
 		t.Fatal(err)
 	}
 	configPath := t.TempDir() + string(os.PathSeparator) + "config.json"
-	if err := os.WriteFile(configPath, []byte("{}"), 0o600); err != nil {
+	if err := os.WriteFile(configPath, []byte(`{"inbounds":[{"type":"tun","interface_name":"HypoMux-Tun","address":["172.19.0.1/30"]}]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	return Config{
@@ -251,7 +273,7 @@ func TestNormalizeConfigEnforcesPinnedExecutableDigest(t *testing.T) {
 	if err := os.WriteFile(executable, []byte("trusted-sidecar"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(configPath, []byte("{}"), 0o600); err != nil {
+	if err := os.WriteFile(configPath, []byte(`{"inbounds":[{"type":"tun","interface_name":"HypoMux-Tun","address":["172.19.0.1/30"]}]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	digest, err := fileintegrity.SHA256(executable)

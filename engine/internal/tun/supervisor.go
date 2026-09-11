@@ -3,6 +3,7 @@ package tun
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -25,7 +26,6 @@ const (
 	cleanupTimeout        = 15 * time.Second
 	maxLogLineBytes       = 64 * 1024
 	tunInterfaceName      = "HypoMux-Tun"
-	tunIPv4Address        = "172.19.0.1"
 )
 
 type State string
@@ -98,7 +98,7 @@ type Supervisor struct {
 	stageConfig    func(Config) (string, func(), error)
 	onLog          func(string)
 	onUnexpected   func(Status)
-	startupReady   func() bool
+	startupReady   func(string) bool
 	readyStableFor time.Duration
 	nextGeneration uint64
 }
@@ -174,6 +174,12 @@ func (s *Supervisor) Activate(ctx context.Context, config Config) (Status, error
 		return s.Status(), err
 	}
 	s.emitLog("[TUN] sing-box configuration check passed")
+	expectedAddress, err := configuredTunIPv4Address(normalized.ConfigPath)
+	if err != nil {
+		s.failStart(err)
+		return s.Status(), err
+	}
+	s.emitLog("[TUN] expected IPv4 address: " + expectedAddress)
 	if err := s.cleanupWithTimeout(ctx); err != nil {
 		err = fmt.Errorf("clean stale HypoMux TUN state: %w", err)
 		s.failStart(err)
@@ -251,7 +257,7 @@ func (s *Supervisor) Activate(ctx context.Context, config Config) (Status, error
 			)
 			return s.failStartedRun(run, err)
 		case <-readyTicker.C:
-			if s.startupReady != nil && s.startupReady() {
+			if s.startupReady != nil && s.startupReady(expectedAddress) {
 				if readySince.IsZero() {
 					readySince = time.Now()
 				}
@@ -318,7 +324,36 @@ func (s *Supervisor) markRunning(run *sidecarRun) (Status, error) {
 	return status, nil
 }
 
-func tunInterfaceWithExpectedAddress() (*net.Interface, bool) {
+func configuredTunIPv4Address(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read staged TUN address: %w", err)
+	}
+	var config struct {
+		Inbounds []struct {
+			Type    string   `json:"type"`
+			Name    string   `json:"interface_name"`
+			Address []string `json:"address"`
+		} `json:"inbounds"`
+	}
+	if err := json.Unmarshal(data, &config); err != nil {
+		return "", fmt.Errorf("parse staged TUN address: %w", err)
+	}
+	for _, inbound := range config.Inbounds {
+		if inbound.Type != "tun" || inbound.Name != tunInterfaceName {
+			continue
+		}
+		for _, value := range inbound.Address {
+			host, _, err := net.ParseCIDR(value)
+			if err == nil && host.To4() != nil {
+				return host.String(), nil
+			}
+		}
+	}
+	return "", errors.New("staged configuration has no IPv4 address for HypoMux-Tun")
+}
+
+func tunInterfaceWithExpectedAddress(expectedAddress string) (*net.Interface, bool) {
 	device, err := net.InterfaceByName(tunInterfaceName)
 	if err != nil || device.Flags&net.FlagUp == 0 {
 		return nil, false
@@ -330,7 +365,7 @@ func tunInterfaceWithExpectedAddress() (*net.Interface, bool) {
 	for _, address := range addresses {
 		value := address.String()
 		host, _, splitErr := net.ParseCIDR(value)
-		if splitErr == nil && host.String() == tunIPv4Address {
+		if splitErr == nil && host.String() == expectedAddress {
 			return device, true
 		}
 	}

@@ -32,6 +32,7 @@ type dnsResolveResult struct {
 }
 
 type tunConfigOptions struct {
+	IPv4Address   string
 	Stack         string
 	DNSPolicy     string
 	IPv6Available bool
@@ -196,7 +197,14 @@ func writeSingBoxConfigWithOptions(
 		}
 		dnsConfig["reverse_mapping"] = true
 	}
-	address := []string{"172.19.0.1/30"}
+	ipv4Address := options.IPv4Address
+	if ipv4Address == "" {
+		ipv4Address, err = availableTunIPv4Address()
+		if err != nil {
+			return "", "", clashAPIConfig{}, err
+		}
+	}
+	address := []string{ipv4Address}
 	if options.IPv6Available {
 		address = append(address, "fdfe:dcba:9876::1/126")
 	}

@@ -276,14 +276,14 @@ func TestGeneratedTunConfigProtectsLiteralDNSBootstrapAndOmitsIPv6WhenUnavailabl
 		"aggregation":  "127.0.0.1:19303",
 	}
 	configDigest := ""
-	_, configPath, _, err := writeSingBoxConfigWithOptions(
+	executable, configPath, _, err := writeSingBoxConfigWithOptions(
 		endpoints,
 		AdapterView{Name: "以太网", Address: "192.0.2.10"},
 		dnsResolveResult{Transport: "doh", Server: "dns.example@223.5.5.5:443"},
 		nil,
 		normalizedCompatibilityPlan(nil, nil),
 		true,
-		tunConfigOptions{DNSPolicy: "auto", IPv6Available: false, ConfigSHA256: &configDigest},
+		tunConfigOptions{IPv4Address: "10.255.255.1/30", DNSPolicy: "auto", IPv6Available: false, ConfigSHA256: &configDigest},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -311,7 +311,7 @@ func TestGeneratedTunConfigProtectsLiteralDNSBootstrapAndOmitsIPv6WhenUnavailabl
 	if len(config.Inbounds) != 1 {
 		t.Fatalf("inbounds = %#v", config.Inbounds)
 	}
-	if !reflect.DeepEqual(config.Inbounds[0].Address, []string{"172.19.0.1/30"}) {
+	if !reflect.DeepEqual(config.Inbounds[0].Address, []string{"10.255.255.1/30"}) {
 		t.Fatalf("IPv4-only TUN address = %#v", config.Inbounds[0].Address)
 	}
 	if !reflect.DeepEqual(config.Inbounds[0].RouteExcludeAddress, []string{"223.5.5.5/32"}) {
@@ -322,6 +322,10 @@ func TestGeneratedTunConfigProtectsLiteralDNSBootstrapAndOmitsIPv6WhenUnavailabl
 	}
 	if strings.Contains(string(data), "fdfe:dcba:9876") {
 		t.Fatal("IPv6 TUN address was emitted for an IPv4-only host")
+	}
+	command := exec.Command(executable, "check", "--disable-color", "-c", configPath)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("dynamic IPv4 TUN config rejected by sing-box: %v\n%s", err, output)
 	}
 }
 
@@ -336,7 +340,7 @@ func TestIPv4FallbackConfigReusesClashAPIIdentity(t *testing.T) {
 	result := dnsResolveResult{Transport: "udp", Server: "192.0.2.53:53"}
 	_, _, primaryAPI, err := writeSingBoxConfigWithOptions(
 		endpoints, adapter, result, nil, normalizedCompatibilityPlan(nil, nil), true,
-		tunConfigOptions{DNSPolicy: "auto", IPv6Available: true, ConfigName: "sing-box.json"},
+		tunConfigOptions{IPv4Address: "10.255.255.1/30", DNSPolicy: "auto", IPv6Available: true, ConfigName: "sing-box.json"},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -344,7 +348,8 @@ func TestIPv4FallbackConfigReusesClashAPIIdentity(t *testing.T) {
 	_, fallbackPath, fallbackAPI, err := writeSingBoxConfigWithOptions(
 		endpoints, adapter, result, nil, normalizedCompatibilityPlan(nil, nil), true,
 		tunConfigOptions{
-			DNSPolicy: "auto", IPv6Available: false, ConfigName: "sing-box-ipv4.json",
+			IPv4Address: "10.255.255.1/30",
+			DNSPolicy:   "auto", IPv6Available: false, ConfigName: "sing-box-ipv4.json",
 			ClashAPI: &primaryAPI,
 		},
 	)
@@ -372,6 +377,9 @@ func TestIPv4FallbackConfigReusesClashAPIIdentity(t *testing.T) {
 	if config.Experimental.ClashAPI.ExternalController != primaryAPI.Endpoint ||
 		config.Experimental.ClashAPI.Secret != primaryAPI.Secret {
 		t.Fatalf("fallback config changed Clash API identity: %#v vs %#v", config.Experimental.ClashAPI, primaryAPI)
+	}
+	if !strings.Contains(string(data), "10.255.255.1/30") || strings.Contains(string(data), "172.19.0.1") {
+		t.Fatal("IPv4 fallback lost the selected TUN address")
 	}
 }
 

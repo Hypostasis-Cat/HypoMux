@@ -910,8 +910,19 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 		}, &dnsResult); err != nil {
 			return rollback(fmt.Errorf("TUN 启动前 DNS 验证失败：%w", err))
 		}
-		s.recordStartStage("dns_validated", nil)
+		s.recordStartStage("dns_validated", map[string]any{
+			"adapter": dnsEgress.Adapter.Name, "policy": effectiveDNSPolicy,
+			"transport": dnsResult.Transport, "server": dnsResult.Server,
+		})
+		tunAddress, addressErr := availableTunIPv4Address()
+		if addressErr != nil {
+			return rollback(addressErr)
+		}
+		if s.logs != nil {
+			s.logs.RecordEvent("tun_address", "selected", map[string]any{"ipv4": tunAddress})
+		}
 		configOptions := tunConfigOptions{
+			IPv4Address:   tunAddress,
 			Stack:         settings.TUNStack,
 			DNSPolicy:     effectiveDNSPolicy,
 			IPv6Available: selectedAdaptersHaveIPv6(selected),

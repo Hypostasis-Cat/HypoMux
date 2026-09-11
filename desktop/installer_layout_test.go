@@ -646,7 +646,7 @@ func TestHomeThroughputUsesLightweightFastTelemetryAndSynchronizedLayers(t *test
 	}
 	stateSource := string(stateData)
 	engineSource := string(engineData)
-	css := string(cssData)
+	css := strings.ReplaceAll(string(cssData), "\r\n", "\n")
 	for _, required := range []string{
 		`export const HOME_TELEMETRY_POLL_MS = 800`,
 		`}, HOME_TELEMETRY_POLL_MS);`,
