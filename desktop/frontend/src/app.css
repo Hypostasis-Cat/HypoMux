@@ -1775,7 +1775,7 @@ svg {
 
 .routing-add-row {
   display: grid;
-  grid-template-columns: minmax(260px, 1fr) minmax(180px, 250px) repeat(3, auto);
+  grid-template-columns: minmax(120px, 1fr) minmax(140px, 220px) repeat(3, auto);
   gap: 8px;
 }
 
@@ -1833,7 +1833,8 @@ svg {
 }
 
 .routing-grid {
-  min-width: 830px;
+  min-width: 0;
+  width: 100%;
   color: var(--hm-text-secondary);
 }
 
@@ -1910,8 +1911,8 @@ svg {
 
 .routing-cell-dropdown {
   width: 100%;
-  min-width: 190px;
-  max-width: 280px;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .routing-cell-input,
@@ -5231,5 +5232,30 @@ svg {
 .steam-node-state span, .steam-node-state div { display: block; color: var(--hm-text-secondary); font-size: 11px; }
 .tool-node-table td { vertical-align: top; }
 
-.routing-priority-input { width: 80px; min-width: 0; }
+
 .routing-row.is-disabled .routing-cell-input { color: var(--hm-text-secondary); }
+
+.routing-type-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; min-width: 0; }
+.routing-order-control { display: flex; align-items: center; gap: 8px; color: var(--hm-text-secondary); font-size: 12px; flex-wrap: wrap; }
+.routing-order-control .fui-Dropdown { min-width: 184px; }
+#routing-order-hint { color: var(--hm-text-tertiary); font-size: 11px; }
+.routing-grid-header, .routing-row { display: grid !important; grid-template-columns: 40px 76px minmax(0, 1.7fr) minmax(0, 1fr) minmax(100px, .65fr); width: 100%; box-sizing: border-box; }
+.routing-grid-header > *, .routing-row > * { width: auto !important; min-width: 0 !important; box-sizing: border-box; }
+.routing-grid-surface { min-width: 0; }
+.routing-grid .routing-rule-status { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.routing-grid .fui-Switch { margin: 0; }
+.routing-actions { flex-wrap: wrap; row-gap: 6px; }
+.routing-actions .fui-SearchBox { width: clamp(160px, 22vw, 260px); min-width: 0; }
+.routing-add-row > .fui-Dropdown, .routing-add-row > .fui-Input { min-width: 0; }
+@media (max-width: 1000px) {
+  .routing-page-heading { align-items: flex-start; gap: 12px; }
+  .routing-page-heading h1 { font-size: 21px; }
+  .routing-save-state { flex-direction: column; align-items: flex-end; }
+  .routing-add-row { grid-template-columns: minmax(120px, 1fr) minmax(130px, 180px) auto auto; }
+  .routing-process-button { grid-column: 1 / -1; justify-self: start; }
+}
+
+/* Keep the decorative glow inside the scroll container. */
+.routing-grid-surface.hm-card::before { inset: 0; }
+
+.routing-action-buttons { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; margin-left: auto; }

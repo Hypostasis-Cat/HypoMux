@@ -57,6 +57,8 @@ import {
 import { routingApplyState } from "./routingEffect";
 
 type MatchType = "process" | "domain" | "ip";
+const matchOrders = ["process,domain,ip", "process,ip,domain", "domain,process,ip", "domain,ip,process", "ip,process,domain", "ip,domain,process"];
+const normalizeOrder = (order?: string[]) => matchOrders.includes(order?.join(",") ?? "") ? order!.join(",") : matchOrders[0];
 type DraftRule = RoutingRule & {
   id: string;
   error?: string;
@@ -144,6 +146,8 @@ export function RoutingPage() {
     domain: t("routing_placeholder_domain"),
     ip: t("routing_placeholder_ip"),
   }), [t]);
+  const [matchOrder, setMatchOrder] = useState(matchOrders[0]);
+  const orderRef = useRef(matchOrders[0]);
   const [rules, setRules] = useState<DraftRule[]>([]);
   const [outbounds, setOutbounds] = useState<RoutingSnapshot["outbounds"]>([]);
   const [activeType, setActiveType] = useState<MatchType>("process");
@@ -180,9 +184,9 @@ export function RoutingPage() {
   const autosaveTimer = useRef<number>();
   const validationSequence = useRef(new Map<string, number>());
   const validationTimers = useRef(new Map<string, number>());
-  const saveQueue = useRef<LatestSaveQueue<RoutingRule[], RoutingSnapshot>>();
+  const saveQueue = useRef<LatestSaveQueue<{ rules: RoutingRule[]; order: string[] }, RoutingSnapshot>>();
   if (!saveQueue.current) {
-    saveQueue.current = new LatestSaveQueue((next) => appServices.routing.save(next));
+    saveQueue.current = new LatestSaveQueue((next) => appServices.routing.save(next.rules, next.order));
   }
   const addRuleInputRef = useRef<HTMLInputElement>(null);
   const { notify: pushNotification } = useAppNotifications();
@@ -232,6 +236,8 @@ export function RoutingPage() {
       .catch(() => undefined);
     try {
       const snapshot = await appServices.routing.snapshot();
+      orderRef.current = normalizeOrder(snapshot.match_order);
+      setMatchOrder(orderRef.current);
       const available = new Set((snapshot.outbounds ?? []).map((outbound) => outbound.id));
       const nextRules = makeDrafts(snapshot.rules ?? []).map((rule) => rule.disabled || available.has(rule.outbound)
         ? rule
@@ -349,7 +355,7 @@ export function RoutingPage() {
     setSaving(true);
     const queue = saveQueue.current!;
     const handle = queue.enqueue(
-      submitted.map(serializeRule),
+      { rules: submitted.map(serializeRule), order: orderRef.current.split(",") },
     );
     try {
       const snapshot = await handle.done;
@@ -459,12 +465,14 @@ export function RoutingPage() {
     setSaving(true);
     const queue = saveQueue.current!;
     const importedEditRevision = editRevision.current;
-    const handle = queue.enqueue(importPreview.rules ?? []);
+    const handle = queue.enqueue({ rules: importPreview.rules ?? [], order: normalizeOrder(importPreview.match_order).split(",") });
     try {
       const saved = await handle.done;
       if (!queue.isCurrent(handle.revision) || importedEditRevision !== editRevision.current) return;
       applyRules(reconcileSavedDrafts(saved.rules ?? [], imported));
       setOutbounds(saved.outbounds ?? []);
+      orderRef.current = normalizeOrder(saved.match_order ?? orderRef.current.split(","));
+      setMatchOrder(orderRef.current);
       const applied = applyResult(saved);
       setImportPreviewOpen(false);
       setSelected(new Set());
@@ -562,12 +570,14 @@ export function RoutingPage() {
     setBatchApplying(true);
     const queue = saveQueue.current!;
     const batchEditRevision = editRevision.current;
-    const handle = queue.enqueue(next.map(serializeRule));
+    const handle = queue.enqueue({ rules: next.map(serializeRule), order: orderRef.current.split(",") });
     try {
       const saved = await handle.done;
       if (!queue.isCurrent(handle.revision) || batchEditRevision !== editRevision.current) return;
       applyRules(reconcileSavedDrafts(saved.rules ?? [], next));
       setOutbounds(saved.outbounds ?? []);
+      orderRef.current = normalizeOrder(saved.match_order ?? orderRef.current.split(","));
+      setMatchOrder(orderRef.current);
       const applied = applyResult(saved);
       setSavedAt(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
       setPendingSave(false);
@@ -629,11 +639,6 @@ export function RoutingPage() {
       columnId: "enabled",
       renderHeaderCell: () => text("启用", "Enabled"),
       renderCell: (item) => <Switch checked={!item.disabled} aria-label={text(`启用规则 ${item.value}`, `Enable rule ${item.value}`)} onChange={(_, data) => updateRule(item.id, { disabled: !data.checked })} />,
-    }),
-    createTableColumn<DraftRule>({
-      columnId: "priority",
-      renderHeaderCell: () => text("优先级", "Priority"),
-      renderCell: (item) => <Input className="routing-priority-input" appearance="filled-darker" type="number" min={0} max={999} step={1} value={String(item.priority ?? 0)} aria-label={text(`${item.value} 的优先级`, `Priority for ${item.value}`)} onChange={(_, data) => updateRule(item.id, { priority: Number(data.value) })} />,
     }),
     createTableColumn<DraftRule>({
       columnId: "value",
@@ -742,6 +747,7 @@ export function RoutingPage() {
       </div>
 
       <GlassSurface className="routing-toolbar-surface" tone="secondary">
+        <div className="routing-type-bar">
         <TabList selectedValue={activeType} onTabSelect={(_, data) => {
           setActiveType(data.value as MatchType);
           setSelected(new Set());
@@ -750,6 +756,22 @@ export function RoutingPage() {
             <Tab key={type} value={type}>{matchLabels[type]} · {counts[type]}</Tab>
           ))}
         </TabList>
+        <div className="routing-order-control">
+          <span id="routing-order-label">{text("匹配顺序", "Match order")}</span>
+          <Dropdown aria-labelledby="routing-order-label" aria-describedby="routing-order-hint" size="small"
+            value={matchOrder.split(",").map((kind) => kind === "ip" ? "IP" : kind === "domain" ? text("域名", "Domain") : text("进程", "Process")).join(" → ")}
+            selectedOptions={[matchOrder]} disabled={loading || saving || batchApplying}
+            onOptionSelect={(_, data) => {
+              if (!data.optionValue) return;
+              orderRef.current = data.optionValue;
+              setMatchOrder(data.optionValue);
+              applyRules(rulesRef.current.map((rule) => ({ ...rule, priority: 2 - data.optionValue!.split(",").indexOf(rule.match_type) })), true);
+            }}>
+            {matchOrders.map((order) => <Option key={order} value={order}>{order.split(",").map((kind) => kind === "ip" ? "IP" : kind === "domain" ? text("域名", "Domain") : text("进程", "Process")).join(" → ")}</Option>)}
+          </Dropdown>
+          <span id="routing-order-hint">{text("从左到右优先", "Leftmost first")}</span>
+        </div>
+        </div>
         <div className="routing-add-row">
           <Input
             ref={addRuleInputRef}
@@ -782,17 +804,19 @@ export function RoutingPage() {
         <Toolbar className="routing-actions" aria-label={text("规则操作", "Rule actions")}>
           <SearchBox value={filter} placeholder={text("筛选当前类型", "Filter current type")} onChange={(_, data) => setFilter(data.value)} />
           <span>{text(`${activeRules.length} 条显示 · ${rules.length} 条总计`, `${activeRules.length} shown · ${rules.length} total`)}</span>
+          <div className="routing-action-buttons">
           <ToolbarButton disabled={loading || checkingOutbounds} onClick={() => void disableUnavailableRules()}>{text(checkingOutbounds ? "正在检查出口…" : "一键禁用无效规则", checkingOutbounds ? "Checking egress…" : "Disable unavailable rules")}</ToolbarButton>
           <ToolbarButton icon={<Delete20Regular />} disabled={selected.size === 0} onClick={() => setDeleteOpen(true)}>
             {text(`删除选中 (${selected.size})`, `Delete selected (${selected.size})`)}
           </ToolbarButton>
           <ToolbarButton icon={<ArrowDownload20Regular />} onClick={() => void importRules()}>{text("导入备份", "Import backup")}</ToolbarButton>
           <ToolbarButton icon={<ArrowUpload20Regular />} onClick={() => void appServices.routing.exportRules(
-            rules.map(serializeRule),
+            rules.map(serializeRule), orderRef.current.split(","),
           ).then((path) => path && notify(text("导出完成", "Export complete"), path, "success")).catch((error) =>
             notify(text("导出失败", "Export failed"), error instanceof Error ? error.message : String(error), "error"))}>
             {text("导出 / 分享", "Export / Share")}
           </ToolbarButton>
+          </div>
         </Toolbar>
       </GlassSurface>
 
@@ -827,14 +851,7 @@ export function RoutingPage() {
             selectedItems={selected}
             onSelectionChange={(_, data) => setSelected(data.selectedItems)}
             sortable={false}
-            resizableColumns
-            columnSizingOptions={{
-              enabled: { minWidth: 76, defaultWidth: 76 },
-              priority: { minWidth: 100, defaultWidth: 100 },
-              value: { minWidth: 220, defaultWidth: 340 },
-              outbound: { minWidth: 190, defaultWidth: 230 },
-              status: { minWidth: 140, defaultWidth: 170 },
-            }}
+
           >
             <DataGridHeader>
               <DataGridRow className="routing-grid-header" selectionCell={{ checkboxIndicator: { "aria-label": text("全选当前规则", "Select all current rules") } }}>

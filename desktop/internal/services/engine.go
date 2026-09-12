@@ -686,7 +686,11 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 	compatibility := compatibilityPlan{}
 	dnsEgress := tunDNSEgressDecision{}
 	if mode == "tun" {
-		routingRules, err = normalizeRulesStrict(settings.RoutingRules)
+		sourceRules := settings.RoutingRules
+		if validMatchOrder(settings.RoutingMatchOrder) {
+			sourceRules = rulesWithMatchOrder(sourceRules, settings.RoutingMatchOrder)
+		}
+		routingRules, err = normalizeRulesStrict(sourceRules)
 		if err != nil {
 			return EngineSnapshot{}, err
 		}

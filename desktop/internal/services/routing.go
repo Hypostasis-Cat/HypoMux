@@ -165,6 +165,7 @@ type RoutingBatchPreview struct {
 }
 
 type RoutingSnapshot struct {
+	MatchOrder      []string      `json:"match_order"`
 	Rules           []RoutingRule `json:"rules"`
 	Outbounds       []Outbound    `json:"outbounds"`
 	RestartRequired bool          `json:"restart_required"`
@@ -197,7 +198,7 @@ func (s *RoutingRuleService) Snapshot() (RoutingSnapshot, error) {
 	}
 	restartRequired, restartReason := singBoxRuleSetRestartRequirement(rules)
 	return RoutingSnapshot{
-		Rules: rules, Outbounds: outbounds,
+		Rules: rules, Outbounds: outbounds, MatchOrder: routingMatchOrder(s.settings.Get()),
 		RestartRequired: restartRequired, RestartReason: restartReason,
 	}, nil
 }
@@ -314,7 +315,74 @@ func (s *RoutingRuleService) PreviewBatch(
 	return preview, nil
 }
 
+// Type order is stored even with no rules. Numeric priorities remain an internal
+// encoding for stable, hot-reloadable rule-set files and legacy backup readers.
+func routingMatchOrder(settings AppSettings) []string {
+	if validMatchOrder(settings.RoutingMatchOrder) {
+		return append([]string(nil), settings.RoutingMatchOrder...)
+	}
+	order := []string{MatchProcess, MatchDomain, MatchIP}
+	priority := map[string]int{}
+	for _, rule := range settings.RoutingRules {
+		if rule.Priority > priority[rule.MatchType] {
+			priority[rule.MatchType] = rule.Priority
+		}
+	}
+	sort.SliceStable(order, func(i, j int) bool { return priority[order[i]] > priority[order[j]] })
+	return order
+}
+
+func validMatchOrder(order []string) bool {
+	seen := map[string]bool{}
+	for _, kind := range order {
+		if (kind != MatchProcess && kind != MatchDomain && kind != MatchIP) || seen[kind] {
+			return false
+		}
+		seen[kind] = true
+	}
+	return len(order) == 3
+}
+
+func rulesWithMatchOrder(rules []RoutingRule, order []string) []RoutingRule {
+	result := append([]RoutingRule(nil), rules...)
+	for i := range result {
+		for rank, kind := range order {
+			if canonicalMatchType(result[i].MatchType) == kind {
+				result[i].Priority = 2 - rank
+			}
+		}
+	}
+	return result
+}
+
+func (s *RoutingRuleService) SaveOrdered(rules []RoutingRule, order []string) (RoutingSnapshot, error) {
+	if !validMatchOrder(order) {
+		return RoutingSnapshot{}, fmt.Errorf("匹配顺序必须包含进程、域名、IP，且不能重复")
+	}
+	normalized, err := normalizeRulesStrict(rulesWithMatchOrder(rules, order))
+	if err != nil {
+		return RoutingSnapshot{}, err
+	}
+	if err := s.validateSelectedOutbounds(normalized); err != nil {
+		return RoutingSnapshot{}, err
+	}
+	if err := refreshSingBoxRuleSetsAndCommit(normalized, func() error {
+		s.settings.mu.Lock()
+		defer s.settings.mu.Unlock()
+		next := cloneSettings(s.settings.settings)
+		next.RoutingRules = normalized
+		next.RoutingMatchOrder = append([]string(nil), order...)
+		return s.settings.commitLocked(next)
+	}); err != nil {
+		return RoutingSnapshot{}, err
+	}
+	return s.Snapshot()
+}
+
 func (s *RoutingRuleService) Save(rules []RoutingRule) (RoutingSnapshot, error) {
+	if order := s.settings.Get().RoutingMatchOrder; validMatchOrder(order) {
+		return s.SaveOrdered(rules, order)
+	}
 	normalized, err := normalizeRulesStrict(rules)
 	if err != nil {
 		return RoutingSnapshot{}, err
@@ -358,10 +426,26 @@ func (s *RoutingRuleService) Import() (RoutingSnapshot, error) {
 	if err != nil {
 		return RoutingSnapshot{}, err
 	}
-	return RoutingSnapshot{Rules: rules, Outbounds: outbounds}, nil
+	var envelope struct {
+		MatchOrder []string `json:"match_order"`
+	}
+	_ = json.Unmarshal(data, &envelope)
+	if len(envelope.MatchOrder) > 0 && !validMatchOrder(envelope.MatchOrder) {
+		return RoutingSnapshot{}, fmt.Errorf("备份匹配顺序无效")
+	}
+	order := routingMatchOrder(AppSettings{RoutingRules: rules, RoutingMatchOrder: envelope.MatchOrder})
+	return RoutingSnapshot{Rules: rules, Outbounds: outbounds, MatchOrder: order}, nil
 }
 
 func (s *RoutingRuleService) Export(rules []RoutingRule) (string, error) {
+	return s.ExportOrdered(rules, routingMatchOrder(s.settings.Get()))
+}
+
+func (s *RoutingRuleService) ExportOrdered(rules []RoutingRule, order []string) (string, error) {
+	if !validMatchOrder(order) {
+		return "", fmt.Errorf("匹配顺序无效")
+	}
+	rules = rulesWithMatchOrder(rules, order)
 	normalized, err := normalizeRulesStrict(rules)
 	if err != nil {
 		return "", err
@@ -379,9 +463,10 @@ func (s *RoutingRuleService) Export(rules []RoutingRule) (string, error) {
 	payload := struct {
 		Format     string        `json:"format"`
 		Version    int           `json:"version"`
+		MatchOrder []string      `json:"match_order"`
 		ExportedAt string        `json:"exported_at"`
 		Rules      []RoutingRule `json:"rules"`
-	}{RoutingBackupFormat, RoutingBackupVersion, time.Now().Format(time.RFC3339), normalized}
+	}{RoutingBackupFormat, RoutingBackupVersion, order, time.Now().Format(time.RFC3339), normalized}
 	data, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {
 		return "", fmt.Errorf("生成规则备份失败：%w", err)

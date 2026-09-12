@@ -175,3 +175,28 @@ func TestRoutingPreferenceValidation(t *testing.T) {
 		t.Fatalf("legacy defaults changed: %#v %v", legacy, err)
 	}
 }
+
+func TestSaveRoutingOrderPersistsWithEmptyListAndAppliesToNewRules(t *testing.T) {
+	t.Setenv("HYPOMUX_DATA_DIR", t.TempDir())
+	settings := NewSettingsService()
+	service := NewRoutingRuleService(settings, NewAdapterService(settings), nil)
+	order := []string{MatchIP, MatchDomain, MatchProcess}
+	if _, err := service.SaveOrdered(nil, order); err != nil {
+		t.Fatal(err)
+	}
+	reloaded := NewSettingsService()
+	if got := routingMatchOrder(reloaded.Get()); got[0] != MatchIP || got[2] != MatchProcess {
+		t.Fatal(got)
+	}
+	saved, err := service.Save([]RoutingRule{{MatchType: MatchProcess, Value: "app.exe", Outbound: "direct", Priority: 999}, {MatchType: MatchIP, Value: "203.0.113.0/24", Outbound: "aggregation"}})
+	if err != nil || saved.Rules[0].MatchType != MatchIP || saved.Rules[1].Priority != 0 {
+		t.Fatalf("new rules ignore order: %#v %v", saved, err)
+	}
+	if _, err := service.SaveOrdered(nil, []string{MatchIP, MatchIP, MatchDomain}); err == nil {
+		t.Fatal("accepted duplicate types")
+	}
+	snapshot, err := service.Snapshot()
+	if err != nil || len(snapshot.Rules) != 2 {
+		t.Fatal("failed save changed rules")
+	}
+}

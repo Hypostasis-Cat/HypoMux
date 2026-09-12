@@ -21,6 +21,7 @@ const (
 )
 
 type AppSettings struct {
+	RoutingMatchOrder   []string              `json:"routing_match_order,omitempty"`
 	SteamCDNEnabled     bool                  `json:"steam_cdn_enabled"`
 	Mode                string                `json:"mode"`
 	Language            string                `json:"language"`
@@ -670,6 +671,7 @@ func writeSettingsFile(path string, settings AppSettings) error {
 }
 
 func cloneSettings(value AppSettings) AppSettings {
+	value.RoutingMatchOrder = append([]string(nil), value.RoutingMatchOrder...)
 	result := value
 	result.SelectedAdapterIDs = append([]string(nil), value.SelectedAdapterIDs...)
 	result.AdapterWeights = cloneWeights(value.AdapterWeights)

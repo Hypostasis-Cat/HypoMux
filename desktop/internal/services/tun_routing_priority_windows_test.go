@@ -333,3 +333,35 @@ func TestCustomRoutingPriorityAndDisabledRulesHotReload(t *testing.T) {
 	}
 	checkSingBoxConfig(t, executable, path)
 }
+
+func TestAllTypeOrdersHotReload(t *testing.T) {
+	t.Setenv("HYPOMUX_DATA_DIR", t.TempDir())
+	rules := []RoutingRule{{MatchType: MatchProcess, Value: "app.exe", Outbound: "nic_wifi"}, {MatchType: MatchDomain, Value: "example.com", Outbound: "direct"}, {MatchType: MatchIP, Value: "203.0.113.0/24", Outbound: "aggregation"}}
+	exe, path, _, err := writeSingBoxConfigWithOptions(map[string]string{"nic_ethernet": "127.0.0.1:19101", "nic_wifi": "127.0.0.1:19102", "aggregation": "127.0.0.1:19103"}, AdapterView{}, dnsResolveResult{Transport: "udp", Server: "1.1.1.1"}, rules, compatibilityPlan{}, true, tunConfigOptions{DNSPolicy: "auto"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	orders := [][]string{{MatchProcess, MatchDomain, MatchIP}, {MatchProcess, MatchIP, MatchDomain}, {MatchDomain, MatchProcess, MatchIP}, {MatchDomain, MatchIP, MatchProcess}, {MatchIP, MatchProcess, MatchDomain}, {MatchIP, MatchDomain, MatchProcess}}
+	outbounds := map[string]string{MatchProcess: "nic_wifi", MatchDomain: "direct", MatchIP: "aggregation"}
+	for _, order := range orders {
+		if err := refreshSingBoxRuleSets(rulesWithMatchOrder(rules, order)); err != nil {
+			t.Fatal(err)
+		}
+		flow := priorityFlow{process: "app.exe", domain: "example.com", ip: "203.0.113.7", port: 443}
+		if got := priorityRouteFor(t, path, flow); got != outbounds[order[0]] {
+			t.Fatalf("order %v: %s", order, got)
+		}
+		switch order[0] {
+		case MatchProcess:
+			flow.process = "other.exe"
+		case MatchDomain:
+			flow.domain = "other.test"
+		case MatchIP:
+			flow.ip = "192.0.2.1"
+		}
+		if got := priorityRouteFor(t, path, flow); got != outbounds[order[1]] {
+			t.Fatalf("second type in %v: %s", order, got)
+		}
+	}
+	checkSingBoxConfig(t, exe, path)
+}

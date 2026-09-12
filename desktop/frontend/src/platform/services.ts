@@ -14,7 +14,7 @@ import type {
   RunningProcess,
   RoutingBatchPreview,
   RoutingRule,
-  RoutingSnapshot,
+  RoutingSnapshot as GeneratedRoutingSnapshot,
   RoutingValidation,
   SupportLogSession,
   SupportLogSnapshot,
@@ -29,13 +29,14 @@ export type {
   RunningProcess,
   RoutingBatchPreview,
   RoutingRule,
-  RoutingSnapshot,
   RoutingValidation,
   SupportLogSession,
   SupportLogSnapshot,
   TunPreflightIssue,
   TunPreflightSnapshot,
 };
+
+export type RoutingSnapshot = GeneratedRoutingSnapshot & { match_order?: string[] };
 
 export type AdapterView = GeneratedAdapterView & { is_virtual?: boolean };
 
@@ -243,16 +244,16 @@ export const appServices = {
       ) as Promise<WFPRepairResult>,
   },
   routing: {
-    snapshot: () => RoutingRuleService.Snapshot(),
+    snapshot: () => RoutingRuleService.Snapshot() as Promise<RoutingSnapshot>,
     validate: (rule: RoutingRule, existing: RoutingRule[]) =>
       RoutingRuleService.Validate(rule, existing),
     previewBatch: (matchType: string, values: string[], outbound: string, existing: RoutingRule[]) =>
       RoutingRuleService.PreviewBatch(matchType, values, outbound, existing),
-    save: (rules: RoutingRule[]) => RoutingRuleService.Save(rules),
+    save: (rules: RoutingRule[], order: string[] = ["process", "domain", "ip"]) => Call.ByName("github.com/Hypostasis-Cat/HypoMux/desktop/internal/services.RoutingRuleService.SaveOrdered", rules, order) as Promise<RoutingSnapshot>,
     listProcesses: () => RoutingRuleService.ListProcesses(),
     listProcessChoices: () => RoutingRuleService.ListProcessChoices(),
     importRules: () => RoutingRuleService.Import(),
-    exportRules: (rules: RoutingRule[]) => RoutingRuleService.Export(rules),
+    exportRules: (rules: RoutingRule[], order: string[] = ["process", "domain", "ip"]) => Call.ByName("github.com/Hypostasis-Cat/HypoMux/desktop/internal/services.RoutingRuleService.ExportOrdered", rules, order) as Promise<string>,
   },
   diagnostics: {
     latest: () => DiagnosticsService.Latest(),

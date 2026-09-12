@@ -36,8 +36,11 @@ it("disables unavailable rules across tabs and persists priority without deletin
   expect(saved[1].disabled).toBeUndefined();
   expect(saved[2].disabled).toBe(true);
   expect((screen.getByRole("switch", { name: "Enable rule old.exe" }) as HTMLInputElement).checked).toBe(false);
-  fireEvent.change(screen.getByRole("spinbutton", { name: "Priority for old.exe" }), { target: { value: "90" } });
-  await waitFor(() => expect(mocks.save.mock.calls[mocks.save.mock.calls.length - 1][0][0]).toMatchObject({ disabled: true, priority: 90 }), { timeout: 4000 });
+  expect(screen.queryByRole("spinbutton")).toBeNull();
+  fireEvent.click(screen.getByRole("combobox", { name: "Match order" }));
+  expect(screen.getAllByRole("option")).toHaveLength(6);
+  fireEvent.click(screen.getByRole("option", { name: "IP → Domain → Process" }));
+  await waitFor(() => expect(mocks.save).toHaveBeenLastCalledWith(expect.any(Array), ["ip", "domain", "process"]), { timeout: 4000 });
 });
 
 it("keeps rules unchanged when refreshing adapter availability fails", async () => {
@@ -48,4 +51,15 @@ it("keeps rules unchanged when refreshing adapter availability fails", async () 
   await waitFor(() => expect(mocks.notify).toHaveBeenCalledWith(expect.objectContaining({ title: "Egress check failed" })));
   expect(mocks.save).not.toHaveBeenCalled();
   expect((screen.getByRole("switch", { name: "Enable rule old.exe" }) as HTMLInputElement).checked).toBe(true);
+});
+
+
+it("saves type order with an empty rule list", async () => {
+  mocks.snapshot.mockResolvedValue({ rules: [], outbounds, restart_required: false, match_order: ["domain", "ip", "process"] });
+  render(<RoutingPage />);
+  const order = await screen.findByRole("combobox", { name: "Match order" });
+  await waitFor(() => expect(order.textContent).toContain("Domain → IP → Process"));
+  fireEvent.click(order);
+  fireEvent.click(screen.getByRole("option", { name: "IP → Process → Domain" }));
+  await waitFor(() => expect(mocks.save).toHaveBeenLastCalledWith([], ["ip", "process", "domain"]), { timeout: 4000 });
 });
