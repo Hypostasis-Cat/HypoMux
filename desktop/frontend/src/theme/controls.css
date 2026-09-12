@@ -34,6 +34,13 @@
   --borderRadiusMedium: var(--hm-control-radius);
 }
 
+/* Keep selection controls neutral on three sides; Fluent's accessible bottom
+ * stroke and animated focus underline retain the theme accent. */
+.fui-Dropdown,
+.fui-Combobox {
+  --colorNeutralStroke1Pressed: var(--hm-control-border);
+}
+
 /* Repeated class specificity wins over generated single-class Fluent styles. */
 .fui-Button.fui-Button,
 .fui-Dropdown.fui-Dropdown,
