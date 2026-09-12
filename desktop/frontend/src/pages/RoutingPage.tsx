@@ -58,7 +58,7 @@ import { routingApplyState } from "./routingEffect";
 
 type MatchType = "process" | "domain" | "ip";
 const matchOrders = ["process,domain,ip", "process,ip,domain", "domain,process,ip", "domain,ip,process", "ip,process,domain", "ip,domain,process"];
-const normalizeOrder = (order?: string[]) => matchOrders.includes(order?.join(",") ?? "") ? order!.join(",") : matchOrders[0];
+const normalizeOrder = (order?: string[] | null) => matchOrders.includes(order?.join(",") ?? "") ? order!.join(",") : matchOrders[0];
 type DraftRule = RoutingRule & {
   id: string;
   error?: string;

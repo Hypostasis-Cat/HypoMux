@@ -36,7 +36,7 @@ export type {
   TunPreflightSnapshot,
 };
 
-export type RoutingSnapshot = GeneratedRoutingSnapshot & { match_order?: string[] };
+export type RoutingSnapshot = Omit<GeneratedRoutingSnapshot, "match_order"> & { match_order?: string[] | null };
 
 export type AdapterView = GeneratedAdapterView & { is_virtual?: boolean };
 
