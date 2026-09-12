@@ -5230,3 +5230,6 @@ svg {
 .steam-node-state strong { display: block; font-weight: 500; }
 .steam-node-state span, .steam-node-state div { display: block; color: var(--hm-text-secondary); font-size: 11px; }
 .tool-node-table td { vertical-align: top; }
+
+.routing-priority-input { width: 80px; min-width: 0; }
+.routing-row.is-disabled .routing-cell-input { color: var(--hm-text-secondary); }

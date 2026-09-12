@@ -49,6 +49,7 @@ export type CompleteAppSettings = AppSettings & {
   blocked_domain_expiry: boolean;
   autostart: boolean;
   auto_start_engine: boolean;
+  auto_connect_wifi?: boolean;
 };
 
 export type SteamCDNStatus = {

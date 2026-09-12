@@ -264,3 +264,76 @@ func TestShouldAutoStartAcceleration(t *testing.T) {
 		t.Fatal("acceleration must not auto-start when launch at startup is disabled")
 	}
 }
+
+func TestBootWiFiRequestWaitsForDHCPBeforeStarting(t *testing.T) {
+	calls, polls := 0, 0
+	err := waitForSelectedAdapters(context.Background(), []string{"WLAN"}, time.Millisecond,
+		func() ([]services.AdapterView, error) {
+			polls++
+			if calls < 1 {
+				t.Fatal("did not request a Wi-Fi connection")
+			}
+			if polls < 3 {
+				return nil, nil
+			}
+			return []services.AdapterView{{ID: "WLAN", Address: "192.0.2.1", Operational: true}}, nil
+		},
+		func(context.Context) error { calls++; return nil },
+	)
+	if err != nil || polls != 3 {
+		t.Fatalf("did not wait for an addressed adapter: polls=%d err=%v", polls, err)
+	}
+}
+
+func TestBootWiFiFailurePreservesUsefulReasonAndDoesNotStart(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	err := waitForSelectedAdapters(ctx, []string{"WLAN"}, time.Millisecond,
+		func() ([]services.AdapterView, error) { cancel(); return nil, nil },
+		func(context.Context) error { return errors.New("Wi-Fi disabled by policy") },
+	)
+	if !errors.Is(err, context.Canceled) || !strings.Contains(err.Error(), "disabled by policy") {
+		t.Fatalf("lost diagnosis: %v", err)
+	}
+}
+
+func TestBootWiFiCancellationDoesNotContinueWaiting(t *testing.T) {
+	err := waitForSelectedAdapters(context.Background(), []string{"WLAN"}, time.Hour,
+		func() ([]services.AdapterView, error) {
+			t.Fatal("continued after startup was disabled")
+			return nil, nil
+		},
+		func(context.Context) error { return context.Canceled },
+	)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
+	}
+}
+
+func TestPrepareBootWiFiHonorsLivePreferences(t *testing.T) {
+	expected := services.DefaultSettings()
+	expected.Autostart, expected.AutoStartEngine = true, true
+	expected.SelectedAdapterIDs = []string{"WLAN"}
+	current := expected
+	calls := 0
+	connect := func(context.Context, []string) error { calls++; return nil }
+	if err := prepareBootWiFi(context.Background(), expected, current, connect); err != nil || calls != 0 {
+		t.Fatal("disabled Wi-Fi feature made a connection request")
+	}
+	current.AutoConnectWiFi = true
+	if err := prepareBootWiFi(context.Background(), expected, current, connect); err != nil || calls != 1 {
+		t.Fatal("enabled Wi-Fi feature did not connect")
+	}
+	current.AutoConnectWiFi = false
+	if err := prepareBootWiFi(context.Background(), expected, current, connect); err != nil || calls != 1 {
+		t.Fatal("Wi-Fi requests continued after switch was turned off")
+	}
+	current.AutoStartEngine = false
+	if err := prepareBootWiFi(context.Background(), expected, current, connect); !errors.Is(err, context.Canceled) {
+		t.Fatal("startup continued after automatic acceleration was disabled")
+	}
+	current = expected
+	current.SelectedAdapterIDs = []string{"new-WLAN"}
+	if err := prepareBootWiFi(context.Background(), expected, current, connect); !errors.Is(err, context.Canceled) {
+		t.Fatal("startup continued with obsolete adapter selection")
+	}
+}

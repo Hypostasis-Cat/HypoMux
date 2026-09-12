@@ -284,3 +284,52 @@ func TestTUNRoutingPriorityAndHotReload(t *testing.T) {
 		}
 	}
 }
+
+func TestCustomRoutingPriorityAndDisabledRulesHotReload(t *testing.T) {
+	t.Setenv("HYPOMUX_DATA_DIR", t.TempDir())
+	rules := []RoutingRule{
+		{MatchType: MatchProcess, Value: "app.exe", Outbound: "nic_wifi"},
+		{MatchType: MatchDomain, Value: "example.com", Outbound: "direct", Priority: 20},
+		{MatchType: MatchIP, Value: "203.0.113.0/24", Outbound: "aggregation", Priority: 30},
+		{MatchType: MatchDomain, Value: "disabled.example", Outbound: "nic_missing", Disabled: true, Priority: 999},
+	}
+	executable, path, _, err := writeSingBoxConfigWithOptions(
+		map[string]string{"nic_ethernet": "127.0.0.1:19101", "nic_wifi": "127.0.0.1:19102", "aggregation": "127.0.0.1:19103"},
+		AdapterView{}, dnsResolveResult{Transport: "udp", Server: "1.1.1.1"}, rules,
+		compatibilityPlan{ProcessNames: []string{"app.exe"}}, true, tunConfigOptions{DNSPolicy: "auto"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkSingBoxConfig(t, executable, path)
+	flow := priorityFlow{process: "app.exe", domain: "example.com", ip: "203.0.113.7", port: 443}
+	if got := priorityRouteFor(t, path, flow); got != "aggregation" {
+		t.Fatalf("IP priority got %s", got)
+	}
+	rules[2].Disabled = true
+	if err := refreshSingBoxRuleSets(rules); err != nil {
+		t.Fatal(err)
+	}
+	if got := priorityRouteFor(t, path, flow); got != "direct" {
+		t.Fatalf("disabled IP still matches: %s", got)
+	}
+	rules[0].Priority = 50
+	if err := refreshSingBoxRuleSets(rules); err != nil {
+		t.Fatal(err)
+	}
+	if got := priorityRouteFor(t, path, flow); got != "nic_wifi" {
+		t.Fatalf("process priority got %s", got)
+	}
+	rules[0].Disabled = true
+	rules[1].Disabled = true
+	if err := refreshSingBoxRuleSets(rules); err != nil {
+		t.Fatal(err)
+	}
+	if got := priorityRouteFor(t, path, flow); got != "system-direct" {
+		t.Fatalf("disabled rules block compatibility fallback: %s", got)
+	}
+	if tunDNSNeedsFakeIP("off", rules) {
+		t.Fatal("disabled domains still require FakeIP")
+	}
+	checkSingBoxConfig(t, executable, path)
+}

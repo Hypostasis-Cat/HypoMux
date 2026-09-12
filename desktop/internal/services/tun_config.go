@@ -437,7 +437,7 @@ func tunDNSNeedsFakeIP(policy string, rules []RoutingRule) bool {
 		return true
 	}
 	for _, rule := range rules {
-		if rule.MatchType == MatchDomain {
+		if !rule.Disabled && rule.MatchType == MatchDomain {
 			return true
 		}
 	}

@@ -149,3 +149,23 @@ describe("TUN settings", () => {
     expect(screen.getByText("FakeIP 与规则集缓存")).toBeTruthy();
   });
 });
+
+
+it("adds Wi-Fi startup control below auto acceleration and persists opt-in", async () => {
+  mocks.get.mockResolvedValue({ ...initial, autostart: true, auto_start_engine: true });
+  render(<SettingsPage adapterRuntime={[]} onOpenBlockedDomains={() => {}} />);
+  const toggle = await screen.findByRole("switch", { name: "Connect Wi-Fi at startup" });
+  await waitFor(() => expect(toggle.hasAttribute("disabled")).toBe(false));
+  expect((toggle as HTMLInputElement).checked).toBe(false);
+  fireEvent.click(toggle);
+  await waitFor(() => expect(mocks.update).toHaveBeenCalledWith(expect.objectContaining({ auto_connect_wifi: true })));
+});
+
+it("disables Wi-Fi startup control when automatic acceleration is off", async () => {
+  mocks.get.mockResolvedValue({ ...initial, autostart: true, auto_start_engine: false, auto_connect_wifi: true });
+  render(<SettingsPage adapterRuntime={[]} onOpenBlockedDomains={() => {}} />);
+  const toggle = await screen.findByRole("switch", { name: "Connect Wi-Fi at startup" });
+  await waitFor(() => expect((toggle as HTMLInputElement).checked).toBe(true));
+  expect(toggle.hasAttribute("disabled")).toBe(true);
+  expect(mocks.update).not.toHaveBeenCalled();
+});

@@ -55,6 +55,7 @@ const emptySettings: CompleteAppSettings = {
   hide_virtual_adapters: true,
   autostart: false,
   auto_start_engine: false,
+  auto_connect_wifi: false,
   dns_server: "223.5.5.5",
   dns_policy: "auto",
   dns_egress_mode: "auto",
@@ -903,6 +904,16 @@ export function SettingsPage({
               checked={settings.auto_start_engine}
               disabled={saving || !settings.autostart}
               onChange={(checked) => setAutoStartEngine(checked)}
+            />
+          </SettingRow>
+          <SettingRow title={text("开机自动连接 Wi-Fi", "Connect Wi-Fi at startup")} description={text(
+            "自动加速前，为已选无线网卡连接 Windows 中已保存且允许自动连接的网络，最多等待 2 分钟。关闭后停止主动连接，已连接的 Wi-Fi 保持连接。",
+            "Before automatic acceleration, connect selected Wi-Fi adapters using saved Windows networks that allow automatic connection. Wait up to 2 minutes. Turning this off stops connection requests and keeps existing connections.",
+          )}>
+            <SettingSwitch
+              checked={settings.auto_connect_wifi ?? false}
+              disabled={saving || !settings.autostart || !settings.auto_start_engine}
+              onChange={(checked) => patchAndSave({ auto_connect_wifi: checked })}
             />
           </SettingRow>
           <SettingRow title={t("settings_config_path")} description={configPath || text("正在读取配置文件位置…", "Reading configuration path…")}>

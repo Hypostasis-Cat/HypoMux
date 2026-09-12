@@ -38,6 +38,7 @@ type AppSettings struct {
 	HideVirtualAdapters bool                  `json:"hide_virtual_adapters"`
 	Autostart           bool                  `json:"autostart"`
 	AutoStartEngine     bool                  `json:"auto_start_engine"`
+	AutoConnectWiFi     bool                  `json:"auto_connect_wifi,omitempty"`
 	DNSServer           string                `json:"dns_server"`
 	DNSPolicy           string                `json:"dns_policy"`
 	DNSEgressMode       string                `json:"dns_egress_mode"`

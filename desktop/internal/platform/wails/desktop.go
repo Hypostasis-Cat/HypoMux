@@ -67,6 +67,8 @@ func (d *DesktopHost) SetEngineTrayStatus(phase string, mode string) {
 		state = "运行中"
 	case "degraded":
 		state = "降级运行"
+	case "waiting_network":
+		state = "等待开机网络就绪"
 	case "starting":
 		state = "正在启动"
 	case "stopping":

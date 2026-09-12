@@ -130,3 +130,48 @@ func TestPreviewRoutingBatchRejectsOversizedInput(t *testing.T) {
 		t.Fatal("expected oversized batch to be rejected")
 	}
 }
+
+func TestRoutingPreferencesRoundTripAndDisabledOutbound(t *testing.T) {
+	t.Setenv("HYPOMUX_DATA_DIR", t.TempDir())
+	settings := NewSettingsService()
+	service := NewRoutingRuleService(settings, NewAdapterService(settings), nil)
+	rules, err := parseRoutingRulesJSON([]byte(`[{"match_type":"process","value":"old.exe","outbound":"nic_missing","disabled":true,"priority":80},{"match_type":"ip","value":"192.0.2.1","outbound":"direct","priority":90}]`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved, err := service.Save(rules)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if saved.Rules[0].MatchType != MatchIP || !saved.Rules[1].Disabled {
+		t.Fatalf("lost preferences: %#v", saved.Rules)
+	}
+	reloaded := NewSettingsService().Get().RoutingRules
+	if len(reloaded) != 2 || reloaded[1].Priority != 80 || !reloaded[1].Disabled {
+		t.Fatalf("lost preferences after restart: %#v", reloaded)
+	}
+	reloaded[1].Disabled = false
+	if _, err := service.Save(reloaded); err == nil {
+		t.Fatal("enabled unavailable rule must fail")
+	}
+	if !settings.Get().RoutingRules[1].Disabled {
+		t.Fatal("failed save modified persisted rules")
+	}
+	data, _ := json.Marshal(saved.Rules)
+	imported, err := parseRoutingBackup(data)
+	if err != nil || !imported[1].Disabled || imported[0].Priority != 90 {
+		t.Fatalf("backup lost preferences: %s: %v", data, err)
+	}
+}
+
+func TestRoutingPreferenceValidation(t *testing.T) {
+	for _, value := range []string{`"high"`, `1.5`, `-1`, `1000`} {
+		if _, err := parseRoutingRulesJSON([]byte(`[{"match_type":"process","value":"a.exe","outbound":"direct","priority":` + value + `}]`)); err == nil {
+			t.Fatalf("accepted priority %s", value)
+		}
+	}
+	legacy, err := parseRoutingRulesJSON([]byte(`[{"process_name":["a.exe"],"outbound":"direct"}]`))
+	if err != nil || legacy[0].Disabled || legacy[0].Priority != 0 {
+		t.Fatalf("legacy defaults changed: %#v %v", legacy, err)
+	}
+}

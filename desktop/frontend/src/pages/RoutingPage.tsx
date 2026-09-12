@@ -23,6 +23,7 @@ import {
   Option,
   SearchBox,
   Spinner,
+  Switch,
   Tab,
   TabList,
   Textarea,
@@ -68,7 +69,11 @@ const newID = () => globalThis.crypto?.randomUUID?.() ?? `rule-${Date.now()}-${M
 export const makeDrafts = (rules: RoutingRule[]): DraftRule[] =>
   rules.map((rule) => ({ ...rule, id: newID() }));
 
-const ruleKey = (rule: RoutingRule) => `${rule.match_type}\u0000${rule.value}\u0000${rule.outbound}`;
+const serializeRule = ({ match_type, value, outbound, disabled, priority }: RoutingRule): RoutingRule => ({
+  match_type, value, outbound, ...(disabled ? { disabled } : {}), ...(priority ? { priority } : {}),
+});
+
+const ruleKey = (rule: RoutingRule) => `${rule.match_type}\u0000${rule.value}\u0000${rule.outbound}\u0000${!!rule.disabled}\u0000${rule.priority ?? 0}`;
 
 export const reconcileSavedDrafts = (saved: RoutingRule[], submitted: DraftRule[]): DraftRule[] => {
   const available = new Map<string, DraftRule[]>();
@@ -148,6 +153,7 @@ export function RoutingPage() {
   const [newOutbound, setNewOutbound] = useState("aggregation");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [checkingOutbounds, setCheckingOutbounds] = useState(false);
   const [savedAt, setSavedAt] = useState("");
   const [pendingSave, setPendingSave] = useState(false);
   const [engineRuntime, setEngineRuntime] = useState({ phase: "stopped", mode: "tun" });
@@ -227,7 +233,7 @@ export function RoutingPage() {
     try {
       const snapshot = await appServices.routing.snapshot();
       const available = new Set((snapshot.outbounds ?? []).map((outbound) => outbound.id));
-      const nextRules = makeDrafts(snapshot.rules ?? []).map((rule) => available.has(rule.outbound)
+      const nextRules = makeDrafts(snapshot.rules ?? []).map((rule) => rule.disabled || available.has(rule.outbound)
         ? rule
         : {
             ...rule,
@@ -283,9 +289,12 @@ export function RoutingPage() {
     const sequence = (validationSequence.current.get(draft.id) ?? 0) + 1;
     validationSequence.current.set(draft.id, sequence);
     try {
+      if (!Number.isInteger(draft.priority ?? 0) || (draft.priority ?? 0) < 0 || (draft.priority ?? 0) > 999) {
+        throw new Error(text("优先级必须是 0–999 的整数", "Priority must be an integer from 0 to 999"));
+      }
       const currentRules = rulesRef.current
         .filter((item) => item.id !== draft.id)
-        .map(({ match_type, value, outbound }) => ({ match_type, value, outbound }));
+        .map(serializeRule);
       const result = await appServices.routing.validate(draft, currentRules);
       if (validationSequence.current.get(draft.id) !== sequence) return;
       const next = rulesRef.current.map((item) =>
@@ -301,9 +310,10 @@ export function RoutingPage() {
           : item);
       applyRules(next);
     }
-  }, [applyRules]);
+  }, [applyRules, text]);
 
   const updateRule = useCallback((id: string, patch: Partial<RoutingRule>) => {
+    validationSequence.current.set(id, (validationSequence.current.get(id) ?? 0) + 1);
     let nextDraft: DraftRule | undefined;
     const next = rulesRef.current.map((item) => {
       if (item.id !== id) return item;
@@ -339,7 +349,7 @@ export function RoutingPage() {
     setSaving(true);
     const queue = saveQueue.current!;
     const handle = queue.enqueue(
-      submitted.map(({ match_type, value, outbound }) => ({ match_type, value, outbound })),
+      submitted.map(serializeRule),
     );
     try {
       const snapshot = await handle.done;
@@ -393,7 +403,7 @@ export function RoutingPage() {
     };
     const result = await appServices.routing.validate(
       candidate,
-      rulesRef.current.map(({ match_type, value: itemValue, outbound }) => ({ match_type, value: itemValue, outbound })),
+      rulesRef.current.map(serializeRule),
     );
     if (!result.valid) {
       notify(
@@ -503,7 +513,7 @@ export function RoutingPage() {
         batchType,
         values,
         batchOutbound,
-        rulesRef.current.map(({ match_type, value, outbound }) => ({ match_type, value, outbound })),
+        rulesRef.current.map(serializeRule),
       );
       setBatchPreview({ ...preview, items: preview.items ?? [] });
     } catch (error) {
@@ -552,7 +562,7 @@ export function RoutingPage() {
     setBatchApplying(true);
     const queue = saveQueue.current!;
     const batchEditRevision = editRevision.current;
-    const handle = queue.enqueue(next.map(({ match_type, value, outbound }) => ({ match_type, value, outbound })));
+    const handle = queue.enqueue(next.map(serializeRule));
     try {
       const saved = await handle.done;
       if (!queue.isCurrent(handle.revision) || batchEditRevision !== editRevision.current) return;
@@ -595,7 +605,36 @@ export function RoutingPage() {
     return (outbounds ?? []).find((outbound) => outbound.id === id)?.label ?? id.replace(/^nic_/, "");
   }, [outbounds, t]);
 
+  const disableUnavailableRules = useCallback(async () => {
+    setCheckingOutbounds(true);
+    try {
+      const snapshot = await appServices.routing.snapshot();
+      setOutbounds(snapshot.outbounds ?? []);
+      const available = new Set((snapshot.outbounds ?? []).map((item) => item.id));
+      const targets = rulesRef.current.filter((rule) => !rule.disabled && rule.outbound.startsWith("nic_") && !available.has(rule.outbound));
+      // Use the normal validation and save queue so edits in flight cannot restore an old state.
+      targets.forEach((rule) => updateRule(rule.id, { disabled: true }));
+      notify(text("出口检查完成", "Egress check complete"), targets.length
+        ? text(`已禁用 ${targets.length} 条失效出口规则，校验完成后自动保存。可随时重新启用。`, `Disabled ${targets.length} unavailable-egress rules; changes save after validation. You can enable them again.`)
+        : text("没有需要禁用的失效出口规则。", "No unavailable-egress rules need disabling."));
+    } catch (error) {
+      notify(text("出口检查失败", "Egress check failed"), error instanceof Error ? error.message : String(error), "error");
+    } finally {
+      setCheckingOutbounds(false);
+    }
+  }, [notify, text, updateRule]);
+
   const columns: TableColumnDefinition<DraftRule>[] = useMemo(() => [
+    createTableColumn<DraftRule>({
+      columnId: "enabled",
+      renderHeaderCell: () => text("启用", "Enabled"),
+      renderCell: (item) => <Switch checked={!item.disabled} aria-label={text(`启用规则 ${item.value}`, `Enable rule ${item.value}`)} onChange={(_, data) => updateRule(item.id, { disabled: !data.checked })} />,
+    }),
+    createTableColumn<DraftRule>({
+      columnId: "priority",
+      renderHeaderCell: () => text("优先级", "Priority"),
+      renderCell: (item) => <Input className="routing-priority-input" appearance="filled-darker" type="number" min={0} max={999} step={1} value={String(item.priority ?? 0)} aria-label={text(`${item.value} 的优先级`, `Priority for ${item.value}`)} onChange={(_, data) => updateRule(item.id, { priority: Number(data.value) })} />,
+    }),
     createTableColumn<DraftRule>({
       columnId: "value",
       renderHeaderCell: () => text("匹配值", "Match value"),
@@ -636,6 +675,7 @@ export function RoutingPage() {
         ? <span className="routing-rule-status is-validating"><Spinner size="tiny" />{text("校验中", "Validating")}</span>
         : item.error
           ? <span className="routing-rule-status is-error" title={item.error}><ErrorCircle16Regular /><span>{item.error}</span></span>
+          : item.disabled ? <span className="routing-rule-status">{text("已禁用", "Disabled")}</span>
           : <span className="routing-rule-status is-valid"><CheckmarkCircle16Regular />{text("有效", "Valid")}</span>,
     }),
   ], [outboundLabel, outbounds, t, text, updateRule]);
@@ -742,12 +782,13 @@ export function RoutingPage() {
         <Toolbar className="routing-actions" aria-label={text("规则操作", "Rule actions")}>
           <SearchBox value={filter} placeholder={text("筛选当前类型", "Filter current type")} onChange={(_, data) => setFilter(data.value)} />
           <span>{text(`${activeRules.length} 条显示 · ${rules.length} 条总计`, `${activeRules.length} shown · ${rules.length} total`)}</span>
+          <ToolbarButton disabled={loading || checkingOutbounds} onClick={() => void disableUnavailableRules()}>{text(checkingOutbounds ? "正在检查出口…" : "一键禁用无效规则", checkingOutbounds ? "Checking egress…" : "Disable unavailable rules")}</ToolbarButton>
           <ToolbarButton icon={<Delete20Regular />} disabled={selected.size === 0} onClick={() => setDeleteOpen(true)}>
             {text(`删除选中 (${selected.size})`, `Delete selected (${selected.size})`)}
           </ToolbarButton>
           <ToolbarButton icon={<ArrowDownload20Regular />} onClick={() => void importRules()}>{text("导入备份", "Import backup")}</ToolbarButton>
           <ToolbarButton icon={<ArrowUpload20Regular />} onClick={() => void appServices.routing.exportRules(
-            rules.map(({ match_type, value, outbound }) => ({ match_type, value, outbound })),
+            rules.map(serializeRule),
           ).then((path) => path && notify(text("导出完成", "Export complete"), path, "success")).catch((error) =>
             notify(text("导出失败", "Export failed"), error instanceof Error ? error.message : String(error), "error"))}>
             {text("导出 / 分享", "Export / Share")}
@@ -788,8 +829,10 @@ export function RoutingPage() {
             sortable={false}
             resizableColumns
             columnSizingOptions={{
-              value: { minWidth: 280, defaultWidth: 520 },
-              outbound: { minWidth: 210, defaultWidth: 280 },
+              enabled: { minWidth: 76, defaultWidth: 76 },
+              priority: { minWidth: 100, defaultWidth: 100 },
+              value: { minWidth: 220, defaultWidth: 340 },
+              outbound: { minWidth: 190, defaultWidth: 230 },
               status: { minWidth: 140, defaultWidth: 170 },
             }}
           >
@@ -802,7 +845,7 @@ export function RoutingPage() {
               {({ item, rowId }) => (
                 <DataGridRow<DraftRule>
                   key={rowId}
-                  className={`routing-row${selected.has(rowId) ? " is-selected" : ""}${item.error ? " has-error" : ""}`}
+                  className={`routing-row${selected.has(rowId) ? " is-selected" : ""}${item.error ? " has-error" : ""}${item.disabled ? " is-disabled" : ""}`}
                   selectionCell={{ checkboxIndicator: { "aria-label": text(`选择 ${item.value}`, `Select ${item.value}`) } }}
                 >
                   {({ renderCell }) => <DataGridCell>{renderCell(item)}</DataGridCell>}

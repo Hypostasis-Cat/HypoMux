@@ -19,10 +19,11 @@ const (
 	singBoxRuleSetManifestVersion = 2
 	singBoxRuleSetVersion         = 3
 
-	ruleSetScopeEarlyIP = "early-ip"
-	ruleSetScopeProcess = "process"
-	ruleSetScopeDomain  = "domain"
-	ruleSetScopeIP      = "ip"
+	ruleSetScopeCustomIP = "custom-ip"
+	ruleSetScopeEarlyIP  = "early-ip"
+	ruleSetScopeProcess  = "process"
+	ruleSetScopeDomain   = "domain"
+	ruleSetScopeIP       = "ip"
 )
 
 var (
@@ -31,9 +32,10 @@ var (
 )
 
 type singBoxRuleSetManifest struct {
-	Version    int      `json:"version"`
-	Outbounds  []string `json:"outbounds"`
-	UsesFakeIP bool     `json:"uses_fakeip"`
+	Version        int      `json:"version"`
+	Outbounds      []string `json:"outbounds"`
+	UsesFakeIP     bool     `json:"uses_fakeip"`
+	CustomPriority bool     `json:"custom_priority"`
 }
 
 type ruleSetFile struct {
@@ -112,6 +114,9 @@ func writeSingBoxRuleSetPlanLocked(
 		}
 		if binding.Scope == ruleSetScopeEarlyIP {
 			plan.EarlyRouteRules = append(plan.EarlyRouteRules, reference)
+		} else if binding.Scope == ruleSetScopeCustomIP {
+			// Explicit IP priorities must also take precedence over proxy bypass.
+			plan.PriorityRuleSets = append(plan.PriorityRuleSets, binding.Tag)
 		} else {
 			plan.UserRouteRules = append(plan.UserRouteRules, reference)
 			if binding.Scope == ruleSetScopeProcess || binding.Scope == ruleSetScopeDomain {
@@ -121,7 +126,7 @@ func writeSingBoxRuleSetPlanLocked(
 	}
 	if writeManifest {
 		manifest, err := json.MarshalIndent(singBoxRuleSetManifest{
-			Version: singBoxRuleSetManifestVersion, Outbounds: outbounds, UsesFakeIP: usesFakeIP,
+			Version: singBoxRuleSetManifestVersion, Outbounds: outbounds, UsesFakeIP: usesFakeIP, CustomPriority: true,
 		}, "", "  ")
 		if err != nil {
 			return singBoxRuleSetPlan{}, nil, fmt.Errorf("编码 sing-box 规则集清单失败：%w", err)
@@ -247,12 +252,21 @@ func singBoxRuleSetRestartRequirement(rules []RoutingRule) (bool, string) {
 		available[outbound] = struct{}{}
 	}
 	for _, rule := range rules {
+		if rule.Disabled {
+			continue
+		}
+		if rule.Priority > 0 && !manifest.CustomPriority {
+			return true, "priority_changed"
+		}
 		if _, ok := available[rule.Outbound]; !ok {
 			return true, "outbound_changed"
 		}
 	}
 	if !manifest.UsesFakeIP {
 		for _, rule := range rules {
+			if rule.Disabled {
+				continue
+			}
 			if rule.MatchType == MatchDomain {
 				return true, "enable_fakeip"
 			}
@@ -280,6 +294,9 @@ func normalizedRuleSetOutbounds(outbounds []string, rules []RoutingRule) []strin
 	// referenced after the normal engine restart that applies adapter changes.
 	missing := []string{}
 	for _, rule := range rules {
+		if rule.Disabled {
+			continue
+		}
 		if _, exists := seen[rule.Outbound]; exists {
 			continue
 		}
@@ -292,7 +309,7 @@ func normalizedRuleSetOutbounds(outbounds []string, rules []RoutingRule) []strin
 
 func buildSingBoxRuleSetBindings(directory string, outbounds []string) []singBoxRuleSetBinding {
 	bindings := make([]singBoxRuleSetBinding, 0, len(outbounds)*3)
-	for _, scope := range []string{ruleSetScopeProcess, ruleSetScopeDomain, ruleSetScopeIP} {
+	for _, scope := range []string{ruleSetScopeProcess, ruleSetScopeDomain, ruleSetScopeIP, ruleSetScopeCustomIP} {
 		for _, outbound := range outbounds {
 			bindings = append(bindings, newSingBoxRuleSetBinding(directory, scope, outbound))
 		}
@@ -319,23 +336,29 @@ func newSingBoxRuleSetBinding(directory, scope, outbound string) singBoxRuleSetB
 }
 
 func buildSingBoxSourceRules(rules []RoutingRule, binding singBoxRuleSetBinding) []any {
-	candidates := rules
+	candidates := append([]RoutingRule(nil), rules...)
+	sortRules(candidates)
 	matchType := binding.Scope
-	if binding.Scope == ruleSetScopeEarlyIP {
+	if binding.Scope == ruleSetScopeEarlyIP || binding.Scope == ruleSetScopeCustomIP {
 		matchType = MatchIP
 		// Include other outbounds when computing exclusions: a more specific
 		// direct/aggregation rule must not be swallowed by an adapter catch-all.
 	}
 	result := []any{}
 	for index, rule := range candidates {
-		if rule.MatchType != matchType || rule.Outbound != binding.Outbound {
+		if binding.Scope == ruleSetScopeCustomIP && rule.Priority == 0 {
+			continue
+		}
+		if rule.Disabled || rule.MatchType != matchType || rule.Outbound != binding.Outbound {
 			continue
 		}
 		base := singBoxHeadlessRule(rule)
 		exclusions := []any{}
+		// Stable per-type files keep hot reload possible. Exclude higher-priority
+		// matches so fixed route-reference order cannot override user priority.
 		for _, earlier := range candidates[:index] {
-			if earlier.MatchType == rule.MatchType && earlier.Outbound != rule.Outbound &&
-				routingRulesCanOverlap(earlier, rule) {
+			if !earlier.Disabled && earlier.Outbound != rule.Outbound &&
+				((earlier.MatchType != rule.MatchType && earlier.Priority > rule.Priority) || routingRulesCanOverlap(earlier, rule)) {
 				exclusions = append(exclusions, singBoxHeadlessRule(earlier))
 			}
 		}

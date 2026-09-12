@@ -182,3 +182,21 @@ func TestSetAutostartRollsBackSystemStateWhenDiskCommitFails(t *testing.T) {
 		t.Fatal("memory changed after compensated autostart failure")
 	}
 }
+
+func TestAutoConnectWiFiDefaultsOffAndPersists(t *testing.T) {
+	t.Setenv("HYPOMUX_DATA_DIR", t.TempDir())
+	service := NewSettingsService()
+	if service.Get().AutoConnectWiFi {
+		t.Fatal("Wi-Fi connection must be opt-in")
+	}
+	for _, enabled := range []bool{true, false} {
+		next := service.Get()
+		next.AutoConnectWiFi = enabled
+		if _, err := service.Update(next); err != nil {
+			t.Fatal(err)
+		}
+		if NewSettingsService().Get().AutoConnectWiFi != enabled {
+			t.Fatal("Wi-Fi preference did not persist")
+		}
+	}
+}
