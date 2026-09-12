@@ -1657,8 +1657,14 @@ svg {
   min-height: 68px;
   align-items: center;
   padding: 10px 14px;
-  grid-template-columns: 1.25fr repeat(3, minmax(112px, 1fr)) auto;
-  gap: 10px;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) auto;
+  gap: 16px;
+}
+
+.runtime-status > .fui-Button {
+  min-height: 30px;
+  align-self: center;
+  padding-inline: 10px;
 }
 
 .runtime-item {
@@ -1687,8 +1693,12 @@ svg {
 }
 
 .runtime-item small {
+  overflow: hidden;
   color: var(--hm-text-tertiary);
   font-size: 10.5px;
+  line-height: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .runtime-item strong {
@@ -1696,6 +1706,8 @@ svg {
   color: var(--hm-text-secondary);
   font-size: 11.5px;
   font-weight: 620;
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -5100,7 +5112,7 @@ svg {
   }
 
   .runtime-status {
-    grid-template-columns: 1.2fr repeat(3, 1fr) auto;
+    gap: 10px;
   }
 
   .appearance-lab {
