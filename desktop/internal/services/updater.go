@@ -24,7 +24,7 @@ import (
 )
 
 const (
-	CurrentVersion           = "2.5.9"
+	CurrentVersion           = "2.6.0"
 	githubRepositoryURL      = "https://github.com/Hypostasis-Cat/HypoMux"
 	releaseDownloadURL       = githubRepositoryURL + "/releases/download/"
 	githubLatestManifestURL  = "https://raw.githubusercontent.com/Hypostasis-Cat/HypoMux/update-channel/latest.json"

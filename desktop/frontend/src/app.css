@@ -5157,24 +5157,23 @@ svg {
 }
 .tools-page .tool-card { padding: clamp(16px, 2.5vw, 28px); }
 .tool-view { display: grid; align-content: start; gap: 24px; min-width: 0; }
-.toolbox-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; max-width: 1100px; }
-.toolbox-tile { position: relative; min-width: 0; padding: 24px; }
-.toolbox-tile-open { display: flex; flex-direction: column; align-items: flex-start; gap: 16px; width: 100%; padding: 0; border: 0; background: transparent; color: var(--hm-text-primary); font: inherit; text-align: start; cursor: pointer; }
+.toolbox-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 400px)); gap: 16px; }
+.toolbox-tile { position: relative; min-width: 0; padding: 20px; }
+.toolbox-tile-open { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; width: 100%; padding: 0; border: 0; background: transparent; color: var(--hm-text-primary); font: inherit; text-align: start; cursor: pointer; }
 .toolbox-tile-open::after { content: ""; position: absolute; inset: 0; border-radius: inherit; }
 .toolbox-tile:has(.toolbox-tile-open:hover) { border-color: var(--hm-accent); }
 .toolbox-tile-open:focus-visible { outline: none; }
 .toolbox-tile-open:focus-visible::after { outline: 2px solid var(--hm-accent); outline-offset: 3px; }
-.toolbox-tile-open h2 { margin: 0; font-size: 18px; line-height: 1.4; }
+.toolbox-tile-open h2 { margin: 0; font-size: 16px; line-height: 1.4; }
 .toolbox-tile-description { color: var(--hm-text-secondary); font-size: 13px; line-height: 1.7; }
-.toolbox-tile-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; margin-top: 8px; }
+.toolbox-tile-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; margin-top: 2px; }
 .toolbox-tile-footer > span:last-child { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--hm-accent); }
-.toolbox-tile-switch { position: absolute; top: 24px; right: 18px; z-index: 1; }
-.toolbox-tile-status { display: flex; align-items: center; gap: 8px; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--hm-outer-border); color: var(--hm-text-secondary); font-size: 12px; min-height: 34px; }
+.toolbox-tile-switch { position: absolute; top: 20px; right: 14px; z-index: 1; }
+.toolbox-tile-status { display: flex; align-items: center; gap: 8px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--hm-outer-border); color: var(--hm-text-secondary); font-size: 12px; line-height: 1.5; min-height: 30px; }
 .toolbox-state-dot { flex: 0 0 6px; height: 6px; border-radius: 50%; background: var(--hm-text-secondary); }
 .toolbox-state-dot[data-active="true"] { background: var(--hm-accent); }
 .toolbox-tile .tool-load-error { position: relative; z-index: 1; margin-top: 12px; }
-.toolbox-tile .tool-icon { display: grid; width: 48px; }
-@media (max-width: 760px) { .toolbox-grid { grid-template-columns: minmax(0, 1fr); } }
+.toolbox-tile .tool-icon { display: grid; flex-basis: 40px; width: 40px; height: 40px; border-radius: 12px; }
 .tool-card-heading { display: flex; align-items: center; gap: 16px; padding-bottom: 20px; border-bottom: 1px solid var(--hm-outer-border); }
 .tool-icon { display: grid; place-items: center; flex: 0 0 48px; height: 48px; border-radius: 14px; background: var(--hm-accent-soft); color: var(--hm-accent); }
 .tool-card-copy { flex: 1; min-width: 0; }

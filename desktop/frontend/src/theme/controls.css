@@ -2,11 +2,11 @@
  * behavior; customize its neutral tokens without flattening primary buttons. */
 :root {
   --hm-control-radius: 8px;
-  --hm-control-fill: color-mix(in srgb, rgba(var(--hm-surface-rgb), 0.28) 92%, var(--hm-accent));
-  --hm-control-hover: color-mix(in srgb, var(--hm-control-fill) 78%, var(--hm-accent-muted));
-  --hm-control-pressed: color-mix(in srgb, var(--hm-control-fill) 62%, var(--hm-accent-muted));
+  --hm-control-fill: rgba(var(--hm-surface-rgb), 0.36);
+  --hm-control-hover: color-mix(in srgb, var(--hm-control-fill) 96%, var(--hm-text-primary));
+  --hm-control-pressed: color-mix(in srgb, var(--hm-control-fill) 92%, var(--hm-text-primary));
   --hm-control-border: color-mix(in srgb, var(--hm-text-secondary) 22%, transparent);
-  --hm-control-border-hover: color-mix(in srgb, var(--hm-accent) 48%, var(--hm-control-border));
+  --hm-control-border-hover: color-mix(in srgb, var(--hm-text-secondary) 34%, transparent);
 }
 
 .fui-Button,
@@ -53,9 +53,10 @@
   padding: 6px;
   border: 1px solid var(--hm-control-border);
   border-radius: 10px;
-  background: color-mix(in srgb, rgb(var(--hm-surface-rgb)) 96%, var(--hm-accent));
+  background: rgba(var(--hm-surface-rgb), 0.94);
+  backdrop-filter: blur(20px);
   color: var(--hm-text-primary);
-  box-shadow: 0 12px 32px rgba(var(--hm-shadow-colour), 0.24);
+  box-shadow: 0 8px 24px rgba(var(--hm-shadow-colour), 0.14);
 }
 
 .fui-Option.fui-Option,
@@ -69,7 +70,15 @@
 }
 
 .fui-Option.fui-Option[aria-selected="true"] {
-  background: var(--hm-accent-soft);
+  background: color-mix(in srgb, var(--hm-text-primary) 7%, transparent);
+}
+
+.fui-Option.fui-Option[aria-selected="true"]:hover {
+  background: color-mix(in srgb, var(--hm-text-primary) 10%, transparent);
+}
+
+.fui-Option__checkIcon {
+  color: var(--hm-accent);
 }
 
 @media (forced-colors: active) {
@@ -79,8 +88,10 @@
     color: CanvasText;
     border-color: ButtonText;
   }
-  .fui-Option.fui-Option[aria-selected="true"] {
+  .fui-Option.fui-Option[aria-selected="true"],
+  .fui-Option.fui-Option[aria-selected="true"]:hover {
     background: Highlight;
     color: HighlightText;
   }
+  .fui-Option__checkIcon { color: HighlightText; }
 }
