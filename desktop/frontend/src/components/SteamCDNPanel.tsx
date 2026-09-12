@@ -51,6 +51,7 @@ export function SteamCDNPanel({ enabled, saving }: { enabled: boolean; saving: b
     trial_active: "正在试用，等待有效样本", content_mismatch: "内容校验不一致，已撤销候选资格", slow_candidate: "持续低速，暂缓分配新连接", group_trial_limit: "此网卡与域名的试用额度已满", load_mismatch: "等待相近并发负载样本", concurrency_limit: "试用并发额度已满", route_paused: "连续传输失败，暂缓此线路优选", waiting_trial: "等待试用连接", insufficient_samples: "积累至少 5 个样本、8 MiB 数据", stale_samples: "等待新鲜下载样本", baseline_missing: "等待原节点的新鲜基准", advantage_insufficient: "观测优势尚未超过 15%", advantage_window: "已观测优势，等待下一窗口确认", preferred: "连续窗口优势已确认", validation_expired: "验证已过期，已有连接继续传输", cooldown: "失败后暂缓采用",
   };
   stages.http_speed_sampled = en ? "Bounded speed sample completed" : "有限短测完成";
+  stages.client_write_closed = en ? "Client stopped receiving; not counted as a node failure" : "客户端接收中断，不计为节点故障";
   stages.http_speed_budget = en ? "Short-test budget exhausted" : "本分钟短测预算已用完";
   stages.http_speed_probe_failed = en ? "Short test unavailable; awaiting real transfer" : "短测未完成，等待实际传输";
   const counts = status?.stage_counts ?? {};

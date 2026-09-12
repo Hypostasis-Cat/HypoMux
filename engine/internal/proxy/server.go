@@ -486,6 +486,7 @@ func (s *Server) relay(clientReader io.Reader, client net.Conn, upstream net.Con
 		effectiveRecorded := false
 		var transferBytes uint64
 		var blocked time.Duration
+		var clientWriteFailed bool
 		observe := func() {
 			if session.cdnKey.domain != "" {
 				if blocked < time.Since(sampleAt)/2 {
@@ -500,7 +501,7 @@ func (s *Server) relay(clientReader io.Reader, client net.Conn, upstream net.Con
 		defer observe()
 		var writer io.Writer = client
 		if session.cdnKey.domain != "" {
-			writer = steamTimedWriter{Writer: steamObserverWriter{Writer: client, observer: session.cdnObserver}, blocked: &blocked}
+			writer = steamTimedWriter{Writer: steamObserverWriter{Writer: client, observer: session.cdnObserver}, blocked: &blocked, failed: &clientWriteFailed}
 		}
 		_, copyErr := io.CopyBuffer(accountingWriter{
 			Writer: writer,
@@ -525,8 +526,16 @@ func (s *Server) relay(clientReader io.Reader, client net.Conn, upstream net.Con
 			},
 		}, upstream, buffer)
 		if session.cdnKey.domain != "" {
-			s.cdn.accountTransfer(session.cdnKey, session.cdnGeneration, 0, 0, session.cdnTrial, (copyErr != nil || session.cdnResponseFailed) && session.cdnTrial)
-			s.cdn.finishTransfer(session.cdnKey, session.cdnGeneration, transferBytes, (copyErr != nil || session.cdnResponseFailed) && session.cdnTrial)
+			failed := steamUpstreamFailed(copyErr, clientWriteFailed, session.cdnResponseFailed) && session.cdnTrial
+			s.cdn.accountTransfer(session.cdnKey, session.cdnGeneration, 0, 0, session.cdnTrial, failed)
+			if clientWriteFailed {
+				s.cdn.note(session.cdnGeneration, session.cdnKey.domain, session.cdnKey.adapter, session.cdnKey.ip, "client_write_closed")
+			}
+			// A client cancellation is neither a successful transfer nor proof of
+			// CDN failure. Explicit invalid upstream responses still count.
+			if !clientWriteFailed || failed {
+				s.cdn.finishTransfer(session.cdnKey, session.cdnGeneration, transferBytes, failed)
+			}
 		}
 		closeWrite(client)
 	}()
@@ -560,11 +569,19 @@ func listenAddress(host string, port int) string {
 type steamTimedWriter struct {
 	io.Writer
 	blocked *time.Duration
+	failed  *bool
+}
+
+func steamUpstreamFailed(copyErr error, clientWriteFailed, responseFailed bool) bool {
+	return responseFailed || copyErr != nil && !clientWriteFailed
 }
 
 func (w steamTimedWriter) Write(p []byte) (int, error) {
 	start := time.Now()
 	n, e := w.Writer.Write(p)
+	if w.failed != nil && (e != nil || n != len(p)) {
+		*w.failed = true
+	}
 	elapsed := time.Since(start)
 	if elapsed > 20*time.Millisecond {
 		*w.blocked += elapsed

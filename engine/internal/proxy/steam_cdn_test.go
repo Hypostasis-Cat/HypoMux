@@ -536,7 +536,7 @@ func TestSteamGlobalDualStackDiscovery(t *testing.T) {
 	}
 	close(release)
 	candidates := <-done
-	if len(candidates) != 8 || candidates[0].ip != "1.1.1.1" || candidates[1].ip != "2606:4700::1111" || candidates[2].ip != "8.8.8.8" {
+	if len(candidates) != 10 || candidates[0].ip != "1.1.1.1" || candidates[1].ip != "2606:4700::1111" || candidates[2].ip != "8.8.8.8" {
 		t.Fatalf("family or NIC starved: %+v", candidates)
 	}
 }

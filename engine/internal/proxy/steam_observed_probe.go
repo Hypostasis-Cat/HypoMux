@@ -55,7 +55,7 @@ func (s *Server) validateObservedSteam(ctx context.Context, gen uint64, adapter 
 	}
 	alternatives := 0
 	var verified []cdnCandidate
-	for _, candidate := range candidates {
+	for _, candidate := range steamCandidatesForAdapter(candidates, adapter, originalIP, c.now()) {
 		if candidate.ip == originalIP || !adapterSupportsNetwork(adapter, networkForIP("tcp", net.ParseIP(candidate.ip))) {
 			continue
 		}

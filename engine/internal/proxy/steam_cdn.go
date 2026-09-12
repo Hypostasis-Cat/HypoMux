@@ -523,7 +523,7 @@ func (s *Server) probeSteamCandidates(ctx context.Context, generation uint64, ho
 				continue
 			}
 		}
-		for _, candidate := range candidates {
+		for _, candidate := range steamCandidatesForAdapter(candidates, adapter, "", c.now()) {
 			if ctx.Err() != nil {
 				return
 			}
@@ -648,10 +648,14 @@ func collectSteamCandidates(parent context.Context, host string, adapters []Adap
 			groups[i] = rotateSteamCandidates(groups[i], rotations[0])
 		}
 	}
-	return mergeSteamCandidates(groups)
+	return mergeSteamCandidatePool(groups, 32)
 }
 
 func mergeSteamCandidates(groups [][]cdnCandidate) []cdnCandidate {
+	return mergeSteamCandidatePool(groups, 8)
+}
+
+func mergeSteamCandidatePool(groups [][]cdnCandidate, limit int) []cdnCandidate {
 	// A large A answer must not crowd out AAAA or another adapter. Use the
 	// shortest observed TTL when the same address occurs in several answers.
 	expires := map[string]time.Time{}
@@ -664,7 +668,7 @@ func mergeSteamCandidates(groups [][]cdnCandidate) []cdnCandidate {
 	}
 	var result []cdnCandidate
 	seen := map[string]bool{}
-	for index := 0; index < 64 && len(result) < 8; index++ {
+	for index := 0; index < 64 && len(result) < limit; index++ {
 		for _, group := range groups {
 			if index >= len(group) {
 				continue
@@ -676,7 +680,7 @@ func mergeSteamCandidates(groups [][]cdnCandidate) []cdnCandidate {
 			seen[candidate.ip] = true
 			candidate.expires = expires[candidate.ip]
 			result = append(result, candidate)
-			if len(result) == 8 {
+			if len(result) == limit {
 				break
 			}
 		}
