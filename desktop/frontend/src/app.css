@@ -1936,9 +1936,9 @@ svg {
 
 .routing-cell-input:focus-within,
 .routing-cell-dropdown:focus-within {
-  border-color: var(--hm-accent) !important;
+  border-color: var(--hm-control-border-hover) !important;
   background: var(--hm-control-pressed) !important;
-  box-shadow: 0 0 0 3px var(--hm-focus-ring) !important;
+  box-shadow: none !important;
 }
 
 .routing-rule-status {
@@ -2107,17 +2107,11 @@ svg {
   min-height: 126px;
   border: 1px solid color-mix(in srgb, var(--hm-outer-border) 88%, transparent) !important;
   border-radius: 9px;
-  outline: none !important;
   background: rgba(var(--hm-surface-secondary-rgb), 0.36) !important;
   box-shadow: inset 0 1px 0 color-mix(in srgb, var(--hm-inner-highlight) 48%, transparent) !important;
   transition:
     border-color var(--hm-motion-fast) var(--hm-motion-ease-out),
     box-shadow var(--hm-motion-normal) var(--hm-motion-ease-out);
-}
-
-.routing-batch-editor .fui-Textarea::after {
-  border-bottom: 0 !important;
-  transform: none !important;
 }
 
 .routing-batch-editor .fui-Textarea:focus-within {

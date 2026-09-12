@@ -13,6 +13,7 @@
 .fui-Dropdown,
 .fui-Combobox,
 .fui-Input,
+.fui-SearchBox,
 .fui-Textarea,
 .fui-Select,
 .fui-SpinButton {
@@ -34,11 +35,46 @@
   --borderRadiusMedium: var(--hm-control-radius);
 }
 
-/* Keep selection controls neutral on three sides; Fluent's accessible bottom
- * stroke and animated focus underline retain the theme accent. */
+/* Keep form controls neutral on three sides; Fluent's accessible bottom
+ * stroke and animated focus underline retain the theme accent. This avoids a
+ * saturated ring around the whole field while preserving a clear focus cue. */
 .fui-Dropdown,
-.fui-Combobox {
-  --colorNeutralStroke1Pressed: var(--hm-control-border);
+.fui-Combobox,
+.fui-Input,
+.fui-SearchBox,
+.fui-Textarea,
+.fui-Select,
+.fui-SpinButton {
+  --colorNeutralStroke1Pressed: var(--hm-control-border-hover);
+  --colorNeutralStrokeAccessiblePressed: var(--hm-control-border-hover);
+}
+
+.fui-Dropdown:focus-visible,
+.fui-Dropdown:focus-within,
+.fui-Combobox:focus-visible,
+.fui-Combobox:focus-within,
+.fui-Input:focus-visible,
+.fui-Input:focus-within,
+.fui-SearchBox:focus-visible,
+.fui-SearchBox:focus-within,
+.fui-Textarea:focus-visible,
+.fui-Textarea:focus-within,
+.fui-Select:focus-visible,
+.fui-Select:focus-within,
+.fui-SpinButton:focus-visible,
+.fui-SpinButton:focus-within {
+  outline: none;
+  box-shadow: none;
+}
+
+.fui-Dropdown :is(button, input):focus-visible,
+.fui-Combobox :is(button, input):focus-visible,
+.fui-Input input:focus-visible,
+.fui-SearchBox input:focus-visible,
+.fui-Textarea textarea:focus-visible,
+.fui-Select select:focus-visible,
+.fui-SpinButton input:focus-visible {
+  outline: none;
 }
 
 /* Repeated class specificity wins over generated single-class Fluent styles. */
@@ -46,6 +82,7 @@
 .fui-Dropdown.fui-Dropdown,
 .fui-Combobox.fui-Combobox,
 .fui-Input.fui-Input,
+.fui-SearchBox.fui-SearchBox,
 .fui-Textarea.fui-Textarea,
 .fui-Select.fui-Select,
 .fui-SpinButton.fui-SpinButton {
@@ -89,6 +126,24 @@
 }
 
 @media (forced-colors: active) {
+  .fui-Dropdown:focus-visible,
+  .fui-Dropdown:focus-within,
+  .fui-Combobox:focus-visible,
+  .fui-Combobox:focus-within,
+  .fui-Input:focus-visible,
+  .fui-Input:focus-within,
+  .fui-SearchBox:focus-visible,
+  .fui-SearchBox:focus-within,
+  .fui-Textarea:focus-visible,
+  .fui-Textarea:focus-within,
+  .fui-Select:focus-visible,
+  .fui-Select:focus-within,
+  .fui-SpinButton:focus-visible,
+  .fui-SpinButton:focus-within {
+    outline: 2px solid Highlight;
+    outline-offset: 2px;
+  }
+
   .fui-Listbox.fui-Listbox,
   .fui-MenuPopover.fui-MenuPopover {
     background: Canvas;
