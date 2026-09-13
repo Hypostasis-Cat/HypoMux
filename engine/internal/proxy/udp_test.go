@@ -416,7 +416,18 @@ func TestSOCKSUDPDirectChannelUsesSystemRouteAndReportsTelemetry(t *testing.T) {
 	if reply := readSOCKSUDP(t, client); string(reply) != "direct-udp" {
 		t.Fatalf("direct UDP reply = %q", reply)
 	}
+	// Receiving the datagram does not synchronize with AddDown, which runs
+	// after WriteToUDP returns. Wait for accounting before taking the snapshot.
 	snapshot := server.Snapshot(true)
+	wantBytes := uint64(len("direct-udp"))
+	deadline := time.Now().Add(time.Second)
+	for snapshot.Total.BytesUp < wantBytes || snapshot.Total.BytesDown < wantBytes {
+		if time.Now().After(deadline) {
+			t.Fatalf("direct UDP accounting did not settle: %#v", snapshot.Total)
+		}
+		time.Sleep(5 * time.Millisecond)
+		snapshot = server.Snapshot(true)
+	}
 	var directUDP *ConnectionSnapshot
 	for index := range snapshot.Connections {
 		if snapshot.Connections[index].Protocol == "socks5_udp" {
@@ -430,8 +441,8 @@ func TestSOCKSUDPDirectChannelUsesSystemRouteAndReportsTelemetry(t *testing.T) {
 		t.Fatalf("direct UDP telemetry = %#v", snapshot.Connections)
 	}
 	if snapshot.Total.Connections != 1 ||
-		snapshot.Total.BytesUp == 0 ||
-		snapshot.Total.BytesDown == 0 {
+		snapshot.Total.BytesUp != wantBytes ||
+		snapshot.Total.BytesDown != wantBytes {
 		t.Fatalf("direct UDP totals = %#v", snapshot.Total)
 	}
 }
