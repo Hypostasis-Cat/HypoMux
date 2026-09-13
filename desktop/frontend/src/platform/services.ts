@@ -67,6 +67,8 @@ export type SteamCDNStatus = {
 
 export type HotspotConfig = { ssid: string; password: string; band: "auto" | "2.4" | "5" };
 export type HotspotStatus = {
+  devices?: Array<{ mac: string; hosts: string[] }>;
+  devices_available?: boolean; updated_at?: string;
   state: "stopped" | "starting" | "running" | "failed";
   ssid: string; band: string; clients: number; shared_adapter: string;
   sharing_verified: boolean; cleanup_complete?: boolean; ready: boolean; message?: string; diagnostics?: string; gateway_address?: string;
@@ -238,6 +240,7 @@ export const appServices = {
       AdapterService.SaveSelection(mode, weighted, adapters),
   },
   engine: {
+    saveHotspotPreferences: (config: HotspotConfig) => Call.ByName(engineMethod("SaveHotspotPreferences"), config) as Promise<void>,
     hotspotPreferences: () => Call.ByName(engineMethod("HotspotPreferences")) as Promise<HotspotConfig>,
     hotspotStatus: () => Call.ByName(engineMethod("HotspotStatus")) as Promise<HotspotStatus>,
     startHotspot: (config: HotspotConfig) => Call.ByName(engineMethod("StartHotspot"), config) as Promise<HotspotStatus>,

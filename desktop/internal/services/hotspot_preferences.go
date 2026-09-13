@@ -1,10 +1,12 @@
 package services
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 // HotspotPreferences is separate from status/telemetry because it contains a secret.
@@ -25,6 +27,34 @@ func (s *EngineService) HotspotPreferences() (HotspotConfig, error) {
 		return HotspotConfig{SSID: "HypoMux", Band: "auto"}, errors.New("已保存的热点配置无效，请重新填写")
 	}
 	return config, nil
+}
+
+// SaveHotspotPreferences also works before aggregation starts. Serialize with
+// lifecycle operations so the atomic-file temporary path has a single writer.
+func (s *EngineService) SaveHotspotPreferences(config HotspotConfig) error {
+	if err := validateHotspotConfig(config); err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := s.acquireLifecycle(ctx); err != nil {
+		return err
+	}
+	defer s.releaseLifecycle()
+	s.mu.Lock()
+	h, closing := s.hotspot, s.closing
+	s.mu.Unlock()
+	if closing {
+		return errors.New("HypoMux 正在退出")
+	}
+	if h != nil {
+		select {
+		case <-h.done:
+		default:
+			return errors.New("请先关闭热点再修改配置")
+		}
+	}
+	return saveHotspotPreferences(config)
 }
 
 func saveHotspotPreferences(config HotspotConfig) error {

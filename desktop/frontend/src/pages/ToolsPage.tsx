@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { GlassSurface } from "../components/material/GlassSurface";
 import { SteamCDNPanel } from "../components/SteamCDNPanel";
 import { HotspotPanel } from "../components/HotspotPanel";
+import { HotspotQuickControl } from "../components/HotspotQuickControl";
 import { useAppNotifications } from "../components/notifications/AppNotifications";
 import { useI18n } from "../i18n/i18n";
 import { appServices, type SteamCDNStatus } from "../platform/services";
@@ -132,7 +133,7 @@ export function ToolsPage() {
             <span className="toolbox-tile-description">{text("手机连上 Wi-Fi，共享电脑的聚合网络。无需设置代理。", "Connect your phone to Wi-Fi and share your PC’s aggregated network. No proxy setup.")}</span>
             <span className="toolbox-tile-footer"><Badge appearance="tint">{text("实验性", "Experimental")}</Badge><span>{text("查看详情", "View details")} <ArrowRight20Regular /></span></span>
           </button>
-          <div className="toolbox-tile-status">{text("Windows · 需要 TUN 模式", "Windows · requires TUN mode")}</div>
+          <HotspotQuickControl onConfigure={() => navigate("hotspot")} />
         </GlassSurface>
       </div>
     </div>}

@@ -75,6 +75,21 @@ $fakeAdapters[0].InterfaceGuid = $otherID
 if (Test-PublicNetwork $publicID) { throw 'different adapter accepted as TUN' }
 $fakeAdapters = @()
 if (Test-PublicNetwork $publicID) { throw 'missing TUN accepted' }
+$manager = [PSCustomObject]@{ ClientCount = 1 }
+$manager | Add-Member ScriptMethod GetTetheringClients { @([PSCustomObject]@{ MacAddress = 'AA:BB:CC:DD:EE:FF'; HostNames = @([PSCustomObject]@{ DisplayName = 'test-phone' }) }) }
+$output = New-Object System.IO.StringWriter
+$originalOutput = [Console]::Out
+try {
+    [Console]::SetOut($output)
+    Publish-State 'running' '' $false
+    $state = $output.ToString() | ConvertFrom-Json
+    if (-not $state.devices_available -or $state.devices[0].hosts[0] -ne 'test-phone') { throw 'client details missing' }
+    $output.GetStringBuilder().Clear() | Out-Null
+    $manager | Add-Member -Force ScriptMethod GetTetheringClients { throw 'unsupported client details' }
+    Publish-State 'running' '' $false
+    $state = $output.ToString() | ConvertFrom-Json
+    if ($state.devices_available -or $state.state -ne 'running' -or $state.clients -ne 1) { throw 'optional client failure affected status' }
+} finally { [Console]::SetOut($originalOutput); $output.Dispose() }
 `
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

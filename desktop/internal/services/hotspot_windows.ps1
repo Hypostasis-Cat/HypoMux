@@ -20,7 +20,16 @@ $gatewayAddress = ''
 
 function Publish-State([string]$state, [string]$message, [bool]$verified) {
     $clients = 0
+    $devices = @(); $devicesAvailable = $false
     if ($null -ne $manager -and $state -eq 'running') { $clients = [int]$manager.ClientCount }
+    if ($null -ne $manager -and $state -eq 'running') {
+        try {
+            $devices = @($manager.GetTetheringClients() | ForEach-Object {
+                @{ mac = [string]$_.MacAddress; hosts = @($_.HostNames | ForEach-Object { [string]$_.DisplayName }) }
+            })
+            $devicesAvailable = $true
+        } catch { $devices = @() } # Optional UI detail must not stop networking.
+    }
     $ssid = ''; $band = 'auto'
     if ($null -ne $config) { $ssid = [string]$config.ssid; $band = [string]$config.band }
     [Console]::WriteLine((@{
@@ -29,7 +38,9 @@ function Publish-State([string]$state, [string]$message, [bool]$verified) {
         cleanup_complete = (($state -eq 'stopped' -or $state -eq 'failed') -and -not $cleanupFailed)
         diagnostics = $sharingDetail
         gateway_address = $gatewayAddress
-    } | ConvertTo-Json -Compress))
+        devices = $devices; devices_available = $devicesAvailable
+        updated_at = [DateTime]::UtcNow.ToString('o')
+    } | ConvertTo-Json -Depth 5 -Compress))
 }
 
 function Await-Operation($operation, [Type]$resultType) {

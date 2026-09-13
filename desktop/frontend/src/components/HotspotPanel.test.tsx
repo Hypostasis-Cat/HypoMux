@@ -4,15 +4,34 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HotspotPanel } from "./HotspotPanel";
 import { hotspotDraft } from "./hotspotDraft";
 
-const mocks = vi.hoisted(() => ({ preferences: vi.fn(), status: vi.fn(), start: vi.fn(), stop: vi.fn() }));
-vi.mock("../platform/services", () => ({ appServices: { engine: { hotspotPreferences: mocks.preferences, hotspotStatus: mocks.status, startHotspot: mocks.start, stopHotspot: mocks.stop } } }));
+const mocks = vi.hoisted(() => ({ save: vi.fn(), preferences: vi.fn(), status: vi.fn(), start: vi.fn(), stop: vi.fn() }));
+vi.mock("../platform/services", () => ({ appServices: { engine: { saveHotspotPreferences: mocks.save, hotspotPreferences: mocks.preferences, hotspotStatus: mocks.status, startHotspot: mocks.start, stopHotspot: mocks.stop } } }));
 vi.mock("../i18n/i18n", () => ({ useI18n: () => ({ locale: "en" }) }));
 const stopped = { state: "stopped", ssid: "", band: "auto", ready: true, sharing_verified: false, clients: 0 };
 const running = { ...stopped, state: "running", ssid: "My hotspot", sharing_verified: true, shared_adapter: "HypoMux-Tun", clients: 2 };
-beforeEach(() => { vi.resetAllMocks(); hotspotDraft.current = undefined; mocks.preferences.mockResolvedValue({ ssid: "HypoMux", password: "", band: "auto" }); mocks.status.mockResolvedValue(stopped); mocks.start.mockResolvedValue(running); mocks.stop.mockResolvedValue(stopped); });
+beforeEach(() => { vi.resetAllMocks(); mocks.save.mockResolvedValue(undefined); hotspotDraft.current = undefined; mocks.preferences.mockResolvedValue({ ssid: "HypoMux", password: "", band: "auto" }); mocks.status.mockResolvedValue(stopped); mocks.start.mockResolvedValue(running); mocks.stop.mockResolvedValue(stopped); });
 afterEach(cleanup);
 
 describe("HotspotPanel", () => {
+  it("saves settings without starting aggregation and generates a valid password", async () => {
+    mocks.status.mockResolvedValue({ ...stopped, ready: false });
+    render(<HotspotPanel />);
+    await screen.findByText("Hotspot is off");
+    fireEvent.click(screen.getByRole("button", { name: "Generate password" }));
+    const password = (screen.getByLabelText("Network password") as HTMLInputElement).value;
+    expect(password).toMatch(/^[A-Za-z0-9_-]{16}$/);
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    await screen.findByText("Settings saved encrypted and restored next time you open the app.");
+    expect(mocks.save).toHaveBeenCalledWith({ ssid: "HypoMux", password, band: "auto" });
+    expect(mocks.start).not.toHaveBeenCalled();
+  });
+  it("renders Windows device details without claiming per-device throughput", async () => {
+    mocks.status.mockResolvedValue({ ...running, devices_available: true, devices: [{ mac: "AA:BB:CC:DD:EE:FF", hosts: ["test-phone"] }] });
+    render(<HotspotPanel />);
+    expect(await screen.findByText("test-phone")).toBeTruthy();
+    expect(screen.getByText("AA:BB:CC:DD:EE:FF")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Save settings" })).toBeNull();
+  });
   it("restores encrypted preferences and retains edits across navigation", async () => {
     mocks.preferences.mockResolvedValue({ ssid: "Saved network", password: "saved-pass", band: "5" });
     const view = render(<HotspotPanel />);

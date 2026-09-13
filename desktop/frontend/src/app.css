@@ -5326,6 +5326,10 @@ svg {
 .hotspot-panel { display: flex; flex-direction: column; gap: 20px; padding: 20px; }
 .hotspot-control { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; border-bottom: 1px solid var(--hm-outer-border); padding-bottom: 20px; }
 .hotspot-control strong { font-size: 18px; }
+.hotspot-devices { border-top: 1px solid var(--hm-outer-border); padding-top: 16px; }
+.hotspot-devices ul { list-style: none; padding: 0; margin: 8px 0 0; }
+.hotspot-devices li { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding: 10px 0; overflow-wrap: anywhere; }
+.hotspot-devices code { color: var(--hm-text-secondary); }
 .hotspot-control p, .hotspot-save-hint { color: var(--hm-text-secondary); font-size: 13px; }
 .hotspot-summary, .hotspot-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
 .hotspot-fields { display: grid; align-items: start; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 20px; }

@@ -24,17 +24,25 @@ type HotspotConfig struct {
 }
 
 type HotspotStatus struct {
-	State           string `json:"state"`
-	SSID            string `json:"ssid"`
-	Band            string `json:"band"`
-	Clients         int    `json:"clients"`
-	SharedAdapter   string `json:"shared_adapter"`
-	SharingVerified bool   `json:"sharing_verified"`
-	CleanupComplete bool   `json:"cleanup_complete"`
-	Ready           bool   `json:"ready"`
-	Message         string `json:"message,omitempty"`
-	Diagnostics     string `json:"diagnostics,omitempty"`
-	GatewayAddress  string `json:"gateway_address,omitempty"`
+	Devices          []HotspotDevice `json:"devices,omitempty"`
+	DevicesAvailable bool            `json:"devices_available"`
+	UpdatedAt        string          `json:"updated_at,omitempty"`
+	State            string          `json:"state"`
+	SSID             string          `json:"ssid"`
+	Band             string          `json:"band"`
+	Clients          int             `json:"clients"`
+	SharedAdapter    string          `json:"shared_adapter"`
+	SharingVerified  bool            `json:"sharing_verified"`
+	CleanupComplete  bool            `json:"cleanup_complete"`
+	Ready            bool            `json:"ready"`
+	Message          string          `json:"message,omitempty"`
+	Diagnostics      string          `json:"diagnostics,omitempty"`
+	GatewayAddress   string          `json:"gateway_address,omitempty"`
+}
+
+type HotspotDevice struct {
+	MAC   string   `json:"mac"`
+	Hosts []string `json:"hosts"`
 }
 
 func validateHotspotConfig(config HotspotConfig) error {
@@ -97,6 +105,10 @@ type hotspotSharingReply struct {
 }
 
 func launchHotspot(ctx context.Context, command *exec.Cmd, config HotspotConfig, inspectors ...func() hotspotSharingReply) (*hotspotSession, error) {
+	return launchHotspotObserved(ctx, command, config, nil, inspectors...)
+}
+
+func launchHotspotObserved(ctx context.Context, command *exec.Cmd, config HotspotConfig, onCreated func(*hotspotSession), inspectors ...func() hotspotSharingReply) (*hotspotSession, error) {
 	input, err := command.StdinPipe()
 	if err != nil {
 		return nil, err
@@ -116,6 +128,9 @@ func launchHotspot(ctx context.Context, command *exec.Cmd, config HotspotConfig,
 		return nil, err
 	}
 	h := &hotspotSession{input: input, done: make(chan struct{}), status: HotspotStatus{State: "starting", SSID: config.SSID, Band: config.Band}}
+	if onCreated != nil {
+		onCreated(h)
+	}
 	ready := make(chan struct{})
 	var inputMu sync.Mutex
 	go func() {
@@ -250,7 +265,11 @@ func (s *EngineService) StartHotspot(config HotspotConfig) (HotspotStatus, error
 	if err := saveHotspotPreferences(config); err != nil {
 		return s.HotspotStatus(), err
 	}
-	h, err := launchHotspot(ctx, command, config, func() hotspotSharingReply {
+	_, err = launchHotspotObserved(ctx, command, config, func(h *hotspotSession) {
+		s.mu.Lock()
+		s.hotspot = h
+		s.mu.Unlock()
+	}, func() hotspotSharingReply {
 		inspectionCtx, inspectionCancel := context.WithTimeout(context.Background(), 12*time.Second)
 		defer inspectionCancel()
 		reply := hotspotSharingReply{Connections: []hotspotSharingConnection{}}
@@ -259,11 +278,6 @@ func (s *EngineService) StartHotspot(config HotspotConfig) (HotspotStatus, error
 		}
 		return reply
 	})
-	if h != nil {
-		s.mu.Lock()
-		s.hotspot = h
-		s.mu.Unlock()
-	}
 	return s.HotspotStatus(), err
 }
 
@@ -285,5 +299,10 @@ func (s *EngineService) StopHotspot() (HotspotStatus, error) {
 	}
 	defer s.releaseLifecycle()
 	err := s.stopHotspot(ctx)
+	if err == nil {
+		s.mu.Lock()
+		s.hotspot = nil
+		s.mu.Unlock()
+	}
 	return s.HotspotStatus(), err
 }

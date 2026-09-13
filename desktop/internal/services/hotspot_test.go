@@ -143,6 +143,29 @@ func TestHotspotWorkerRejectsWrongSharedEgress(t *testing.T) {
 	if err := h.stop(context.Background()); err != nil {
 		t.Fatal("a rolled-back start failure must not poison engine shutdown", err)
 	}
+	s := &EngineService{lifecycleGate: make(chan struct{}, 1), hotspot: h}
+	status, err := s.StopHotspot()
+	if err != nil || status.State != "stopped" || status.Message != "" {
+		t.Fatal("successful explicit stop retained stale failure", err, status)
+	}
+}
+
+func TestHotspotPublishesStartingSessionBeforeReadiness(t *testing.T) {
+	command := exec.Command(os.Args[0], "-test.run=^TestHotspotWorkerProcess$")
+	command.Env = append(os.Environ(), "HYPOMUX_HOTSPOT_TEST_WORKER=normal")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	observed := false
+	h, err := launchHotspotObserved(ctx, command, HotspotConfig{SSID: "test", Password: "safe-'$`password", Band: "auto"}, func(h *hotspotSession) {
+		observed = h.snapshot().State == "starting"
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.stop(ctx)
+	if !observed {
+		t.Fatal("starting session unavailable during launch")
+	}
 }
 
 func TestHotspotWorkerDoesNotAcceptUnverifiedRunningState(t *testing.T) {
