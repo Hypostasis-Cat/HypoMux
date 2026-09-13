@@ -1463,7 +1463,7 @@ svg {
   flex: 0 0 auto;
   align-items: center;
   padding: calc(8px * var(--hm-density-space)) 14px;
-  grid-template-columns: minmax(220px, 1.25fr) minmax(280px, 1.25fr) minmax(170px, 0.8fr) 210px;
+  grid-template-columns: minmax(220px, 1.25fr) minmax(280px, 1.25fr) minmax(170px, 0.8fr) 236px;
   gap: 14px;
   border: 1px solid color-mix(in srgb, var(--hm-outer-border) 72%, transparent);
   border-radius: var(--hm-radius);
@@ -1641,6 +1641,8 @@ svg {
 .adapter-weight strong {
   color: var(--hm-text-secondary);
   font-size: 12px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 .weight-stepper {
@@ -5287,7 +5289,7 @@ svg {
   }
 
   .network-adapter {
-    grid-template-columns: minmax(170px, 0.9fr) minmax(220px, 1fr) minmax(125px, 0.65fr) 180px;
+    grid-template-columns: minmax(170px, 0.9fr) minmax(220px, 1fr) minmax(125px, 0.65fr) 236px;
     gap: 10px;
   }
 
