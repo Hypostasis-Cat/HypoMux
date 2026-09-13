@@ -133,7 +133,7 @@ describe("HomePage adapter interactions", () => {
     const onAdapterRuntimeChange = vi.fn();
     renderPage(<HomePage onAdapterRuntimeChange={onAdapterRuntimeChange} />);
     expect(screen.getByText("All active adapters are hidden")).toBeTruthy();
-    expect(screen.getByText(/1 virtual adapter\(s\) hidden, including 1 selected/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "1 virtual hidden · 1 selected" })).toBeTruthy();
     expect(screen.queryByRole("article")).toBeNull();
     expect((screen.getByRole("button", { name: "Select all" }) as HTMLButtonElement).disabled).toBe(true);
     expect(onAdapterRuntimeChange).toHaveBeenCalledWith([virtual]);

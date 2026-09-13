@@ -1,4 +1,4 @@
-import { Badge, Button, Switch } from "@fluentui/react-components";
+import { Badge, Button, Switch, Tooltip } from "@fluentui/react-components";
 import { ArrowLeft20Regular, ArrowRight20Regular, Games24Regular, Wifi124Regular } from "@fluentui/react-icons";
 import { useEffect, useRef, useState } from "react";
 import { GlassSurface } from "../components/material/GlassSurface";
@@ -123,14 +123,19 @@ export function ToolsPage() {
             <span className="toolbox-tile-footer"><Badge appearance="tint">{text("实验性", "Experimental")}</Badge><span>{text("查看详情", "View details")} <ArrowRight20Regular /></span></span>
           </button>
           <div className="toolbox-tile-switch">{control}</div>
-          <div className="toolbox-tile-status" role="status"><span className="toolbox-state-dot" data-active={enabled && !!status?.enabled && !statusError} />{stateText}</div>
-          {loadError}
+          <div className="toolbox-tile-status" role={error ? "alert" : "status"}>
+            <span className="toolbox-state-dot" data-active={enabled && !!status?.enabled && !statusError} />
+            <Tooltip content={error || stateText} relationship={error ? "description" : "label"}>
+              <span className="toolbox-status-text" tabIndex={0}>{stateText}</span>
+            </Tooltip>
+            {error && <Button size="small" appearance="subtle" onClick={() => setRevision(value => value + 1)}>{text("重试", "Retry")}</Button>}
+          </div>
         </GlassSurface>
         <GlassSurface className="toolbox-tile" aria-labelledby="hotspot-tool-title">
           <button ref={hotspotEntryRef} className="toolbox-tile-open" onClick={() => navigate("hotspot")} aria-label={text("查看聚合热点详情", "View aggregation hotspot details")}>
             <span className="tool-icon" aria-hidden="true"><Wifi124Regular /></span>
             <h2 id="hotspot-tool-title">{text("聚合热点", "Aggregation hotspot")}</h2>
-            <span className="toolbox-tile-description">{text("手机连上 Wi-Fi，共享电脑的聚合网络。无需设置代理。", "Connect your phone to Wi-Fi and share your PC’s aggregated network. No proxy setup.")}</span>
+            <span className="toolbox-tile-description">{text("手机连上 Wi-Fi，共享电脑的聚合网络。", "Share your PC’s aggregated network over Wi-Fi.")}</span>
             <span className="toolbox-tile-footer"><Badge appearance="tint">{text("实验性", "Experimental")}</Badge><span>{text("查看详情", "View details")} <ArrowRight20Regular /></span></span>
           </button>
           <HotspotQuickControl onConfigure={() => navigate("hotspot")} />

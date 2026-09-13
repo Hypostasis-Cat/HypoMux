@@ -152,7 +152,20 @@ export function HomePage({
         <div className="network-section-heading">
           <div>
             <span className="section-kicker">{text("参与聚合的链路", "Links participating in aggregation")}</span>
-            <h1 id="network-section-title">{text("网络适配器", "Network adapters")}</h1>
+            <div className="network-section-title-row">
+              <h1 id="network-section-title">{text("网络适配器", "Network adapters")}</h1>
+              {engine.hiddenAdapterCount > 0 && (
+                <Tooltip content={text(
+                  `已隐藏 ${engine.hiddenAdapterCount} 张虚拟网卡${engine.hiddenSelectedCount ? `，其中 ${engine.hiddenSelectedCount} 张已选中` : ""}。可在设置中关闭“首页隐藏虚拟网卡”以显示。`,
+                  `${engine.hiddenAdapterCount} virtual adapter(s) hidden${engine.hiddenSelectedCount ? `, including ${engine.hiddenSelectedCount} selected` : ""}. Turn off “Hide virtual adapters on Home” in Settings to show them.`,
+                )} relationship="description">
+                  <button type="button" className="network-hidden-hint">
+                    {text(`已隐藏 ${engine.hiddenAdapterCount} 张虚拟网卡`, `${engine.hiddenAdapterCount} virtual hidden`)}
+                    {engine.hiddenSelectedCount > 0 && text(` · ${engine.hiddenSelectedCount} 张已选`, ` · ${engine.hiddenSelectedCount} selected`)}
+                  </button>
+                </Tooltip>
+              )}
+            </div>
           </div>
           <div className="network-section-actions">
             <span>{engine.visibleAdapters.filter((adapter) => adapter.selected).length} / {engine.visibleAdapters.length} {text("已启用", "enabled")}</span>
@@ -185,14 +198,6 @@ export function HomePage({
             </Button>
           </div>
         </div>
-        {engine.hiddenAdapterCount > 0 && (
-          <p className="network-section-note">
-            {text(
-              `已隐藏 ${engine.hiddenAdapterCount} 张虚拟网卡${engine.hiddenSelectedCount ? `，其中 ${engine.hiddenSelectedCount} 张已选中` : ""}。可在设置中关闭“首页隐藏虚拟网卡”以显示。`,
-              `${engine.hiddenAdapterCount} virtual adapter(s) hidden${engine.hiddenSelectedCount ? `, including ${engine.hiddenSelectedCount} selected` : ""}. Turn off “Hide virtual adapters on Home” in Settings to show them.`,
-            )}
-          </p>
-        )}
         <div className="network-adapter-list">
           {engine.loading ? (
             <div className="adapter-empty hm-card"><Spinner label={text("正在扫描活动网络适配器", "Scanning active network adapters")} /></div>

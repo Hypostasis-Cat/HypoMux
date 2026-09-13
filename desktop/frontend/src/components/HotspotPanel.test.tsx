@@ -36,13 +36,18 @@ describe("HotspotPanel", () => {
     mocks.preferences.mockResolvedValue({ ssid: "Saved network", password: "saved-pass", band: "5" });
     const view = render(<HotspotPanel />);
     await waitFor(() => expect((screen.getByLabelText("Network password") as HTMLInputElement).value).toBe("saved-pass"));
+    expect(screen.getByRole("combobox", { name: "Wi-Fi band" }).textContent).toContain("5 GHz");
+    fireEvent.click(screen.getByRole("combobox", { name: "Wi-Fi band" }));
+    fireEvent.click(await screen.findByRole("option", { name: "2.4 GHz" }));
     fireEvent.change(screen.getByLabelText("Network password"), { target: { value: "edited-pass" } });
     view.unmount();
     render(<HotspotPanel />);
     await screen.findByText("Hotspot is off");
     expect((screen.getByLabelText("Network password") as HTMLInputElement).value).toBe("edited-pass");
     expect((screen.getByLabelText("Network name") as HTMLInputElement).value).toBe("Saved network");
-    expect((screen.getByLabelText("Wi-Fi band") as HTMLSelectElement).value).toBe("5");
+    expect(screen.getByRole("combobox", { name: "Wi-Fi band" }).textContent).toContain("2.4 GHz");
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    await waitFor(() => expect(mocks.save).toHaveBeenCalledWith({ ssid: "Saved network", password: "edited-pass", band: "2.4" }));
     expect(mocks.preferences).toHaveBeenCalledOnce();
   });
   it("keeps an operational hotspot stoppable without claiming verified egress", async () => {

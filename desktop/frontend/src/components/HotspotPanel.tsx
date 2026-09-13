@@ -1,4 +1,4 @@
-import { Badge, Button, Field, Input, Select, Spinner, Switch } from "@fluentui/react-components";
+import { Badge, Button, Dropdown, Field, Input, Option, Spinner, Switch } from "@fluentui/react-components";
 import { useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n/i18n";
 import { appServices, type HotspotConfig, type HotspotStatus } from "../platform/services";
@@ -57,6 +57,8 @@ export function HotspotPanel() {
     return () => { cancelled = true; mounted.current = false; clearTimeout(timer); };
   }, []);
   const active = status?.state === "running" || status?.state === "starting";
+  const band = (active ? status?.band : config.band) ?? "auto";
+  const bandLabel = band === "5" ? "5 GHz" : band === "2.4" ? "2.4 GHz" : text("自动", "Automatic");
   const validName = config.ssid.trim().length > 0 && new TextEncoder().encode(config.ssid).length <= 32 && !/[\0\r\n]/.test(config.ssid);
   const validPassword = /^[\x20-\x7e]{8,63}$/.test(config.password);
   const save = async () => {
@@ -129,9 +131,15 @@ export function HotspotPanel() {
           contentAfter={<Button size="small" appearance="transparent" aria-pressed={showPassword} onClick={() => setShowPassword(value => !value)}>{showPassword ? text("隐藏", "Hide") : text("显示", "Show")}</Button>} />
       </Field>
       <Field label={text("Wi-Fi 频段", "Wi-Fi band")}>
-        <Select value={active ? status?.band : config.band} disabled={loadingConfig || pending || active} onChange={(_, data) => setConfig(value => ({ ...value, band: data.value as HotspotConfig["band"] }))}>
-          <option value="auto">{text("自动", "Automatic")}</option><option value="5">5 GHz</option><option value="2.4">2.4 GHz</option>
-        </Select>
+        <Dropdown className="hotspot-band-dropdown" value={bandLabel} selectedOptions={[band]} disabled={loadingConfig || pending || active}
+          onOptionSelect={(_, data) => {
+            if (data.optionValue === "auto" || data.optionValue === "5" || data.optionValue === "2.4") {
+              const nextBand = data.optionValue;
+              setConfig(value => ({ ...value, band: nextBand }));
+            }
+          }}>
+          <Option value="auto">{text("自动", "Automatic")}</Option><Option value="5">5 GHz</Option><Option value="2.4">2.4 GHz</Option>
+        </Dropdown>
       </Field>
     </div>
     <div className="hotspot-actions">

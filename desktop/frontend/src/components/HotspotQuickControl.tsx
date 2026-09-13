@@ -1,4 +1,4 @@
-import { Switch } from "@fluentui/react-components";
+import { Switch, Tooltip } from "@fluentui/react-components";
 import { useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n/i18n";
 import { appServices, type HotspotStatus } from "../platform/services";
@@ -59,7 +59,11 @@ export function HotspotQuickControl({ onConfigure }: { onConfigure: () => void }
     : !status.ready ? text("请先启动 TUN 聚合", "Start TUN aggregation first") : text("热点已关闭", "Hotspot is off");
   return <>
     <div className="toolbox-tile-switch"><Switch aria-label={text("聚合热点快捷开关", "Aggregation hotspot quick switch")} checked={!!active} disabled={pending || !status || (!active && (!status.ready || !!error))} onChange={(_, data) => void toggle(data.checked)} /></div>
-    <div className="toolbox-tile-status" role="status"><span className="toolbox-state-dot" data-active={status?.state === "running" && !error} />{label}</div>
-    {error && <p className="hotspot-error" role="alert">{error}</p>}
+    <div className="toolbox-tile-status" role={error ? "alert" : "status"}>
+      <span className="toolbox-state-dot" data-active={status?.state === "running" && !error} />
+      <Tooltip content={error || label} relationship={error ? "description" : "label"}>
+        <span className="toolbox-status-text" tabIndex={0}>{label}</span>
+      </Tooltip>
+    </div>
   </>;
 }

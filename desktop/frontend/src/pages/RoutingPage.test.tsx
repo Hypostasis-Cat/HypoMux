@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { FluentProvider, webLightTheme } from "@fluentui/react-components";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { RoutingPage, reconcileSavedDrafts } from "./RoutingPage";
 
@@ -12,6 +13,9 @@ vi.mock("../components/notifications/AppNotifications", () => ({ useAppNotificat
 vi.mock("../i18n/i18n", () => ({ useI18n: () => ({ locale: "en", t: mocks.translate }) }));
 
 const outbounds = [{ id: "direct", label: "Direct" }, { id: "aggregation", label: "Aggregation" }];
+// Match App's portal and focus-management context rather than using the
+// fallback Tabster root, which can hide the dialog as preview controls change.
+const renderPage = () => render(<FluentProvider theme={webLightTheme}><RoutingPage /></FluentProvider>);
 beforeEach(() => {
   vi.clearAllMocks();
   vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
@@ -35,7 +39,7 @@ it("preserves row identity when the backend normalizes priority and casing", () 
 it("keeps selected rows deletable after normalized settings are saved", async () => {
   mocks.snapshot.mockResolvedValue({ rules: [{ match_type: "process", value: "app.exe", outbound: "direct", priority: 70 }], outbounds, restart_required: false });
   mocks.save.mockImplementation(async (rules) => ({ rules: rules.map((rule: any) => ({ ...rule, priority: 2 })), outbounds, restart_required: false }));
-  render(<RoutingPage />);
+  renderPage();
   fireEvent.click(await screen.findByRole("switch", { name: "Enable rule app.exe" }));
   const selection = screen.getByRole("checkbox", { name: "Select app.exe" }) as HTMLInputElement;
   if (!selection.checked) fireEvent.click(selection);
@@ -47,7 +51,7 @@ it("keeps selected rows deletable after normalized settings are saved", async ()
 });
 
 it("disables unavailable rules across tabs and persists priority without deleting rules", async () => {
-  render(<RoutingPage />);
+  renderPage();
   await screen.findByRole("switch", { name: "Enable rule old.exe" });
   fireEvent.click(screen.getByRole("button", { name: "Disable unavailable rules" }));
   await waitFor(() => expect(mocks.save).toHaveBeenCalled(), { timeout: 4000 });
@@ -65,7 +69,7 @@ it("disables unavailable rules across tabs and persists priority without deletin
 });
 
 it("keeps rules unchanged when refreshing adapter availability fails", async () => {
-  render(<RoutingPage />);
+  renderPage();
   await screen.findByRole("switch", { name: "Enable rule old.exe" });
   mocks.snapshot.mockRejectedValueOnce(new Error("Adapter enumeration failed"));
   fireEvent.click(screen.getByRole("button", { name: "Disable unavailable rules" }));
@@ -77,7 +81,7 @@ it("keeps rules unchanged when refreshing adapter availability fails", async () 
 
 it("saves type order with an empty rule list", async () => {
   mocks.snapshot.mockResolvedValue({ rules: [], outbounds, restart_required: false, match_order: ["domain", "ip", "process"] });
-  render(<RoutingPage />);
+  renderPage();
   const order = await screen.findByRole("combobox", { name: "Match order" });
   await waitFor(() => expect(order.textContent).toContain("Domain → IP → Process"));
   fireEvent.click(order);
@@ -89,20 +93,24 @@ it("keeps a disabled conflict disabled when a batch replaces its egress", async 
   mocks.snapshot.mockResolvedValue({ rules: [{ match_type: "process", value: "app.exe", outbound: "direct", disabled: true, priority: 2 }], outbounds, restart_required: false });
   // Even an older or stale preview missing the state must not re-enable it.
   mocks.previewBatch.mockResolvedValue({ add_count: 0, duplicate_count: 0, conflict_count: 1, invalid_count: 0, items: [{ status: "conflict", input: "app.exe", existing_outbound: "direct", rule: { match_type: "process", value: "app.exe", outbound: "aggregation" } }] });
-  render(<RoutingPage />);
+  renderPage();
   await screen.findByRole("switch", { name: "Enable rule app.exe" });
   fireEvent.click(screen.getByRole("button", { name: /Batch add/ }));
-  const dialog = within(await screen.findByRole("dialog"));
+  const surface = await screen.findByRole("dialog");
+  const dialog = within(surface);
+  await waitFor(() => expect(surface.contains(document.activeElement)).toBe(true));
   fireEvent.change(await dialog.findByPlaceholderText(/browser\.exe/), { target: { value: "app.exe" } });
   fireEvent.click(dialog.getByRole("button", { name: "Preview 1" }));
   const replaceConflict = await dialog.findByRole("checkbox", { name: "Update conflicting rules to the selected egress" });
   fireEvent.click(replaceConflict);
   await waitFor(() => expect(replaceConflict).toHaveProperty("checked", true));
-  // Scope queries to the open dialog: scanning the background routing table
-  // can exhaust the default 1s accessibility-query deadline on CI. Keep the
-  // visible/enabled assertions and allow the dialog's focus updates to settle.
-  const addRules = await dialog.findByRole("button", { name: "Add 1 rules" }, { timeout: 4000 });
-  await waitFor(() => expect(addRules).toHaveProperty("disabled", false));
+  const addRules = await waitFor(() => {
+    expect(surface.getAttribute("aria-hidden")).not.toBe("true");
+    expect(surface.contains(document.activeElement)).toBe(true);
+    const button = dialog.getByRole("button", { name: "Add 1 rules" });
+    expect(button).toHaveProperty("disabled", false);
+    return button;
+  }, { timeout: 4000 });
   fireEvent.click(addRules);
   await waitFor(() => expect(mocks.save).toHaveBeenCalledWith([expect.objectContaining({ value: "app.exe", outbound: "aggregation", disabled: true, priority: 2 })], expect.any(Array)));
   await waitFor(() => expect(screen.getByRole("switch", { name: "Enable rule app.exe" })).toHaveProperty("checked", false));

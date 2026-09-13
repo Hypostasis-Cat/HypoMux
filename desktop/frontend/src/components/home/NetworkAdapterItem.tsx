@@ -66,7 +66,7 @@ export function NetworkAdapterItem({
           {adapter.kind === "wifi" ? <Wifi124Regular /> : <Router24Regular />}
         </span>
         <span className="adapter-name">
-          <strong>{adapter.name}</strong>
+          <strong title={adapter.name}>{adapter.name}</strong>
           <span>{adapter.address}</span>
         </span>
       </div>
