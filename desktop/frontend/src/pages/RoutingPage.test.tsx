@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { RoutingPage } from "./RoutingPage";
+import { RoutingPage, reconcileSavedDrafts } from "./RoutingPage";
 
-const mocks = vi.hoisted(() => ({ snapshot: vi.fn(), save: vi.fn(), validate: vi.fn(), notify: vi.fn(), translate: (key: string) => key }));
+const mocks = vi.hoisted(() => ({ snapshot: vi.fn(), save: vi.fn(), validate: vi.fn(), previewBatch: vi.fn(), notify: vi.fn(), translate: (key: string) => key }));
 vi.mock("../platform/services", () => ({ appServices: {
-  routing: { snapshot: mocks.snapshot, save: mocks.save, validate: mocks.validate },
+  routing: { snapshot: mocks.snapshot, save: mocks.save, validate: mocks.validate, previewBatch: mocks.previewBatch },
   engine: { snapshot: async () => ({ phase: "stopped", mode: "tun" }) },
 } }));
 vi.mock("../components/notifications/AppNotifications", () => ({ useAppNotifications: () => ({ notify: mocks.notify }) }));
@@ -24,6 +24,27 @@ beforeEach(() => {
   mocks.save.mockImplementation(async (rules) => ({ rules, outbounds, restart_required: false }));
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+
+it("preserves row identity when the backend normalizes priority and casing", () => {
+  const submitted = [{ id: "selected-rule", match_type: "process", value: "App.exe", outbound: "direct", priority: 70, disabled: true }];
+  const saved = reconcileSavedDrafts([{ match_type: "process", value: "app.exe", outbound: "direct", priority: 2, disabled: true }], submitted);
+  expect(saved[0]).toMatchObject({ id: "selected-rule", priority: 2, disabled: true });
+  expect(saved.filter((rule) => !new Set(["selected-rule"]).has(rule.id))).toEqual([]);
+});
+
+it("keeps selected rows deletable after normalized settings are saved", async () => {
+  mocks.snapshot.mockResolvedValue({ rules: [{ match_type: "process", value: "app.exe", outbound: "direct", priority: 70 }], outbounds, restart_required: false });
+  mocks.save.mockImplementation(async (rules) => ({ rules: rules.map((rule: any) => ({ ...rule, priority: 2 })), outbounds, restart_required: false }));
+  render(<RoutingPage />);
+  fireEvent.click(await screen.findByRole("switch", { name: "Enable rule app.exe" }));
+  const selection = screen.getByRole("checkbox", { name: "Select app.exe" }) as HTMLInputElement;
+  if (!selection.checked) fireEvent.click(selection);
+  await waitFor(() => expect(mocks.save).toHaveBeenCalled(), { timeout: 4000 });
+  await waitFor(() => expect(screen.getByRole("checkbox", { name: "Select app.exe" })).toHaveProperty("checked", true));
+  fireEvent.click(screen.getByRole("button", { name: /Delete selected/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+  await waitFor(() => expect(mocks.save).toHaveBeenLastCalledWith([], expect.any(Array)), { timeout: 4000 });
+});
 
 it("disables unavailable rules across tabs and persists priority without deleting rules", async () => {
   render(<RoutingPage />);
@@ -62,4 +83,19 @@ it("saves type order with an empty rule list", async () => {
   fireEvent.click(order);
   fireEvent.click(screen.getByRole("option", { name: "IP → Process → Domain" }));
   await waitFor(() => expect(mocks.save).toHaveBeenLastCalledWith([], ["ip", "process", "domain"]), { timeout: 4000 });
+});
+
+it("keeps a disabled conflict disabled when a batch replaces its egress", async () => {
+  mocks.snapshot.mockResolvedValue({ rules: [{ match_type: "process", value: "app.exe", outbound: "direct", disabled: true, priority: 2 }], outbounds, restart_required: false });
+  // Even an older or stale preview missing the state must not re-enable it.
+  mocks.previewBatch.mockResolvedValue({ add_count: 0, duplicate_count: 0, conflict_count: 1, invalid_count: 0, items: [{ status: "conflict", input: "app.exe", existing_outbound: "direct", rule: { match_type: "process", value: "app.exe", outbound: "aggregation" } }] });
+  render(<RoutingPage />);
+  await screen.findByRole("switch", { name: "Enable rule app.exe" });
+  fireEvent.click(screen.getByRole("button", { name: /Batch add/ }));
+  fireEvent.change(await screen.findByPlaceholderText(/browser\.exe/), { target: { value: "app.exe" } });
+  fireEvent.click(screen.getByRole("button", { name: "Preview 1" }));
+  fireEvent.click(await screen.findByRole("checkbox", { name: "Update conflicting rules to the selected egress" }));
+  fireEvent.click(screen.getByRole("button", { name: "Add 1 rules" }));
+  await waitFor(() => expect(mocks.save).toHaveBeenCalledWith([expect.objectContaining({ value: "app.exe", outbound: "aggregation", disabled: true, priority: 2 })], expect.any(Array)));
+  await waitFor(() => expect(screen.getByRole("switch", { name: "Enable rule app.exe" })).toHaveProperty("checked", false));
 });

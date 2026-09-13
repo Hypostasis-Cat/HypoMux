@@ -295,6 +295,10 @@ func (s *RoutingRuleService) PreviewBatch(
 		}
 		seenBatch[identity] = struct{}{}
 		if current, exists := existingByIdentity[identity]; exists {
+			// Replacing an outbound must not change whether the rule is enabled
+			// or its saved priority.
+			item.Rule.Disabled = current.Disabled
+			item.Rule.Priority = current.Priority
 			item.ExistingOutbound = current.Outbound
 			if current.Outbound == rule.Outbound {
 				item.Status = RoutingBatchDuplicate

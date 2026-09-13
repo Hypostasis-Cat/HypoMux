@@ -144,6 +144,7 @@ func isVirtualAdapter(name, description string) bool {
 		"vmware", "vmnet", "hyper-v", "hyperv", "vethernet", "virtualbox", "vbox",
 		"virtual ethernet", "virtual adapter", "virtual network", "virtual nic",
 		"wintun", "wireguard", "tailscale", "zerotier", "tap-windows", "tap-win32",
+		"meta tunnel", "mihomo", "clash",
 		"vpn client adapter", "docker", "wsl", "loopback adapter", "虚拟",
 	} {
 		if strings.Contains(value, marker) {

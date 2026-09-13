@@ -75,7 +75,9 @@ const serializeRule = ({ match_type, value, outbound, disabled, priority }: Rout
   match_type, value, outbound, ...(disabled ? { disabled } : {}), ...(priority ? { priority } : {}),
 });
 
-const ruleKey = (rule: RoutingRule) => `${rule.match_type}\u0000${rule.value}\u0000${rule.outbound}\u0000${!!rule.disabled}\u0000${rule.priority ?? 0}`;
+// Backend normalization can change priority or other editable fields. Row
+// identity must remain stable so saved selections still refer to the same rule.
+const ruleKey = (rule: RoutingRule) => routingRuleIdentity(rule.match_type, rule.value);
 
 export const reconcileSavedDrafts = (saved: RoutingRule[], submitted: DraftRule[]): DraftRule[] => {
   const available = new Map<string, DraftRule[]>();
@@ -560,9 +562,15 @@ export function RoutingPage() {
         .filter((item) => item.status === "conflict")
         .map((item) => routingRuleIdentity(item.rule.match_type, item.rule.value)),
     );
+    const previousByIdentity = new Map(previous.map((rule) => [routingRuleIdentity(rule.match_type, rule.value), rule]));
     const next = [
       ...previous.filter((rule) => !replacementKeys.has(routingRuleIdentity(rule.match_type, rule.value))),
-      ...accepted.map((item) => ({ ...item.rule, id: newID(), dirty: true })),
+      ...accepted.map((item) => {
+        const existing = previousByIdentity.get(routingRuleIdentity(item.rule.match_type, item.rule.value));
+        return existing
+          ? { ...item.rule, disabled: existing.disabled, priority: existing.priority, id: existing.id, dirty: true }
+          : { ...item.rule, id: newID(), dirty: true };
+      }),
     ];
     applyRules(next, true);
     setPendingSave(false);

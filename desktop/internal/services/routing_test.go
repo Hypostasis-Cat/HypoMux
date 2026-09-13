@@ -95,7 +95,7 @@ func TestPreviewRoutingBatchClassifiesNormalizedValues(t *testing.T) {
 		"direct",
 		[]RoutingRule{
 			{MatchType: MatchDomain, Value: "same.example", Outbound: "direct"},
-			{MatchType: MatchDomain, Value: "move.example", Outbound: "aggregation"},
+			{MatchType: MatchDomain, Value: "move.example", Outbound: "aggregation", Disabled: true, Priority: 70},
 		},
 	)
 	if err != nil {
@@ -118,6 +118,12 @@ func TestPreviewRoutingBatchClassifiesNormalizedValues(t *testing.T) {
 	}
 	if preview.Items[0].Rule.Value != "new.example" || preview.Items[3].ExistingOutbound != "aggregation" {
 		t.Fatalf("batch values were not normalized: %#v", preview.Items)
+	}
+	if replacement := preview.Items[3].Rule; !replacement.Disabled || replacement.Priority != 70 || replacement.Outbound != "direct" {
+		t.Fatalf("replacement lost the existing state: %#v", replacement)
+	}
+	if preview.Items[0].Rule.Disabled {
+		t.Fatal("new rules should remain enabled")
 	}
 }
 
