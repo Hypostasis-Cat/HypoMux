@@ -94,8 +94,13 @@ it("keeps a disabled conflict disabled when a batch replaces its egress", async 
   fireEvent.click(screen.getByRole("button", { name: /Batch add/ }));
   fireEvent.change(await screen.findByPlaceholderText(/browser\.exe/), { target: { value: "app.exe" } });
   fireEvent.click(screen.getByRole("button", { name: "Preview 1" }));
-  fireEvent.click(await screen.findByRole("checkbox", { name: "Update conflicting rules to the selected egress" }));
-  fireEvent.click(screen.getByRole("button", { name: "Add 1 rules" }));
+  const replaceConflict = await screen.findByRole("checkbox", { name: "Update conflicting rules to the selected egress" });
+  fireEvent.click(replaceConflict);
+  // Fluent's dialog accessibility/focus updates can complete after the
+  // checkbox render. Wait for the resulting action, not just the preview.
+  const addRules = await screen.findByRole("button", { name: "Add 1 rules" });
+  await waitFor(() => expect(addRules).toHaveProperty("disabled", false));
+  fireEvent.click(addRules);
   await waitFor(() => expect(mocks.save).toHaveBeenCalledWith([expect.objectContaining({ value: "app.exe", outbound: "aggregation", disabled: true, priority: 2 })], expect.any(Array)));
   await waitFor(() => expect(screen.getByRole("switch", { name: "Enable rule app.exe" })).toHaveProperty("checked", false));
 });
