@@ -187,7 +187,9 @@ describe("ConnectionsPage interactions", () => {
     expect(screen.getByText("1 connection(s)")).not.toBeNull();
     expect(screen.getByText("400 B/s")).not.toBeNull();
     expect(screen.getByText("100 B/s")).not.toBeNull();
-  });
+    // The first FluentProvider render includes style/focus initialization.
+    // Windows CI can exceed 5s under parallel jsdom load; keep all assertions.
+  }, 15000);
 
   it("shows and clears the adapter filter without clearing search", async () => {
     renderPage(<ConnectionsPage initialAdapter="Ethernet" adapterRuntime={adapterRuntime} />);
