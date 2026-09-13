@@ -36,6 +36,18 @@ func TestHotspotConfigValidation(t *testing.T) {
 	}
 }
 
+func TestHotspotRetryRechecksLivePrerequisitesAfterFailedCleanup(t *testing.T) {
+	done := make(chan struct{})
+	close(done)
+	s := &EngineService{lifecycleGate: make(chan struct{}, 1), hotspot: &hotspotSession{
+		done: done, status: HotspotStatus{State: "failed", CleanupComplete: false, Message: "old cleanup error"},
+	}}
+	_, err := s.StartHotspot(HotspotConfig{SSID: "HypoMux", Password: "password123", Band: "auto"})
+	if err == nil || !strings.Contains(err.Error(), "TUN 模式") {
+		t.Fatalf("retry should reach live prerequisites, got %v", err)
+	}
+}
+
 // Exercise the real subprocess/pipe lifecycle without changing host networking.
 func TestHotspotWorkerProcess(t *testing.T) {
 	mode := os.Getenv("HYPOMUX_HOTSPOT_TEST_WORKER")

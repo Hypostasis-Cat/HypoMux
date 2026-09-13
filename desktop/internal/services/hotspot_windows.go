@@ -4,10 +4,7 @@ package services
 
 import (
 	_ "embed"
-	"encoding/base64"
-	"encoding/binary"
 	"os/exec"
-	"unicode/utf16"
 )
 
 //go:embed hotspot_windows.ps1
@@ -20,10 +17,8 @@ func hotspotCommand() (*exec.Cmd, error) {
 	if err != nil {
 		return nil, err
 	}
-	units := utf16.Encode([]rune(hotspotScript))
-	encoded := make([]byte, len(units)*2)
-	for i, unit := range units {
-		binary.LittleEndian.PutUint16(encoded[i*2:], unit)
-	}
-	return exec.Command(executable, "-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", base64.StdEncoding.EncodeToString(encoded)), nil
+	// exec passes UTF-16 arguments directly to CreateProcess. Base64-encoding
+	// UTF-16 inflated the fixed script beyond Windows' 32K command-line limit.
+	// Credentials remain exclusively on stdin, never interpolated into code.
+	return exec.Command(executable, "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", hotspotScript), nil
 }

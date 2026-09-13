@@ -223,9 +223,9 @@ func (s *EngineService) StartHotspot(config HotspotConfig) (HotspotStatus, error
 	if previous != nil {
 		select {
 		case <-previous.done:
-			if !previous.snapshot().CleanupComplete {
-				return s.HotspotStatus(), errors.New("上一次热点清理未完成，请先检查 Windows 移动热点和共享设置")
-			}
+			// A terminated worker cannot retry cleanup. Re-run the new worker's
+			// live Off/ICS checks instead of permanently latching a stale failure.
+			// Those checks still refuse to take over any active sharing session.
 		default:
 			return s.HotspotStatus(), errors.New("热点仍在运行或清理中，请先关闭后重试")
 		}

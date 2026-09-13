@@ -105,6 +105,33 @@ function Publish-Running([string]$verdict) {
     Publish-State 'running' $message ($verdict -eq 'verified')
 }
 
+function Get-StartFailure([string]$status) {
+    if ($status -eq 'WiFiDeviceOff') {
+        return 'Wi-Fi 无线设备未开启（WiFiDeviceOff）。请在 Windows 快速设置中开启 Wi-Fi、关闭飞行模式；无需连接其他 Wi-Fi，然后重试。若 Wi-Fi 已开启，请检查无线网卡是否被禁用或驱动异常。'
+    }
+    return ('Windows tethering status: ' + $status)
+}
+
+function Stop-OwnedHotspot {
+    # Transitional/off states can lag behind a failed Start/Stop result.
+    $deadline = [DateTime]::UtcNow.AddSeconds(5)
+    while ([string]$manager.TetheringOperationalState -eq 'InTransition' -and [DateTime]::UtcNow -lt $deadline) {
+        Start-Sleep -Milliseconds 200
+    }
+    if ([string]$manager.TetheringOperationalState -eq 'Off') { return }
+    try {
+        $stopped = Await-Operation ($manager.StopTetheringAsync()) $resultType
+        if ([string]$stopped.Status -ne 'Success') { throw ('Stop status: ' + [string]$stopped.Status) }
+    } catch {
+        if ([string]$manager.TetheringOperationalState -ne 'Off') { throw }
+    }
+    $deadline = [DateTime]::UtcNow.AddSeconds(5)
+    while ([string]$manager.TetheringOperationalState -ne 'Off' -and [DateTime]::UtcNow -lt $deadline) {
+        Start-Sleep -Milliseconds 200
+    }
+    if ([string]$manager.TetheringOperationalState -ne 'Off') { throw 'Windows has not confirmed hotspot is off' }
+}
+
 try {
     $config = [Console]::ReadLine() | ConvertFrom-Json
     if ($null -eq $config) { throw 'Configuration is missing' }
@@ -157,7 +184,7 @@ public static class HypoMuxHotspotLifetime {
     $previousPrivateIDs = @(Get-NetAdapter -IncludeHidden | Where-Object { $_.InterfaceDescription -like '*Wi-Fi Direct*' -and $_.Status -eq 'Up' } | ForEach-Object { [guid]$_.InterfaceGuid })
     $attempted = $true
     $result = Await-Operation ($manager.StartTetheringAsync()) $resultType
-    if ([string]$result.Status -ne 'Success') { throw ('Windows tethering status: ' + [string]$result.Status) }
+    if ([string]$result.Status -ne 'Success') { throw (Get-StartFailure ([string]$result.Status)) }
     $phase = 'shared egress verification'
     $networkReady = $false
     $verificationDeadline = [DateTime]::UtcNow.AddSeconds(20)
@@ -189,11 +216,8 @@ public static class HypoMuxHotspotLifetime {
 } finally {
     if ($attempted) {
         try {
-            if ([string]$manager.TetheringOperationalState -ne 'Off') {
-                $stopped = Await-Operation ($manager.StopTetheringAsync()) $resultType
-                if ([string]$stopped.Status -ne 'Success') { throw 'Stop failed' }
-            }
-        } catch { $cleanupFailed = $true; $failure += ' Hotspot cleanup failed; check Windows Mobile hotspot settings.' }
+            Stop-OwnedHotspot
+        } catch { $cleanupFailed = $true; $failure += ' 热点关闭未确认；请在 Windows 中关闭移动热点，再返回重试。' }
     }
     if ($configured -and $null -ne $original) {
         try { Await-Action ($manager.ConfigureAccessPointAsync($original)) }

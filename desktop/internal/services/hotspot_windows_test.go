@@ -52,6 +52,17 @@ $script:previousPrivateIDs = @([guid]'00000000-0000-0000-0000-000000000002')
 if (Test-PrivateNetwork) { throw 'pre-existing AP accepted' }
 $manager.TetheringOperationalState = 'Off'
 if (Test-PrivateNetwork) { throw 'stopped hotspot accepted' }
+if ((Get-StartFailure 'WiFiDeviceOff') -notlike '*WiFiDeviceOff*') { throw 'radio error code lost' }
+$manager | Add-Member ScriptMethod StopTetheringAsync { throw 'must not stop an already off hotspot' }
+Stop-OwnedHotspot
+$manager.TetheringOperationalState = 'On'
+$manager | Add-Member -Force ScriptMethod StopTetheringAsync { $this.TetheringOperationalState = 'Off'; throw 'late stop error' }
+Stop-OwnedHotspot
+$manager.TetheringOperationalState = 'On'
+$manager | Add-Member -Force ScriptMethod StopTetheringAsync { throw 'real stop failure' }
+$rejected = $false
+try { Stop-OwnedHotspot } catch { $rejected = $true }
+if (-not $rejected) { throw 'live cleanup failure was suppressed' }
 `
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
