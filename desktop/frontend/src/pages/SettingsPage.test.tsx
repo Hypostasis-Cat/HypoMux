@@ -15,11 +15,12 @@ const mocks = vi.hoisted(() => ({
   setLocale: vi.fn(),
   setSteamCDNEnabled: vi.fn(),
   steamCDNStatus: vi.fn(),
+  hotspotStatus: vi.fn(),
 }));
 
 vi.mock("../platform/services", () => ({
   appServices: {
-    engine: { setSteamCDNEnabled: mocks.setSteamCDNEnabled, steamCDNStatus: mocks.steamCDNStatus },
+    engine: { setSteamCDNEnabled: mocks.setSteamCDNEnabled, steamCDNStatus: mocks.steamCDNStatus, hotspotStatus: mocks.hotspotStatus },
     settings: {
       get: mocks.get,
       update: mocks.update,
@@ -51,6 +52,7 @@ beforeEach(() => {
   mocks.get.mockResolvedValue(initial);
   mocks.setSteamCDNEnabled.mockImplementation(async (enabled) => ({ ...initial, steam_cdn_enabled: enabled }));
   mocks.steamCDNStatus.mockResolvedValue({available: true, enabled: false, probing: 0, replacements: 0, fallbacks: 0, entries: []});
+  mocks.hotspotStatus.mockResolvedValue({state: "stopped", ready: false, ssid: "", clients: 0, band: "auto", sharing_verified: false});
   mocks.update.mockImplementation(async (settings) => settings);
   class Observer {
     observe() {}
@@ -67,6 +69,15 @@ afterEach(() => {
 });
 
 describe("TUN settings", () => {
+  it("opens the aggregation hotspot from the toolbox and restores entry focus", async () => {
+    render(<ToolsPage />);
+    const entry = screen.getByRole("button", { name: "View aggregation hotspot details" });
+    fireEvent.click(entry);
+    expect(await screen.findByRole("button", { name: "Enable aggregation hotspot" })).toBeTruthy();
+    expect(document.activeElement).toBe(screen.getByRole("heading", { level: 1, name: "Aggregation hotspot" }));
+    fireEvent.click(screen.getByRole("button", { name: "Back to toolbox" }));
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "View aggregation hotspot details" }));
+  });
   it("opens tool details separately and restores focus when returning", async () => {
     render(<ToolsPage />);
     const entry = await screen.findByRole("button", { name: "View Steam download optimization details" });

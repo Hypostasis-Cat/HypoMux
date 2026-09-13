@@ -65,6 +65,13 @@ export type SteamCDNStatus = {
  entries: Array<{probe_bps?: number; probed_at?: string; admission_reason?: string; source?: string; evaluated_at?: string; switched_bytes?: number; original_bytes?: number; switched_bps?: number; switched_active?: number; transfer_failures?: number; decision_reason?: string; validated?: boolean; preferred?: boolean; total_bps?: number; active_connections?: number; successful_connections?: number; effective_bytes?: number; adapter: string; domain: string; port: string; ip: string; download_bps: number; samples: number; selections: number; cooldown_until: string; expires_at: string}>;
 };
 
+export type HotspotConfig = { ssid: string; password: string; band: "auto" | "2.4" | "5" };
+export type HotspotStatus = {
+  state: "stopped" | "starting" | "running" | "failed";
+  ssid: string; band: string; clients: number; shared_adapter: string;
+  sharing_verified: boolean; ready: boolean; message?: string;
+};
+
 export type BlockedDomainEntry = {
   adapter: string;
   domain: string;
@@ -231,6 +238,9 @@ export const appServices = {
       AdapterService.SaveSelection(mode, weighted, adapters),
   },
   engine: {
+    hotspotStatus: () => Call.ByName(engineMethod("HotspotStatus")) as Promise<HotspotStatus>,
+    startHotspot: (config: HotspotConfig) => Call.ByName(engineMethod("StartHotspot"), config) as Promise<HotspotStatus>,
+    stopHotspot: () => Call.ByName(engineMethod("StopHotspot")) as Promise<HotspotStatus>,
     steamCDNStatus: (reset = false) => Call.ByName(engineMethod("SteamCDNStatus"), reset) as Promise<SteamCDNStatus>,
     setSteamCDNEnabled: (enabled: boolean) => Call.ByName(engineMethod("SetSteamCDNEnabled"), enabled) as Promise<CompleteAppSettings>,
     snapshot: () => EngineService.Snapshot(),

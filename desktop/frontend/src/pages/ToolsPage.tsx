@@ -1,8 +1,9 @@
 import { Badge, Button, Switch } from "@fluentui/react-components";
-import { ArrowLeft20Regular, ArrowRight20Regular, Games24Regular } from "@fluentui/react-icons";
+import { ArrowLeft20Regular, ArrowRight20Regular, Games24Regular, Wifi124Regular } from "@fluentui/react-icons";
 import { useEffect, useRef, useState } from "react";
 import { GlassSurface } from "../components/material/GlassSurface";
 import { SteamCDNPanel } from "../components/SteamCDNPanel";
+import { HotspotPanel } from "../components/HotspotPanel";
 import { useAppNotifications } from "../components/notifications/AppNotifications";
 import { useI18n } from "../i18n/i18n";
 import { appServices, type SteamCDNStatus } from "../platform/services";
@@ -17,15 +18,17 @@ export function ToolsPage() {
   const [error, setError] = useState("");
   const [revision, setRevision] = useState(0);
   const busy = useRef(false);
-  const [detail, setDetail] = useState(false);
+  const [detail, setDetail] = useState<false | "steam" | "hotspot">(false);
   const [status, setStatus] = useState<SteamCDNStatus>();
   const [statusError, setStatusError] = useState(false);
   const entryRef = useRef<HTMLButtonElement>(null);
+  const hotspotEntryRef = useRef<HTMLButtonElement>(null);
+  const lastDetail = useRef<"steam" | "hotspot">("steam");
   const titleRef = useRef<HTMLHeadingElement>(null);
   const navigated = useRef(false);
   useEffect(() => {
     if (!navigated.current) return;
-    if (detail) titleRef.current?.focus(); else entryRef.current?.focus();
+    if (detail) titleRef.current?.focus(); else (lastDetail.current === "hotspot" ? hotspotEntryRef : entryRef).current?.focus();
   }, [detail]);
   useEffect(() => {
     if (detail || loading || saving) return;
@@ -41,7 +44,7 @@ export function ToolsPage() {
     void poll();
     return () => { cancelled = true; clearTimeout(timer); };
   }, [detail, loading, saving, enabled, revision]);
-  const navigate = (next: boolean) => { navigated.current = true; setDetail(next); };
+  const navigate = (next: false | "steam" | "hotspot") => { navigated.current = true; if (next) lastDetail.current = next; setDetail(next); };
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -83,7 +86,14 @@ export function ToolsPage() {
   const loadError = error && <div role="alert" className="tool-load-error"><p>{text("无法读取工具设置：", "Unable to load tool settings: ")}{error}</p><Button onClick={() => setRevision(value => value + 1)}>{text("重试", "Retry")}</Button></div>;
 
   return <main className="tools-page">
-    {detail ? <div key="detail" className="tool-view page-transition-layer is-entering">
+    {detail === "hotspot" ? <div key="hotspot" className="tool-view page-transition-layer is-entering">
+      <header className="page-heading"><div>
+        <Button appearance="subtle" icon={<ArrowLeft20Regular />} onClick={() => navigate(false)}>{text("返回工具箱", "Back to toolbox")}</Button>
+        <h1 ref={titleRef} tabIndex={-1}>{text("聚合热点", "Aggregation hotspot")}</h1>
+        <p>{text("把电脑的聚合网络分享给手机，连接 Wi-Fi 即可使用。", "Share your aggregated connection with your phone over Wi-Fi.")}</p>
+      </div></header>
+      <GlassSurface className="tool-card"><HotspotPanel /></GlassSurface>
+    </div> : detail ? <div key="detail" className="tool-view page-transition-layer is-entering">
       <header className="page-heading"><div>
         <Button appearance="subtle" icon={<ArrowLeft20Regular />} onClick={() => navigate(false)}>{text("返回工具箱", "Back to toolbox")}</Button>
         <h1 ref={titleRef} tabIndex={-1}>{name}</h1>
@@ -105,7 +115,7 @@ export function ToolsPage() {
       </div></header>
       <div className="toolbox-grid">
         <GlassSurface className="toolbox-tile" aria-labelledby="steam-tool-title">
-          <button ref={entryRef} className="toolbox-tile-open" aria-label={text("查看 Steam 下载优选详情", "View Steam download optimization details")} onClick={() => navigate(true)}>
+          <button ref={entryRef} className="toolbox-tile-open" aria-label={text("查看 Steam 下载优选详情", "View Steam download optimization details")} onClick={() => navigate("steam")}>
             <span className="tool-icon" aria-hidden="true"><Games24Regular /></span>
             <h2 id="steam-tool-title">{name}</h2>
             <span className="toolbox-tile-description">{text("为 Steam 下载寻找更合适的节点。", "Find suitable nodes for your Steam downloads.")}</span>
@@ -114,6 +124,15 @@ export function ToolsPage() {
           <div className="toolbox-tile-switch">{control}</div>
           <div className="toolbox-tile-status" role="status"><span className="toolbox-state-dot" data-active={enabled && !!status?.enabled && !statusError} />{stateText}</div>
           {loadError}
+        </GlassSurface>
+        <GlassSurface className="toolbox-tile" aria-labelledby="hotspot-tool-title">
+          <button ref={hotspotEntryRef} className="toolbox-tile-open" onClick={() => navigate("hotspot")} aria-label={text("查看聚合热点详情", "View aggregation hotspot details")}>
+            <span className="tool-icon" aria-hidden="true"><Wifi124Regular /></span>
+            <h2 id="hotspot-tool-title">{text("聚合热点", "Aggregation hotspot")}</h2>
+            <span className="toolbox-tile-description">{text("手机连上 Wi-Fi，共享电脑的聚合网络。无需设置代理。", "Connect your phone to Wi-Fi and share your PC’s aggregated network. No proxy setup.")}</span>
+            <span className="toolbox-tile-footer"><Badge appearance="tint">{text("实验性", "Experimental")}</Badge><span>{text("查看详情", "View details")} <ArrowRight20Regular /></span></span>
+          </button>
+          <div className="toolbox-tile-status">{text("Windows · 需要 TUN 模式", "Windows · requires TUN mode")}</div>
         </GlassSurface>
       </div>
     </div>}

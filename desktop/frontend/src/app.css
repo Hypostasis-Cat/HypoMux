@@ -5323,6 +5323,13 @@ svg {
 .tools-page .tool-card { padding: clamp(16px, 2.5vw, 28px); }
 .tool-view { display: grid; align-content: start; gap: 24px; min-width: 0; }
 .toolbox-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 400px)); gap: 16px; }
+.hotspot-panel { display: flex; flex-direction: column; gap: 20px; padding: 20px; }
+.hotspot-summary, .hotspot-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.hotspot-fields { display: grid; align-items: start; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 20px; }
+.hotspot-help { border-top: 1px solid var(--hm-outer-border); padding-top: 12px; color: var(--hm-text-secondary); font-size: 13px; }
+.hotspot-panel p { margin: 0; line-height: 1.7; }
+.hotspot-help p + p { margin-top: 8px; }
+.hotspot-error { overflow-wrap: anywhere; color: var(--hm-text-primary); }
 .toolbox-tile { position: relative; min-width: 0; padding: 20px; }
 .toolbox-tile-open { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; width: 100%; padding: 0; border: 0; background: transparent; color: var(--hm-text-primary); font: inherit; text-align: start; cursor: pointer; }
 .toolbox-tile-open::after { content: ""; position: absolute; inset: 0; border-radius: inherit; }
