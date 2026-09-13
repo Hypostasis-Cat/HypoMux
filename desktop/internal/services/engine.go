@@ -146,6 +146,7 @@ type telemetrySample struct {
 }
 
 type EngineService struct {
+	hotspot                *hotspotSession
 	mu                     sync.Mutex
 	lifecycleGate          chan struct{}
 	transitionPhase        string
@@ -1135,12 +1136,16 @@ func (s *EngineService) clearTransition(expected string) {
 }
 
 func (s *EngineService) Stop() (EngineSnapshot, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 35*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 75*time.Second)
 	defer cancel()
 	if err := s.acquireLifecycle(ctx); err != nil {
 		return EngineSnapshot{}, err
 	}
 	defer s.releaseLifecycle()
+	// Release hotspot sharing while its TUN connection profile still exists.
+	hotspotCtx, hotspotCancel := context.WithTimeout(context.Background(), 45*time.Second)
+	hotspotErr := s.stopHotspot(hotspotCtx)
+	hotspotCancel()
 	s.mu.Lock()
 	s.transitionPhase = "stopping"
 	s.mu.Unlock()
@@ -1209,7 +1214,7 @@ func (s *EngineService) Stop() (EngineSnapshot, error) {
 		s.logs.RecordEvent("engine", reason, fields)
 		s.logs.Finish(reason)
 	}
-	return snapshot, firstError
+	return snapshot, errors.Join(firstError, hotspotErr)
 }
 
 func (s *EngineService) Shutdown() {

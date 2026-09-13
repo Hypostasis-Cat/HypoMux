@@ -48,6 +48,11 @@ func (s *scheduler) SelectForDomain(
 	if len(candidates) == 0 {
 		return Adapter{}, false
 	}
+	// A constrained flow (address family, retry or health filtering) has no
+	// scheduling choice. Do not reset the rotation for subsequent pool flows.
+	if len(candidates) == 1 {
+		return candidates[0], true
+	}
 	if s.weighted {
 		return s.selectWeighted(candidates), true
 	}

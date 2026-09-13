@@ -238,7 +238,9 @@ func TestDialLearnsDomainOnlyAfterAlternateAdapterSuccess(t *testing.T) {
 		return client, nil
 	}
 
-	for range domainFailureThreshold {
+	// Pool rotation continues after a fallback; only every other first attempt
+	// now uses a. Gather enough independent failures to reach the threshold.
+	for range 2*domainFailureThreshold - 1 {
 		connection, adapter, dialErr := server.dialUpstream(
 			context.Background(),
 			"Example.COM.:443",

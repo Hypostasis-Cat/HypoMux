@@ -57,6 +57,8 @@ Engine 测试与构建在仓库根目录的 `engine/` 模块执行。
 
 ## TUN 协议栈与持久化缓存
 
+工具箱新增 Windows 实验性“聚合热点”：TUN 运行后，可以将聚合出口通过 Wi-Fi 分享给手机，无需配置手机代理。实现范围、兼容性边界与手机实测步骤见 [聚合热点说明](../docs/AGGREGATION_HOTSPOT.md)。
+
 “设置 → 高级网络 → TUN 协议栈”支持 `system`（默认）、`mixed`
 （系统 TCP + gVisor UDP）和 `gvisor`（完整用户态协议栈）。选择保存为
 `tun_stack`，下次启动 TUN 生效；IPv4 回退配置保留同一选择。旧设置缺少该字段时

@@ -10,6 +10,7 @@ import (
 
 	"github.com/Hypostasis-Cat/HypoMux/engine/internal/diagnostic"
 	"github.com/Hypostasis-Cat/HypoMux/engine/internal/dns"
+	"github.com/Hypostasis-Cat/HypoMux/engine/internal/platform"
 	"github.com/Hypostasis-Cat/HypoMux/engine/internal/protocol"
 	"github.com/Hypostasis-Cat/HypoMux/engine/internal/proxy"
 	engineRuntime "github.com/Hypostasis-Cat/HypoMux/engine/internal/runtime"
@@ -221,6 +222,7 @@ func decodeRequestParams(t *testing.T, request protocol.Request) {
 		MethodTunDeactivate,
 		MethodDNSStatus,
 		MethodHealthCheck,
+		MethodHotspotInspect,
 		MethodHostShutdown:
 		if len(request.Params) != 0 {
 			t.Fatalf("%s fixture must not have params", request.Method)
@@ -264,6 +266,8 @@ func decodeResult(t *testing.T, method string, payload json.RawMessage) {
 		target = &diagnostic.Result{}
 	case MethodWFPInspect:
 		target = &WFPInspectResult{}
+	case MethodHotspotInspect:
+		target = &platform.SharingSnapshot{}
 	case MethodHostShutdown:
 		target = &ShutdownResult{}
 	default:
