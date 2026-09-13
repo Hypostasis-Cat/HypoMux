@@ -63,6 +63,18 @@ $manager | Add-Member -Force ScriptMethod StopTetheringAsync { throw 'real stop 
 $rejected = $false
 try { Stop-OwnedHotspot } catch { $rejected = $true }
 if (-not $rejected) { throw 'live cleanup failure was suppressed' }
+$fakeAdapters = @([PSCustomObject]@{ InterfaceGuid = '{00000000-0000-0000-0000-000000000001}'; Status = 'Up' })
+function Get-NetAdapter { param([switch]$IncludeHidden) $fakeAdapters }
+if (-not (Test-PublicNetwork $publicID)) { throw 'running TUN with braced string GUID rejected' }
+$fakeAdapters[0].InterfaceGuid = $publicID
+if (-not (Test-PublicNetwork $publicID)) { throw 'running TUN with typed GUID rejected' }
+$fakeAdapters[0].Status = 'Disconnected'
+if (Test-PublicNetwork $publicID) { throw 'disconnected TUN accepted' }
+$fakeAdapters[0].Status = 'Up'
+$fakeAdapters[0].InterfaceGuid = $otherID
+if (Test-PublicNetwork $publicID) { throw 'different adapter accepted as TUN' }
+$fakeAdapters = @()
+if (Test-PublicNetwork $publicID) { throw 'missing TUN accepted' }
 `
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

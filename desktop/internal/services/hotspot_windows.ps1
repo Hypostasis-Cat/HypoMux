@@ -99,6 +99,13 @@ function Test-PrivateNetwork {
     return $true
 }
 
+function Test-PublicNetwork([guid]$publicID) {
+    # Get-NetAdapter returns InterfaceGuid as a braced string. Normalize it
+    # before comparison; string-on-left equality rejects the same GUID.
+    $alive = @(Get-NetAdapter -IncludeHidden | Where-Object { [guid]$_.InterfaceGuid -eq $publicID -and $_.Status -eq 'Up' })
+    return ($alive.Count -eq 1)
+}
+
 function Publish-Running([string]$verdict) {
     $message = ''
     if ($verdict -eq 'unobserved') { $message = '热点已开启，但传统 ICS 接口未提供出口信息。请连接手机测试；当前尚未确认手机流量经过聚合。' }
@@ -200,8 +207,7 @@ public static class HypoMuxHotspotLifetime {
     $phase = 'hotspot monitoring'
     while (-not $stopSignal.Wait(3000)) {
         if ([string]$manager.TetheringOperationalState -eq 'Off') { break }
-        $alive = @(Get-NetAdapter -IncludeHidden | Where-Object { $_.InterfaceGuid -eq $publicID -and $_.Status -eq 'Up' })
-        if ($alive.Count -ne 1) { throw 'HypoMux TUN stopped; hotspot is being closed' }
+        if (-not (Test-PublicNetwork $publicID)) { throw 'HypoMux TUN stopped; hotspot is being closed' }
         if (-not (Test-PrivateNetwork)) { throw '热点网卡或 IPv4 网关已失效，正在关闭热点。' }
         $verdict = Test-Sharing $publicID
         if ($verdict -eq 'mismatch') { throw 'Shared egress changed; hotspot is being closed' }
