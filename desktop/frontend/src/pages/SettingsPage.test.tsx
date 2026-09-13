@@ -15,12 +15,13 @@ const mocks = vi.hoisted(() => ({
   setLocale: vi.fn(),
   setSteamCDNEnabled: vi.fn(),
   steamCDNStatus: vi.fn(),
+  hotspotPreferences: vi.fn(),
   hotspotStatus: vi.fn(),
 }));
 
 vi.mock("../platform/services", () => ({
   appServices: {
-    engine: { setSteamCDNEnabled: mocks.setSteamCDNEnabled, steamCDNStatus: mocks.steamCDNStatus, hotspotStatus: mocks.hotspotStatus },
+    engine: { hotspotPreferences: mocks.hotspotPreferences, setSteamCDNEnabled: mocks.setSteamCDNEnabled, steamCDNStatus: mocks.steamCDNStatus, hotspotStatus: mocks.hotspotStatus },
     settings: {
       get: mocks.get,
       update: mocks.update,
@@ -52,6 +53,7 @@ beforeEach(() => {
   mocks.get.mockResolvedValue(initial);
   mocks.setSteamCDNEnabled.mockImplementation(async (enabled) => ({ ...initial, steam_cdn_enabled: enabled }));
   mocks.steamCDNStatus.mockResolvedValue({available: true, enabled: false, probing: 0, replacements: 0, fallbacks: 0, entries: []});
+  mocks.hotspotPreferences.mockResolvedValue({ ssid: "HypoMux", password: "", band: "auto" });
   mocks.hotspotStatus.mockResolvedValue({state: "stopped", ready: false, ssid: "", clients: 0, band: "auto", sharing_verified: false});
   mocks.update.mockImplementation(async (settings) => settings);
   class Observer {
@@ -73,7 +75,7 @@ describe("TUN settings", () => {
     render(<ToolsPage />);
     const entry = screen.getByRole("button", { name: "View aggregation hotspot details" });
     fireEvent.click(entry);
-    expect(await screen.findByRole("button", { name: "Enable aggregation hotspot" })).toBeTruthy();
+    expect(await screen.findByRole("switch", { name: "Aggregation hotspot" })).toBeTruthy();
     expect(document.activeElement).toBe(screen.getByRole("heading", { level: 1, name: "Aggregation hotspot" }));
     fireEvent.click(screen.getByRole("button", { name: "Back to toolbox" }));
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "View aggregation hotspot details" }));

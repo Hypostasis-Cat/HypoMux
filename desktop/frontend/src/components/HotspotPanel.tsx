@@ -1,12 +1,19 @@
-import { Badge, Button, Field, Input, Select, Spinner } from "@fluentui/react-components";
+import { Badge, Button, Field, Input, Select, Spinner, Switch } from "@fluentui/react-components";
 import { useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n/i18n";
 import { appServices, type HotspotConfig, type HotspotStatus } from "../platform/services";
+import { hotspotDraft } from "./hotspotDraft";
 
 export function HotspotPanel() {
   const { locale } = useI18n();
   const text = (zh: string, en: string) => locale === "en" ? en : zh;
-  const [config, setConfig] = useState<HotspotConfig>({ ssid: "HypoMux", password: "", band: "auto" });
+  const [config, updateConfig] = useState<HotspotConfig>(() => hotspotDraft.current ?? { ssid: "HypoMux", password: "", band: "auto" });
+  const [loadingConfig, setLoadingConfig] = useState(!hotspotDraft.current);
+  const setConfig = (update: (value: HotspotConfig) => HotspotConfig) => {
+    const next = update(hotspotDraft.current ?? config);
+    hotspotDraft.current = next;
+    updateConfig(next);
+  };
   const [status, setStatus] = useState<HotspotStatus>();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
@@ -18,6 +25,16 @@ export function HotspotPanel() {
   useEffect(() => {
     mounted.current = true;
     let cancelled = false;
+    if (!hotspotDraft.current) {
+      void appServices.engine.hotspotPreferences().then(saved => {
+        if (!cancelled && !hotspotDraft.current) {
+          hotspotDraft.current = saved;
+          updateConfig(saved);
+        }
+      }).catch(reason => {
+        if (!cancelled) setError(String(reason));
+      }).finally(() => { if (!cancelled) setLoadingConfig(false); });
+    }
     let timer: ReturnType<typeof setTimeout>;
     const refresh = async () => {
       if (!busy.current) {
@@ -46,7 +63,7 @@ export function HotspotPanel() {
     busy.current = true; setPending(true); setError("");
     try {
       const next = start ? await appServices.engine.startHotspot(config) : await appServices.engine.stopHotspot();
-      if (mounted.current) { setStatus(next); setPollError(""); if (!start) setConfig(value => ({ ...value, password: "" })); }
+      if (mounted.current) { setStatus(next); setPollError(""); }
     } catch (reason) {
       if (mounted.current) setError(String(reason));
       try {
@@ -63,6 +80,12 @@ export function HotspotPanel() {
     : status.state === "failed" ? text("热点需要检查", "Hotspot needs attention")
     : text("热点已关闭", "Hotspot is off");
   return <section className="hotspot-panel" aria-label={text("聚合热点设置", "Aggregation hotspot settings")}>
+    <div className="hotspot-control">
+      <div><strong>{text("共享聚合网络", "Share aggregation network")}</strong><p>{text("手机连接 Wi-Fi，即可使用电脑的聚合网络。", "Connect your phone over Wi-Fi to use the aggregated network.")}</p></div>
+      <Switch label={text("聚合热点", "Aggregation hotspot")} checked={!!active}
+        disabled={pending || !status || (!active && (loadingConfig || !!pollError || !status.ready || !validName || !validPassword))}
+        onChange={(_, data) => void change(data.checked)} />
+    </div>
     <div className="hotspot-summary" role="status">
       <Badge appearance="tint" color={status?.state === "running" && status.sharing_verified && !pollError ? "success" : "informative"}>{stateText}</Badge>
       {pending && <Spinner size="tiny" />}
@@ -84,10 +107,8 @@ export function HotspotPanel() {
         </Select>
       </Field>
     </div>
-    <div className="hotspot-actions">
-      <Button appearance="primary" disabled={pending || !!pollError || !status?.ready || active || !validName || !validPassword} onClick={() => void change(true)}>{text("开启聚合热点", "Enable aggregation hotspot")}</Button>
-      <Button disabled={pending || !status || (!active && status.state !== "failed" && !pollError)} onClick={() => void change(false)}>{text("关闭热点", "Turn off hotspot")}</Button>
-    </div>
+    <p className="hotspot-save-hint">{text("开启时自动加密保存配置；关闭热点或切换页面后无需重新填写。", "Settings are saved encrypted when you enable the hotspot and retained when you turn it off or leave this page.")}</p>
+    {status?.state === "failed" && !status.cleanup_complete && <Button disabled={pending} onClick={() => void change(false)}>{text("重试关闭热点", "Retry hotspot cleanup")}</Button>}
     {(error || pollError || status?.message) && <p className="hotspot-error" role="alert">{error || pollError || status?.message}</p>}
     {status?.diagnostics && <details className="hotspot-error"><summary>{text("共享诊断", "Sharing diagnostics")}</summary><p>{status.diagnostics}</p></details>}
     <div className="hotspot-help">

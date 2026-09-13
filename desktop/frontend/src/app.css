@@ -5324,6 +5324,9 @@ svg {
 .tool-view { display: grid; align-content: start; gap: 24px; min-width: 0; }
 .toolbox-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 400px)); gap: 16px; }
 .hotspot-panel { display: flex; flex-direction: column; gap: 20px; padding: 20px; }
+.hotspot-control { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; border-bottom: 1px solid var(--hm-outer-border); padding-bottom: 20px; }
+.hotspot-control strong { font-size: 18px; }
+.hotspot-control p, .hotspot-save-hint { color: var(--hm-text-secondary); font-size: 13px; }
 .hotspot-summary, .hotspot-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
 .hotspot-fields { display: grid; align-items: start; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 20px; }
 .hotspot-help { border-top: 1px solid var(--hm-outer-border); padding-top: 12px; color: var(--hm-text-secondary); font-size: 13px; }

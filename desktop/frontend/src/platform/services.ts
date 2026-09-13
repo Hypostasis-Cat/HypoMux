@@ -69,7 +69,7 @@ export type HotspotConfig = { ssid: string; password: string; band: "auto" | "2.
 export type HotspotStatus = {
   state: "stopped" | "starting" | "running" | "failed";
   ssid: string; band: string; clients: number; shared_adapter: string;
-  sharing_verified: boolean; ready: boolean; message?: string; diagnostics?: string; gateway_address?: string;
+  sharing_verified: boolean; cleanup_complete?: boolean; ready: boolean; message?: string; diagnostics?: string; gateway_address?: string;
 };
 
 export type BlockedDomainEntry = {
@@ -238,6 +238,7 @@ export const appServices = {
       AdapterService.SaveSelection(mode, weighted, adapters),
   },
   engine: {
+    hotspotPreferences: () => Call.ByName(engineMethod("HotspotPreferences")) as Promise<HotspotConfig>,
     hotspotStatus: () => Call.ByName(engineMethod("HotspotStatus")) as Promise<HotspotStatus>,
     startHotspot: (config: HotspotConfig) => Call.ByName(engineMethod("StartHotspot"), config) as Promise<HotspotStatus>,
     stopHotspot: () => Call.ByName(engineMethod("StopHotspot")) as Promise<HotspotStatus>,

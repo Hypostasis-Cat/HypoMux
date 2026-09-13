@@ -15,8 +15,8 @@ import (
 	"unicode/utf8"
 )
 
-// HotspotConfig is deliberately transient. Credentials are passed on stdin,
-// never on the command line, in telemetry, or in HypoMux settings.
+// Credentials are passed on stdin and stored only in user-encrypted preferences,
+// never on the command line, in telemetry, or in general HypoMux settings.
 type HotspotConfig struct {
 	SSID     string `json:"ssid"`
 	Password string `json:"password"`
@@ -57,7 +57,7 @@ func validateHotspotConfig(config HotspotConfig) error {
 
 // The worker owns a single Windows tethering session, including its original
 // configuration. Closing stdin asks it to stop and restore that configuration;
-// desktop crashes also close the pipe, without a persisted password or lease.
+// desktop crashes also close the pipe, without a persisted session lease.
 type hotspotSession struct {
 	mu       sync.Mutex
 	status   HotspotStatus
@@ -245,6 +245,9 @@ func (s *EngineService) StartHotspot(config HotspotConfig) (HotspotStatus, error
 	}
 	command, err := hotspotCommand()
 	if err != nil {
+		return s.HotspotStatus(), err
+	}
+	if err := saveHotspotPreferences(config); err != nil {
 		return s.HotspotStatus(), err
 	}
 	h, err := launchHotspot(ctx, command, config, func() hotspotSharingReply {
