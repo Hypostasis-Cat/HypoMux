@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { RoutingPage, reconcileSavedDrafts } from "./RoutingPage";
 
@@ -92,13 +92,16 @@ it("keeps a disabled conflict disabled when a batch replaces its egress", async 
   render(<RoutingPage />);
   await screen.findByRole("switch", { name: "Enable rule app.exe" });
   fireEvent.click(screen.getByRole("button", { name: /Batch add/ }));
-  fireEvent.change(await screen.findByPlaceholderText(/browser\.exe/), { target: { value: "app.exe" } });
-  fireEvent.click(screen.getByRole("button", { name: "Preview 1" }));
-  const replaceConflict = await screen.findByRole("checkbox", { name: "Update conflicting rules to the selected egress" });
+  const dialog = within(await screen.findByRole("dialog"));
+  fireEvent.change(await dialog.findByPlaceholderText(/browser\.exe/), { target: { value: "app.exe" } });
+  fireEvent.click(dialog.getByRole("button", { name: "Preview 1" }));
+  const replaceConflict = await dialog.findByRole("checkbox", { name: "Update conflicting rules to the selected egress" });
   fireEvent.click(replaceConflict);
-  // Fluent's dialog accessibility/focus updates can complete after the
-  // checkbox render. Wait for the resulting action, not just the preview.
-  const addRules = await screen.findByRole("button", { name: "Add 1 rules" });
+  await waitFor(() => expect(replaceConflict).toHaveProperty("checked", true));
+  // Scope queries to the open dialog: scanning the background routing table
+  // can exhaust the default 1s accessibility-query deadline on CI. Keep the
+  // visible/enabled assertions and allow the dialog's focus updates to settle.
+  const addRules = await dialog.findByRole("button", { name: "Add 1 rules" }, { timeout: 4000 });
   await waitFor(() => expect(addRules).toHaveProperty("disabled", false));
   fireEvent.click(addRules);
   await waitFor(() => expect(mocks.save).toHaveBeenCalledWith([expect.objectContaining({ value: "app.exe", outbound: "aggregation", disabled: true, priority: 2 })], expect.any(Array)));
