@@ -143,11 +143,17 @@ jobs:
         shell: pwsh
         run: |
           go -C engine mod verify
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           go -C desktop mod verify
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           go -C engine test ./...
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           go -C desktop test ./...
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           go -C engine vet ./...
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           go -C desktop vet ./...
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Verify Go formatting
         shell: pwsh

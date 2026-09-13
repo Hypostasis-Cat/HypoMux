@@ -7,10 +7,12 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -173,31 +175,46 @@ func TestManifestRequiresSchemaDigestAndExactInstallerMetadata(t *testing.T) {
 }
 
 func TestUpdaterChoosesNewestMetadataSource(t *testing.T) {
-	githubManifest, githubSignature := signedManifestJSON(t, testManifest("2.5.10", []byte("new")))
-	cnbManifest, cnbSignature := signedManifestJSON(t, testManifest("2.5.8", []byte("old")))
-	service := NewUpdaterService()
-	service.manifestPublicKey = testManifestPublicKey()
-	service.client = clientFor(func(request *http.Request) *http.Response {
-		switch request.URL.String() {
-		case githubLatestManifestURL:
-			return stringResponse(request, http.StatusOK, githubManifest)
-		case githubLatestManifestURL + ".sig":
-			return bytesResponse(request, http.StatusOK, githubSignature)
-		case cnbLatestManifestURL:
-			return stringResponse(request, http.StatusOK, cnbManifest)
-		case cnbLatestManifestURL + ".sig":
-			return bytesResponse(request, http.StatusOK, cnbSignature)
-		default:
-			return stringResponse(request, http.StatusServiceUnavailable, "")
-		}
-	})
-
-	result, err := service.Check()
+	major, err := strconv.Atoi(strings.Split(CurrentVersion, ".")[0])
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !result.Available || result.Release.TagName != "v2.5.10" {
-		t.Fatalf("newest update result = %#v", result)
+	for _, candidate := range []struct {
+		version   string
+		available bool
+	}{
+		{fmt.Sprintf("%d.0.0", major+1), true},
+		{CurrentVersion, false},
+		{fmt.Sprintf("%d.0.0", major-1), false},
+	} {
+		t.Run(candidate.version, func(t *testing.T) {
+			githubManifest, githubSignature := signedManifestJSON(t, testManifest(candidate.version, []byte("new")))
+			cnbManifest, cnbSignature := signedManifestJSON(t, testManifest("0.0.0", []byte("old")))
+			service := NewUpdaterService()
+			service.manifestPublicKey = testManifestPublicKey()
+			service.client = clientFor(func(request *http.Request) *http.Response {
+				switch request.URL.String() {
+				case githubLatestManifestURL:
+					return stringResponse(request, http.StatusOK, githubManifest)
+				case githubLatestManifestURL + ".sig":
+					return bytesResponse(request, http.StatusOK, githubSignature)
+				case cnbLatestManifestURL:
+					return stringResponse(request, http.StatusOK, cnbManifest)
+				case cnbLatestManifestURL + ".sig":
+					return bytesResponse(request, http.StatusOK, cnbSignature)
+				default:
+					return stringResponse(request, http.StatusServiceUnavailable, "")
+				}
+			})
+
+			result, err := service.Check()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Available != candidate.available || result.Release.TagName != "v"+candidate.version {
+				t.Fatalf("newest update result = %#v", result)
+			}
+		})
 	}
 }
 

@@ -689,6 +689,16 @@ func sortRules(rules []RoutingRule) {
 		if rank[rules[i].MatchType] != rank[rules[j].MatchType] {
 			return rank[rules[i].MatchType] < rank[rules[j].MatchType]
 		}
+		if rules[i].MatchType == MatchDomain {
+			// A child domain is an exception to its parent, just as a narrower
+			// CIDR is an exception to a broader IP rule. Sort it first before
+			// rule-set generation computes exclusions between outbounds.
+			leftDepth := strings.Count(strings.TrimPrefix(rules[i].Value, "."), ".")
+			rightDepth := strings.Count(strings.TrimPrefix(rules[j].Value, "."), ".")
+			if leftDepth != rightDepth {
+				return leftDepth > rightDepth
+			}
+		}
 		if rules[i].MatchType == MatchIP {
 			_, ni, _ := net.ParseCIDR(rules[i].Value)
 			_, nj, _ := net.ParseCIDR(rules[j].Value)

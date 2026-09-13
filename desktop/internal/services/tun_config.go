@@ -150,12 +150,15 @@ func writeSingBoxConfigWithOptions(
 			map[string]any{"protocol": []string{"dns"}, "action": "hijack-dns"},
 		)
 	}
-	routeRules = append(routeRules, singBoxCompatibilityRouteRules(compatibility, ruleSetPlan)...)
 	if dnsPolicy != "system" {
+		// Resolve FakeIP/domain destinations before compatibility IP overrides
+		// decide whether to bypass user routing. DNS and self-process bypasses
+		// above must remain ahead of resolution to avoid routing loops.
 		routeRules = append(routeRules,
 			map[string]any{"action": "resolve", "server": "dns-local", "strategy": "prefer_ipv4"},
 		)
 	}
+	routeRules = append(routeRules, singBoxCompatibilityRouteRules(compatibility, ruleSetPlan)...)
 	routeRules = append(routeRules, ruleSetPlan.UserRouteRules...)
 	directOutbound := map[string]any{"type": "direct", "tag": "direct"}
 	if directPort, directErr := loopbackPort(endpoints, "direct"); directErr == nil {

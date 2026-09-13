@@ -190,7 +190,7 @@ func TestTunRouteResolvesFakeIPBeforeUserCIDRRules(t *testing.T) {
 			}
 		}
 	}
-	if compatibilityAt < 0 || resolveAt <= compatibilityAt || userIPAt <= resolveAt {
+	if resolveAt < 0 || compatibilityAt <= resolveAt || userIPAt <= compatibilityAt {
 		t.Fatalf("unexpected compatibility/resolve/user order: compatibility=%d resolve=%d user_ip=%d", compatibilityAt, resolveAt, userIPAt)
 	}
 }

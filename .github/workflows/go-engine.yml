@@ -48,8 +48,11 @@ jobs:
         shell: pwsh
         run: |
           go mod verify
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           go test ./...
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           go vet ./...
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Scan known vulnerabilities
         shell: pwsh
