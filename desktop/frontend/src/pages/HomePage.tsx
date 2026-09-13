@@ -186,7 +186,7 @@ export function HomePage({
           </div>
         </div>
         {engine.hiddenAdapterCount > 0 && (
-          <p className="section-kicker">
+          <p className="network-section-note">
             {text(
               `已隐藏 ${engine.hiddenAdapterCount} 张虚拟网卡${engine.hiddenSelectedCount ? `，其中 ${engine.hiddenSelectedCount} 张已选中` : ""}。可在设置中关闭“首页隐藏虚拟网卡”以显示。`,
               `${engine.hiddenAdapterCount} virtual adapter(s) hidden${engine.hiddenSelectedCount ? `, including ${engine.hiddenSelectedCount} selected` : ""}. Turn off “Hide virtual adapters on Home” in Settings to show them.`,

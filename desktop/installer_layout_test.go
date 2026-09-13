@@ -14,7 +14,7 @@ func TestInstallerMigratesLegacyLayoutsBeforeWritingCorrectedRoot(t *testing.T) 
 	script := string(data)
 	for _, required := range []string{
 		`!define UNINST_KEY_NAME "HypoMux"`,
-		`InstallDir "$PROGRAMFILES64\${INFO_PRODUCTNAME}"`,
+		`InstallDir ""`,
 		`HypoMuxHypoMux`,
 		`{7637d353-b9c0-4145-bc81-7a474e534d07}_is1`,
 		`Call RemoveLegacyInstallations`,

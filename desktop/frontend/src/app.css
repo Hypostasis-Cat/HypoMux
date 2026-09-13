@@ -1941,18 +1941,60 @@ svg {
   box-shadow: none !important;
 }
 
+.adapter-weight.is-automatic {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.network-section-note {
+  margin: 8px 4px 12px;
+  color: var(--hm-text-tertiary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 /* English labels are longer than their Chinese counterparts. Keep the home
    layout fluid so copy can wrap inside its own column instead of pushing the
    final column out of view. */
 :lang(en) .engine-hero {
-  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+  max-height: none;
   gap: clamp(20px, 3vw, 40px);
+}
+
+:lang(en) .engine-control-row {
+  width: 100%;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+:lang(en) .scheduling-selector {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+}
+
+:lang(en) .scheduling-selector .scheduling-dropdown {
+  width: 204px;
+  min-width: 204px;
+  max-width: 100%;
+  min-height: 36px;
+}
+
+:lang(en) .scheduling-dropdown .fui-Dropdown__button {
+  height: auto;
+  min-height: 34px;
+}
+
+:lang(en) .engine-state-badge {
+  gap: 6px;
+  flex-shrink: 0;
 }
 
 :lang(en) .engine-mode-note,
 :lang(en) .scheduling-hint {
   max-width: 100%;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 :lang(en) .network-section-heading {
@@ -1967,28 +2009,93 @@ svg {
 }
 
 :lang(en) .network-adapter {
-  grid-template-columns: minmax(180px, 1.15fr) minmax(230px, 1.2fr) minmax(150px, 0.85fr) minmax(170px, 0.9fr);
+  grid-template-columns: minmax(160px, 1fr) minmax(230px, 1.2fr) minmax(110px, 0.65fr) minmax(190px, 1fr);
   min-height: 96px;
   max-height: none;
 }
 
+:lang(en) .network-adapter-list {
+  grid-auto-rows: max-content;
+}
+
 :lang(en) .adapter-quality {
-  white-space: normal;
-  overflow-wrap: anywhere;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  white-space: nowrap;
 }
 
 :lang(en) .adapter-weight {
-  grid-template-columns: minmax(70px, 1fr) 108px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+}
+
+:lang(en) .adapter-weight > div {
+  line-height: 1.5;
+}
+
+:lang(en) .adapter-name strong {
+  overflow-wrap: anywhere;
 }
 
 :lang(en) .runtime-status {
-  grid-template-columns: repeat(4, minmax(120px, 1fr)) auto;
+  grid-template-columns: minmax(0, 1.1fr) repeat(2, minmax(0, 0.85fr)) minmax(0, 1.2fr) auto;
   gap: 12px;
+}
+
+:lang(en) .runtime-item small,
+:lang(en) .runtime-item strong {
+  white-space: normal;
+  overflow-wrap: break-word;
 }
 
 @media (max-width: 1040px) {
   :lang(en) .network-adapter {
-    grid-template-columns: minmax(160px, 1fr) minmax(200px, 1.1fr) minmax(130px, 0.8fr) minmax(160px, 0.85fr);
+    grid-template-columns: minmax(0, 1fr) minmax(230px, 1.1fr);
+    gap: 12px 20px;
+  }
+
+  :lang(en) .adapter-quality {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+  }
+
+  :lang(en) .adapter-weight {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  :lang(en) .adapter-weight.is-automatic {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 800px) {
+  :lang(en) .home-page {
+    height: auto;
+    min-height: 100%;
+    grid-template-rows: auto auto auto;
+  }
+
+  :lang(en) .engine-hero {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  :lang(en) .network-section-heading {
+    flex-direction: column;
+  }
+
+  :lang(en) .network-section-actions {
+    justify-content: flex-start;
+  }
+
+  :lang(en) .runtime-status {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  :lang(en) .runtime-status > .fui-Button {
+    justify-self: start;
   }
 }
 

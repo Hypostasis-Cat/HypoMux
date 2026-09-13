@@ -96,7 +96,7 @@ export function NetworkAdapterItem({
         <span>{text("丢包", "Loss")} {adapter.lossRate === undefined ? "—" : `${adapter.lossRate}%`}</span>
       </div>
 
-      <div className="adapter-weight" onClick={(event) => event.stopPropagation()}>
+      <div className={`adapter-weight${weighted ? "" : " is-automatic"}`} onClick={(event) => event.stopPropagation()}>
         {weighted ? <>
         <div>
           <span>{t("home_bw_column")}</span>

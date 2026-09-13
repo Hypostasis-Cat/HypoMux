@@ -157,13 +157,7 @@ LangString WailsNetworkRecoverFailed ${LANG_SIMPCHINESE} "无法安全恢复上�
 
 Name "${INFO_PRODUCTNAME}"
 OutFile "..\..\..\bin\${INFO_PROJECTNAME}-${ARCH}-installer.exe" # Name of the installer's file.
-!if "${WAILS_INSTALL_SCOPE}" == "user"
-    InstallDir "$LOCALAPPDATA\Programs\${INFO_PRODUCTNAME}"
-    InstallDirRegKey HKCU "${UNINST_KEY}" "InstallLocation"
-!else
-    InstallDir "$PROGRAMFILES64\${INFO_PRODUCTNAME}"
-    InstallDirRegKey HKLM "${UNINST_KEY}" "InstallLocation"
-!endif
+InstallDir "" ; Preserve /D=; resolve the default in .onInit using the 64-bit registry.
 ShowInstDetails show # This will always show the installation details.
 
 Var HypoMuxFreshInstall
@@ -244,6 +238,8 @@ hypoMuxPlatformVisibleArchitecture:
    Quit
 FunctionEnd
 
+!include "install-directory.nsh"
+
 Function .onInit
    !insertmacro HypoMuxClearInheritedPSModulePath
    !insertmacro MUI_LANGDLL_DISPLAY
@@ -257,6 +253,7 @@ Function .onInit
    ${If} $0 != ""
        StrCpy $HypoMuxAutostartEnabled "1"
    ${EndIf}
+   SetRegView 64
    !if "${WAILS_INSTALL_SCOPE}" == "user"
        ReadRegStr $HypoMuxPreviousInstallDir HKCU "${UNINST_KEY}" "InstallLocation"
    !else
@@ -271,6 +268,7 @@ Function .onInit
            StrCpy $HypoMuxFreshInstall "0"
        ${EndIf}
    !endif
+   Call HypoMuxInitializeInstallDir
 FunctionEnd
 
 Function un.onInit
