@@ -69,7 +69,7 @@ export type HotspotConfig = { ssid: string; password: string; band: "auto" | "2.
 export type HotspotStatus = {
   state: "stopped" | "starting" | "running" | "failed";
   ssid: string; band: string; clients: number; shared_adapter: string;
-  sharing_verified: boolean; ready: boolean; message?: string; diagnostics?: string;
+  sharing_verified: boolean; ready: boolean; message?: string; diagnostics?: string; gateway_address?: string;
 };
 
 export type BlockedDomainEntry = {

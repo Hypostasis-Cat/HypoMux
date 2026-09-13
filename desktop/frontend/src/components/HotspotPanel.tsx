@@ -58,13 +58,13 @@ export function HotspotPanel() {
   const stateText = pending ? text("正在处理…", "Working…")
     : pollError ? text("状态暂不可用", "Status unavailable")
     : !status ? text("正在读取状态", "Checking status")
-    : status.state === "running" ? text("热点已开启", "Hotspot is on")
+    : status.state === "running" ? (status.sharing_verified ? text("热点已开启", "Hotspot is on") : text("热点已开启 · 出口待验证", "Hotspot is on · egress unverified"))
     : status.state === "starting" ? text("正在启动", "Starting")
     : status.state === "failed" ? text("热点需要检查", "Hotspot needs attention")
     : text("热点已关闭", "Hotspot is off");
   return <section className="hotspot-panel" aria-label={text("聚合热点设置", "Aggregation hotspot settings")}>
     <div className="hotspot-summary" role="status">
-      <Badge appearance="tint" color={status?.state === "running" && !pollError ? "success" : "informative"}>{stateText}</Badge>
+      <Badge appearance="tint" color={status?.state === "running" && status.sharing_verified && !pollError ? "success" : "informative"}>{stateText}</Badge>
       {pending && <Spinner size="tiny" />}
       {status?.state === "running" && !pollError && <span>{status.ssid} · {text("已连接设备", "Connected devices")}: {status.clients}</span>}
     </div>
@@ -91,6 +91,7 @@ export function HotspotPanel() {
     {(error || pollError || status?.message) && <p className="hotspot-error" role="alert">{error || pollError || status?.message}</p>}
     {status?.diagnostics && <details className="hotspot-error"><summary>{text("共享诊断", "Sharing diagnostics")}</summary><p>{status.diagnostics}</p></details>}
     <div className="hotspot-help">
+      {active && status?.gateway_address && <p>{text("热点网关", "Hotspot gateway")}: {status.gateway_address}</p>}
       <p>{text("手机连接上面的 Wi-Fi 即可，无需安装客户端或设置代理。停止聚合或退出 HypoMux 时，热点会自动关闭。", "Connect your phone to this Wi-Fi network. No client or proxy settings are needed. The hotspot closes when aggregation stops or HypoMux exits.")}</p>
       <p>{text("沿用当前聚合线路和分流规则，多连接可利用多条线路，单连接速度不保证叠加。首次使用请在手机上验证网页、视频和下载。", "Uses your current aggregation links and routing rules. Multiple connections can use multiple links; single-connection bonding is not guaranteed. Verify browsing, video and downloads on your phone on first use.")}</p>
       {status?.sharing_verified && !pollError && <p>{text("共享出口已校验", "Shared egress verified")}: {status.shared_adapter}</p>}

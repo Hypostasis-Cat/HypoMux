@@ -34,6 +34,7 @@ type HotspotStatus struct {
 	Ready           bool   `json:"ready"`
 	Message         string `json:"message,omitempty"`
 	Diagnostics     string `json:"diagnostics,omitempty"`
+	GatewayAddress  string `json:"gateway_address,omitempty"`
 }
 
 func validateHotspotConfig(config HotspotConfig) error {
@@ -146,7 +147,9 @@ func launchHotspot(ctx context.Context, command *exec.Cmd, config HotspotConfig,
 			h.mu.Lock()
 			h.status = status
 			h.mu.Unlock()
-			if status.State == "running" && status.SharingVerified && !signalled {
+			// A working AP is distinct from verified aggregation egress. Windows
+			// can omit legacy ICS entries; keep that state explicitly unverified.
+			if status.State == "running" && (status.SharingVerified || status.GatewayAddress != "") && !signalled {
 				close(ready)
 				signalled = true
 			}

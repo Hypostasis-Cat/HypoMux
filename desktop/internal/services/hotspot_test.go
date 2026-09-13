@@ -63,6 +63,8 @@ func TestHotspotWorkerProcess(t *testing.T) {
 	}
 	if mode == "unverified" {
 		_ = encoder.Encode(HotspotStatus{State: "running", SharingVerified: false})
+	} else if mode == "windows-managed" {
+		_ = encoder.Encode(HotspotStatus{State: "running", SharingVerified: false, GatewayAddress: "192.168.137.1", Message: "Egress unverified"})
 	} else {
 		_ = encoder.Encode(HotspotStatus{State: "running", SSID: config.SSID, SharingVerified: true})
 	}
@@ -135,6 +137,27 @@ func TestHotspotWorkerDoesNotAcceptUnverifiedRunningState(t *testing.T) {
 	h, err := launchTestHotspot(t, "unverified", time.Second)
 	if err == nil {
 		t.Fatal("unverified sharing reported as successful")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := h.stop(ctx); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestHotspotWorkerKeepsOperationalUnverifiedHotspot(t *testing.T) {
+	h, err := launchTestHotspot(t, "windows-managed", 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	status := h.snapshot()
+	if status.State != "running" || status.SharingVerified || status.GatewayAddress != "192.168.137.1" || status.Message == "" {
+		t.Fatal(status)
+	}
+	select {
+	case <-h.done:
+		t.Fatal("unobserved legacy sharing must not stop an operational hotspot")
+	default:
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

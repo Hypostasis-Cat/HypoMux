@@ -12,6 +12,17 @@ beforeEach(() => { vi.resetAllMocks(); mocks.status.mockResolvedValue(stopped); 
 afterEach(cleanup);
 
 describe("HotspotPanel", () => {
+  it("keeps an operational hotspot stoppable without claiming verified egress", async () => {
+    mocks.status.mockResolvedValue({ ...running, sharing_verified: false, gateway_address: "192.168.137.1", message: "Egress verification unavailable" });
+    render(<HotspotPanel />);
+    await screen.findByText("Hotspot is on · egress unverified");
+    expect(screen.queryByText(/Shared egress verified/)).toBeNull();
+    expect(screen.getByText("Hotspot gateway: 192.168.137.1")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Turn off hotspot" }).hasAttribute("disabled")).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Turn off hotspot" }));
+    await screen.findByText("Hotspot is off");
+    expect(mocks.stop).toHaveBeenCalledOnce();
+  });
   it("requires a running TUN before allowing hotspot startup", async () => {
     mocks.status.mockResolvedValue({ ...stopped, ready: false });
     render(<HotspotPanel />);

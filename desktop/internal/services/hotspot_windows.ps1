@@ -14,6 +14,9 @@ $phase = 'initialization'
 $config = $null
 $cleanupFailed = $false
 $sharingDetail = ''
+$privateID = $null
+$previousPrivateIDs = @()
+$gatewayAddress = ''
 
 function Publish-State([string]$state, [string]$message, [bool]$verified) {
     $clients = 0
@@ -25,6 +28,7 @@ function Publish-State([string]$state, [string]$message, [bool]$verified) {
         shared_adapter = 'HypoMux-Tun'; sharing_verified = $verified; message = $message
         cleanup_complete = (($state -eq 'stopped' -or $state -eq 'failed') -and -not $cleanupFailed)
         diagnostics = $sharingDetail
+        gateway_address = $gatewayAddress
     } | ConvertTo-Json -Compress))
 }
 
@@ -62,12 +66,43 @@ function Shared-Connections {
     }
 }
 
-function Test-Sharing([guid]$publicID) {
-    $shared = @(Shared-Connections)
+function Get-SharingVerdict($shared, [guid]$publicID) {
+    if (@($shared).Count -eq 0) { return 'unobserved' }
     $public = @($shared | Where-Object { $_.Role -eq 0 })
     $private = @($shared | Where-Object { $_.Role -eq 1 })
+    if ($public.Count -eq 1 -and $public[0].Guid -eq $publicID -and $private.Count -eq 1 -and $private[0].Guid -eq $script:privateID) { return 'verified' }
+    return 'mismatch'
+}
+
+function Test-Sharing([guid]$publicID) {
+    $shared = @(Shared-Connections)
     $script:sharingDetail = 'expected=' + $publicID.ToString() + '; observed=' + (($shared | ForEach-Object { $_.Name + ' [' + $_.Guid.ToString() + '] role=' + $_.Role }) -join ', ')
-    return ($public.Count -eq 1 -and $public[0].Guid -eq $publicID -and $private.Count -eq 1 -and $private[0].Guid -ne $publicID)
+    $script:sharingDetail += '; WinRT=' + [string]$manager.TetheringOperationalState + '; hotspot_adapter=' + [string]$script:privateID + '; gateway=' + $script:gatewayAddress
+    return Get-SharingVerdict $shared $publicID
+}
+
+function Test-PrivateNetwork {
+    $script:gatewayAddress = ''
+    if ([string]$manager.TetheringOperationalState -ne 'On') { return $false }
+    $candidates = @(Get-NetAdapter -IncludeHidden | Where-Object {
+        $_.InterfaceDescription -like '*Wi-Fi Direct*' -and $_.Status -eq 'Up' -and
+        (($null -ne $script:privateID -and [guid]$_.InterfaceGuid -eq $script:privateID) -or
+         ($null -eq $script:privateID -and [guid]$_.InterfaceGuid -notin $script:previousPrivateIDs))
+    })
+    if ($candidates.Count -ne 1) { return $false }
+    $addresses = @(Get-NetIPAddress -InterfaceIndex $candidates[0].ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object {
+        $_.AddressState -eq 'Preferred' -and $_.IPAddress -ne '0.0.0.0' -and $_.IPAddress -notlike '169.254.*' -and $_.IPAddress -notlike '127.*'
+    })
+    if ($addresses.Count -eq 0) { return $false }
+    $script:privateID = [guid]$candidates[0].InterfaceGuid
+    $script:gatewayAddress = [string]$addresses[0].IPAddress
+    return $true
+}
+
+function Publish-Running([string]$verdict) {
+    $message = ''
+    if ($verdict -eq 'unobserved') { $message = '热点已开启，但传统 ICS 接口未提供出口信息。请连接手机测试；当前尚未确认手机流量经过聚合。' }
+    Publish-State 'running' $message ($verdict -eq 'verified')
 }
 
 try {
@@ -119,26 +154,31 @@ public static class HypoMuxHotspotLifetime {
     $configured = $true
     Await-Action ($manager.ConfigureAccessPointAsync($desired))
     $phase = 'hotspot startup'
+    $previousPrivateIDs = @(Get-NetAdapter -IncludeHidden | Where-Object { $_.InterfaceDescription -like '*Wi-Fi Direct*' -and $_.Status -eq 'Up' } | ForEach-Object { [guid]$_.InterfaceGuid })
     $attempted = $true
     $result = Await-Operation ($manager.StartTetheringAsync()) $resultType
     if ([string]$result.Status -ne 'Success') { throw ('Windows tethering status: ' + [string]$result.Status) }
     $phase = 'shared egress verification'
-    $verified = $false
+    $networkReady = $false
     $verificationDeadline = [DateTime]::UtcNow.AddSeconds(20)
     do {
-        if (Test-Sharing $publicID) { $verified = $true; break }
+        if (Test-PrivateNetwork) { $networkReady = $true; break }
         if ($stopSignal.IsCompleted) { break }
         Start-Sleep -Milliseconds 500
     } while ([DateTime]::UtcNow -lt $verificationDeadline)
-    if (-not $verified) { throw 'Windows 热点共享出口校验未通过，已请求关闭热点。请查看下方共享诊断。' }
-    Publish-State 'running' '' $true
+    $verdict = Test-Sharing $publicID
+    if (-not $networkReady) { throw 'Windows 热点未准备好：未检测到本次启动的 Wi-Fi Direct 网卡及有效 IPv4 网关，已请求关闭热点。' }
+    if ($verdict -eq 'mismatch') { throw '检测到共享接口与本次 HypoMux 热点不匹配，已请求关闭热点。' }
+    Publish-Running $verdict
     $phase = 'hotspot monitoring'
     while (-not $stopSignal.Wait(3000)) {
         if ([string]$manager.TetheringOperationalState -eq 'Off') { break }
         $alive = @(Get-NetAdapter -IncludeHidden | Where-Object { $_.InterfaceGuid -eq $publicID -and $_.Status -eq 'Up' })
         if ($alive.Count -ne 1) { throw 'HypoMux TUN stopped; hotspot is being closed' }
-        if (-not (Test-Sharing $publicID)) { throw 'Shared egress changed; hotspot is being closed' }
-        Publish-State 'running' '' $true
+        if (-not (Test-PrivateNetwork)) { throw '热点网卡或 IPv4 网关已失效，正在关闭热点。' }
+        $verdict = Test-Sharing $publicID
+        if ($verdict -eq 'mismatch') { throw 'Shared egress changed; hotspot is being closed' }
+        Publish-Running $verdict
     }
 } catch {
     # Do not print ErrorRecord / InvocationInfo: these can contain credentials.
