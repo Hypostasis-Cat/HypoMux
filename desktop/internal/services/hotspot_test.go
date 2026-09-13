@@ -49,6 +49,14 @@ func TestHotspotWorkerProcess(t *testing.T) {
 		os.Exit(2)
 	}
 	encoder := json.NewEncoder(os.Stdout)
+	if mode == "inspect" {
+		_ = encoder.Encode(map[string]string{"kind": "inspect_sharing"})
+		line, _ := input.ReadBytes('\n')
+		var reply hotspotSharingReply
+		if json.Unmarshal(line, &reply) != nil || reply.Error != "" || len(reply.Connections) != 2 || reply.Connections[0].Name != "HypoMux-Tun" {
+			os.Exit(4)
+		}
+	}
 	if mode == "reject" {
 		_ = encoder.Encode(HotspotStatus{State: "failed", Message: "Shared egress mismatch; rolled back", CleanupComplete: true})
 		os.Exit(0)
@@ -72,7 +80,21 @@ func launchTestHotspot(t *testing.T, mode string, timeout time.Duration) (*hotsp
 	command.Env = append(os.Environ(), "HYPOMUX_HOTSPOT_TEST_WORKER="+mode)
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	return launchHotspot(ctx, command, HotspotConfig{SSID: "HypoMux 手机", Password: "safe-'$`password", Band: "auto"})
+	return launchHotspot(ctx, command, HotspotConfig{SSID: "HypoMux 手机", Password: "safe-'$`password", Band: "auto"}, func() hotspotSharingReply {
+		return hotspotSharingReply{Connections: []hotspotSharingConnection{{Name: "HypoMux-Tun", Role: 0}, {Name: "Wi-Fi Direct", Role: 1}}}
+	})
+}
+
+func TestHotspotWorkerBrokersSharingInspection(t *testing.T) {
+	h, err := launchTestHotspot(t, "inspect", 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := h.stop(ctx); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestHotspotWorkerStopsOnPipeClose(t *testing.T) {

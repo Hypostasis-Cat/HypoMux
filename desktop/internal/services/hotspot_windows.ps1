@@ -13,6 +13,7 @@ $failure = ''
 $phase = 'initialization'
 $config = $null
 $cleanupFailed = $false
+$sharingDetail = ''
 
 function Publish-State([string]$state, [string]$message, [bool]$verified) {
     $clients = 0
@@ -23,6 +24,7 @@ function Publish-State([string]$state, [string]$message, [bool]$verified) {
         state = $state; ssid = $ssid; band = $band; clients = $clients
         shared_adapter = 'HypoMux-Tun'; sharing_verified = $verified; message = $message
         cleanup_complete = (($state -eq 'stopped' -or $state -eq 'failed') -and -not $cleanupFailed)
+        diagnostics = $sharingDetail
     } | ConvertTo-Json -Compress))
 }
 
@@ -45,13 +47,18 @@ function Await-Action($operation) {
 }
 
 function Shared-Connections {
-    $sharing = New-Object -ComObject HNetCfg.HNetShare
-    foreach ($connection in $sharing.EnumEveryConnection) {
-        $entry = $sharing.INetSharingConfigurationForINetConnection($connection)
-        if ($entry.SharingEnabled) {
-            $properties = $sharing.NetConnectionProps($connection)
-            [PSCustomObject]@{ Guid = [guid]$properties.Guid; Role = [int]$entry.SharingConnectionType }
-        }
+    # ICS enumeration requires elevation. Request a read-only inspection from
+    # Core through the desktop broker; keep WinRT in the interactive session.
+    if ($script:stopSignal.IsCompleted) { throw 'Desktop requested hotspot shutdown' }
+    [Console]::WriteLine('{"kind":"inspect_sharing"}')
+    if (-not $script:stopSignal.Wait(15000)) { throw 'Core sharing inspection timed out' }
+    $line = $script:stopSignal.Result
+    if ($null -eq $line) { throw 'Desktop disconnected during sharing inspection' }
+    $script:stopSignal = [HypoMuxHotspotLifetime]::ReadStop()
+    $reply = $line | ConvertFrom-Json
+    if ($reply.error) { throw ([string]$reply.error) }
+    foreach ($connection in $reply.connections) {
+        [PSCustomObject]@{ Guid = [guid]$connection.guid; Name = [string]$connection.name; Role = [int]$connection.role }
     }
 }
 
@@ -59,6 +66,7 @@ function Test-Sharing([guid]$publicID) {
     $shared = @(Shared-Connections)
     $public = @($shared | Where-Object { $_.Role -eq 0 })
     $private = @($shared | Where-Object { $_.Role -eq 1 })
+    $script:sharingDetail = 'expected=' + $publicID.ToString() + '; observed=' + (($shared | ForEach-Object { $_.Name + ' [' + $_.Guid.ToString() + '] role=' + $_.Role }) -join ', ')
     return ($public.Count -eq 1 -and $public[0].Guid -eq $publicID -and $private.Count -eq 1 -and $private[0].Guid -ne $publicID)
 }
 
@@ -116,12 +124,13 @@ public static class HypoMuxHotspotLifetime {
     if ([string]$result.Status -ne 'Success') { throw ('Windows tethering status: ' + [string]$result.Status) }
     $phase = 'shared egress verification'
     $verified = $false
-    for ($i = 0; $i -lt 10; $i++) {
+    $verificationDeadline = [DateTime]::UtcNow.AddSeconds(20)
+    do {
         if (Test-Sharing $publicID) { $verified = $true; break }
         if ($stopSignal.IsCompleted) { break }
         Start-Sleep -Milliseconds 500
-    }
-    if (-not $verified) { throw 'Windows did not bind hotspot sharing to HypoMux-Tun; startup was rolled back' }
+    } while ([DateTime]::UtcNow -lt $verificationDeadline)
+    if (-not $verified) { throw 'Windows 热点共享出口校验未通过，已请求关闭热点。请查看下方共享诊断。' }
     Publish-State 'running' '' $true
     $phase = 'hotspot monitoring'
     while (-not $stopSignal.Wait(3000)) {

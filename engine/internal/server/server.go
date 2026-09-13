@@ -222,6 +222,15 @@ func (s *Server) handle(ctx context.Context, line []byte) (protocol.Response, bo
 		}
 		result := diagnostic.Run(ctx, params.Config())
 		return protocol.Result(request.ID, result), false
+	case api.MethodHotspotInspect:
+		if !s.identity.Elevated {
+			return protocol.Failure(request.ID, "elevation_required", "共享状态检查需要管理员 Core，请重新启动 TUN", nil), false
+		}
+		result, err := platform.InspectSharing(ctx)
+		if err != nil {
+			return protocol.Failure(request.ID, "hotspot_inspection_failed", err.Error(), nil), false
+		}
+		return protocol.Result(request.ID, result), false
 	case api.MethodWFPInspect:
 		var params api.WFPInspectParams
 		if len(request.Params) > 0 {

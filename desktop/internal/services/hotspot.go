@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -32,6 +33,7 @@ type HotspotStatus struct {
 	CleanupComplete bool   `json:"cleanup_complete"`
 	Ready           bool   `json:"ready"`
 	Message         string `json:"message,omitempty"`
+	Diagnostics     string `json:"diagnostics,omitempty"`
 }
 
 func validateHotspotConfig(config HotspotConfig) error {
@@ -82,7 +84,18 @@ func (h *hotspotSession) stop(ctx context.Context) error {
 	}
 }
 
-func launchHotspot(ctx context.Context, command *exec.Cmd, config HotspotConfig) (*hotspotSession, error) {
+type hotspotSharingConnection struct {
+	GUID string `json:"guid"`
+	Name string `json:"name"`
+	Role int    `json:"role"`
+}
+
+type hotspotSharingReply struct {
+	Connections []hotspotSharingConnection `json:"connections"`
+	Error       string                     `json:"error,omitempty"`
+}
+
+func launchHotspot(ctx context.Context, command *exec.Cmd, config HotspotConfig, inspectors ...func() hotspotSharingReply) (*hotspotSession, error) {
 	input, err := command.StdinPipe()
 	if err != nil {
 		return nil, err
@@ -103,12 +116,29 @@ func launchHotspot(ctx context.Context, command *exec.Cmd, config HotspotConfig)
 	}
 	h := &hotspotSession{input: input, done: make(chan struct{}), status: HotspotStatus{State: "starting", SSID: config.SSID, Band: config.Band}}
 	ready := make(chan struct{})
+	var inputMu sync.Mutex
 	go func() {
 		defer close(h.done)
 		defer input.Close()
 		signalled := false
 		scanner := bufio.NewScanner(output)
 		for scanner.Scan() {
+			var request struct {
+				Kind string `json:"kind"`
+			}
+			if json.Unmarshal(scanner.Bytes(), &request) == nil && request.Kind == "inspect_sharing" {
+				reply := hotspotSharingReply{Connections: []hotspotSharingConnection{}, Error: "管理员共享检查不可用，请更新 Core"}
+				if len(inspectors) > 0 {
+					reply = inspectors[0]()
+				}
+				inputMu.Lock()
+				err := json.NewEncoder(input).Encode(reply)
+				inputMu.Unlock()
+				if err != nil {
+					_ = input.Close()
+				}
+				continue
+			}
 			var status HotspotStatus
 			if json.Unmarshal(scanner.Bytes(), &status) != nil {
 				continue
@@ -133,7 +163,10 @@ func launchHotspot(ctx context.Context, command *exec.Cmd, config HotspotConfig)
 		}
 		h.mu.Unlock()
 	}()
-	if err := json.NewEncoder(input).Encode(config); err != nil {
+	inputMu.Lock()
+	encodeErr := json.NewEncoder(input).Encode(config)
+	inputMu.Unlock()
+	if err := encodeErr; err != nil {
 		_ = input.Close()
 		return h, fmt.Errorf("发送热点配置失败：%w", err)
 	}
@@ -204,11 +237,22 @@ func (s *EngineService) StartHotspot(config HotspotConfig) (HotspotStatus, error
 	if tun.State != "running" {
 		return s.HotspotStatus(), errors.New("TUN 尚未运行，无法共享聚合出口")
 	}
+	if !slices.Contains(s.client.Hello().Capabilities, "hotspot.inspect") {
+		return s.HotspotStatus(), errors.New("当前 Core 不支持热点共享检查，请安装新版客户端并重启 Core 服务")
+	}
 	command, err := hotspotCommand()
 	if err != nil {
 		return s.HotspotStatus(), err
 	}
-	h, err := launchHotspot(ctx, command, config)
+	h, err := launchHotspot(ctx, command, config, func() hotspotSharingReply {
+		inspectionCtx, inspectionCancel := context.WithTimeout(context.Background(), 12*time.Second)
+		defer inspectionCancel()
+		reply := hotspotSharingReply{Connections: []hotspotSharingConnection{}}
+		if err := s.client.Request(inspectionCtx, "hotspot.inspect", nil, &reply); err != nil {
+			reply.Error = err.Error()
+		}
+		return reply
+	})
 	if h != nil {
 		s.mu.Lock()
 		s.hotspot = h

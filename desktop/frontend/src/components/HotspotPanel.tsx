@@ -89,6 +89,7 @@ export function HotspotPanel() {
       <Button disabled={pending || !status || (!active && status.state !== "failed" && !pollError)} onClick={() => void change(false)}>{text("关闭热点", "Turn off hotspot")}</Button>
     </div>
     {(error || pollError || status?.message) && <p className="hotspot-error" role="alert">{error || pollError || status?.message}</p>}
+    {status?.diagnostics && <details className="hotspot-error"><summary>{text("共享诊断", "Sharing diagnostics")}</summary><p>{status.diagnostics}</p></details>}
     <div className="hotspot-help">
       <p>{text("手机连接上面的 Wi-Fi 即可，无需安装客户端或设置代理。停止聚合或退出 HypoMux 时，热点会自动关闭。", "Connect your phone to this Wi-Fi network. No client or proxy settings are needed. The hotspot closes when aggregation stops or HypoMux exits.")}</p>
       <p>{text("沿用当前聚合线路和分流规则，多连接可利用多条线路，单连接速度不保证叠加。首次使用请在手机上验证网页、视频和下载。", "Uses your current aggregation links and routing rules. Multiple connections can use multiple links; single-connection bonding is not guaranteed. Verify browsing, video and downloads on your phone on first use.")}</p>

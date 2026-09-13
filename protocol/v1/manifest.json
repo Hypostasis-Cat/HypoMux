@@ -97,6 +97,12 @@
       "cancellation": "caller_deadline_and_host_context"
     },
     {
+      "name": "hotspot.inspect",
+      "idempotency": "read_only",
+      "privilege": "administrator",
+      "cancellation": "caller_deadline_and_host_context"
+    },
+    {
       "name": "host.shutdown",
       "idempotency": "process_terminal",
       "privilege": "none",

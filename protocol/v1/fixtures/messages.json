@@ -1,5 +1,17 @@
 [
   {
+    "name": "hotspot_inspect_request",
+    "kind": "request",
+    "method": "hotspot.inspect",
+    "message": { "protocol": 1, "id": "fixture-hotspot", "method": "hotspot.inspect" }
+  },
+  {
+    "name": "hotspot_inspect_response",
+    "kind": "response",
+    "method": "hotspot.inspect",
+    "message": { "protocol": 1, "id": "fixture-hotspot", "result": { "connections": [] } }
+  },
+  {
     "name": "engine_hello_request",
     "kind": "request",
     "method": "engine.hello",
@@ -36,6 +48,7 @@
           "health.check",
           "diagnostic.run",
           "wfp.inspect",
+          "hotspot.inspect",
           "host.shutdown"
         ],
         "modes": [

@@ -32,6 +32,7 @@ const (
 	MethodHealthCheck       = "health.check"
 	MethodDiagnosticRun     = "diagnostic.run"
 	MethodWFPInspect        = "wfp.inspect"
+	MethodHotspotInspect    = "hotspot.inspect"
 	MethodHostShutdown      = "host.shutdown"
 
 	EventEngineStateChanged  = "engine.state_changed"
@@ -56,6 +57,7 @@ var capabilities = []string{
 	MethodHealthCheck,
 	MethodDiagnosticRun,
 	MethodWFPInspect,
+	MethodHotspotInspect,
 	MethodHostShutdown,
 }
 

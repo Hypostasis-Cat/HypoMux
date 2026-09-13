@@ -8,7 +8,9 @@
 
 数据路径：手机 → Windows 移动热点/ICS → HypoMux-Tun → 现有 sing-box 路由 → 现有多网卡聚合引擎。此功能共享现有引擎的多连接分流能力；没有新增远端汇合服务器，不承诺单连接带宽叠加。
 
-桌面 `EngineService` 提供 `HotspotStatus`、`StartHotspot`、`StopHotspot`。固定的 PowerShell 工作进程在普通用户的交互会话中使用 WinRT 热点 API；TUN 的管理员操作继续由原有 Core 承担。共享上游必须是按 GUID 找到的 `HypoMux-Tun` 连接配置，绝不回退到默认物理网卡。启动后读取 ICS，只有公共接口 GUID 匹配且存在一个私有共享接口，才报告共享出口已校验。这证明共享配置正确，不等于已经证明手机联网或吞吐量提升。
+桌面 `EngineService` 提供 `HotspotStatus`、`StartHotspot`、`StopHotspot`。固定的 PowerShell 工作进程在普通用户的交互会话中使用 WinRT 热点 API；TUN 的管理员操作继续由原有 Core 承担。共享上游必须是按 GUID 找到的 `HypoMux-Tun` 连接配置，绝不回退到默认物理网卡。ICS 枚举由管理员 Core 的只读 `hotspot.inspect` 接口执行，桌面通过 IPC 将结果交给热点工作进程。只有公共接口 GUID 匹配且存在一个私有共享接口，才报告共享出口已校验。这证明共享配置正确，不等于已经证明手机联网或吞吐量提升。
+
+共享枚举使用 `EnumEveryConnection()` 方法调用，并开启严格模式，避免误读不存在的属性后把空结果当作真实状态。启动时最多等待 20 秒供共享配置收敛；详情页显示实际共享接口用于诊断。升级需同时更新桌面和 Core，旧 Core 缺少 `hotspot.inspect` 时会在启动热点前明确报错。
 
 已存在的热点/ICS 会阻止启动，避免覆盖其他共享。工作进程每三秒检查 TUN 和共享出口；出口改变、TUN 消失或父进程管道关闭时停止热点。正常停止聚合时先关闭热点，再停止 TUN。退出和启动失败时尝试恢复原热点配置，清理失败会显示错误。密码仅通过标准输入传给工作进程，不放入命令行、HypoMux 设置或日志；Windows 在运行期间会持久化热点配置，正常关闭后恢复原配置。工作进程被强制结束或系统断电时不能保证恢复完成，应在 Windows 设置中检查。
 
