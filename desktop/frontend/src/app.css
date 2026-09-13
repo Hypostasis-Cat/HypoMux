@@ -1941,6 +1941,57 @@ svg {
   box-shadow: none !important;
 }
 
+/* English labels are longer than their Chinese counterparts. Keep the home
+   layout fluid so copy can wrap inside its own column instead of pushing the
+   final column out of view. */
+:lang(en) .engine-hero {
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: clamp(20px, 3vw, 40px);
+}
+
+:lang(en) .engine-mode-note,
+:lang(en) .scheduling-hint {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+:lang(en) .network-section-heading {
+  align-items: flex-start;
+  gap: 12px;
+}
+
+:lang(en) .network-section-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  row-gap: 4px;
+}
+
+:lang(en) .network-adapter {
+  grid-template-columns: minmax(180px, 1.15fr) minmax(230px, 1.2fr) minmax(150px, 0.85fr) minmax(170px, 0.9fr);
+  min-height: 96px;
+  max-height: none;
+}
+
+:lang(en) .adapter-quality {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+:lang(en) .adapter-weight {
+  grid-template-columns: minmax(70px, 1fr) 108px;
+}
+
+:lang(en) .runtime-status {
+  grid-template-columns: repeat(4, minmax(120px, 1fr)) auto;
+  gap: 12px;
+}
+
+@media (max-width: 1040px) {
+  :lang(en) .network-adapter {
+    grid-template-columns: minmax(160px, 1fr) minmax(200px, 1.1fr) minmax(130px, 0.8fr) minmax(160px, 0.85fr);
+  }
+}
+
 .routing-rule-status {
   display: inline-flex;
   width: max-content;
