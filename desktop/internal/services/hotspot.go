@@ -67,11 +67,12 @@ func validateHotspotConfig(config HotspotConfig) error {
 // configuration. Closing stdin asks it to stop and restore that configuration;
 // desktop crashes also close the pipe, without a persisted session lease.
 type hotspotSession struct {
-	mu       sync.Mutex
-	status   HotspotStatus
-	input    io.WriteCloser
-	done     chan struct{}
-	stopOnce sync.Once
+	mu            sync.Mutex
+	status        HotspotStatus
+	input         io.WriteCloser
+	done          chan struct{}
+	stopOnce      sync.Once
+	stopRequested bool
 }
 
 func (h *hotspotSession) snapshot() HotspotStatus {
@@ -81,7 +82,16 @@ func (h *hotspotSession) snapshot() HotspotStatus {
 }
 
 func (h *hotspotSession) stop(ctx context.Context) error {
-	h.stopOnce.Do(func() { _ = h.input.Close() })
+	h.stopOnce.Do(func() {
+		h.mu.Lock()
+		h.stopRequested = true
+		if h.status.State == "running" || h.status.State == "starting" {
+			h.status.State = "stopping"
+			h.status.SharingVerified = false
+		}
+		h.mu.Unlock()
+		_ = h.input.Close()
+	})
 	select {
 	case <-h.done:
 		if status := h.snapshot(); !status.CleanupComplete {
@@ -160,6 +170,16 @@ func launchHotspotObserved(ctx context.Context, command *exec.Cmd, config Hotspo
 				continue
 			}
 			h.mu.Lock()
+			if h.stopRequested && status.CleanupComplete {
+				status.State = "stopped"
+				status.Message = ""
+				status.SharingVerified = false
+			} else if h.stopRequested && (status.State == "running" || status.State == "starting") {
+				// A queued worker update must not revert the UI to running after
+				// the user has requested shutdown.
+				status.State = "stopping"
+				status.SharingVerified = false
+			}
 			h.status = status
 			h.mu.Unlock()
 			// A working AP is distinct from verified aggregation egress. Windows

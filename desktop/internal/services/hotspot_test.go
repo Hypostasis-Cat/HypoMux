@@ -84,6 +84,14 @@ func TestHotspotWorkerProcess(t *testing.T) {
 		os.Exit(3)
 	}
 	_, _ = io.Copy(io.Discard, input)
+	if mode == "stop-error" {
+		_ = encoder.Encode(HotspotStatus{State: "failed", Message: "Desktop disconnected during sharing inspection", CleanupComplete: true})
+		os.Exit(0)
+	}
+	if mode == "cleanup-failure" {
+		_ = encoder.Encode(HotspotStatus{State: "failed", Message: "Windows hotspot still active", CleanupComplete: false})
+		os.Exit(0)
+	}
 	_ = encoder.Encode(HotspotStatus{State: "stopped", CleanupComplete: true})
 	os.Exit(0)
 }
@@ -129,6 +137,43 @@ func TestHotspotWorkerStopsOnPipeClose(t *testing.T) {
 	}
 	if h.snapshot().State != "stopped" || h.snapshot().SharingVerified {
 		t.Fatal(h.snapshot())
+	}
+}
+
+func TestHotspotExpectedShutdownDoesNotHideCleanupFailure(t *testing.T) {
+	for _, mode := range []string{"stop-error", "cleanup-failure"} {
+		t.Run(mode, func(t *testing.T) {
+			h, err := launchTestHotspot(t, mode, 5*time.Second)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			err = h.stop(ctx)
+			status := h.snapshot()
+			if mode == "stop-error" {
+				if err != nil || status.State != "stopped" || status.Message != "" {
+					t.Fatal("expected shutdown reported as failure", status, err)
+				}
+			} else if err == nil || status.State != "failed" || status.CleanupComplete {
+				t.Fatal("real cleanup failure was hidden", status, err)
+			}
+		})
+	}
+}
+
+func TestHotspotRepeatedStartStopSessions(t *testing.T) {
+	for range 5 {
+		h, err := launchTestHotspot(t, "normal", 5*time.Second)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		err = h.stop(ctx)
+		cancel()
+		if err != nil || h.snapshot().State != "stopped" {
+			t.Fatal("session did not cleanly stop", err)
+		}
 	}
 }
 

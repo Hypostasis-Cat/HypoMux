@@ -69,7 +69,7 @@ export type HotspotConfig = { ssid: string; password: string; band: "auto" | "2.
 export type HotspotStatus = {
   devices?: Array<{ mac: string; hosts: string[] }>;
   devices_available?: boolean; updated_at?: string;
-  state: "stopped" | "starting" | "running" | "failed";
+  state: "stopped" | "starting" | "running" | "stopping" | "failed";
   ssid: string; band: string; clients: number; shared_adapter: string;
   sharing_verified: boolean; cleanup_complete?: boolean; ready: boolean; message?: string; diagnostics?: string; gateway_address?: string;
 };

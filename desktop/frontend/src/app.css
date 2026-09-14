@@ -5370,6 +5370,9 @@ svg {
 .hotspot-devices ul { list-style: none; padding: 0; margin: 8px 0 0; }
 .hotspot-devices li { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding: 10px 0; overflow-wrap: anywhere; }
 .hotspot-devices code { color: var(--hm-text-secondary); }
+.hotspot-qr-content { display: flex; align-items: center; flex-wrap: wrap; gap: 20px; margin-top: 16px; }
+.hotspot-qr-content svg { flex: 0 0 auto; max-width: 100%; height: auto; background: white; border-radius: 8px; }
+.hotspot-qr-content p { flex: 1 1 200px; color: var(--hm-text-secondary); }
 .hotspot-control p, .hotspot-save-hint { color: var(--hm-text-secondary); font-size: 13px; }
 .hotspot-summary, .hotspot-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
 .hotspot-fields { display: grid; align-items: start; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 20px; }

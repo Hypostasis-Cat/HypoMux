@@ -13,6 +13,24 @@ beforeEach(() => { vi.resetAllMocks(); mocks.save.mockResolvedValue(undefined); 
 afterEach(cleanup);
 
 describe("HotspotPanel", () => {
+  it("generates an initial password without starting or saving the hotspot", async () => {
+    render(<HotspotPanel />);
+    await waitFor(() => expect((screen.getByLabelText("Network password") as HTMLInputElement).value).toMatch(/^[A-Za-z0-9_-]{16}$/));
+    expect(mocks.start).not.toHaveBeenCalled();
+    expect(mocks.save).not.toHaveBeenCalled();
+  });
+  it("shows a connection QR only on request while the hotspot is running", async () => {
+    mocks.preferences.mockResolvedValue({ ssid: "My hotspot", password: "saved-pass", band: "auto" });
+    mocks.status.mockResolvedValue(running);
+    render(<HotspotPanel />);
+    const show = await screen.findByRole("button", { name: "Scan to connect" });
+    expect(screen.queryByTitle("Wi-Fi connection QR code")).toBeNull();
+    fireEvent.click(show);
+    expect(screen.getByTitle("Wi-Fi connection QR code")).toBeTruthy();
+    fireEvent.click(screen.getByRole("switch", { name: "Aggregation hotspot" }));
+    await screen.findByText("Hotspot is off");
+    expect(screen.queryByTitle("Wi-Fi connection QR code")).toBeNull();
+  });
   it("saves settings without starting aggregation and generates a valid password", async () => {
     mocks.status.mockResolvedValue({ ...stopped, ready: false });
     render(<HotspotPanel />);

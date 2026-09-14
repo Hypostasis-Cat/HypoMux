@@ -3,6 +3,9 @@ import { useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n/i18n";
 import { appServices, type HotspotConfig, type HotspotStatus } from "../platform/services";
 import { hotspotDraft } from "./hotspotDraft";
+import { QRCodeSVG } from "qrcode.react";
+import { createHotspotPassword, hotspotQRPayload } from "./hotspotAccess";
+import { runHotspotOperation, useHotspotOperation } from "./hotspotOperation";
 
 export function HotspotPanel() {
   const { locale } = useI18n();
@@ -15,9 +18,13 @@ export function HotspotPanel() {
     updateConfig(next);
   };
   const [status, setStatus] = useState<HotspotStatus>();
-  const [pending, setPending] = useState(false);
+  const [localPending, setPending] = useState(false);
+  const sharedOperation = useHotspotOperation();
+  const pending = localPending || !!sharedOperation;
+  const [showQR, setShowQR] = useState(false);
   const [error, setError] = useState("");
   const [pollError, setPollError] = useState("");
+  useEffect(() => { if (status?.state !== "running" || pollError) setShowQR(false); }, [status?.state, pollError]);
   const [notice, setNotice] = useState("");
   const [action, setAction] = useState<"start" | "stop" | "save">();
   const [showPassword, setShowPassword] = useState(false);
@@ -30,8 +37,9 @@ export function HotspotPanel() {
     if (!hotspotDraft.current) {
       void appServices.engine.hotspotPreferences().then(saved => {
         if (!cancelled && !hotspotDraft.current) {
-          hotspotDraft.current = saved;
-          updateConfig(saved);
+          const initial = saved.password ? saved : { ...saved, password: createHotspotPassword() };
+          hotspotDraft.current = initial;
+          updateConfig(initial);
         }
       }).catch(reason => {
         if (!cancelled) setError(String(reason));
@@ -56,7 +64,7 @@ export function HotspotPanel() {
     void refresh();
     return () => { cancelled = true; mounted.current = false; clearTimeout(timer); };
   }, []);
-  const active = status?.state === "running" || status?.state === "starting";
+  const active = status?.state === "running" || status?.state === "starting" || status?.state === "stopping";
   const band = (active ? status?.band : config.band) ?? "auto";
   const bandLabel = band === "5" ? "5 GHz" : band === "2.4" ? "2.4 GHz" : text("自动", "Automatic");
   const validName = config.ssid.trim().length > 0 && new TextEncoder().encode(config.ssid).length <= 32 && !/[\0\r\n]/.test(config.ssid);
@@ -65,7 +73,7 @@ export function HotspotPanel() {
     if (busy.current) return;
     busy.current = true; revision.current++; setPending(true); setAction("save"); setError(""); setNotice("");
     try {
-      await appServices.engine.saveHotspotPreferences(config);
+      await runHotspotOperation("save", () => appServices.engine.saveHotspotPreferences(config));
       if (mounted.current) setNotice(text("设置已加密保存，下次打开软件自动恢复。", "Settings saved encrypted and restored next time you open the app."));
     } catch (reason) { if (mounted.current) setError(String(reason)); }
     finally { busy.current = false; if (mounted.current) { setPending(false); setAction(undefined); } }
@@ -77,13 +85,7 @@ export function HotspotPanel() {
     } catch { if (mounted.current) setError(text("复制失败，请手动选择并复制。", "Copy failed. Select and copy the text manually.")); }
   };
   const generatePassword = () => {
-    const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789-_";
-    let password = "";
-    while (password.length < 16) {
-      const value = crypto.getRandomValues(new Uint8Array(1))[0];
-      if (value < Math.floor(256 / alphabet.length) * alphabet.length) password += alphabet[value % alphabet.length];
-    }
-    setConfig(value => ({ ...value, password }));
+    setConfig(value => ({ ...value, password: createHotspotPassword() }));
     setNotice(text("新密码尚未保存。保存设置或开启热点后生效。", "New password is not saved yet. Save settings or enable the hotspot to apply it."));
   };
   const change = async (start: boolean) => {
@@ -91,7 +93,7 @@ export function HotspotPanel() {
     revision.current++;
     busy.current = true; setPending(true); setAction(start ? "start" : "stop"); setError(""); setNotice("");
     try {
-      const next = start ? await appServices.engine.startHotspot(config) : await appServices.engine.stopHotspot();
+      const next = await runHotspotOperation(start ? "start" : "stop", () => start ? appServices.engine.startHotspot(config) : appServices.engine.stopHotspot());
       if (mounted.current) { setStatus(next); setPollError(""); }
     } catch (reason) {
       if (mounted.current) setError(String(reason));
@@ -101,10 +103,11 @@ export function HotspotPanel() {
       } catch { /* Preserve the action error; the next poll retries status. */ }
     } finally { busy.current = false; if (mounted.current) { setPending(false); setAction(undefined); } }
   };
-  const stateText = pending ? (action === "start" ? text("正在开启热点…", "Starting hotspot…") : action === "stop" ? text("正在关闭热点…", "Stopping hotspot…") : text("正在保存设置…", "Saving settings…"))
+  const stateText = pending ? ((action ?? sharedOperation) === "start" ? text("正在开启热点…", "Starting hotspot…") : (action ?? sharedOperation) === "stop" ? text("正在关闭热点…", "Stopping hotspot…") : text("正在保存设置…", "Saving settings…"))
     : pollError ? text("状态暂不可用", "Status unavailable")
     : !status ? text("正在读取状态", "Checking status")
     : status.state === "running" ? (status.sharing_verified ? text("热点已开启", "Hotspot is on") : text("热点已开启 · 出口待验证", "Hotspot is on · egress unverified"))
+    : status.state === "stopping" ? text("正在关闭热点…", "Stopping hotspot…")
     : status.state === "starting" ? text("正在启动", "Starting")
     : status.state === "failed" ? text("热点需要检查", "Hotspot needs attention")
     : text("热点已关闭", "Hotspot is off");
@@ -112,7 +115,7 @@ export function HotspotPanel() {
     <div className="hotspot-control">
       <div><strong>{text("共享聚合网络", "Share aggregation network")}</strong><p>{text("手机连接 Wi-Fi，即可使用电脑的聚合网络。", "Connect your phone over Wi-Fi to use the aggregated network.")}</p></div>
       <Switch label={text("聚合热点", "Aggregation hotspot")} checked={!!active}
-        disabled={pending || !status || (!active && (loadingConfig || !!pollError || !status.ready || !validName || !validPassword))}
+        disabled={pending || status?.state === "stopping" || !status || (!active && (loadingConfig || !!pollError || !status.ready || !validName || !validPassword))}
         onChange={(_, data) => void change(data.checked)} />
     </div>
     <div className="hotspot-summary" role="status">
@@ -157,10 +160,17 @@ export function HotspotPanel() {
         : <ul>{status.devices.map((device, index) => <li key={`${device.mac}-${index}`}><span>{device.hosts?.join(" · ") || text("未命名设备", "Unnamed device")}</span><code>{device.mac}</code></li>)}</ul>}
     </div>}
     {status?.diagnostics && <details className="hotspot-error"><summary>{text("共享诊断", "Sharing diagnostics")}</summary>
+      <p>{text("热点已开启只表示 Wi-Fi 可接入；设备数量表示 Windows 已检测到连接。出口已校验表示共享接口匹配，但不是手机互联网测速结果。", "Hotspot on means Wi-Fi is available; the device count reflects Windows connections. Verified egress confirms the sharing interfaces, not a phone internet speed test.")}</p>
+      {!status.sharing_verified && <p>{text("Windows 未提供共享接口记录时，仍可正常使用热点。若手机能连接但无法上网，请先检查电脑聚合是否能上网，再复制诊断排查。", "When Windows omits sharing records, the hotspot can still work. If a phone connects without internet, check internet access through PC aggregation, then copy these diagnostics.")}</p>}
       {status.updated_at && <p>{text("状态采样时间", "Status sampled at")}: {new Date(status.updated_at).toLocaleString()}</p>}
       <p>{status.diagnostics}</p>
       <Button onClick={() => void copy(JSON.stringify({ state: status.state, sampled_at: status.updated_at, sharing_verified: status.sharing_verified, gateway: status.gateway_address, diagnostics: status.diagnostics }, null, 2))}>{text("复制诊断", "Copy diagnostics")}</Button>
     </details>}
+    {status?.state === "running" && !pollError && config.password && config.ssid === status.ssid && <div className="hotspot-qr">
+      <Button aria-expanded={showQR} onClick={() => setShowQR(value => !value)}>{showQR ? text("隐藏连接码", "Hide connection code") : text("扫码连接", "Scan to connect")}</Button>
+      {showQR && <div className="hotspot-qr-content"><QRCodeSVG value={hotspotQRPayload(config)} size={224} level="M" marginSize={4} title={text("Wi-Fi 连接二维码", "Wi-Fi connection QR code")} />
+        <p>{text("用手机相机或 WLAN 扫一扫连接。二维码包含热点密码，请只向需要连接的人展示。", "Scan with your phone camera or Wi-Fi scanner. This code contains the network password; show it only to people you want to connect.")}</p></div>}
+    </div>}
     <div className="hotspot-help">
       {active && status?.gateway_address && <p>{text("热点网关", "Hotspot gateway")}: {status.gateway_address}</p>}
       <p>{text("手机连接上面的 Wi-Fi 即可，无需安装客户端或设置代理。停止聚合或退出 HypoMux 时，热点会自动关闭。", "Connect your phone to this Wi-Fi network. No client or proxy settings are needed. The hotspot closes when aggregation stops or HypoMux exits.")}</p>
