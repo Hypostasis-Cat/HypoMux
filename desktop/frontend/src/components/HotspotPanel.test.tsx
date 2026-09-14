@@ -95,7 +95,7 @@ describe("HotspotPanel", () => {
     fireEvent.click(screen.getByRole("switch", { name: "Aggregation hotspot" }));
     await screen.findByText("Hotspot is on");
     expect(mocks.start).toHaveBeenCalledWith({ ssid: "My hotspot", password: "safe-'$`password", band: "auto" });
-    expect(screen.getByText(/Connected devices: 2/)).toBeTruthy();
+    expect(screen.getByLabelText("Connected devices: 2").textContent).toBe("2");
     expect(screen.getByText(/Shared egress verified: HypoMux-Tun/)).toBeTruthy();
     fireEvent.click(screen.getByRole("switch", { name: "Aggregation hotspot" }));
     await screen.findByText("Hotspot is off");

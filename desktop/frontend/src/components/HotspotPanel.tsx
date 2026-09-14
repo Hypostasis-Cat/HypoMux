@@ -1,4 +1,5 @@
 import { Badge, Button, Dropdown, Field, Input, Option, Spinner, Switch } from "@fluentui/react-components";
+import { Wifi124Regular, Phone24Regular, ShieldCheckmark24Regular } from "@fluentui/react-icons";
 import { useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n/i18n";
 import { appServices, type HotspotConfig, type HotspotStatus } from "../platform/services";
@@ -112,28 +113,26 @@ export function HotspotPanel() {
     : status.state === "failed" ? text("热点需要检查", "Hotspot needs attention")
     : text("热点已关闭", "Hotspot is off");
   return <section className="hotspot-panel" aria-label={text("聚合热点设置", "Aggregation hotspot settings")}>
-    <div className="hotspot-control">
-      <div><strong>{text("共享聚合网络", "Share aggregation network")}</strong><p>{text("手机连接 Wi-Fi，即可使用电脑的聚合网络。", "Connect your phone over Wi-Fi to use the aggregated network.")}</p></div>
+    <div className={`hotspot-control glass-surface${status?.state === "running" && !pollError ? " is-running" : ""}`}>
+      <span className="hotspot-hero-icon" aria-hidden="true"><Wifi124Regular /></span>
+      <div className="hotspot-control-copy"><span className="hotspot-eyebrow">{text("网络共享", "NETWORK SHARING")}</span><strong>{text("共享你的聚合网络", "Share your aggregated connection")}</strong><p>{text("一台电脑，多设备连接。无需额外安装或代理设置。", "One PC, more devices. No extra apps or proxy setup.")}</p>
+        <div className="hotspot-summary" role="status">
+          <Badge appearance="tint" color={status?.state === "running" && status.sharing_verified && !pollError ? "success" : "informative"}>{stateText}</Badge>
+          {pending && <Spinner size="tiny" />}
+        </div>
+      </div>
       <Switch label={text("聚合热点", "Aggregation hotspot")} checked={!!active}
         disabled={pending || status?.state === "stopping" || !status || (!active && (loadingConfig || !!pollError || !status.ready || !validName || !validPassword))}
         onChange={(_, data) => void change(data.checked)} />
     </div>
-    <div className="hotspot-summary" role="status">
-      <Badge appearance="tint" color={status?.state === "running" && status.sharing_verified && !pollError ? "success" : "informative"}>{stateText}</Badge>
-      {pending && <Spinner size="tiny" />}
-      {status?.state === "running" && !pollError && <span>{status.ssid} · {text("已连接设备", "Connected devices")}: {status.clients}</span>}
-    </div>
-    {status && !status.ready && !active && <p>{text("请先在首页选择网卡，以 TUN 模式启动聚合，然后在这里开启热点。", "Select your adapters and start aggregation in TUN mode on Home, then enable the hotspot here.")}</p>}
+    {status && !status.ready && !active && <div className="hotspot-prerequisite"><ShieldCheckmark24Regular aria-hidden="true" /><div><strong>{text("先启动聚合，再分享网络", "Start aggregation to share your network")}</strong><p>{text("请先在首页选择网卡，以 TUN 模式启动聚合，然后在这里开启热点。", "Select your adapters and start aggregation in TUN mode on Home, then enable the hotspot here.")}</p></div></div>}
+    <div className="hotspot-layout"><div className="hotspot-settings hotspot-surface glass-surface">
+    <header className="hotspot-section-heading"><h2>{text("网络设置", "Network settings")}</h2><span>{active ? text("使用中", "In use") : text("开启前可编辑", "Edit before sharing")}</span></header>
     <div className="hotspot-fields">
-      <Field label={text("热点名称", "Network name")} validationState={!active && !validName ? "error" : "none"} validationMessage={!active && !validName ? text("请输入 1–32 个 UTF-8 字节，不能包含换行。", "Enter 1–32 UTF-8 bytes without line breaks.") : undefined} hint={text("最多 32 个 UTF-8 字节", "Up to 32 UTF-8 bytes")}>
+      <Field label={text("热点名称", "Network name")} validationState={!active && !validName ? "error" : "none"} validationMessage={!active && !validName ? text("请输入 1–32 个 UTF-8 字节，不能包含换行。", "Enter 1–32 UTF-8 bytes without line breaks.") : undefined} hint={text("在手机 Wi-Fi 列表中显示的名称", "The name shown in your phone’s Wi-Fi list")}>
         <Input value={active ? status?.ssid : config.ssid} disabled={loadingConfig || pending || active} onChange={(_, data) => setConfig(value => ({ ...value, ssid: data.value }))} />
       </Field>
-      <Field label={text("热点密码", "Network password")} hint={text("8–63 个英文、数字或符号；手机连接时使用此密码。", "8–63 printable ASCII characters. Use this password when connecting your phone.")}>
-        <Input type={showPassword ? "text" : "password"} autoComplete="new-password" value={config.password} disabled={loadingConfig || pending || active}
-          onChange={(_, data) => setConfig(value => ({ ...value, password: data.value }))}
-          contentAfter={<Button size="small" appearance="transparent" aria-pressed={showPassword} onClick={() => setShowPassword(value => !value)}>{showPassword ? text("隐藏", "Hide") : text("显示", "Show")}</Button>} />
-      </Field>
-      <Field label={text("Wi-Fi 频段", "Wi-Fi band")}>
+      <Field label={text("Wi-Fi 频段", "Wi-Fi band")} hint={text("推荐自动，由 Windows 选择可用频段", "Automatic lets Windows choose an available band")}>
         <Dropdown className="hotspot-band-dropdown" value={bandLabel} selectedOptions={[band]} disabled={loadingConfig || pending || active}
           onOptionSelect={(_, data) => {
             if (data.optionValue === "auto" || data.optionValue === "5" || data.optionValue === "2.4") {
@@ -144,21 +143,36 @@ export function HotspotPanel() {
           <Option value="auto">{text("自动", "Automatic")}</Option><Option value="5">5 GHz</Option><Option value="2.4">2.4 GHz</Option>
         </Dropdown>
       </Field>
+      <Field label={text("热点密码", "Network password")} hint={text("8–63 位英文、数字或符号", "8–63 printable ASCII characters")}>
+        <Input type={showPassword ? "text" : "password"} autoComplete="new-password" value={config.password} disabled={loadingConfig || pending || active}
+          onChange={(_, data) => setConfig(value => ({ ...value, password: data.value }))}
+          contentAfter={<Button size="small" appearance="transparent" aria-pressed={showPassword} onClick={() => setShowPassword(value => !value)}>{showPassword ? text("隐藏", "Hide") : text("显示", "Show")}</Button>} />
+      </Field>
     </div>
     <div className="hotspot-actions">
-      {!active && <><Button disabled={loadingConfig || pending || !validName || !validPassword} onClick={() => void save()}>{text("保存设置", "Save settings")}</Button><Button disabled={loadingConfig || pending} onClick={generatePassword}>{text("生成密码", "Generate password")}</Button></>}
+      {!active && <><Button appearance="primary" disabled={loadingConfig || pending || !validName || !validPassword} onClick={() => void save()}>{text("保存设置", "Save settings")}</Button><Button disabled={loadingConfig || pending} onClick={generatePassword}>{text("生成密码", "Generate password")}</Button></>}
       <Button disabled={loadingConfig || !validPassword} onClick={() => void copy(config.password)}>{text("复制密码", "Copy password")}</Button>
     </div>
     <p className="hotspot-save-hint">{active ? text("修改名称、密码或频段前，请先关闭热点。", "Turn off the hotspot before editing its name, password or band.") : text("可提前保存设置；开启时也会自动加密保存。", "You can save settings in advance. Enabling also saves them encrypted.")}</p>
-    {notice && <p role="status">{notice}</p>}
+    {notice && <p className="hotspot-notice" role="status">{notice}</p>}
     {status?.state === "failed" && !status.cleanup_complete && <Button disabled={pending} onClick={() => void change(false)}>{text("重试关闭热点", "Retry hotspot cleanup")}</Button>}
     {(error || pollError || status?.message) && <p className="hotspot-error" role={error || pollError || status?.state === "failed" ? "alert" : "status"}>{error || pollError || status?.message}</p>}
+    </div><aside className="hotspot-connect hotspot-surface glass-surface" aria-label={text("手机连接", "Phone connection")}>
+    <header className="hotspot-section-heading"><h2>{text("连接你的设备", "Connect your devices")}</h2><Phone24Regular aria-hidden="true" /></header>
+    <div className="hotspot-connect-intro"><span className="hotspot-phone-icon" aria-hidden="true"><Wifi124Regular /></span><strong>{status?.state === "running" && !pollError ? status.ssid : text("准备好，随时连接", "Ready when you are")}</strong><p>{status?.state === "running" && !pollError ? text("打开手机 Wi-Fi，选择此网络", "Choose this network in your phone’s Wi-Fi settings") : text("开启热点后，手机、平板都可以加入", "Once enabled, phones and tablets can join")}</p></div>
+    {!active && <ol className="hotspot-connect-steps"><li>{text("在电脑上启动 TUN 聚合", "Start TUN aggregation on your PC")}</li><li>{text("开启本页的聚合热点", "Enable the hotspot on this page")}</li><li>{text("手机选择热点，输入密码连接", "Select the network and enter its password")}</li></ol>}
     {active && !pollError && <div className="hotspot-devices">
-      <strong>{text("连接设备", "Connected devices")}</strong>
+      <div className="hotspot-section-heading"><strong>{text("连接设备", "Connected devices")}</strong>{status?.state === "running" && <Badge appearance="tint" aria-label={`${text("已连接设备", "Connected devices")}: ${status.clients}`}>{status.clients}</Badge>}</div>
       {!status?.devices_available ? <p>{text("Windows 暂未提供设备明细，不影响热点使用。", "Windows device details are unavailable. The hotspot can still be used.")}</p>
         : !status.devices?.length ? <p>{text("等待设备连接，请在手机 WLAN 设置中选择上面的热点名称。", "Waiting for devices. Select the network above in your phone’s Wi-Fi settings.")}</p>
         : <ul>{status.devices.map((device, index) => <li key={`${device.mac}-${index}`}><span>{device.hosts?.join(" · ") || text("未命名设备", "Unnamed device")}</span><code>{device.mac}</code></li>)}</ul>}
     </div>}
+    {status?.state === "running" && !pollError && config.password && config.ssid === status.ssid && <div className="hotspot-qr">
+      <Button aria-expanded={showQR} onClick={() => setShowQR(value => !value)}>{showQR ? text("隐藏连接码", "Hide connection code") : text("扫码连接", "Scan to connect")}</Button>
+      {showQR && <div className="hotspot-qr-content"><QRCodeSVG value={hotspotQRPayload(config)} size={224} level="M" marginSize={4} title={text("Wi-Fi 连接二维码", "Wi-Fi connection QR code")} />
+        <p>{text("用手机相机或 WLAN 扫一扫连接。二维码包含热点密码，请只向需要连接的人展示。", "Scan with your phone camera or Wi-Fi scanner. This code contains the network password; show it only to people you want to connect.")}</p></div>}
+    </div>}
+    </aside></div>
     {status?.diagnostics && <details className="hotspot-error"><summary>{text("共享诊断", "Sharing diagnostics")}</summary>
       <p>{text("热点已开启只表示 Wi-Fi 可接入；设备数量表示 Windows 已检测到连接。出口已校验表示共享接口匹配，但不是手机互联网测速结果。", "Hotspot on means Wi-Fi is available; the device count reflects Windows connections. Verified egress confirms the sharing interfaces, not a phone internet speed test.")}</p>
       {!status.sharing_verified && <p>{text("Windows 未提供共享接口记录时，仍可正常使用热点。若手机能连接但无法上网，请先检查电脑聚合是否能上网，再复制诊断排查。", "When Windows omits sharing records, the hotspot can still work. If a phone connects without internet, check internet access through PC aggregation, then copy these diagnostics.")}</p>}
@@ -166,16 +180,11 @@ export function HotspotPanel() {
       <p>{status.diagnostics}</p>
       <Button onClick={() => void copy(JSON.stringify({ state: status.state, sampled_at: status.updated_at, sharing_verified: status.sharing_verified, gateway: status.gateway_address, diagnostics: status.diagnostics }, null, 2))}>{text("复制诊断", "Copy diagnostics")}</Button>
     </details>}
-    {status?.state === "running" && !pollError && config.password && config.ssid === status.ssid && <div className="hotspot-qr">
-      <Button aria-expanded={showQR} onClick={() => setShowQR(value => !value)}>{showQR ? text("隐藏连接码", "Hide connection code") : text("扫码连接", "Scan to connect")}</Button>
-      {showQR && <div className="hotspot-qr-content"><QRCodeSVG value={hotspotQRPayload(config)} size={224} level="M" marginSize={4} title={text("Wi-Fi 连接二维码", "Wi-Fi connection QR code")} />
-        <p>{text("用手机相机或 WLAN 扫一扫连接。二维码包含热点密码，请只向需要连接的人展示。", "Scan with your phone camera or Wi-Fi scanner. This code contains the network password; show it only to people you want to connect.")}</p></div>}
-    </div>}
-    <div className="hotspot-help">
+    <details className="hotspot-help"><summary>{text("使用说明与共享规则", "Usage and sharing details")}</summary><div>
       {active && status?.gateway_address && <p>{text("热点网关", "Hotspot gateway")}: {status.gateway_address}</p>}
       <p>{text("手机连接上面的 Wi-Fi 即可，无需安装客户端或设置代理。停止聚合或退出 HypoMux 时，热点会自动关闭。", "Connect your phone to this Wi-Fi network. No client or proxy settings are needed. The hotspot closes when aggregation stops or HypoMux exits.")}</p>
       <p>{text("沿用当前聚合线路和分流规则，多连接可利用多条线路，单连接速度不保证叠加。首次使用请在手机上验证网页、视频和下载。", "Uses your current aggregation links and routing rules. Multiple connections can use multiple links; single-connection bonding is not guaranteed. Verify browsing, video and downloads on your phone on first use.")}</p>
       {status?.sharing_verified && !pollError && <p>{text("共享出口已校验", "Shared egress verified")}: {status.shared_adapter}</p>}
-    </div>
+    </div></details>
   </section>;
 }

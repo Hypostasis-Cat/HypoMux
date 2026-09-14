@@ -243,7 +243,9 @@ func (s *EngineService) StartHotspot(config HotspotConfig) (HotspotStatus, error
 	if err := validateHotspotConfig(config); err != nil {
 		return s.HotspotStatus(), err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	// Allow profile discovery, configuration, startup, private-network readiness
+	// and both broker inspections to finish within their individual deadlines.
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 	if err := s.acquireLifecycle(ctx); err != nil {
 		return s.HotspotStatus(), err

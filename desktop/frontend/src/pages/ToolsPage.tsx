@@ -87,13 +87,13 @@ export function ToolsPage() {
   const loadError = error && <div role="alert" className="tool-load-error"><p>{text("无法读取工具设置：", "Unable to load tool settings: ")}{error}</p><Button onClick={() => setRevision(value => value + 1)}>{text("重试", "Retry")}</Button></div>;
 
   return <main className="tools-page">
-    {detail === "hotspot" ? <div key="hotspot" className="tool-view page-transition-layer is-entering">
+    {detail === "hotspot" ? <div key="hotspot" className="tool-view hotspot-view page-transition-layer is-entering">
       <header className="page-heading"><div>
         <Button appearance="subtle" icon={<ArrowLeft20Regular />} onClick={() => navigate(false)}>{text("返回工具箱", "Back to toolbox")}</Button>
         <h1 ref={titleRef} tabIndex={-1}>{text("聚合热点", "Aggregation hotspot")}</h1>
         <p>{text("把电脑的聚合网络分享给手机，连接 Wi-Fi 即可使用。", "Share your aggregated connection with your phone over Wi-Fi.")}</p>
       </div></header>
-      <GlassSurface className="tool-card"><HotspotPanel /></GlassSurface>
+      <HotspotPanel />
     </div> : detail ? <div key="detail" className="tool-view page-transition-layer is-entering">
       <header className="page-heading"><div>
         <Button appearance="subtle" icon={<ArrowLeft20Regular />} onClick={() => navigate(false)}>{text("返回工具箱", "Back to toolbox")}</Button>

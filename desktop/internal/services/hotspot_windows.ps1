@@ -15,7 +15,8 @@ $config = $null
 $cleanupFailed = $false
 $sharingDetail = ''
 $privateID = $null
-$previousPrivateIDs = @()
+$previousUpIDs = @()
+$privateNetworkDetail = ''
 $gatewayAddress = ''
 
 function Publish-State([string]$state, [string]$message, [bool]$verified) {
@@ -43,12 +44,12 @@ function Publish-State([string]$state, [string]$message, [bool]$verified) {
     } | ConvertTo-Json -Depth 5 -Compress))
 }
 
-function Await-Operation($operation, [Type]$resultType) {
+function Await-Operation($operation, [Type]$resultType, [int]$timeoutMs = 25000) {
     $method = [System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {
         $_.Name -eq 'AsTask' -and $_.IsGenericMethod -and $_.GetGenericArguments().Count -eq 1 -and $_.GetParameters().Count -eq 1
     } | Select-Object -First 1
     $task = $method.MakeGenericMethod($resultType).Invoke($null, @($operation))
-    if (-not $task.Wait(25000)) { $operation.Cancel(); throw 'Windows operation timed out' }
+    if (-not $task.Wait($timeoutMs)) { $operation.Cancel(); throw 'Windows operation timed out' }
     return $task.Result
 }
 
@@ -88,25 +89,39 @@ function Get-SharingVerdict($shared, [guid]$publicID) {
 function Test-Sharing([guid]$publicID) {
     $shared = @(Shared-Connections)
     $script:sharingDetail = 'expected=' + $publicID.ToString() + '; observed=' + (($shared | ForEach-Object { $_.Name + ' [' + $_.Guid.ToString() + '] role=' + $_.Role }) -join ', ')
-    $script:sharingDetail += '; WinRT=' + [string]$manager.TetheringOperationalState + '; hotspot_adapter=' + [string]$script:privateID + '; gateway=' + $script:gatewayAddress
+    $script:sharingDetail += '; WinRT=' + [string]$manager.TetheringOperationalState + '; hotspot_adapter=' + [string]$script:privateID + '; gateway=' + $script:gatewayAddress + '; readiness=' + $script:privateNetworkDetail
     return Get-SharingVerdict $shared $publicID
 }
 
 function Test-PrivateNetwork {
     $script:gatewayAddress = ''
+    $script:privateNetworkDetail = 'WinRT is not On'
     if ([string]$manager.TetheringOperationalState -ne 'On') { return $false }
+    # Wi-Fi 7 drivers may expose the AP using the vendor description (WLAN 12,
+    # for example). Use numeric media metadata as well as the legacy name.
+    # Snapshot ALL previously Up adapters so an existing uplink cannot qualify.
     $candidates = @(Get-NetAdapter -IncludeHidden | Where-Object {
-        $_.InterfaceDescription -like '*Wi-Fi Direct*' -and $_.Status -eq 'Up' -and
+        ($_.InterfaceDescription -like '*Wi-Fi Direct*' -or $_.InterfaceType -eq 71 -or $_.NdisPhysicalMedium -in @(1, 9)) -and $_.Status -eq 'Up' -and
         (($null -ne $script:privateID -and [guid]$_.InterfaceGuid -eq $script:privateID) -or
-         ($null -eq $script:privateID -and [guid]$_.InterfaceGuid -notin $script:previousPrivateIDs))
+         ($null -eq $script:privateID -and [guid]$_.InterfaceGuid -notin $script:previousUpIDs))
     })
-    if ($candidates.Count -ne 1) { return $false }
-    $addresses = @(Get-NetIPAddress -InterfaceIndex $candidates[0].ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object {
-        $_.AddressState -eq 'Preferred' -and $_.IPAddress -ne '0.0.0.0' -and $_.IPAddress -notlike '169.254.*' -and $_.IPAddress -notlike '127.*'
+    # A newly connected Wi-Fi uplink must not be mistaken for the AP. Read all
+    # routes so an empty default-route set is a normal result, not a CIM error.
+    $uplinkIndices = @(Get-NetRoute -AddressFamily IPv4 -ErrorAction Stop | Where-Object { $_.DestinationPrefix -eq '0.0.0.0/0' } | ForEach-Object { $_.InterfaceIndex })
+    $candidates = @($candidates | Where-Object { $_.ifIndex -notin $uplinkIndices })
+    $script:privateNetworkDetail = 'candidates=' + (($candidates | ForEach-Object { [string]$_.InterfaceGuid + ' (' + $_.Name + ', ' + $_.InterfaceDescription + ')' }) -join ', ')
+    $ready = @(foreach ($candidate in $candidates) {
+        $addresses = @(Get-NetIPAddress -InterfaceIndex $candidate.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object {
+            $_.AddressState -eq 'Preferred' -and $_.IPAddress -ne '0.0.0.0' -and $_.IPAddress -notlike '169.254.*' -and $_.IPAddress -notlike '127.*'
+        })
+        if ($addresses.Count -gt 0) {
+            [PSCustomObject]@{ Guid = [guid]$candidate.InterfaceGuid; Address = [string]$addresses[0].IPAddress }
+        }
     })
-    if ($addresses.Count -eq 0) { return $false }
-    $script:privateID = [guid]$candidates[0].InterfaceGuid
-    $script:gatewayAddress = [string]$addresses[0].IPAddress
+    $script:privateNetworkDetail += '; ready_count=' + $ready.Count
+    if ($ready.Count -ne 1) { return $false }
+    $script:privateID = $ready[0].Guid
+    $script:gatewayAddress = $ready[0].Address
     return $true
 }
 
@@ -128,6 +143,68 @@ function Get-StartFailure([string]$status) {
         return 'Wi-Fi 无线设备未开启（WiFiDeviceOff）。请在 Windows 快速设置中开启 Wi-Fi、关闭飞行模式；无需连接其他 Wi-Fi，然后重试。若 Wi-Fi 已开启，请检查无线网卡是否被禁用或驱动异常。'
     }
     return ('Windows tethering status: ' + $status)
+}
+
+function Read-ConnectionProfiles { $network::GetConnectionProfiles() }
+
+function Read-HostNetworkAdapters {
+    $network::GetHostNames() | ForEach-Object {
+        if ($null -ne $_.IPInformation -and $null -ne $_.IPInformation.NetworkAdapter) { $_.IPInformation.NetworkAdapter }
+    }
+}
+
+function Read-TunProfile([guid]$publicID) {
+    $observed = @(Read-ConnectionProfiles)
+    $script:sharingDetail = 'profile_expected=' + $publicID + '; profile_adapters=' + (($observed | ForEach-Object {
+        if ($null -ne $_.NetworkAdapter) { [string]$_.NetworkAdapter.NetworkAdapterId }
+    }) -join ', ')
+    $matches = @($observed | Where-Object { $null -ne $_.NetworkAdapter -and [guid]$_.NetworkAdapter.NetworkAdapterId -eq $publicID })
+    if ($matches.Count -gt 1) { throw 'Windows 返回了多个 HypoMux-Tun 连接配置，无法唯一确认共享出口。' }
+    if ($matches.Count -eq 1) { return $matches[0] }
+    # Windows 10 may omit the TUN from the global profile list while host IP
+    # information still exposes its WinRT adapter. Query that SAME adapter.
+    # ProfileName may equal the upstream Wi-Fi name; only the GUID is identity.
+    $adapters = @(Read-HostNetworkAdapters | Where-Object { [guid]$_.NetworkAdapterId -eq $publicID })
+    $script:sharingDetail += '; host_adapter_matches=' + $adapters.Count
+    if ($adapters.Count -eq 0) { return $null }
+    $profileType = [Windows.Networking.Connectivity.ConnectionProfile, Windows.Networking.Connectivity, ContentType=WindowsRuntime]
+    try { $profile = Await-Operation ($adapters[0].GetConnectedProfileAsync()) $profileType 2000 }
+    catch { $script:sharingDetail += '; connected_profile_error=' + $_.Exception.Message; return $null }
+    if ($null -eq $profile) { return $null }
+    if ($null -eq $profile.NetworkAdapter -or [guid]$profile.NetworkAdapter.NetworkAdapterId -ne $publicID) {
+        throw 'Windows 返回的连接配置不属于 HypoMux-Tun，已拒绝共享其他网卡。'
+    }
+    $script:sharingDetail += '; profile_source=adapter_connected_profile'
+    return $profile
+}
+
+function Wait-TunProfile([guid]$publicID, [int]$timeoutMs = 10000) {
+    $deadline = [DateTime]::UtcNow.AddMilliseconds($timeoutMs)
+    do {
+        if ($script:stopSignal.IsCompleted) { throw 'Desktop closed during TUN profile discovery' }
+        if (-not (Test-PublicNetwork $publicID)) { throw 'HypoMux-Tun stopped during connection profile discovery' }
+        $profile = Read-TunProfile $publicID
+        if ($null -ne $profile) { return $profile }
+        if ($script:stopSignal.Wait(500)) { throw 'Desktop closed during TUN profile discovery' }
+    } while ([DateTime]::UtcNow -lt $deadline)
+    throw 'Windows 未提供 HypoMux-Tun 的连接配置，暂时无法开启聚合热点。请停止并重新启动 TUN 后重试；若仍失败，请复制共享诊断。'
+}
+
+function Set-HotspotBand($desired, [string]$band, [bool]$bandAvailable) {
+    if ($band -notin @('auto', '2.4', '5')) { throw 'Unsupported band' }
+    # Band and IsBandSupported were added in Windows 10 2004. Older systems
+    # can still start a hotspot with the system-selected band.
+    if (-not $bandAvailable) {
+        if ($band -ne 'auto') { throw '当前 Windows 不支持指定热点频段，请选择自动频段或升级到 Windows 10 2004 及以上版本。' }
+        return
+    }
+    $bandType = [Windows.Networking.NetworkOperators.TetheringWiFiBand, Windows.Networking.NetworkOperators, ContentType=WindowsRuntime]
+    switch ($band) {
+        'auto' { $desired.Band = $bandType::Auto }
+        '2.4' { $desired.Band = $bandType::TwoPointFourGigahertz }
+        '5' { $desired.Band = $bandType::FiveGigahertz }
+    }
+    if (-not $desired.IsBandSupported($desired.Band)) { throw 'The Wi-Fi adapter does not support the selected band' }
 }
 
 function Stop-OwnedHotspot {
@@ -172,34 +249,27 @@ public static class HypoMuxHotspotLifetime {
     $tun = @(Get-NetAdapter -IncludeHidden | Where-Object { $_.Name -eq 'HypoMux-Tun' -and $_.Status -eq 'Up' })
     if ($tun.Count -ne 1) { throw 'A running HypoMux-Tun adapter is required' }
     $publicID = [guid]$tun[0].InterfaceGuid
-    $profiles = @($network::GetConnectionProfiles() | Where-Object {
-        $null -ne $_.NetworkAdapter -and $_.NetworkAdapter.NetworkAdapterId -eq $publicID
-    })
-    if ($profiles.Count -ne 1) { throw 'Windows did not expose a shareable HypoMux-Tun connection profile' }
+    $profile = Wait-TunProfile $publicID
     $phase = 'tethering capability'
-    $capability = $tethering::GetTetheringCapabilityFromConnectionProfile($profiles[0])
+    $capability = $tethering::GetTetheringCapabilityFromConnectionProfile($profile)
     if ([string]$capability -ne 'Enabled') { throw ('Tethering capability: ' + [string]$capability) }
-    $manager = $tethering::CreateFromConnectionProfile($profiles[0])
+    $manager = $tethering::CreateFromConnectionProfile($profile)
     if ([string]$manager.TetheringOperationalState -ne 'Off') { throw 'An existing Windows hotspot is active; turn it off before starting HypoMux hotspot' }
     if (@(Shared-Connections).Count -ne 0) { throw 'Internet Connection Sharing is already in use; existing sharing was preserved' }
     $original = $manager.GetCurrentAccessPointConfiguration()
     $desired = New-Object Windows.Networking.NetworkOperators.NetworkOperatorTetheringAccessPointConfiguration
     $desired.Ssid = [string]$config.ssid
     $desired.Passphrase = [string]$config.password
-    $bandType = [Windows.Networking.NetworkOperators.TetheringWiFiBand, Windows.Networking.NetworkOperators, ContentType=WindowsRuntime]
-    switch ([string]$config.band) {
-        'auto' { $desired.Band = $bandType::Auto }
-        '2.4' { $desired.Band = $bandType::TwoPointFourGigahertz }
-        '5' { $desired.Band = $bandType::FiveGigahertz }
-        default { throw 'Unsupported band' }
-    }
-    if (-not $desired.IsBandSupported($desired.Band)) { throw 'The Wi-Fi adapter does not support the selected band' }
+    $apiInformation = [Windows.Foundation.Metadata.ApiInformation, Windows.Foundation, ContentType=WindowsRuntime]
+    $configurationType = 'Windows.Networking.NetworkOperators.NetworkOperatorTetheringAccessPointConfiguration'
+    $bandAvailable = $apiInformation::IsPropertyPresent($configurationType, 'Band') -and $apiInformation::IsMethodPresent($configurationType, 'IsBandSupported')
+    Set-HotspotBand $desired ([string]$config.band) $bandAvailable
     if ($stopSignal.IsCompleted) { throw 'Desktop closed before hotspot startup' }
     $phase = 'access point configuration'
     $configured = $true
     Await-Action ($manager.ConfigureAccessPointAsync($desired))
     $phase = 'hotspot startup'
-    $previousPrivateIDs = @(Get-NetAdapter -IncludeHidden | Where-Object { $_.InterfaceDescription -like '*Wi-Fi Direct*' -and $_.Status -eq 'Up' } | ForEach-Object { [guid]$_.InterfaceGuid })
+    $previousUpIDs = @(Get-NetAdapter -IncludeHidden | Where-Object { $_.Status -eq 'Up' } | ForEach-Object { [guid]$_.InterfaceGuid })
     $attempted = $true
     $result = Await-Operation ($manager.StartTetheringAsync()) $resultType
     if ([string]$result.Status -ne 'Success') { throw (Get-StartFailure ([string]$result.Status)) }
@@ -212,7 +282,7 @@ public static class HypoMuxHotspotLifetime {
         Start-Sleep -Milliseconds 500
     } while ([DateTime]::UtcNow -lt $verificationDeadline)
     $verdict = Test-Sharing $publicID
-    if (-not $networkReady) { throw 'Windows 热点未准备好：未检测到本次启动的 Wi-Fi Direct 网卡及有效 IPv4 网关，已请求关闭热点。' }
+    if (-not $networkReady) { throw 'Windows 热点未准备好：未能唯一识别本次启动的热点无线网卡及有效 IPv4 网关，已请求关闭热点。' }
     if ($verdict -eq 'mismatch') { throw '检测到共享接口与本次 HypoMux 热点不匹配，已请求关闭热点。' }
     Publish-Running $verdict
     $phase = 'hotspot monitoring'

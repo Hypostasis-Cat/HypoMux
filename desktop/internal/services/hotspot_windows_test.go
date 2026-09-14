@@ -12,14 +12,7 @@ import (
 )
 
 func TestHotspotWindowsSharingVerdictAndPrivateReadiness(t *testing.T) {
-	executable, err := resolveWindowsPowerShellExecutable()
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Execute the production functions against fake adapters, without WinRT,
-	// Core, COM, or changes to any network adapter.
-	functions := strings.Split(strings.ReplaceAll(hotspotScript, "\r\n", "\n"), "\ntry {\n")[0]
-	script := functions + `
+	runHotspotFunctions(t, `
 $publicID = [guid]'00000000-0000-0000-0000-000000000001'
 $script:privateID = [guid]'00000000-0000-0000-0000-000000000002'
 $otherID = [guid]'00000000-0000-0000-0000-000000000003'
@@ -38,6 +31,7 @@ $fakeAddress = '192.168.137.1'
 $fakeState = 'Up'
 function Get-NetAdapter { param([switch]$IncludeHidden) [PSCustomObject]@{ InterfaceDescription = 'Microsoft Wi-Fi Direct Virtual Adapter'; Status = $fakeState; InterfaceGuid = '00000000-0000-0000-0000-000000000002'; ifIndex = 23 } }
 function Get-NetIPAddress { param($InterfaceIndex, $AddressFamily, $ErrorAction) [PSCustomObject]@{ AddressState = 'Preferred'; IPAddress = $fakeAddress } }
+function Get-NetRoute { param($AddressFamily, $ErrorAction) @() }
 $script:privateID = $null
 if (-not (Test-PrivateNetwork)) { throw 'new operational AP rejected' }
 if ($script:gatewayAddress -ne '192.168.137.1') { throw 'gateway missing' }
@@ -48,8 +42,47 @@ $fakeState = 'Disconnected'
 if (Test-PrivateNetwork) { throw 'disconnected AP accepted' }
 $fakeState = 'Up'
 $script:privateID = $null
-$script:previousPrivateIDs = @([guid]'00000000-0000-0000-0000-000000000002')
+$script:previousUpIDs = @([guid]'00000000-0000-0000-0000-000000000002')
 if (Test-PrivateNetwork) { throw 'pre-existing AP accepted' }
+# Reproduce the report: vendor-named WLAN 12 becomes Up while WLAN and WLAN 11
+# remain connected. No adapter description contains Wi-Fi Direct.
+$apID = [guid]'00000000-0000-0000-0000-000000000002'
+$ap = [PSCustomObject]@{ Name = 'WLAN 12'; InterfaceDescription = 'MediaTek Wi-Fi 7 MT7927 Wireless LAN Card'; InterfaceType = 71; NdisPhysicalMedium = 9; Status = 'Disconnected'; InterfaceGuid = $apID.ToString('B'); ifIndex = 13 }
+$uplink = [PSCustomObject]@{ Name = 'WLAN 11'; InterfaceDescription = $ap.InterfaceDescription; InterfaceType = 71; NdisPhysicalMedium = 9; Status = 'Up'; InterfaceGuid = $otherID; ifIndex = 9 }
+$qualcomm = [PSCustomObject]@{ Name = 'WLAN'; InterfaceDescription = 'Qualcomm FastConnect 7800 Wi-Fi 7'; InterfaceType = 71; Status = 'Up'; InterfaceGuid = $publicID; ifIndex = 29 }
+$fakeAdapters = @($ap, $uplink, $qualcomm)
+$fakeRoutes = @([PSCustomObject]@{ DestinationPrefix = '0.0.0.0/0'; InterfaceIndex = 9 })
+$addressState = 'Preferred'
+function Get-NetAdapter { param([switch]$IncludeHidden) $fakeAdapters }
+function Get-NetRoute { param($AddressFamily, $ErrorAction) $fakeRoutes }
+function Get-NetIPAddress { param($InterfaceIndex, $AddressFamily, $ErrorAction) [PSCustomObject]@{ AddressState = $addressState; IPAddress = $fakeAddress } }
+$script:previousUpIDs = @(Get-NetAdapter -IncludeHidden | Where-Object { $_.Status -eq 'Up' } | ForEach-Object { [guid]$_.InterfaceGuid })
+if (Test-PrivateNetwork) { throw 'disconnected vendor AP accepted' }
+$ap.Status = 'Up'
+if (-not (Test-PrivateNetwork)) { throw 'vendor-named Wi-Fi 7 AP rejected' }
+if ($script:privateID -ne $apID -or $script:gatewayAddress -ne '192.168.137.1') { throw 'wrong vendor AP selected' }
+if (-not (Test-PrivateNetwork)) { throw 'pinned vendor AP rejected by watchdog' }
+$addressState = 'Tentative'
+if (Test-PrivateNetwork) { throw 'tentative vendor AP address accepted' }
+$addressState = 'Preferred'
+$fakeAddress = '192.168.173.1'
+if (-not (Test-PrivateNetwork)) { throw 'non-default hotspot subnet rejected' }
+$fakeRoutes += [PSCustomObject]@{ DestinationPrefix = '0.0.0.0/0'; InterfaceIndex = 13 }
+if (Test-PrivateNetwork) { throw 'AP acquiring an upstream default route accepted' }
+$script:privateID = $null
+if (Test-PrivateNetwork) { throw 'new Wi-Fi uplink accepted as AP' }
+$fakeRoutes = @()
+$ap.InterfaceType = 6
+$ap.NdisPhysicalMedium = 14
+if (Test-PrivateNetwork) { throw 'new Ethernet adapter accepted as AP' }
+$ap.NdisPhysicalMedium = 9
+if (-not (Test-PrivateNetwork)) { throw 'native wireless medium fallback rejected' }
+$script:privateID = $null
+$script:previousUpIDs = @($publicID)
+if (Test-PrivateNetwork) { throw 'ambiguous new wireless adapters accepted' }
+$script:privateID = $apID
+$fakeAdapters = @($uplink, $qualcomm)
+if (Test-PrivateNetwork) { throw 'watchdog switched to another wireless adapter' }
 $manager.TetheringOperationalState = 'Off'
 if (Test-PrivateNetwork) { throw 'stopped hotspot accepted' }
 if ((Get-StartFailure 'WiFiDeviceOff') -notlike '*WiFiDeviceOff*') { throw 'radio error code lost' }
@@ -90,7 +123,18 @@ try {
     $state = $output.ToString() | ConvertFrom-Json
     if ($state.devices_available -or $state.state -ne 'running' -or $state.clients -ne 1) { throw 'optional client failure affected status' }
 } finally { [Console]::SetOut($originalOutput); $output.Dispose() }
-`
+`)
+}
+
+func runHotspotFunctions(t *testing.T, body string) {
+	t.Helper()
+	executable, err := resolveWindowsPowerShellExecutable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Execute production functions against fakes, without changing networking.
+	functions := strings.Split(strings.ReplaceAll(hotspotScript, "\r\n", "\n"), "\ntry {\n")[0]
+	script := functions + body
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	command := exec.CommandContext(ctx, executable, "-NoProfile", "-NonInteractive", "-Command", script)
@@ -98,6 +142,121 @@ try {
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("%v: %s", err, output)
 	}
+}
+
+func TestHotspotWindowsIgnoresUnreadySiblingInterfaces(t *testing.T) {
+	runHotspotFunctions(t, `
+$manager = [PSCustomObject]@{ TetheringOperationalState = 'On' }
+$apID = [guid]'00000000-0000-0000-0000-000000000002'
+$siblingID = [guid]'00000000-0000-0000-0000-000000000003'
+$adapters = @(
+    [PSCustomObject]@{ InterfaceGuid = $apID; ifIndex = 13; Status = 'Up'; InterfaceType = 71 },
+    [PSCustomObject]@{ InterfaceGuid = $siblingID; ifIndex = 14; Status = 'Up'; InterfaceType = 71 }
+)
+$siblingAddress = '169.254.33.2'
+$siblingState = 'Preferred'
+function Get-NetAdapter { param([switch]$IncludeHidden) $adapters }
+function Get-NetRoute { param($AddressFamily, $ErrorAction) @() }
+function Get-NetIPAddress {
+    param($InterfaceIndex, $AddressFamily, $ErrorAction)
+    if ($InterfaceIndex -eq 13) { [PSCustomObject]@{ AddressState = 'Preferred'; IPAddress = '192.168.137.1' } }
+    elseif ($siblingAddress) { [PSCustomObject]@{ AddressState = $siblingState; IPAddress = $siblingAddress } }
+}
+foreach ($address in @('169.254.33.2', '0.0.0.0', '127.0.0.1', '')) {
+    $siblingAddress = $address
+    $script:privateID = $null
+    if (-not (Test-PrivateNetwork) -or $script:privateID -ne $apID) { throw 'unready sibling blocked valid AP' }
+}
+$siblingAddress = '192.168.173.1'
+$siblingState = 'Tentative'
+$script:privateID = $null
+if (-not (Test-PrivateNetwork)) { throw 'tentative sibling blocked valid AP' }
+$siblingState = 'Preferred'
+if (-not (Test-PrivateNetwork) -or $script:privateID -ne $apID) { throw 'watchdog lost pinned AP when sibling became ready' }
+$script:privateID = $null
+if (Test-PrivateNetwork) { throw 'two ready AP candidates accepted' }
+$script:privateID = $apID
+$adapters = @($adapters[1])
+if (Test-PrivateNetwork) { throw 'missing pinned AP replaced by sibling' }
+`)
+}
+
+func TestHotspotWindowsTunProfileDiscovery(t *testing.T) {
+	runHotspotFunctions(t, `
+$tunID = [guid]'00000000-0000-0000-0000-000000000001'
+$otherID = [guid]'00000000-0000-0000-0000-000000000002'
+$tunAdapter = [PSCustomObject]@{ NetworkAdapterId = $tunID.ToString('B') }
+# Windows 10 can reuse the upstream profile name for the TUN. Identity must
+# come from the adapter GUID, even when both profiles have identical names.
+$tunProfile = [PSCustomObject]@{ ProfileName = 'Upstream Wi-Fi'; NetworkAdapter = $tunAdapter }
+$otherProfile = [PSCustomObject]@{ ProfileName = 'Upstream Wi-Fi'; NetworkAdapter = [PSCustomObject]@{ NetworkAdapterId = $otherID } }
+$observed = @($otherProfile, $tunProfile)
+function Read-ConnectionProfiles { $observed }
+function Read-HostNetworkAdapters { throw 'direct query unnecessary' }
+if ((Read-TunProfile $tunID) -ne $tunProfile) { throw 'matching global profile rejected' }
+$observed = @($tunProfile, $tunProfile)
+$rejected = $false
+try { Read-TunProfile $tunID } catch { $rejected = $true }
+if (-not $rejected) { throw 'ambiguous global profiles accepted' }
+$observed = @($otherProfile)
+$tunAdapter | Add-Member ScriptMethod GetConnectedProfileAsync { $script:directCalls++; return $script:directProfile }
+$script:directCalls = 0
+$script:directProfile = $tunProfile
+function Read-HostNetworkAdapters { @($otherProfile.NetworkAdapter, $tunAdapter, $tunAdapter) }
+function Await-Operation($operation, [Type]$resultType, [int]$timeoutMs) { return $operation }
+if ((Read-TunProfile $tunID) -ne $tunProfile -or $script:directCalls -ne 1) { throw 'same-adapter direct lookup failed' }
+if ($script:sharingDetail -notlike '*adapter_connected_profile*') { throw 'direct source missing from diagnostics' }
+$script:directProfile = $otherProfile
+$rejected = $false
+try { Read-TunProfile $tunID } catch { $rejected = $true }
+if (-not $rejected) { throw 'direct query accepted another adapter' }
+$script:directProfile = $null
+if ($null -ne (Read-TunProfile $tunID)) { throw 'null direct profile accepted' }
+function Read-HostNetworkAdapters { @($otherProfile.NetworkAdapter) }
+if ($null -ne (Read-TunProfile $tunID)) { throw 'physical profile used as fallback' }
+$script:stopSignal = [PSCustomObject]@{ IsCompleted = $false }
+$script:stopSignal | Add-Member ScriptMethod Wait { param($timeout) return $this.IsCompleted }
+function Test-PublicNetwork { param($id) return $true }
+$script:reads = 0
+function Read-ConnectionProfiles { $script:reads++; if ($script:reads -ge 3) { $tunProfile } }
+if ((Wait-TunProfile $tunID) -ne $tunProfile -or $script:reads -ne 3) { throw 'delayed profile not retried' }
+function Read-ConnectionProfiles { @() }
+$message = ''
+try { Wait-TunProfile $tunID 0 } catch { $message = $_.Exception.Message }
+if ($message -notlike '*HypoMux-Tun*' -or $message -notlike '*共享诊断*') { throw 'persistent absence lacks actionable error' }
+$script:stopSignal.IsCompleted = $true
+$message = ''
+try { Wait-TunProfile $tunID } catch { $message = $_.Exception.Message }
+if ($message -notlike '*Desktop closed*') { throw 'discovery ignored shutdown' }
+$script:stopSignal.IsCompleted = $false
+function Test-PublicNetwork { param($id) return $false }
+$message = ''
+try { Wait-TunProfile $tunID } catch { $message = $_.Exception.Message }
+if ($message -notlike '*stopped during*') { throw 'discovery ignored TUN disappearance' }
+`)
+}
+
+func TestHotspotWindowsBandAPIVersionCompatibility(t *testing.T) {
+	runHotspotFunctions(t, `
+$legacy = [PSCustomObject]@{ Ssid = 'test' }
+Set-HotspotBand $legacy 'auto' $false
+foreach ($band in @('2.4', '5')) {
+    $message = ''
+    try { Set-HotspotBand $legacy $band $false } catch { $message = $_.Exception.Message }
+    if ($message -notlike '*Windows 10 2004*') { throw 'missing band API did not give actionable error' }
+}
+$modern = [PSCustomObject]@{ Band = $null }
+$modern | Add-Member ScriptMethod IsBandSupported { param($band) return $true }
+foreach ($band in @('auto', '2.4', '5')) {
+    Set-HotspotBand $modern $band $true
+    $expected = @{ auto = 'Auto'; '2.4' = 'TwoPointFourGigahertz'; '5' = 'FiveGigahertz' }[$band]
+    if ([string]$modern.Band -ne $expected) { throw 'wrong band selected' }
+}
+$modern | Add-Member -Force ScriptMethod IsBandSupported { param($band) return $false }
+$rejected = $false
+try { Set-HotspotBand $modern '5' $true } catch { $rejected = $true }
+if (-not $rejected) { throw 'unsupported hardware band accepted' }
+`)
 }
 
 // Only exercise the real worker's preflight rejection. Never start a hotspot

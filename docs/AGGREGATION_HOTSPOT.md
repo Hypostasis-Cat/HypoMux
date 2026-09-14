@@ -10,13 +10,17 @@
 
 桌面 `EngineService` 提供 `HotspotStatus`、`StartHotspot`、`StopHotspot`。固定的 PowerShell 工作进程在普通用户的交互会话中使用 WinRT 热点 API；TUN 的管理员操作继续由原有 Core 承担。共享上游必须是按 GUID 找到的 `HypoMux-Tun` 连接配置，绝不回退到默认物理网卡。ICS 枚举由管理员 Core 的只读 `hotspot.inspect` 接口执行，桌面通过 IPC 将结果交给热点工作进程。只有公共接口 GUID 匹配且存在一个私有共享接口，才报告共享出口已校验。这证明共享配置正确，不等于已经证明手机联网或吞吐量提升。
 
-共享枚举使用 `EnumEveryConnection()` 方法调用，并开启严格模式，避免误读不存在的属性。用户实测确认：WinRT 启动成功后，传统 ICS 枚举仍可能为空；空列表不能证明出口配置失败。因此启动时最多等待 20 秒，检查 WinRT 为 On、本次新启用的唯一 Wi-Fi Direct 网卡及其有效 IPv4 网关。传统 ICS 列表为空时保留已就绪的热点，显示“热点已开启 · 出口待验证”，不声明手机经过聚合。列表非空时必须同时匹配 TUN 公共接口与本次热点私有接口，否则关闭。此兼容分支只确认热点和本地网关就绪，不能保证 DHCP、DNS、互联网转发或聚合已经可用。
+共享枚举使用 `EnumEveryConnection()` 方法调用，并开启严格模式，避免误读不存在的属性。用户实测确认：WinRT 启动成功后，传统 ICS 枚举仍可能为空；空列表不能证明出口配置失败。因此启动时最多等待 20 秒，检查 WinRT 为 On、本次新启用的唯一热点无线网卡及其有效 IPv4 网关。网卡识别兼容 Wi-Fi Direct 描述、InterfaceType=71，以及 NdisPhysicalMedium=1/9，不依赖厂商是否在描述中标注 Wi-Fi Direct（部分 Wi-Fi 7 驱动使用 MediaTek/Qualcomm 名称）。启动前记录所有 Up 网卡并排除这些接口，也排除带 IPv4 默认路由的接口；先排除没有 Preferred 有效 IPv4 的候选（包括 APIPA、回环和尚在地址检测中的接口），再要求就绪候选唯一；多个就绪候选时拒绝猜测，运行中固定已识别的 GUID。传统 ICS 列表为空时保留已就绪的热点，显示“热点已开启 · 出口待验证”，不声明手机经过聚合。列表非空时必须同时匹配 TUN 公共接口与本次热点私有接口，否则关闭。此兼容分支只确认热点和本地网关就绪，不能保证 DHCP、DNS、互联网转发或聚合已经可用。
 
-详情页显示 WinRT 状态、热点网卡 GUID、网关及实际共享接口用于诊断。升级需同时更新桌面和 Core，旧 Core 缺少 `hotspot.inspect` 时会在启动热点前明确报错。
+详情页显示 WinRT 状态、热点网卡 GUID、网关、就绪检测候选网卡及实际共享接口用于诊断。升级需同时更新桌面和 Core，旧 Core 缺少 `hotspot.inspect` 时会在启动热点前明确报错。
 
 已存在的热点/ICS 会阻止启动，避免覆盖其他共享。工作进程每三秒检查 TUN、热点网卡与共享出口；明确发现出口不匹配、TUN 消失、本地网关失效或父进程管道关闭时停止热点。传统 ICS 从有记录变为空记录时只撤销“出口已验证”标记。正常停止聚合时先关闭热点，再停止 TUN。退出和启动失败时尝试恢复原热点配置，清理失败会显示错误。密码仅通过标准输入传给工作进程，不放入命令行、通用设置或日志；启动时以 Windows 当前用户 DPAPI 加密保存到 hotspot.dat，重新打开软件可恢复，未提交的页面编辑保留在内存中；Windows 在运行期间会持久化热点配置，正常关闭后恢复原配置。工作进程被强制结束或系统断电时不能保证恢复完成，应在 Windows 设置中检查。
 
 ## 兼容性边界
+
+Windows 10 22H2（19045）实测：`Get-NetConnectionProfile` 可见 TUN，但 WinRT `GetConnectionProfiles()` 不返回它；`GetHostNames()` 的本地 IP 信息仍暴露同一 GUID 的网卡。发现流程现增加最多约 10 秒重试，并通过该网卡的 `GetConnectedProfileAsync()` 补充查询，再校验返回配置的网卡 GUID。配置名称可能沿用上游 Wi-Fi 名称，不作为身份依据。群友已确认此直接查询返回 TUN GUID 且共享能力为 Enabled；尚待新构建的完整热点启停与手机联网复测。未取得配置时输出发现诊断，不改用默认物理上游。启动总等待预算为 120 秒，以容纳各阶段独立超时。
+
+频段 API 使用运行时能力检测：Windows 10 2004 之前缺少 Band/IsBandSupported 时，自动频段沿用系统选择；指定 2.4/5 GHz 则明确提示改选自动或升级系统，不再因访问不存在的成员而失败。频段 API 版本依据：[Microsoft Band 文档](https://learn.microsoft.com/en-us/uwp/api/windows.networking.networkoperators.networkoperatortetheringaccesspointconfiguration.band)。此分支已通过模拟回归，仍需旧版 Windows 实机确认。
 
 `WiFiDeviceOff` 表示 Windows 无线设备未开启：需打开 Wi-Fi 并关闭飞行模式，无需连接另一个 Wi-Fi。失败后若工作进程已经退出，下一次启动会重新执行实时热点关闭状态和 ICS 检查，不再被旧的“清理未完成”标记永久锁住。系统仍有热点或共享时依旧拒绝接管。停止接口报错但 Windows 已确认 Off 时，按已经关闭处理；未确认关闭仍保留清理失败提示。
 
