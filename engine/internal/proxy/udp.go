@@ -230,13 +230,14 @@ func (a *udpAssociation) createFlow(
 	if a.channel == ChannelDirect {
 		return a.createDirectFlow(clientAddress, target, network, firstPayload)
 	}
-	excluded := make(map[string]struct{}, len(a.scheduler.adapters))
-	for _, adapter := range a.scheduler.adapters {
+	adapters := a.scheduler.snapshot().Adapters
+	excluded := make(map[string]struct{}, len(adapters))
+	for _, adapter := range adapters {
 		if !adapterSupportsNetwork(adapter, network) {
 			excluded[adapter.Name] = struct{}{}
 		}
 	}
-	attempts := len(a.scheduler.adapters) - len(excluded)
+	attempts := len(adapters) - len(excluded)
 	if attempts > 2 {
 		attempts = 2
 	}

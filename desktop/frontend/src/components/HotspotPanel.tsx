@@ -1,12 +1,29 @@
 import { Badge, Button, Dropdown, Field, Input, Option, Spinner, Switch } from "@fluentui/react-components";
 import { Wifi124Regular, Phone24Regular, ShieldCheckmark24Regular } from "@fluentui/react-icons";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n/i18n";
 import { appServices, type HotspotConfig, type HotspotStatus } from "../platform/services";
 import { hotspotDraft } from "./hotspotDraft";
 import { QRCodeSVG } from "qrcode.react";
 import { createHotspotPassword, hotspotQRPayload } from "./hotspotAccess";
 import { runHotspotOperation, useHotspotOperation } from "./hotspotOperation";
+
+// Keep inputs mounted and animate only changed content, never the card shell.
+function useContentTransition(state: string) {
+  const ref = useRef<HTMLDivElement>(null);
+  const previous = useRef(state);
+  useLayoutEffect(() => {
+    if (previous.current === state) return;
+    previous.current = state;
+    if (!ref.current?.animate || window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+    const animation = ref.current.animate(
+      [{ opacity: 0.35, transform: "translateY(5px)" }, { opacity: 1, transform: "translateY(0)" }],
+      { duration: 220, easing: "cubic-bezier(0.2, 0, 0, 1)" },
+    );
+    return () => animation.cancel();
+  }, [state]);
+  return ref;
+}
 
 export function HotspotPanel() {
   const { locale } = useI18n();
@@ -25,7 +42,8 @@ export function HotspotPanel() {
   const [showQR, setShowQR] = useState(false);
   const [error, setError] = useState("");
   const [pollError, setPollError] = useState("");
-  useEffect(() => { if (status?.state !== "running" || pollError || pending) setShowQR(false); }, [status?.state, pollError, pending]);
+  const changingHotspot = pending && (sharedOperation === "start" || sharedOperation === "stop");
+  useEffect(() => { if (status?.state !== "running" || pollError || changingHotspot) setShowQR(false); }, [status?.state, pollError, changingHotspot]);
   const [notice, setNotice] = useState("");
   const [action, setAction] = useState<"start" | "stop" | "save">();
   const [showPassword, setShowPassword] = useState(false);
@@ -66,8 +84,12 @@ export function HotspotPanel() {
     return () => { cancelled = true; mounted.current = false; clearTimeout(timer); };
   }, []);
   const active = status?.state === "running" || status?.state === "starting" || status?.state === "stopping";
-  const canShowQR = status?.state === "running" && !pollError && !pending && !!config.password && config.ssid === status.ssid;
+  const canShowQR = status?.state === "running" && !pollError && !changingHotspot && !!config.password && config.ssid === status.ssid;
   const qrVisible = showQR && canShowQR;
+  const settingsRef = useContentTransition(loadingConfig ? "loading" : active ? "active" : "editable");
+  const connectionState = qrVisible ? "qr" : pollError ? "unavailable" : !status ? "loading" : `${status.state}-${status.ready}-${!!status.devices_available}-${!!status.devices?.length}`;
+  const connectionRef = useContentTransition(connectionState);
+  const prerequisiteRef = useContentTransition(String(!!(status?.ready || active)));
   const band = (active ? status?.band : config.band) ?? "auto";
   const bandLabel = band === "5" ? "5 GHz" : band === "2.4" ? "2.4 GHz" : text("自动", "Automatic");
   const validName = config.ssid.trim().length > 0 && new TextEncoder().encode(config.ssid).length <= 32 && !/[\0\r\n]/.test(config.ssid);
@@ -128,9 +150,10 @@ export function HotspotPanel() {
         disabled={pending || status?.state === "stopping" || !status || (!active && (loadingConfig || !!pollError || !status.ready || !validName || !validPassword))}
         onChange={(_, data) => void change(data.checked)} />
     </div>
-    <div className="hotspot-prerequisite"><ShieldCheckmark24Regular aria-hidden="true" /><div><strong>{status?.ready || active ? text("聚合网络共享", "Aggregation network sharing") : text("先启动聚合，再分享网络", "Start aggregation to share your network")}</strong><p>{status?.ready || active ? text("以 TUN 聚合网络作为热点出口；停止聚合时，热点会自动关闭。", "Shares your TUN aggregation connection. Stopping aggregation also closes the hotspot.") : text("请先在首页选择网卡，以 TUN 模式启动聚合，然后在这里开启热点。", "Select your adapters and start aggregation in TUN mode on Home, then enable the hotspot here.")}</p></div></div>
+    <div className="hotspot-prerequisite"><ShieldCheckmark24Regular aria-hidden="true" /><div ref={prerequisiteRef}><strong>{status?.ready || active ? text("聚合网络共享", "Aggregation network sharing") : text("先启动聚合，再分享网络", "Start aggregation to share your network")}</strong><p>{status?.ready || active ? text("以 TUN 聚合网络作为热点出口；停止聚合时，热点会自动关闭。", "Shares your TUN aggregation connection. Stopping aggregation also closes the hotspot.") : text("请先在首页选择网卡，以 TUN 模式启动聚合，然后在这里开启热点。", "Select your adapters and start aggregation in TUN mode on Home, then enable the hotspot here.")}</p></div></div>
     <div className="hotspot-layout"><div className="hotspot-settings hotspot-surface glass-surface">
     <header className="hotspot-section-heading"><h2>{text("网络设置", "Network settings")}</h2><span>{active ? text("使用中", "In use") : text("开启前可编辑", "Edit before sharing")}</span></header>
+    <div className="hotspot-settings-content" ref={settingsRef}>
     <div className="hotspot-fields">
       <Field label={text("热点名称", "Network name")} validationState={!active && !validName ? "error" : "none"} validationMessage={!active && !validName ? text("请输入 1–32 个 UTF-8 字节，不能包含换行。", "Enter 1–32 UTF-8 bytes without line breaks.") : undefined} hint={text("在手机 Wi-Fi 列表中显示的名称", "The name shown in your phone’s Wi-Fi list")}>
         <Input value={active ? status?.ssid : config.ssid} disabled={loadingConfig || pending || active} onChange={(_, data) => setConfig(value => ({ ...value, ssid: data.value }))} />
@@ -153,31 +176,32 @@ export function HotspotPanel() {
       </Field>
     </div>
     <div className="hotspot-actions">
-      <Button appearance="primary" disabled={loadingConfig || pending || active || !validName || !validPassword} onClick={() => void save()}>{text("保存设置", "Save settings")}</Button><Button disabled={loadingConfig || pending || active} onClick={generatePassword}>{text("生成密码", "Generate password")}</Button>
+      <Button appearance="primary" disabled={loadingConfig || pending || status?.state === "starting" || status?.state === "stopping" || !validName || !validPassword} onClick={() => void save()}>{text("保存设置", "Save settings")}</Button><Button disabled={loadingConfig || pending || active} onClick={generatePassword}>{text("生成密码", "Generate password")}</Button>
       <Button disabled={loadingConfig || !validPassword} onClick={() => void copy(config.password)}>{text("复制密码", "Copy password")}</Button>
     </div>
-    <p className="hotspot-save-hint">{active ? text("修改名称、密码或频段前，请先关闭热点。", "Turn off the hotspot before editing its name, password or band.") : text("可提前保存设置；开启时也会自动加密保存。", "You can save settings in advance. Enabling also saves them encrypted.")}</p>
+    <p className="hotspot-save-hint">{active ? text("热点运行中仍可保存设置；修改名称、密码或频段前，请先关闭热点。", "Settings can be saved while the hotspot is on. Turn it off before editing its name, password or band.") : text("可提前保存设置；开启时也会自动加密保存。", "You can save settings in advance. Enabling also saves them encrypted.")}</p>
+    </div>
     <div className="hotspot-feedback" tabIndex={0} aria-label={text("操作与状态提示", "Operation and status messages")}>
     {notice && <p className="hotspot-notice" role="status">{notice}</p>}
     {status?.state === "failed" && !status.cleanup_complete && <p className="hotspot-error" role="alert">{status.hotspot_off_confirmed === true
       ? text("热点已关闭，但原配置未完全恢复。请在 Windows 移动热点设置中检查名称、密码和频段。", "The hotspot is off, but its original settings were not fully restored. Check the name, password and band in Windows Mobile hotspot settings.")
       : text("尚未确认热点已关闭。请在 Windows 设置中检查并关闭移动热点，然后重新开启聚合热点。", "Hotspot shutdown is unconfirmed. Check and turn off Mobile hotspot in Windows Settings before starting again.")}</p>}
-    {(error || pollError || status?.message) && <p className="hotspot-error" role={error || pollError || status?.state === "failed" ? "alert" : "status"}>{error || pollError || status?.message}</p>}
+    {(error || pollError || (status?.state === "failed" && status.message)) && <p className="hotspot-error" role={error || pollError || status?.state === "failed" ? "alert" : "status"}>{error || pollError || status?.message}</p>}
     </div></div><aside className="hotspot-connect hotspot-surface glass-surface" aria-label={text("手机连接", "Phone connection")}>
     <header className="hotspot-section-heading"><h2>{text("连接你的设备", "Connect your devices")}</h2><Phone24Regular aria-hidden="true" /></header>
-    <div className="hotspot-connect-body" id="hotspot-connection-content">
-    {qrVisible ? <div className="hotspot-qr-content hotspot-content-enter" key="qr">
+    <div className="hotspot-connect-body" ref={connectionRef} id="hotspot-connection-content">
+    {qrVisible ? <div className="hotspot-qr-content" key="qr">
       <strong>{status?.ssid}</strong>
       <QRCodeSVG value={hotspotQRPayload(config)} size={224} level="M" marginSize={4} title={text("Wi-Fi 连接二维码", "Wi-Fi connection QR code")} />
       <p>{text("用手机相机或 WLAN 扫一扫连接。二维码包含热点密码，请只向需要连接的人展示。", "Scan with your phone camera or Wi-Fi scanner. This code contains the network password; show it only to people you want to connect.")}</p>
-    </div> : <div className="hotspot-device-view hotspot-content-enter" key="devices">
+    </div> : <div className="hotspot-device-view" key="devices">
     <div className="hotspot-connect-intro"><span className="hotspot-phone-icon" aria-hidden="true"><Wifi124Regular /></span><strong>{status?.state === "running" && !pollError ? status.ssid : text("准备好，随时连接", "Ready when you are")}</strong><p>{status?.state === "running" && !pollError ? text("打开手机 Wi-Fi，选择此网络", "Choose this network in your phone’s Wi-Fi settings") : text("开启热点后，手机、平板都可以加入", "Once enabled, phones and tablets can join")}</p></div>
     {!active && <ol className="hotspot-connect-steps"><li>{text("在电脑上启动 TUN 聚合", "Start TUN aggregation on your PC")}</li><li>{text("开启本页的聚合热点", "Enable the hotspot on this page")}</li><li>{text("手机选择热点，输入密码连接", "Select the network and enter its password")}</li></ol>}
     {active && !pollError && <div className="hotspot-devices">
       <div className="hotspot-section-heading"><strong>{text("连接设备", "Connected devices")}</strong>{status?.state === "running" && <Badge appearance="tint" aria-label={`${text("已连接设备", "Connected devices")}: ${status.clients}`}>{status.clients}</Badge>}</div>
       {!status?.devices_available ? <p>{text("Windows 暂未提供设备明细，不影响热点使用。", "Windows device details are unavailable. The hotspot can still be used.")}</p>
         : !status.devices?.length ? <p>{text("等待设备连接，请在手机 WLAN 设置中选择上面的热点名称。", "Waiting for devices. Select the network above in your phone’s Wi-Fi settings.")}</p>
-        : <ul>{status.devices.map((device, index) => <li key={`${device.mac}-${index}`}><span>{device.hosts?.join(" · ") || text("未命名设备", "Unnamed device")}</span><code>{device.mac}</code></li>)}</ul>}
+        : <ul tabIndex={0} aria-label={text("已连接设备列表", "Connected device list")}>{status.devices.map((device, index) => <li key={`${device.mac}-${index}`}><span>{device.hosts?.join(" · ") || text("未命名设备", "Unnamed device")}</span><code>{device.mac}</code></li>)}</ul>}
     </div>}
     </div>}
     </div>
@@ -185,6 +209,7 @@ export function HotspotPanel() {
     </aside></div>
     <details className="hotspot-error"><summary>{text("共享诊断", "Sharing diagnostics")}</summary>
       <p>{text("热点已开启只表示 Wi-Fi 可接入；设备数量表示 Windows 已检测到连接。出口已校验表示共享接口匹配，但不是手机互联网测速结果。", "Hotspot on means Wi-Fi is available; the device count reflects Windows connections. Verified egress confirms the sharing interfaces, not a phone internet speed test.")}</p>
+      {status?.state !== "failed" && status?.message && <p>{status.message}</p>}
       {!status?.sharing_verified && <p>{text("Windows 未提供共享接口记录时，仍可正常使用热点。若手机能连接但无法上网，请先检查电脑聚合是否能上网，再复制诊断排查。", "When Windows omits sharing records, the hotspot can still work. If a phone connects without internet, check internet access through PC aggregation, then copy these diagnostics.")}</p>}
       {status?.updated_at && <p>{text("状态采样时间", "Status sampled at")}: {new Date(status.updated_at).toLocaleString()}</p>}
       <p>{status?.diagnostics || text("暂无共享诊断，开启热点后将在这里显示。", "Sharing diagnostics will appear here after starting the hotspot.")}</p>

@@ -51,6 +51,7 @@ export const desktopPlatform = {
   isMaximised: () => Window.IsMaximised().catch(() => false),
   close: closeWithAnimation,
   hideToTray: () => Window.Hide().catch(ignoreOutsideWails),
+  show: () => (Call.ByName("github.com/Hypostasis-Cat/HypoMux/desktop/internal/platform/wails.DesktopHost.Show") as Promise<void>).catch(ignoreOutsideWails),
   showStartup: () =>
     (Call.ByName(
       "github.com/Hypostasis-Cat/HypoMux/desktop/internal/platform/wails.DesktopHost.ShowStartup",

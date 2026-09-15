@@ -25,17 +25,18 @@ func (s *Server) dialUpstream(
 		return nil, Adapter{}, errors.New("TUN TCP pool requires a literal IP target")
 	}
 
-	excluded := make(map[string]struct{}, len(channelScheduler.adapters))
+	adapters := channelScheduler.snapshot().Adapters
+	excluded := make(map[string]struct{}, len(adapters))
 	if targetIP != nil {
 		network := networkForIP("tcp", targetIP)
-		for _, adapter := range channelScheduler.adapters {
+		for _, adapter := range adapters {
 			if !adapterSupportsNetwork(adapter, network) {
 				excluded[adapter.Name] = struct{}{}
 			}
 		}
 	}
 
-	attempts := len(channelScheduler.adapters) - len(excluded)
+	attempts := len(adapters) - len(excluded)
 	if attempts > 2 {
 		attempts = 2
 	}

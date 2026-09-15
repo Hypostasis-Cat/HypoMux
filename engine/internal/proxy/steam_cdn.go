@@ -511,7 +511,7 @@ func (s *Server) probeSteamCandidates(ctx context.Context, generation uint64, ho
 	if len(candidates) == 0 {
 		c.note(generation, host, "", "", "dns_no_candidates")
 	}
-	for _, adapter := range s.config.Adapters {
+	for _, adapter := range s.scheduler.snapshot().Adapters {
 		var baseline []byte
 		if port == "80" {
 			answer, e := probeResolver.Resolve(ctx, dns.Query{Domain: host, RecordType: dns.RecordA, Binding: adapterDNSBinding(adapter)})
@@ -568,7 +568,7 @@ func (s *Server) probeSteamCandidates(ctx context.Context, generation uint64, ho
 }
 
 func (s *Server) steamCandidates(ctx context.Context, host string, resolver *dns.Resolver) []cdnCandidate {
-	return collectSteamCandidates(ctx, host, s.config.Adapters, resolver.Resolve, int(time.Now().Unix()/30))
+	return collectSteamCandidates(ctx, host, s.scheduler.snapshot().Adapters, resolver.Resolve, int(time.Now().Unix()/30))
 }
 
 // Bound discovery latency independently of the number of interfaces. Results

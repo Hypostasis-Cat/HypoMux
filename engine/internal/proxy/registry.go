@@ -168,7 +168,14 @@ func (r *registry) beginAddress(
 }
 
 func (r *registry) Attach(session *connection, upstream net.Conn, target string, adapter Adapter) {
+	r.mu.Lock()
 	counters := r.adapters[adapter.Name]
+	if counters == nil {
+		counters = &adapterCounters{adapter: adapter}
+		r.adapters[adapter.Name] = counters
+		r.order = append(r.order, adapter.Name)
+	}
+	r.mu.Unlock()
 	session.mu.Lock()
 	session.upstream = upstream
 	session.target = target
@@ -257,6 +264,7 @@ func (r *registry) CloseAll() {
 }
 
 func (r *registry) Snapshot(includeConnections bool) TelemetrySnapshot {
+	r.mu.RLock()
 	result := TelemetrySnapshot{
 		StartedAt: r.startedAt,
 		SampledAt: time.Now().UTC(),
@@ -279,6 +287,7 @@ func (r *registry) Snapshot(includeConnections bool) TelemetrySnapshot {
 		result.Total.BytesUp += item.BytesUp
 		result.Total.BytesDown += item.BytesDown
 	}
+	r.mu.RUnlock()
 	result.Total.Connections += r.directActive.Load()
 	result.Total.BytesUp += r.directBytesUp.Load()
 	result.Total.BytesDown += r.directBytesDown.Load()

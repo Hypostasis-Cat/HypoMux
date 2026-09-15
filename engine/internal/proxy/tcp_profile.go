@@ -47,13 +47,13 @@ func (s *Server) shouldTuneTCP(channel string) bool {
 		return true
 	}
 	if channel == "" {
-		return len(s.config.Adapters) >= 2
+		return len(s.scheduler.snapshot().Adapters) >= 2
 	}
 	if channel != ChannelAggregation {
 		return false
 	}
 	scheduler := s.schedulers[channel]
-	return scheduler != nil && len(scheduler.adapters) >= 2
+	return scheduler != nil && len(scheduler.snapshot().Adapters) >= 2
 }
 
 func (s *Server) tcpProfileName() string {

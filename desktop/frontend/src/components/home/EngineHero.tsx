@@ -131,7 +131,7 @@ export function EngineHero({
               aria-describedby={strategyHintId}
               value={strategy.label[language]}
               selectedOptions={[strategy.id]}
-              disabled={transitioning || active}
+              disabled={transitioning}
               onOptionSelect={(_, data) => {
                 const next = schedulingStrategies.find((item) => item.id === data.optionValue);
                 if (next) onWeightedChange(next.weighted);

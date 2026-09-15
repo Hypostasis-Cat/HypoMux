@@ -258,7 +258,7 @@ export function useEngineState(
         appServices.adapters.list(),
         appServices.settings.get(),
       ]);
-      if (!mounted.current) return;
+      if (!mounted.current || requestEpoch !== snapshotEpoch.current) return;
       setAdapters(nextAdapters ?? []);
       adaptersRef.current = nextAdapters ?? [];
       setWeightedState(settings.weighted);
@@ -294,8 +294,9 @@ export function useEngineState(
     }, HOME_TELEMETRY_POLL_MS);
     const stopAdapterPoll = startSerialPoll(async () => {
       if (transitionRef.current || previewRef.current || adapterSaveQueue.isPending()) return;
+      const requestEpoch = snapshotEpoch.current;
       const next = await appServices.adapters.list();
-      if (mounted.current) {
+      if (mounted.current && requestEpoch === snapshotEpoch.current && !adapterSaveQueue.isPending()) {
         setAdapters((current) => {
           const currentKey = adapterListKey(current);
           const nextKey = adapterListKey(next ?? []);
@@ -331,6 +332,11 @@ export function useEngineState(
   }, []);
 
   const persistAdapters = useCallback((next: AdapterView[], nextMode = modeRef.current, nextWeighted = weightedRef.current) => {
+    if ((phase === "running" || phase === "degraded") && !next.some((adapter) => adapter.selected)) {
+      onErrorRef.current("聚合运行时至少需要保留一张参与网卡 / Keep at least one adapter enabled while aggregation is running.");
+      return Promise.resolve(adaptersRef.current);
+    }
+    ++snapshotEpoch.current;
     adaptersRef.current = next;
     setAdapters(next);
     if (preview) return Promise.resolve(next);
@@ -346,7 +352,7 @@ export function useEngineState(
       void load(false);
     });
     return handle.done;
-  }, [load, preview]);
+  }, [load, preview, phase]);
 
   const setMode = useCallback((nextMode: EngineMode) => {
     setModeState(nextMode);

@@ -183,6 +183,7 @@ export function RoutingPage() {
   const loaded = useRef(false);
   const rulesRef = useRef<DraftRule[]>([]);
   const editRevision = useRef(0);
+  const submittedRevision = useRef(-1);
   const autosaveTimer = useRef<number>();
   const validationSequence = useRef(new Map<string, number>());
   const validationTimers = useRef(new Map<string, number>());
@@ -355,6 +356,7 @@ export function RoutingPage() {
       return false;
     }
     setSaving(true);
+    submittedRevision.current = submittedEditRevision;
     const queue = saveQueue.current!;
     const handle = queue.enqueue(
       { rules: submitted.map(serializeRule), order: orderRef.current.split(",") },
@@ -390,6 +392,7 @@ export function RoutingPage() {
     }
     autosaveTimer.current = window.setTimeout(() => {
       autosaveTimer.current = undefined;
+      if (saveQueue.current?.isPending() && submittedRevision.current === editRevision.current) return;
       void saveRules(false);
     }, 700);
     return () => {
@@ -774,6 +777,9 @@ export function RoutingPage() {
               orderRef.current = data.optionValue;
               setMatchOrder(data.optionValue);
               applyRules(rulesRef.current.map((rule) => ({ ...rule, priority: 2 - data.optionValue!.split(",").indexOf(rule.match_type) })), true);
+              // A discrete selection must survive navigation before the typing
+              // debounce expires. The save queue remains alive after unmount.
+              void saveRules(true);
             }}>
             {matchOrders.map((order) => <Option key={order} value={order}>{order.split(",").map((kind) => kind === "ip" ? "IP" : kind === "domain" ? text("域名", "Domain") : text("进程", "Process")).join(" → ")}</Option>)}
           </Dropdown>

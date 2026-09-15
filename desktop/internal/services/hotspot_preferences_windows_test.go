@@ -33,8 +33,12 @@ func TestHotspotPreferencesEncryptedRoundTrip(t *testing.T) {
 		t.Fatal("encrypted preferences did not round trip", err)
 	}
 	s.hotspot = &hotspotSession{done: make(chan struct{})}
-	if err := s.SaveHotspotPreferences(want); err == nil {
-		t.Fatal("saved while worker is active")
+	if err := s.SaveHotspotPreferences(want); err != nil {
+		t.Fatal("could not persist preferences while worker is active", err)
+	}
+	got, err = s.HotspotPreferences()
+	if err != nil || got != want {
+		t.Fatal("active hotspot preferences did not round trip", err)
 	}
 	s.hotspot = nil
 	if err := s.SaveHotspotPreferences(HotspotConfig{}); err == nil {

@@ -10,7 +10,7 @@ vi.mock("../i18n/i18n", () => ({ useI18n: () => ({ locale: "en" }) }));
 const stopped = { state: "stopped", ssid: "", band: "auto", ready: true, sharing_verified: false, clients: 0 };
 const running = { ...stopped, state: "running", ssid: "My hotspot", sharing_verified: true, shared_adapter: "HypoMux-Tun", clients: 2 };
 beforeEach(() => { vi.resetAllMocks(); mocks.save.mockResolvedValue(undefined); hotspotDraft.current = undefined; mocks.preferences.mockResolvedValue({ ssid: "HypoMux", password: "", band: "auto" }); mocks.status.mockResolvedValue(stopped); mocks.start.mockResolvedValue(running); mocks.stop.mockResolvedValue(stopped); });
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 describe("HotspotPanel", () => {
   it.each([true, false])("reports cleanup failure accurately when off confirmation is %s", async (off) => {
@@ -60,7 +60,56 @@ describe("HotspotPanel", () => {
     render(<HotspotPanel />);
     expect(await screen.findByText("test-phone")).toBeTruthy();
     expect(screen.getByText("AA:BB:CC:DD:EE:FF")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Save settings" }).hasAttribute("disabled")).toBe(false);
+  });
+  it("saves while running without restarting the hotspot or hiding its QR", async () => {
+    const config = { ssid: "My hotspot", password: "saved-pass", band: "auto" };
+    mocks.preferences.mockResolvedValue(config);
+    mocks.status.mockResolvedValue(running);
+    let finishSave!: () => void;
+    mocks.save.mockImplementation(() => new Promise<void>(resolve => { finishSave = resolve; }));
+    render(<HotspotPanel />);
+    await screen.findByText("Hotspot is on");
+    fireEvent.click(screen.getByRole("button", { name: "Scan to connect" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    expect(mocks.save).toHaveBeenCalledWith(config);
     expect(screen.getByRole("button", { name: "Save settings" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByTitle("Wi-Fi connection QR code")).toBeTruthy();
+    finishSave();
+    await screen.findByText("Settings saved encrypted and restored next time you open the app.");
+    expect(screen.getByTitle("Wi-Fi connection QR code")).toBeTruthy();
+    expect(mocks.start).not.toHaveBeenCalled();
+    expect(mocks.stop).not.toHaveBeenCalled();
+  });
+  it("keeps unverified egress details in diagnostics without an orange error", async () => {
+    mocks.status.mockResolvedValue({ ...running, sharing_verified: false, message: "Egress verification unavailable" });
+    const view = render(<HotspotPanel />);
+    await screen.findByText("Hotspot is on · egress unverified");
+    expect(screen.getByText("Egress verification unavailable").closest("details")).toBeTruthy();
+    expect(view.container.querySelector(".hotspot-feedback .hotspot-error")).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+  it("animates internal state changes without remounting the settings inputs", async () => {
+    const animated: Element[] = [];
+    const animate = vi.fn(function (this: Element) { animated.push(this); return { cancel: vi.fn() }; });
+    Object.defineProperty(Element.prototype, "animate", { configurable: true, value: animate });
+    try {
+      render(<HotspotPanel />);
+      await screen.findByText("Hotspot is off");
+      const input = screen.getByLabelText("Network name");
+      fireEvent.change(input, { target: { value: "My hotspot" } });
+      animated.length = 0;
+      fireEvent.click(screen.getByRole("switch", { name: "Aggregation hotspot" }));
+      await screen.findByText("Hotspot is on");
+      expect(screen.getByLabelText("Network name")).toBe(input);
+      expect(animated.some(element => element.classList.contains("hotspot-settings-content"))).toBe(true);
+      expect(animated.some(element => element.classList.contains("hotspot-connect-body"))).toBe(true);
+      animated.length = 0;
+      fireEvent.click(screen.getByRole("button", { name: "Scan to connect" }));
+      expect(animated.map(element => element.className)).toEqual(["hotspot-connect-body"]);
+    } finally {
+      Reflect.deleteProperty(Element.prototype, "animate");
+    }
   });
   it("restores encrypted preferences and retains edits across navigation", async () => {
     mocks.preferences.mockResolvedValue({ ssid: "Saved network", password: "saved-pass", band: "5" });

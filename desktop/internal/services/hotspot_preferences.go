@@ -29,7 +29,7 @@ func (s *EngineService) HotspotPreferences() (HotspotConfig, error) {
 	return config, nil
 }
 
-// SaveHotspotPreferences also works before aggregation starts. Serialize with
+// SaveHotspotPreferences persists settings without reconfiguring a running hotspot. Serialize with
 // lifecycle operations so the atomic-file temporary path has a single writer.
 func (s *EngineService) SaveHotspotPreferences(config HotspotConfig) error {
 	if err := validateHotspotConfig(config); err != nil {
@@ -42,17 +42,10 @@ func (s *EngineService) SaveHotspotPreferences(config HotspotConfig) error {
 	}
 	defer s.releaseLifecycle()
 	s.mu.Lock()
-	h, closing := s.hotspot, s.closing
+	closing := s.closing
 	s.mu.Unlock()
 	if closing {
 		return errors.New("HypoMux 正在退出")
-	}
-	if h != nil {
-		select {
-		case <-h.done:
-		default:
-			return errors.New("请先关闭热点再修改配置")
-		}
 	}
 	return saveHotspotPreferences(config)
 }

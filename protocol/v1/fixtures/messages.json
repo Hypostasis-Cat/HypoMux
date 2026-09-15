@@ -1,4 +1,6 @@
 [
+  {"name": "engine_scheduling_request", "kind": "request", "method": "engine.scheduling", "message": {"protocol": 1, "id": "fixture-scheduling", "method": "engine.scheduling", "params": {"weighted": true, "adapters": [{"name": "Ethernet", "source_ip": "192.0.2.10", "if_index": 7, "weight": 3}]}}},
+  {"name": "engine_scheduling_response", "kind": "response", "method": "engine.scheduling", "message": {"protocol": 1, "id": "fixture-scheduling", "result": {"weighted": true, "adapters": [{"name": "Ethernet", "source_ip": "192.0.2.10", "if_index": 7, "weight": 3}]}}},
   {
     "name": "hotspot_inspect_request",
     "kind": "request",

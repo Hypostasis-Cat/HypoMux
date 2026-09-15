@@ -121,10 +121,26 @@ describe("HomePage adapter interactions", () => {
     expect(state.setWeighted).toHaveBeenLastCalledWith(false);
   });
 
-  it.each(["starting", "running", "degraded", "stopping"])("locks the strategy while %s", (phase) => {
+  it.each(["starting", "stopping"])("locks the strategy while %s", (phase) => {
     mocks.useEngineState.mockReturnValue({ ...engineState(), phase, transitioning: phase === "starting" || phase === "stopping" });
     renderPage(<HomePage />);
     expect((screen.getByRole("combobox", { name: "Scheduling strategy" }) as HTMLSelectElement).disabled).toBe(true);
+  });
+
+  it.each(["running", "degraded"])("allows live scheduling edits while %s", (phase) => {
+    const state = { ...engineState(), phase, weighted: true };
+    mocks.useEngineState.mockReturnValue(state);
+    renderPage(<HomePage />);
+    const selector = screen.getByRole("combobox", { name: "Scheduling strategy" }) as HTMLButtonElement;
+    expect(selector.disabled).toBe(false);
+    fireEvent.click(selector);
+    fireEvent.click(screen.getByRole("option", { name: "Maximum speed first" }));
+    expect(state.setWeighted).toHaveBeenCalledWith(false);
+    fireEvent.click(screen.getByRole("button", { name: "Increase Ethernet Weight" }));
+    expect(state.updateWeight).toHaveBeenCalledWith("Ethernet", 4);
+    fireEvent.click(screen.getByRole("checkbox", { name: "Disable Ethernet" }));
+    expect(state.toggleAdapter).toHaveBeenCalledWith("Ethernet", false);
+    expect(state.toggleEngine).not.toHaveBeenCalled();
   });
 
   it("explains hidden adapters and keeps the shared runtime list complete", () => {

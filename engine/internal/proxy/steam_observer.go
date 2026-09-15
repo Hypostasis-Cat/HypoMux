@@ -222,7 +222,7 @@ func (s *Server) newSteamObserver(session *connection) *steamHTTPObserver {
 	}
 	c.observers++
 	o := &steamHTTPObserver{s: s, session: session}
-	for _, a := range s.config.Adapters {
+	for _, a := range s.scheduler.snapshot().Adapters {
 		if a.Name == session.cdnKey.adapter {
 			o.adapter = a
 			break

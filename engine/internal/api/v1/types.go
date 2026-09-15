@@ -20,6 +20,7 @@ import (
 const (
 	MethodEngineHello       = "engine.hello"
 	MethodEngineStatus      = "engine.status"
+	MethodEngineScheduling  = "engine.scheduling"
 	MethodEngineStart       = "engine.start"
 	MethodEngineStop        = "engine.stop"
 	MethodEngineTelemetry   = "engine.telemetry"
@@ -46,6 +47,7 @@ var capabilities = []string{
 	MethodEngineHello,
 	MethodEngineStatus,
 	MethodEngineStart,
+	MethodEngineScheduling,
 	MethodEngineStop,
 	MethodEngineTelemetry,
 	MethodSteamCDNConfigure,

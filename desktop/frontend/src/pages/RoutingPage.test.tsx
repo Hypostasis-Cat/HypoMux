@@ -89,6 +89,26 @@ it("saves type order with an empty rule list", async () => {
   await waitFor(() => expect(mocks.save).toHaveBeenLastCalledWith([], ["ip", "process", "domain"]), { timeout: 4000 });
 });
 
+it.each([{ rules: [] }, { rules: [{ match_type: "process", value: "app.exe", outbound: "direct" }] }])("persists match order when leaving immediately after selection (%j)", async ({ rules }) => {
+  let saved = { rules, outbounds, restart_required: false, match_order: ["process", "domain", "ip"] };
+  mocks.snapshot.mockImplementation(async () => saved);
+  let finishSave!: () => void;
+  mocks.save.mockImplementation((nextRules, order) => new Promise(resolve => {
+    finishSave = () => { saved = { ...saved, rules: nextRules, match_order: order }; resolve(saved); };
+  }));
+  const view = renderPage();
+  const order = await screen.findByRole("combobox", { name: "Match order" });
+  await waitFor(() => expect(order).toHaveProperty("disabled", false));
+  fireEvent.click(order);
+  fireEvent.click(screen.getByRole("option", { name: "IP → Domain → Process" }));
+  expect(mocks.save).toHaveBeenCalledWith(expect.any(Array), ["ip", "domain", "process"]);
+  view.unmount();
+  finishSave();
+  renderPage();
+  await waitFor(() => expect(screen.getByRole("combobox", { name: "Match order" }).textContent).toContain("IP → Domain → Process"));
+  expect(mocks.save).toHaveBeenCalledTimes(1);
+});
+
 it("keeps a disabled conflict disabled when a batch replaces its egress", async () => {
   mocks.snapshot.mockResolvedValue({ rules: [{ match_type: "process", value: "app.exe", outbound: "direct", disabled: true, priority: 2 }], outbounds, restart_required: false });
   // Even an older or stale preview missing the state must not re-enable it.

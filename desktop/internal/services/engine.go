@@ -256,6 +256,7 @@ func newEngineService(
 			supportLogs.RecordEvent("system_proxy", "startup_recovery_notice", map[string]any{"message": service.proxyRecoveryNotice})
 		}
 	}
+	adapters.saveRuntimeSelection = service.saveRuntimeSelection
 	go service.consumeCoreEvents()
 	return service
 }

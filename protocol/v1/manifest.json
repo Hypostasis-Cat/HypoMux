@@ -31,6 +31,12 @@
       "cancellation": "not_supported_in_v1"
     },
     {
+      "name": "engine.scheduling",
+      "idempotency": "safe_retry_state_only_response_is_previous_config",
+      "privilege": "mode_dependent",
+      "cancellation": "not_supported_in_v1"
+    },
+    {
       "name": "engine.stop",
       "idempotency": "safe_retry",
       "privilege": "mode_dependent",

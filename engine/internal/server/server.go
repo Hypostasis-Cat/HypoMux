@@ -189,6 +189,8 @@ func (s *Server) handle(ctx context.Context, line []byte) (protocol.Response, bo
 		return protocol.Result(request.ID, s.hello()), false
 	case api.MethodEngineStatus:
 		return protocol.Result(request.ID, s.status()), false
+	case api.MethodEngineScheduling:
+		return s.updateScheduling(request), false
 	case api.MethodEngineStart:
 		return s.startProxy(request), false
 	case api.MethodEngineStop:

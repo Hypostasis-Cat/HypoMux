@@ -19,6 +19,7 @@ var _ platform.DesktopHost = (*DesktopHost)(nil)
 type DesktopHost struct {
 	app          *application.App
 	window       application.Window
+	trayWindow   application.Window
 	tray         *application.SystemTray
 	trayStatus   *application.MenuItem
 	onQuit       func()
@@ -34,17 +35,27 @@ func NewDesktopHost(app *application.App, window application.Window, startSilent
 }
 
 func (d *DesktopHost) ConfigureTray(icon []byte) {
+	d.trayWindow = d.app.Window.NewWithOptions(application.WebviewWindowOptions{
+		Name: "tray-menu", Title: "HypoMux", Width: 292, Height: 228,
+		Frameless: true, Hidden: true, AlwaysOnTop: true, HideOnFocusLost: true,
+		HideOnEscape: true, DisableResize: true,
+		BackgroundType: application.BackgroundTypeTranslucent,
+		BackgroundColour: application.NewRGBA(0, 0, 0, 0), URL: "/?tray=1",
+	})
 	menu := d.app.Menu.New()
-	d.trayStatus = menu.Add("聚合引擎：未启动").SetEnabled(false)
+	// Keep the tray menu deliberately small and action-oriented.  The native
+	// Windows menu inherits the platform theme, so consistent wording and
+	// grouping are more reliable than trying to emulate the WebView surface.
+	d.trayStatus = menu.Add("引擎状态  ·  未启动").SetEnabled(false).SetTooltip("当前聚合引擎状态")
 	menu.AddSeparator()
-	menu.Add("打开 HypoMux").OnClick(func(_ *application.Context) {
+	menu.Add("显示主窗口").SetAccelerator("Ctrl+Shift+H").OnClick(func(_ *application.Context) {
 		d.Show()
 	})
-	menu.Add("隐藏窗口").OnClick(func(_ *application.Context) {
+	menu.Add("隐藏到托盘").OnClick(func(_ *application.Context) {
 		d.HideToTray()
 	})
 	menu.AddSeparator()
-	menu.Add("退出").OnClick(func(_ *application.Context) {
+	menu.Add("退出 HypoMux").OnClick(func(_ *application.Context) {
 		d.Quit()
 	})
 
@@ -57,7 +68,17 @@ func (d *DesktopHost) ConfigureTray(icon []byte) {
 	d.tray.OnClick(func() {
 		d.Show()
 	})
-	d.tray.SetMenu(menu)
+	// The visible menu is rendered by the WebView so it shares the app theme.
+	// Keep the native menu unattached as a fallback for platforms where the
+	// transient window cannot be created.
+	d.tray.OnRightClick(func() {
+		if d.trayWindow != nil {
+			_ = d.tray.PositionWindow(d.trayWindow, 8)
+			d.trayWindow.Show().Focus()
+			return
+		}
+		d.tray.ShowMenu()
+	})
 }
 
 func (d *DesktopHost) SetEngineTrayStatus(phase string, mode string) {
@@ -80,7 +101,7 @@ func (d *DesktopHost) SetEngineTrayStatus(phase string, mode string) {
 	if mode == "tun" {
 		modeName = "虚拟网卡"
 	}
-	label := fmt.Sprintf("聚合引擎：%s · %s", state, modeName)
+	label := fmt.Sprintf("引擎状态  ·  %s  ·  %s", state, modeName)
 	if d.trayStatus != nil {
 		d.trayStatus.SetLabel(label)
 	}

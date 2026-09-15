@@ -2,14 +2,10 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
 
-const isEditableTarget = (target: EventTarget | null) =>
-  target instanceof Element &&
-  Boolean(target.closest("input, textarea, [contenteditable='true']"));
-
+// Suppress the browser menu in inputs too. Preventing the default action
+// preserves keyboard editing shortcuts and app-specific context menu handlers.
 document.addEventListener("contextmenu", (event) => {
-  if (!isEditableTarget(event.target)) {
-    event.preventDefault();
-  }
+  event.preventDefault();
 });
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(

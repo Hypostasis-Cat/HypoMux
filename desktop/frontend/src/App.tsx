@@ -17,6 +17,7 @@ import { AppearanceProvider, useAppearance } from "./theme/appearance.store";
 import { LanguageProvider } from "./i18n/i18n";
 import { desktopPlatform } from "./platform/desktop";
 import { resolveWallpaperBackground } from "./theme/wallpaper";
+import { TrayMenu } from "./components/tray/TrayMenu";
 import {
   AppNotificationCenter,
   AppNotificationProvider,
@@ -172,6 +173,7 @@ function HypoMuxWindow() {
 }
 
 export default function App() {
+  if (new URLSearchParams(window.location.search).get("tray") === "1") return <TrayMenu />;
   return (
     <LanguageProvider>
       <AppearanceProvider>

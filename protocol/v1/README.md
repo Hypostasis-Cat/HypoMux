@@ -66,3 +66,16 @@ sing-box reads them. Installed service policy failures use the additive
 `tun_tcp_pool` is running. In TUN mode they are the authoritative
 selected-adapter DNS preflight used to build the sing-box upstream plan; the
 channel listeners still accept only already-resolved IP destinations.
+
+### Live aggregation scheduling
+
+`engine.scheduling` accepts `{weighted: boolean, adapters: Adapter[]}` while the
+engine is running. The complete pool must contain 1–64 distinct valid adapters,
+each with a weight of 1–100. The result is the previous scheduling configuration,
+which the desktop can submit to roll back a failed settings save. Retrying sets
+the same pool but returns the configuration immediately preceding that attempt.
+Listeners, TUN, established TCP connections and UDP flows are retained. New
+aggregation flows use the new pool; explicit NIC channels retain their bindings.
+A NIC can join the pool even if it was not selected at startup. This does not
+create new explicit NIC routing channels or change the TUN IPv6/DNS topology.
+Clients must check the `engine.scheduling` capability before live updates.

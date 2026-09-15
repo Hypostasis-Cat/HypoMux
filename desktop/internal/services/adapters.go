@@ -28,7 +28,8 @@ type AdapterView struct {
 }
 
 type AdapterService struct {
-	settings *SettingsService
+	settings             *SettingsService
+	saveRuntimeSelection func(string, bool, []AdapterView) ([]AdapterView, error)
 }
 
 func NewAdapterService(settings *SettingsService) *AdapterService {
@@ -178,11 +179,25 @@ func (s *AdapterService) Refresh() ([]AdapterView, error) {
 }
 
 func (s *AdapterService) SaveSelection(mode string, weighted bool, adapters []AdapterView) ([]AdapterView, error) {
+	if s.saveRuntimeSelection != nil {
+		return s.saveRuntimeSelection(mode, weighted, adapters)
+	}
+	return s.saveSelection(mode, weighted, adapters)
+}
+
+func (s *AdapterService) saveSelection(mode string, weighted bool, adapters []AdapterView) ([]AdapterView, error) {
+	if err := s.persistSelection(mode, weighted, adapters); err != nil {
+		return nil, err
+	}
+	return s.List()
+}
+
+func (s *AdapterService) persistSelection(mode string, weighted bool, adapters []AdapterView) error {
 	selected := make([]string, 0, len(adapters))
 	weights := make(map[string]int, len(adapters))
 	for _, adapter := range adapters {
 		if adapter.Weight < AdapterWeightMin || adapter.Weight > AdapterWeightMax {
-			return nil, fmt.Errorf("%s 的调度权重必须在 %d–%d 之间", adapter.Name, AdapterWeightMin, AdapterWeightMax)
+			return fmt.Errorf("%s 的调度权重必须在 %d–%d 之间", adapter.Name, AdapterWeightMin, AdapterWeightMax)
 		}
 		weights[adapter.ID] = adapter.Weight
 		if adapter.Selected {
@@ -190,7 +205,7 @@ func (s *AdapterService) SaveSelection(mode string, weighted bool, adapters []Ad
 		}
 	}
 	if _, err := s.settings.UpdateHome(mode, weighted, selected, weights); err != nil {
-		return nil, err
+		return err
 	}
-	return s.List()
+	return nil
 }

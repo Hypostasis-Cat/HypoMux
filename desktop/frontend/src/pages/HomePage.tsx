@@ -198,6 +198,12 @@ export function HomePage({
             </Button>
           </div>
         </div>
+        {(engine.phase === "running" || engine.phase === "degraded") && (
+          <p className="health-lock-note">{text(
+            "修改会自动应用于新连接；已有连接和指定网卡的分流规则保持原路径。运行中至少保留一张参与网卡。",
+            "Changes apply automatically to new connections. Existing connections and explicit adapter routes keep their paths. Keep at least one adapter enabled.",
+          )}</p>
+        )}
         <div className="network-adapter-list">
           {engine.loading ? (
             <div className="adapter-empty hm-card"><Spinner label={text("正在扫描活动网络适配器", "Scanning active network adapters")} /></div>
@@ -220,7 +226,7 @@ export function HomePage({
               adapter={adapter}
               weighted={engine.weighted}
               percentage={adapter.selected ? Math.round((adapter.weight / engine.totalWeight) * 100) || 0 : 0}
-              disabled={engine.transitioning || engine.phase === "running" || engine.phase === "degraded"}
+              disabled={engine.transitioning}
               onOpenConnections={() => onNavigate?.("connections", adapter.name)}
               onSelectedChange={(checked) => engine.toggleAdapter(adapter.id, checked)}
               onWeightChange={(value) => engine.updateWeight(adapter.id, value)}

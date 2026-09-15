@@ -64,6 +64,11 @@ func New(config Config) (*Server, error) {
 		if channel.Name == ChannelDirect {
 			continue
 		}
+		if channel.Name == ChannelAggregation {
+			server.scheduler = newScheduler(adaptersForChannel(normalized.Adapters, channel), normalized.Weighted, health)
+			server.schedulers[channel.Name] = server.scheduler
+			continue
+		}
 		server.schedulers[channel.Name] = newScheduler(
 			adaptersForChannel(normalized.Adapters, channel),
 			normalized.Weighted,
@@ -299,8 +304,9 @@ func (s *Server) ResolveDNS(
 		return dns.Result{}, fmt.Errorf("proxy engine is not running")
 	}
 	var selected *Adapter
-	for index := range s.config.Adapters {
-		adapter := &s.config.Adapters[index]
+	adapters := s.scheduler.snapshot().Adapters
+	for index := range adapters {
+		adapter := &adapters[index]
 		if adapterName == "" || adapter.Name == adapterName {
 			selected = adapter
 			break
