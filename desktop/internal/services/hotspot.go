@@ -24,20 +24,23 @@ type HotspotConfig struct {
 }
 
 type HotspotStatus struct {
-	Devices          []HotspotDevice `json:"devices,omitempty"`
-	DevicesAvailable bool            `json:"devices_available"`
-	UpdatedAt        string          `json:"updated_at,omitempty"`
-	State            string          `json:"state"`
-	SSID             string          `json:"ssid"`
-	Band             string          `json:"band"`
-	Clients          int             `json:"clients"`
-	SharedAdapter    string          `json:"shared_adapter"`
-	SharingVerified  bool            `json:"sharing_verified"`
-	CleanupComplete  bool            `json:"cleanup_complete"`
-	Ready            bool            `json:"ready"`
-	Message          string          `json:"message,omitempty"`
-	Diagnostics      string          `json:"diagnostics,omitempty"`
-	GatewayAddress   string          `json:"gateway_address,omitempty"`
+	Devices               []HotspotDevice `json:"devices,omitempty"`
+	DevicesAvailable      bool            `json:"devices_available"`
+	UpdatedAt             string          `json:"updated_at,omitempty"`
+	State                 string          `json:"state"`
+	SSID                  string          `json:"ssid"`
+	Band                  string          `json:"band"`
+	Clients               int             `json:"clients"`
+	SharedAdapter         string          `json:"shared_adapter"`
+	SharingVerified       bool            `json:"sharing_verified"`
+	CleanupComplete       bool            `json:"cleanup_complete"`
+	HotspotOffConfirmed   *bool           `json:"hotspot_off_confirmed,omitempty"`
+	ConfigurationRestored *bool           `json:"configuration_restored,omitempty"`
+	CleanupError          string          `json:"cleanup_error,omitempty"`
+	Ready                 bool            `json:"ready"`
+	Message               string          `json:"message,omitempty"`
+	Diagnostics           string          `json:"diagnostics,omitempty"`
+	GatewayAddress        string          `json:"gateway_address,omitempty"`
 }
 
 type HotspotDevice struct {
@@ -244,8 +247,8 @@ func (s *EngineService) StartHotspot(config HotspotConfig) (HotspotStatus, error
 		return s.HotspotStatus(), err
 	}
 	// Allow profile discovery, configuration, startup, private-network readiness
-	// and both broker inspections to finish within their individual deadlines.
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	// and bounded broker inspection retries to finish within their deadlines.
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Second)
 	defer cancel()
 	if err := s.acquireLifecycle(ctx); err != nil {
 		return s.HotspotStatus(), err

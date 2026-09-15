@@ -88,8 +88,9 @@ func TestHotspotWorkerProcess(t *testing.T) {
 		_ = encoder.Encode(HotspotStatus{State: "failed", Message: "Desktop disconnected during sharing inspection", CleanupComplete: true})
 		os.Exit(0)
 	}
-	if mode == "cleanup-failure" {
-		_ = encoder.Encode(HotspotStatus{State: "failed", Message: "Windows hotspot still active", CleanupComplete: false})
+	if mode == "cleanup-failure" || mode == "restore-failure" {
+		off, restored := mode == "restore-failure", false
+		_ = encoder.Encode(HotspotStatus{State: "failed", Message: "Cleanup failed", CleanupComplete: false, HotspotOffConfirmed: &off, ConfigurationRestored: &restored, CleanupError: "cleanup details"})
 		os.Exit(0)
 	}
 	_ = encoder.Encode(HotspotStatus{State: "stopped", CleanupComplete: true})
@@ -141,7 +142,7 @@ func TestHotspotWorkerStopsOnPipeClose(t *testing.T) {
 }
 
 func TestHotspotExpectedShutdownDoesNotHideCleanupFailure(t *testing.T) {
-	for _, mode := range []string{"stop-error", "cleanup-failure"} {
+	for _, mode := range []string{"stop-error", "cleanup-failure", "restore-failure"} {
 		t.Run(mode, func(t *testing.T) {
 			h, err := launchTestHotspot(t, mode, 5*time.Second)
 			if err != nil {
@@ -157,6 +158,9 @@ func TestHotspotExpectedShutdownDoesNotHideCleanupFailure(t *testing.T) {
 				}
 			} else if err == nil || status.State != "failed" || status.CleanupComplete {
 				t.Fatal("real cleanup failure was hidden", status, err)
+			}
+			if mode != "stop-error" && (status.HotspotOffConfirmed == nil || *status.HotspotOffConfirmed != (mode == "restore-failure") || status.ConfigurationRestored == nil || *status.ConfigurationRestored || status.CleanupError != "cleanup details") {
+				t.Fatal("cleanup details lost", status)
 			}
 		})
 	}

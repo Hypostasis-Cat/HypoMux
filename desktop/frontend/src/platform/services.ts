@@ -71,7 +71,7 @@ export type HotspotStatus = {
   devices_available?: boolean; updated_at?: string;
   state: "stopped" | "starting" | "running" | "stopping" | "failed";
   ssid: string; band: string; clients: number; shared_adapter: string;
-  sharing_verified: boolean; cleanup_complete?: boolean; ready: boolean; message?: string; diagnostics?: string; gateway_address?: string;
+  sharing_verified: boolean; cleanup_complete?: boolean; hotspot_off_confirmed?: boolean; configuration_restored?: boolean; cleanup_error?: string; ready: boolean; message?: string; diagnostics?: string; gateway_address?: string;
 };
 
 export type BlockedDomainEntry = {

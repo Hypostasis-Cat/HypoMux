@@ -5,7 +5,9 @@ package services
 import (
 	"context"
 	"net"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -25,25 +27,25 @@ if ((Get-SharingVerdict @($public, $private) $publicID) -ne 'mismatch') { throw 
 $public.Guid = $publicID
 $private.Guid = $otherID
 if ((Get-SharingVerdict @($public, $private) $publicID) -ne 'mismatch') { throw 'wrong private accepted' }
-if ((Get-SharingVerdict @($public) $publicID) -ne 'mismatch') { throw 'partial sharing accepted' }
+if ((Get-SharingVerdict @($public) $publicID) -ne 'transitional') { throw 'partial sharing must retry' }
 $manager = [PSCustomObject]@{ TetheringOperationalState = 'On'; ClientCount = 0 }
 $fakeAddress = '192.168.137.1'
 $fakeState = 'Up'
 function Get-NetAdapter { param([switch]$IncludeHidden) [PSCustomObject]@{ InterfaceDescription = 'Microsoft Wi-Fi Direct Virtual Adapter'; Status = $fakeState; InterfaceGuid = '00000000-0000-0000-0000-000000000002'; ifIndex = 23 } }
-function Get-NetIPAddress { param($InterfaceIndex, $AddressFamily, $ErrorAction) [PSCustomObject]@{ AddressState = 'Preferred'; IPAddress = $fakeAddress } }
+function Get-NetIPAddress { param($InterfaceIndex, $AddressFamily, $ErrorAction) [PSCustomObject]@{ InterfaceIndex = 23; AddressState = 'Preferred'; IPAddress = $fakeAddress } }
 function Get-NetRoute { param($AddressFamily, $ErrorAction) @() }
 $script:privateID = $null
-if (-not (Test-PrivateNetwork)) { throw 'new operational AP rejected' }
+if (-not (Test-ReadyNetwork)) { throw 'new operational AP rejected' }
 if ($script:gatewayAddress -ne '192.168.137.1') { throw 'gateway missing' }
 $fakeAddress = '169.254.1.2'
-if (Test-PrivateNetwork) { throw 'APIPA accepted' }
+if (Test-ReadyNetwork) { throw 'APIPA accepted' }
 $fakeAddress = '192.168.137.1'
 $fakeState = 'Disconnected'
-if (Test-PrivateNetwork) { throw 'disconnected AP accepted' }
+if (Test-ReadyNetwork) { throw 'disconnected AP accepted' }
 $fakeState = 'Up'
 $script:privateID = $null
-$script:previousUpIDs = @([guid]'00000000-0000-0000-0000-000000000002')
-if (Test-PrivateNetwork) { throw 'pre-existing AP accepted' }
+Save-NetworkBaseline
+if (Test-ReadyNetwork) { throw 'pre-existing AP accepted' }
 # Reproduce the report: vendor-named WLAN 12 becomes Up while WLAN and WLAN 11
 # remain connected. No adapter description contains Wi-Fi Direct.
 $apID = [guid]'00000000-0000-0000-0000-000000000002'
@@ -55,36 +57,36 @@ $fakeRoutes = @([PSCustomObject]@{ DestinationPrefix = '0.0.0.0/0'; InterfaceInd
 $addressState = 'Preferred'
 function Get-NetAdapter { param([switch]$IncludeHidden) $fakeAdapters }
 function Get-NetRoute { param($AddressFamily, $ErrorAction) $fakeRoutes }
-function Get-NetIPAddress { param($InterfaceIndex, $AddressFamily, $ErrorAction) [PSCustomObject]@{ AddressState = $addressState; IPAddress = $fakeAddress } }
-$script:previousUpIDs = @(Get-NetAdapter -IncludeHidden | Where-Object { $_.Status -eq 'Up' } | ForEach-Object { [guid]$_.InterfaceGuid })
-if (Test-PrivateNetwork) { throw 'disconnected vendor AP accepted' }
+function Get-NetIPAddress { param($InterfaceIndex, $AddressFamily, $ErrorAction) $fakeAdapters | ForEach-Object { [PSCustomObject]@{ InterfaceIndex = $_.ifIndex; AddressState = $addressState; IPAddress = $fakeAddress } } }
+Save-NetworkBaseline
+if (Test-ReadyNetwork) { throw 'disconnected vendor AP accepted' }
 $ap.Status = 'Up'
-if (-not (Test-PrivateNetwork)) { throw 'vendor-named Wi-Fi 7 AP rejected' }
+if (-not (Test-ReadyNetwork)) { throw 'vendor-named Wi-Fi 7 AP rejected' }
 if ($script:privateID -ne $apID -or $script:gatewayAddress -ne '192.168.137.1') { throw 'wrong vendor AP selected' }
-if (-not (Test-PrivateNetwork)) { throw 'pinned vendor AP rejected by watchdog' }
+if (-not (Test-ReadyNetwork)) { throw 'pinned vendor AP rejected by watchdog' }
 $addressState = 'Tentative'
-if (Test-PrivateNetwork) { throw 'tentative vendor AP address accepted' }
+if (Test-ReadyNetwork) { throw 'tentative vendor AP address accepted' }
 $addressState = 'Preferred'
 $fakeAddress = '192.168.173.1'
-if (-not (Test-PrivateNetwork)) { throw 'non-default hotspot subnet rejected' }
+if (-not (Test-ReadyNetwork)) { throw 'non-default hotspot subnet rejected' }
 $fakeRoutes += [PSCustomObject]@{ DestinationPrefix = '0.0.0.0/0'; InterfaceIndex = 13 }
-if (Test-PrivateNetwork) { throw 'AP acquiring an upstream default route accepted' }
+if (Test-ReadyNetwork) { throw 'AP acquiring an upstream default route accepted' }
 $script:privateID = $null
-if (Test-PrivateNetwork) { throw 'new Wi-Fi uplink accepted as AP' }
+if (Test-ReadyNetwork) { throw 'new Wi-Fi uplink accepted as AP' }
 $fakeRoutes = @()
 $ap.InterfaceType = 6
 $ap.NdisPhysicalMedium = 14
-if (Test-PrivateNetwork) { throw 'new Ethernet adapter accepted as AP' }
+if (Test-ReadyNetwork) { throw 'new Ethernet adapter accepted as AP' }
 $ap.NdisPhysicalMedium = 9
-if (-not (Test-PrivateNetwork)) { throw 'native wireless medium fallback rejected' }
+if (-not (Test-ReadyNetwork)) { throw 'native wireless medium fallback rejected' }
 $script:privateID = $null
-$script:previousUpIDs = @($publicID)
-if (Test-PrivateNetwork) { throw 'ambiguous new wireless adapters accepted' }
+$script:beforeNetwork.Remove($otherID.ToString())
+if (Test-ReadyNetwork) { throw 'ambiguous new wireless adapters accepted' }
 $script:privateID = $apID
 $fakeAdapters = @($uplink, $qualcomm)
-if (Test-PrivateNetwork) { throw 'watchdog switched to another wireless adapter' }
+if (Test-ReadyNetwork) { throw 'watchdog switched to another wireless adapter' }
 $manager.TetheringOperationalState = 'Off'
-if (Test-PrivateNetwork) { throw 'stopped hotspot accepted' }
+if (Test-ReadyNetwork) { throw 'stopped hotspot accepted' }
 if ((Get-StartFailure 'WiFiDeviceOff') -notlike '*WiFiDeviceOff*') { throw 'radio error code lost' }
 $manager | Add-Member ScriptMethod StopTetheringAsync { throw 'must not stop an already off hotspot' }
 Stop-OwnedHotspot
@@ -126,6 +128,81 @@ try {
 `)
 }
 
+func TestHotspotWindowsReusedInterfaceAndStability(t *testing.T) {
+	runHotspotFunctions(t, `
+$manager = [PSCustomObject]@{ TetheringOperationalState = 'On' }
+$id = [guid]'00000000-0000-0000-0000-000000000002'
+$address = @(); $routes = @(); $failRoute = $false
+function Get-NetAdapter { [PSCustomObject]@{ InterfaceGuid = $id; ifIndex = 13; Status = 'Up'; InterfaceType = 71 } }
+function Get-NetIPAddress { $address }
+function Get-NetRoute { if ($failRoute) { throw 'temporary CIM failure' }; $routes }
+Save-NetworkBaseline
+$address = @([PSCustomObject]@{ InterfaceIndex = 13; AddressState = 'Preferred'; IPAddress = '192.168.137.1' })
+if (Test-PrivateNetwork) { throw 'first sample pinned too early' }
+$routes = @([PSCustomObject]@{ InterfaceIndex = 13; DestinationPrefix = '0.0.0.0/0' })
+if (Test-PrivateNetwork) { throw 'delayed upstream route accepted' }
+if ($null -ne $script:privateID) { throw 'unstable candidate was pinned' }
+$routes = @()
+if (Test-PrivateNetwork) { throw 'stability did not reset' }
+$failRoute = $true
+if (Test-PrivateNetwork) { throw 'failed query accepted' }
+if (-not $script:networkQueryFailed) { throw 'query error not distinguished' }
+$failRoute = $false
+if (Test-PrivateNetwork) { throw 'query failure did not reset stability' }
+if (Test-PrivateNetwork) { throw 'second sample pinned too early' }
+if (-not (Test-PrivateNetwork) -or $script:privateID -ne $id) { throw 'already Up addressless interface rejected' }
+$script:privateID = $null
+Save-NetworkBaseline
+if (Test-ReadyNetwork) { throw 'preexisting addressed interface accepted' }
+`)
+}
+
+func TestHotspotWindowsSharingRetryAndCadence(t *testing.T) {
+	runHotspotFunctions(t, `
+$id = [guid]'00000000-0000-0000-0000-000000000001'
+$answer = 'transitional'
+function Test-Sharing { param($publicID) $answer }
+if ((Update-SharingCheck $id) -ne 'transitional') { throw 'partial snapshot not retried' }
+$answer = 'verified'
+$null = Update-SharingCheck $id
+if ($script:sharingRetryCount -ne 0 -or $script:nextSharingCheck -lt [DateTime]::UtcNow.AddSeconds(14)) { throw 'normal cadence or reset incorrect' }
+foreach ($answer in @('query_error', 'transitional')) {
+ $script:sharingRetryCount = 0
+ $null = Update-SharingCheck $id
+ $null = Update-SharingCheck $id
+ $rejected = $false
+ try { Update-SharingCheck $id } catch { $rejected = $true }
+ if (-not $rejected) { throw 'persistent failure accepted' }
+}
+$script:sharingRetryCount = 0
+$answer = 'mismatch'
+$rejected = $false
+try { Update-SharingCheck $id } catch { $rejected = $true }
+if (-not $rejected) { throw 'wrong egress not rejected immediately' }
+`)
+}
+
+func TestHotspotWindowsCleanupOutcomes(t *testing.T) {
+	runHotspotFunctions(t, `
+$attempted = $true; $configured = $true; $original = 'old'
+$manager = [PSCustomObject]@{}
+$manager | Add-Member ScriptMethod ConfigureAccessPointAsync { param($value) $script:restoreCalls++; throw 'restore failure' }
+$restoreCalls = 0
+function Stop-OwnedHotspot { throw 'stop failure' }
+Complete-HotspotCleanup
+if (-not $cleanupFailed -or $hotspotOffConfirmed -eq $true -or $restoreCalls -ne 0) { throw 'unconfirmed shutdown restored live configuration' }
+$cleanupFailed = $false; $cleanupError = ''; $failure = ''; $configurationRestored = $false
+function Stop-OwnedHotspot { }
+Complete-HotspotCleanup
+if (-not $hotspotOffConfirmed -or $configurationRestored -or -not $cleanupFailed -or $restoreCalls -ne 1) { throw 'restore failure confused with shutdown failure' }
+$cleanupFailed = $false; $cleanupError = ''; $failure = ''
+$manager | Add-Member -Force ScriptMethod ConfigureAccessPointAsync { param($value) return 'done' }
+function Await-Action { param($operation) }
+Complete-HotspotCleanup
+if (-not $hotspotOffConfirmed -or -not $configurationRestored -or $cleanupFailed) { throw 'successful cleanup reported as failure' }
+`)
+}
+
 func runHotspotFunctions(t *testing.T, body string) {
 	t.Helper()
 	executable, err := resolveWindowsPowerShellExecutable()
@@ -134,10 +211,14 @@ func runHotspotFunctions(t *testing.T, body string) {
 	}
 	// Execute production functions against fakes, without changing networking.
 	functions := strings.Split(strings.ReplaceAll(hotspotScript, "\r\n", "\n"), "\ntry {\n")[0]
-	script := functions + body
+	script := functions + "\nfunction Test-ReadyNetwork { 1..2 | ForEach-Object { $null = Test-PrivateNetwork }; Test-PrivateNetwork }\n" + body
+	path := filepath.Join(t.TempDir(), "hotspot-test.ps1")
+	if err := os.WriteFile(path, append([]byte{0xef, 0xbb, 0xbf}, []byte(script)...), 0600); err != nil {
+		t.Fatal(err)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	command := exec.CommandContext(ctx, executable, "-NoProfile", "-NonInteractive", "-Command", script)
+	command := exec.CommandContext(ctx, executable, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", path)
 	configureBackgroundCommand(command)
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("%v: %s", err, output)
@@ -159,25 +240,25 @@ function Get-NetAdapter { param([switch]$IncludeHidden) $adapters }
 function Get-NetRoute { param($AddressFamily, $ErrorAction) @() }
 function Get-NetIPAddress {
     param($InterfaceIndex, $AddressFamily, $ErrorAction)
-    if ($InterfaceIndex -eq 13) { [PSCustomObject]@{ AddressState = 'Preferred'; IPAddress = '192.168.137.1' } }
-    elseif ($siblingAddress) { [PSCustomObject]@{ AddressState = $siblingState; IPAddress = $siblingAddress } }
+    [PSCustomObject]@{ InterfaceIndex = 13; AddressState = 'Preferred'; IPAddress = '192.168.137.1' }
+    if ($siblingAddress) { [PSCustomObject]@{ InterfaceIndex = 14; AddressState = $siblingState; IPAddress = $siblingAddress } }
 }
 foreach ($address in @('169.254.33.2', '0.0.0.0', '127.0.0.1', '')) {
     $siblingAddress = $address
     $script:privateID = $null
-    if (-not (Test-PrivateNetwork) -or $script:privateID -ne $apID) { throw 'unready sibling blocked valid AP' }
+    if (-not (Test-ReadyNetwork) -or $script:privateID -ne $apID) { throw 'unready sibling blocked valid AP' }
 }
 $siblingAddress = '192.168.173.1'
 $siblingState = 'Tentative'
 $script:privateID = $null
-if (-not (Test-PrivateNetwork)) { throw 'tentative sibling blocked valid AP' }
+if (-not (Test-ReadyNetwork)) { throw 'tentative sibling blocked valid AP' }
 $siblingState = 'Preferred'
-if (-not (Test-PrivateNetwork) -or $script:privateID -ne $apID) { throw 'watchdog lost pinned AP when sibling became ready' }
+if (-not (Test-ReadyNetwork) -or $script:privateID -ne $apID) { throw 'watchdog lost pinned AP when sibling became ready' }
 $script:privateID = $null
-if (Test-PrivateNetwork) { throw 'two ready AP candidates accepted' }
+if (Test-ReadyNetwork) { throw 'two ready AP candidates accepted' }
 $script:privateID = $apID
 $adapters = @($adapters[1])
-if (Test-PrivateNetwork) { throw 'missing pinned AP replaced by sibling' }
+if (Test-ReadyNetwork) { throw 'missing pinned AP replaced by sibling' }
 `)
 }
 
@@ -218,7 +299,7 @@ $script:stopSignal = [PSCustomObject]@{ IsCompleted = $false }
 $script:stopSignal | Add-Member ScriptMethod Wait { param($timeout) return $this.IsCompleted }
 function Test-PublicNetwork { param($id) return $true }
 $script:reads = 0
-function Read-ConnectionProfiles { $script:reads++; if ($script:reads -ge 3) { $tunProfile } }
+function Read-ConnectionProfiles { $script:reads++; if ($script:reads -ge 3) { $tunProfile } else { throw 'transient enumeration failure' } }
 if ((Wait-TunProfile $tunID) -ne $tunProfile -or $script:reads -ne 3) { throw 'delayed profile not retried' }
 function Read-ConnectionProfiles { @() }
 $message = ''

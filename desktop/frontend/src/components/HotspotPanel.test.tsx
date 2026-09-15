@@ -13,6 +13,13 @@ beforeEach(() => { vi.resetAllMocks(); mocks.save.mockResolvedValue(undefined); 
 afterEach(cleanup);
 
 describe("HotspotPanel", () => {
+  it.each([true, false])("reports cleanup failure accurately when off confirmation is %s", async (off) => {
+    mocks.status.mockResolvedValue({ ...stopped, state: "failed", cleanup_complete: false, hotspot_off_confirmed: off, configuration_restored: false });
+    render(<HotspotPanel />);
+    expect(await screen.findByText(off ? /The hotspot is off, but its original settings/ : /Hotspot shutdown is unconfirmed/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Retry/ })).toBeNull();
+    expect(mocks.stop).not.toHaveBeenCalled();
+  });
   it("generates an initial password without starting or saving the hotspot", async () => {
     render(<HotspotPanel />);
     await waitFor(() => expect((screen.getByLabelText("Network password") as HTMLInputElement).value).toMatch(/^[A-Za-z0-9_-]{16}$/));
@@ -21,12 +28,17 @@ describe("HotspotPanel", () => {
   });
   it("shows a connection QR only on request while the hotspot is running", async () => {
     mocks.preferences.mockResolvedValue({ ssid: "My hotspot", password: "saved-pass", band: "auto" });
-    mocks.status.mockResolvedValue(running);
+    mocks.status.mockResolvedValue({ ...running, devices_available: true, devices: [{mac:"AA:BB", hosts:["QR test phone"]}] });
     render(<HotspotPanel />);
     const show = await screen.findByRole("button", { name: "Scan to connect" });
     expect(screen.queryByTitle("Wi-Fi connection QR code")).toBeNull();
     fireEvent.click(show);
     expect(screen.getByTitle("Wi-Fi connection QR code")).toBeTruthy();
+    expect(screen.queryByText("QR test phone")).toBeNull();
+    fireEvent.click(screen.getByRole("button", {name:"Hide connection code"}));
+    expect(screen.getByText("QR test phone")).toBeTruthy();
+    expect(screen.queryByTitle("Wi-Fi connection QR code")).toBeNull();
+    fireEvent.click(show);
     fireEvent.click(screen.getByRole("switch", { name: "Aggregation hotspot" }));
     await screen.findByText("Hotspot is off");
     expect(screen.queryByTitle("Wi-Fi connection QR code")).toBeNull();
@@ -48,7 +60,7 @@ describe("HotspotPanel", () => {
     render(<HotspotPanel />);
     expect(await screen.findByText("test-phone")).toBeTruthy();
     expect(screen.getByText("AA:BB:CC:DD:EE:FF")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Save settings" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Save settings" }).hasAttribute("disabled")).toBe(true);
   });
   it("restores encrypted preferences and retains edits across navigation", async () => {
     mocks.preferences.mockResolvedValue({ ssid: "Saved network", password: "saved-pass", band: "5" });

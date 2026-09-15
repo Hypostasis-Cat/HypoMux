@@ -5418,7 +5418,7 @@ svg {
 .hotspot-help > div, details.hotspot-error > p { margin-top: 12px; }
 .hotspot-help p + p { margin-top: 8px; }
 .hotspot-error { overflow-wrap: anywhere; color: var(--hm-text-primary); }
-.hotspot-settings > .hotspot-error { border-left: 3px solid var(--hm-warning); padding: 8px 12px; background: rgba(var(--hm-surface-secondary-rgb), .7); font-size: 12px; }
+.hotspot-feedback > .hotspot-error { border-left: 3px solid var(--hm-warning); padding: 8px 12px; background: rgba(var(--hm-surface-secondary-rgb), .7); font-size: 12px; }
 .hotspot-notice { color: var(--hm-text-secondary); font-size: 12px; }
 @media (max-width: 820px) {
   .hotspot-layout { grid-template-columns: minmax(0, 1fr); }
@@ -5522,3 +5522,20 @@ svg {
 .routing-grid-surface.hm-card::before { inset: 0; }
 
 .routing-action-buttons { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; margin-left: auto; }
+
+/* Keep hotspot state changes within stable card regions. */
+.hotspot-summary { min-height: 24px; flex-wrap: nowrap; }
+.hotspot-prerequisite { min-height: 76px; box-sizing: border-box; }
+.hotspot-prerequisite p { min-height: 40px; }
+.hotspot-save-hint { min-height: 36px; }
+.hotspot-feedback { height: 96px; flex-shrink: 0; overflow: auto; scrollbar-gutter: stable; display: flex; flex-direction: column; gap: 8px; }
+.hotspot-connect { height: 480px; box-sizing: border-box; display: flex; flex-direction: column; gap: 16px; }
+.hotspot-connect-body { flex: 1; min-height: 0; overflow: auto; scrollbar-gutter: stable both-edges; }
+.hotspot-qr-toggle { width: 100%; flex-shrink: 0; }
+.hotspot-qr-content { margin: 0; min-height: 100%; align-content: center; text-align: center; gap: 12px; }
+.hotspot-qr-content > strong { overflow-wrap: anywhere; max-width: 100%; }
+.hotspot-qr-content svg { flex-shrink: 0; width: 224px; max-width: 100%; }
+.hotspot-connect-intro { padding-top: 8px; }
+.hotspot-content-enter { animation: hotspot-content-enter 160ms ease-out; }
+@keyframes hotspot-content-enter { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) { .hotspot-content-enter { animation: none; } }
