@@ -22,6 +22,7 @@ export function TrayMenu() {
   const [unavailable, setUnavailable] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [keyboardNavigation, setKeyboardNavigation] = useState(false);
   const pending = useRef(false);
   const menu = useRef<HTMLDivElement>(null);
   const card = useRef<HTMLElement>(null);
@@ -68,6 +69,7 @@ export function TrayMenu() {
       active = true;
       clearTimeout(timer);
       setError("");
+      setKeyboardNavigation(false);
       menu.current?.querySelector<HTMLButtonElement>("button")?.focus();
       void refresh();
       const revision = ++preferencesRevision;
@@ -106,6 +108,7 @@ export function TrayMenu() {
     finally { pending.current = false; setBusy(false); }
   };
   const keyDown = (event: KeyboardEvent) => {
+    setKeyboardNavigation(true);
     if (event.key === "Escape" || event.key === "Tab") {
       event.preventDefault();
       void act("dismiss");
@@ -131,7 +134,8 @@ export function TrayMenu() {
     : phases[phase]?.[english ? 1 : 0] ?? text("未知状态", "Unknown state");
 
   return <FluentProvider lang={english ? "en" : "zh-CN"} theme={createHypoMuxTheme(mode, resolveAccent(appearance))} className="tray-menu">
-    <main ref={card} className="tray-menu__card" onKeyDown={keyDown}>
+    <main ref={card} className="tray-menu__card" data-keyboard-navigation={keyboardNavigation}
+      onKeyDown={keyDown} onPointerMove={() => setKeyboardNavigation(false)} onPointerDown={() => setKeyboardNavigation(false)}>
       <header className="tray-menu__header">
         <div className="tray-menu__title">HypoMux</div>
         <div className="tray-menu__status" data-phase={phase} role="status">{status}
