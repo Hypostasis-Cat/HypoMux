@@ -32,7 +32,7 @@ export function TrayMenu() {
     if (!card.current || typeof ResizeObserver === "undefined") return;
     let lastHeight = 0;
     const resize = () => {
-      const height = Math.ceil(card.current!.getBoundingClientRect().height) + 16;
+      const height = Math.ceil(card.current!.getBoundingClientRect().height) + 12;
       if (height === lastHeight) return;
       lastHeight = height;
       void desktopPlatform.resizeTray(height);
