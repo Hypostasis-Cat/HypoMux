@@ -73,7 +73,7 @@ func TestTrayUsesPopupWithNativeFallback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	host := string(hostSource)
+	host := strings.Join(strings.Fields(string(hostSource)), " ")
 	for _, required := range []string{
 		"menu := d.app.Menu.New()",
 		"d.trayStatus = menu.Add",
@@ -82,6 +82,8 @@ func TestTrayUsesPopupWithNativeFallback(t *testing.T) {
 		"d.tray.OnRightClick",
 		"HideOnFocusLost: true",
 		"HiddenOnTaskbar: true",
+		"DisableFramelessWindowDecorations: true",
+		"CloseButtonState: application.ButtonHidden",
 		"d.tray.ShowMenu()",
 	} {
 		if !strings.Contains(host, required) {

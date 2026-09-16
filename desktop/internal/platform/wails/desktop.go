@@ -39,7 +39,15 @@ func (d *DesktopHost) ConfigureTray(icon []byte) {
 		Name: "tray-menu", Title: "HypoMux", Width: 304, Height: 216,
 		Frameless: true, Hidden: true, AlwaysOnTop: true, HideOnFocusLost: true,
 		HideOnEscape: true, DisableResize: true,
-		Windows:          application.WindowsWindow{HiddenOnTaskbar: true},
+		MinimiseButtonState: application.ButtonHidden,
+		MaximiseButtonState: application.ButtonHidden,
+		CloseButtonState:    application.ButtonHidden,
+		// Frameless alone retains DWM decorations and native caption hit
+		// targets. The popup supplies its own border, corners and shadow.
+		Windows: application.WindowsWindow{
+			HiddenOnTaskbar:                   true,
+			DisableFramelessWindowDecorations: true,
+		},
 		BackgroundType:   application.BackgroundTypeTransparent,
 		BackgroundColour: application.NewRGBA(0, 0, 0, 0), URL: "/?tray=1",
 	})
