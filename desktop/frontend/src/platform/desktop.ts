@@ -46,6 +46,10 @@ const callAppearance = async (method: string, value: string): Promise<NativeAppe
 // This facade is the only frontend module allowed to import the Wails runtime.
 // Browser previews intentionally degrade to no-ops.
 export const desktopPlatform = {
+  resizeTray: (height: number) =>
+    (Call.ByName("github.com/Hypostasis-Cat/HypoMux/desktop/internal/platform/wails.DesktopHost.ResizeTray", height) as Promise<void>).catch(ignoreOutsideWails),
+  trayAction: (action: "show" | "hide" | "dismiss" | "quit") =>
+    Call.ByName("github.com/Hypostasis-Cat/HypoMux/desktop/internal/platform/wails.DesktopHost.TrayAction", action) as Promise<void>,
   minimise: () => Window.Minimise().catch(ignoreOutsideWails),
   toggleMaximise: () => Window.ToggleMaximise().catch(ignoreOutsideWails),
   isMaximised: () => Window.IsMaximised().catch(() => false),

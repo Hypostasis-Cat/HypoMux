@@ -312,6 +312,16 @@ func (s *Server) ResolveDNS(
 			break
 		}
 	}
+	// Explicit NIC channels keep their startup bindings when the aggregation
+	// pool changes. Keep those bindings addressable by named DNS queries too.
+	if selected == nil && adapterName != "" {
+		for index := range s.config.Adapters {
+			if s.config.Adapters[index].Name == adapterName {
+				selected = &s.config.Adapters[index]
+				break
+			}
+		}
+	}
 	if selected == nil {
 		return dns.Result{}, fmt.Errorf("unknown adapter %q", adapterName)
 	}

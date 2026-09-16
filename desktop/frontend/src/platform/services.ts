@@ -240,6 +240,7 @@ export const appServices = {
       AdapterService.SaveSelection(mode, weighted, adapters),
   },
   engine: {
+    trayStatus: () => Call.ByName(engineMethod("TrayStatus")) as Promise<{ phase: string; mode: string }>,
     saveHotspotPreferences: (config: HotspotConfig) => Call.ByName(engineMethod("SaveHotspotPreferences"), config) as Promise<void>,
     hotspotPreferences: () => Call.ByName(engineMethod("HotspotPreferences")) as Promise<HotspotConfig>,
     hotspotStatus: () => Call.ByName(engineMethod("HotspotStatus")) as Promise<HotspotStatus>,

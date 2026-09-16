@@ -2,14 +2,25 @@
   box-sizing: border-box;
 }
 
-.tray-menu { min-height: 100vh; padding: 10px; background: var(--colorNeutralBackground1); color: var(--colorNeutralForeground1); font-family: var(--fontFamilyBase); }
-.tray-menu__card { overflow: hidden; border: 1px solid var(--colorNeutralStroke2); border-radius: 12px; background: var(--colorNeutralBackground1); box-shadow: var(--shadow16); }
-.tray-menu__header { padding: 12px 14px 10px; }
-.tray-menu__title { font-weight: 600; }
-.tray-menu__status { margin-top: 4px; color: var(--colorNeutralForeground3); font-size: var(--fontSizeBase200); }
-.tray-menu__status::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 7px; border-radius: 50%; background: var(--colorPaletteGreenForeground1); }
-.tray-menu__action { display: block; width: 100%; padding: 10px 14px; border: 0; border-top: 1px solid var(--colorNeutralStroke3); background: transparent; color: inherit; text-align: left; cursor: pointer; }
-.tray-menu__action:hover { background: var(--colorNeutralBackground1Hover); }
+.tray-document body { min-width: 0; min-height: 0; }
+.tray-document, .tray-document body, .tray-document #root { background: transparent; color-scheme: normal; }
+.tray-document .tray-menu { background: transparent; }
+.tray-menu { height: 100%; padding: 8px; background: transparent; color: var(--colorNeutralForeground1); font-family: var(--fontFamilyBase); font-size: 14px; }
+.tray-menu__card { max-height: 344px; overflow: auto; padding: 5px; border: 1px solid var(--colorNeutralStroke2); border-radius: 12px; background: var(--colorNeutralBackground1); box-shadow: var(--shadow8); }
+.tray-menu__header { padding: 10px 9px 12px; }
+.tray-menu__title { font-size: 15px; font-weight: 600; }
+.tray-menu__status { margin-top: 5px; color: var(--colorNeutralForeground2); font-size: 12px; line-height: 18px; }
+.tray-menu__status::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 7px; border-radius: 50%; background: var(--colorNeutralForeground3); }
+.tray-menu__status[data-phase="running"]::before { background: var(--colorPaletteGreenForeground1); }
+.tray-menu__status[data-phase="failed"]::before { background: var(--colorPaletteRedForeground1); }
+.tray-menu__status:is([data-phase="degraded"], [data-phase="waiting_network"], [data-phase="starting"], [data-phase="stopping"])::before { background: var(--colorPaletteMarigoldForeground1); }
+.tray-menu__action { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 38px; padding: 8px 10px; border: 0; border-radius: 6px; background: transparent; color: inherit; text-align: left; cursor: pointer; }
+.tray-menu__action:hover, .tray-menu__action:focus-visible { background: var(--colorNeutralBackground1Hover); }
+.tray-menu__action:focus-visible { outline: 2px solid var(--colorCompoundBrandStroke); outline-offset: -2px; }
+.tray-menu__action[aria-disabled="true"] { opacity: 0.6; cursor: wait; }
+.tray-menu__action svg { flex-shrink: 0; }
+.tray-menu__separator { margin: 4px 8px; border-top: 1px solid var(--colorNeutralStroke2); }
+.tray-menu__error { padding: 4px 9px; color: var(--colorPaletteRedForeground1); font-size: 12px; }
 
 /* ========================================
  * Global Focus Indicator (Accessibility)

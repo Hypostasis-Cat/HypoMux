@@ -36,16 +36,15 @@ func NewDesktopHost(app *application.App, window application.Window, startSilent
 
 func (d *DesktopHost) ConfigureTray(icon []byte) {
 	d.trayWindow = d.app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Name: "tray-menu", Title: "HypoMux", Width: 292, Height: 228,
+		Name: "tray-menu", Title: "HypoMux", Width: 304, Height: 216,
 		Frameless: true, Hidden: true, AlwaysOnTop: true, HideOnFocusLost: true,
 		HideOnEscape: true, DisableResize: true,
-		BackgroundType: application.BackgroundTypeTranslucent,
+		Windows:          application.WindowsWindow{HiddenOnTaskbar: true},
+		BackgroundType:   application.BackgroundTypeTransparent,
 		BackgroundColour: application.NewRGBA(0, 0, 0, 0), URL: "/?tray=1",
 	})
 	menu := d.app.Menu.New()
-	// Keep the tray menu deliberately small and action-oriented.  The native
-	// Windows menu inherits the platform theme, so consistent wording and
-	// grouping are more reliable than trying to emulate the WebView surface.
+	// Retain a native fallback if positioning the popup fails.
 	d.trayStatus = menu.Add("引擎状态  ·  未启动").SetEnabled(false).SetTooltip("当前聚合引擎状态")
 	menu.AddSeparator()
 	menu.Add("显示主窗口").SetAccelerator("Ctrl+Shift+H").OnClick(func(_ *application.Context) {
@@ -62,23 +61,57 @@ func (d *DesktopHost) ConfigureTray(icon []byte) {
 	d.tray = d.app.SystemTray.New()
 	d.tray.SetIcon(icon)
 	d.tray.SetTooltip("HypoMux · 聚合引擎未启动")
-	// Keep the application window independent from the tray menu. Wails uses
-	// the native Windows popup menu here, so no second WebView2 controller or
-	// taskbar window is created.
 	d.tray.OnClick(func() {
 		d.Show()
 	})
-	// The visible menu is rendered by the WebView so it shares the app theme.
-	// Keep the native menu unattached as a fallback for platforms where the
-	// transient window cannot be created.
-	d.tray.OnRightClick(func() {
-		if d.trayWindow != nil {
-			_ = d.tray.PositionWindow(d.trayWindow, 8)
+	// Register before the custom handler: the fallback must remain usable.
+	d.tray.SetMenu(menu)
+	d.tray.OnRightClick(d.ShowTrayMenu)
+}
+
+func (d *DesktopHost) ShowTrayMenu() {
+	if d.tray == nil {
+		return
+	}
+	if d.trayWindow != nil {
+		if err := d.tray.PositionWindow(d.trayWindow, 8); err == nil {
 			d.trayWindow.Show().Focus()
 			return
 		}
-		d.tray.ShowMenu()
-	})
+	}
+	d.tray.ShowMenu()
+}
+
+// ResizeTray keeps the popup fitted to translated text and inline errors.
+func (d *DesktopHost) ResizeTray(height int) {
+	if d.trayWindow == nil {
+		return
+	}
+	height = max(160, min(height, 360))
+	d.trayWindow.SetSize(304, height)
+	if d.tray != nil && d.trayWindow.IsVisible() {
+		_ = d.tray.PositionWindow(d.trayWindow, 8)
+	}
+}
+
+// TrayAction targets the main window explicitly; runtime Window.Hide targets
+// the calling WebView, which is the popup for these actions.
+func (d *DesktopHost) TrayAction(action string) error {
+	if action != "show" && action != "hide" && action != "dismiss" && action != "quit" {
+		return fmt.Errorf("unknown tray action: %s", action)
+	}
+	if d.trayWindow != nil {
+		d.trayWindow.Hide()
+	}
+	switch action {
+	case "show":
+		d.Show()
+	case "hide":
+		d.HideToTray()
+	case "quit":
+		d.Quit()
+	}
+	return nil
 }
 
 func (d *DesktopHost) SetEngineTrayStatus(phase string, mode string) {

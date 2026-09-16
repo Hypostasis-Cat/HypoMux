@@ -68,18 +68,7 @@ func TestElevatedCompatibilityFallbackDoesNotShowStartupModal(t *testing.T) {
 	}
 }
 
-func TestTrayUsesNativeMenuWithoutSecondWebView(t *testing.T) {
-	mainSource, err := os.ReadFile("main.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	mainText := string(mainSource)
-	for _, forbidden := range []string{"createTrayMenuWindow", "tray-menu.html", "Name:             \"tray-menu\""} {
-		if strings.Contains(mainText, forbidden) {
-			t.Fatalf("desktop entry point still creates a tray WebView: found %q", forbidden)
-		}
-	}
-
+func TestTrayUsesPopupWithNativeFallback(t *testing.T) {
 	hostSource, err := os.ReadFile("internal/platform/wails/desktop.go")
 	if err != nil {
 		t.Fatal(err)
@@ -90,14 +79,13 @@ func TestTrayUsesNativeMenuWithoutSecondWebView(t *testing.T) {
 		"d.trayStatus = menu.Add",
 		"d.tray.OnClick",
 		"d.tray.SetMenu(menu)",
+		"d.tray.OnRightClick",
+		"HideOnFocusLost: true",
+		"HiddenOnTaskbar: true",
+		"d.tray.ShowMenu()",
 	} {
 		if !strings.Contains(host, required) {
-			t.Fatalf("native tray menu is missing %q", required)
-		}
-	}
-	for _, forbidden := range []string{"AttachWindow", "ToggleWindow", "trayMenuWindow", "trayMenuFactory"} {
-		if strings.Contains(host, forbidden) {
-			t.Fatalf("tray host still uses a WebView popup: found %q", forbidden)
+			t.Fatalf("tray popup or fallback is missing %q", required)
 		}
 	}
 }
