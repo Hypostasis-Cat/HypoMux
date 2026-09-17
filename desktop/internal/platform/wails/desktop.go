@@ -22,6 +22,7 @@ type DesktopHost struct {
 	trayWindow   application.Window
 	tray         *application.SystemTray
 	trayStatus   *application.MenuItem
+	positionTray func() error
 	onQuit       func()
 	closeToTray  func() bool
 	startSilent  bool
@@ -36,7 +37,7 @@ func NewDesktopHost(app *application.App, window application.Window, startSilent
 
 func (d *DesktopHost) ConfigureTray(icon []byte) {
 	d.trayWindow = d.app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Name: "tray-menu", Title: "HypoMux", Width: 196, Height: 166,
+		Name: "tray-menu", Title: "HypoMux", Width: 208, Height: 182,
 		Frameless: true, Hidden: true, AlwaysOnTop: true, HideOnFocusLost: true,
 		HideOnEscape: true, DisableResize: true,
 		MinimiseButtonState: application.ButtonHidden,
@@ -82,7 +83,8 @@ func (d *DesktopHost) ShowTrayMenu() {
 		return
 	}
 	if d.trayWindow != nil {
-		if err := d.tray.PositionWindow(d.trayWindow, 8); err == nil {
+		d.positionTray = newTrayPositioner(d.trayWindow, d.tray)
+		if err := d.positionTray(); err == nil {
 			d.trayWindow.Show().Focus()
 			return
 		}
@@ -96,9 +98,9 @@ func (d *DesktopHost) ResizeTray(height int) {
 		return
 	}
 	height = max(140, min(height, 360))
-	d.trayWindow.SetSize(196, height)
-	if d.tray != nil && d.trayWindow.IsVisible() {
-		_ = d.tray.PositionWindow(d.trayWindow, 8)
+	d.trayWindow.SetSize(208, height)
+	if d.positionTray != nil && d.trayWindow.IsVisible() {
+		_ = d.positionTray()
 	}
 }
 
