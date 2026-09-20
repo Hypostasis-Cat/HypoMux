@@ -201,10 +201,6 @@ export function HomePage({
             </Button>
           </div>
         </div>
-        <p className="health-lock-note">{text(
-          "运行中修改会自动应用于新连接；已有连接和指定网卡的分流规则保持原路径。运行中至少保留一张参与网卡。",
-          "Changes while running apply to new connections. Existing connections and explicit adapter routes keep their paths. Keep at least one adapter enabled while running.",
-        )}</p>
         <div className="network-adapter-list">
           {engine.loading ? (
             <div className="adapter-empty hm-card"><Spinner label={text("正在扫描活动网络适配器", "Scanning active network adapters")} /></div>

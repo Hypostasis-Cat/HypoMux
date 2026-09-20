@@ -98,7 +98,7 @@ describe("HomePage adapter interactions", () => {
     const { rerender } = renderPage(<HomePage />);
     expect(screen.getByRole("article").getAttribute("aria-busy")).toBe("true");
     expect(screen.getByRole("article").classList.contains("has-pending")).toBe(true);
-    const note = screen.getByText(/Changes while running apply to new connections/);
+    expect(screen.queryByText(/Changes while running apply to new connections/)).toBeNull();
     expect((screen.getByRole("checkbox", { name: "Disable Ethernet" }) as HTMLInputElement).disabled).toBe(true);
     mocks.useEngineState.mockReturnValue({ ...state, adapterFeedback: { status: "success", changes } });
     rerender(<HomePage />);
@@ -106,7 +106,7 @@ describe("HomePage adapter interactions", () => {
     expect(screen.getByRole("article").getAttribute("aria-busy")).toBe("false");
     expect(screen.queryByText("Aggregation adapters updated")).toBeNull();
     expect(screen.queryByText("Added to aggregation")).toBeNull();
-    expect(screen.getByText(/Changes while running apply to new connections/)).toBe(note);
+    expect(screen.queryByText(/Changes while running apply to new connections/)).toBeNull();
     expect((screen.getByRole("checkbox", { name: "Disable Ethernet" }) as HTMLInputElement).disabled).toBe(false);
   });
 
