@@ -12,7 +12,7 @@ vi.mock("../platform/services", () => ({ appServices: {
 vi.mock("../components/notifications/AppNotifications", () => ({ useAppNotifications: () => ({ notify: mocks.notify }) }));
 vi.mock("../i18n/i18n", () => ({ useI18n: () => ({ locale: "en", t: mocks.translate }) }));
 
-const outbounds = [{ id: "direct", label: "Direct" }, { id: "aggregation", label: "Aggregation" }];
+const outbounds = [{ id: "direct", label: "Direct" }, { id: "aggregation", label: "Aggregation" }, { id: "reject", label: "Reject connection" }];
 // Match App's portal and focus-management context rather than using the
 // fallback Tabster root, which can hide the dialog as preview controls change.
 const renderPage = () => render(<FluentProvider theme={webLightTheme}><RoutingPage /></FluentProvider>);
@@ -28,6 +28,28 @@ beforeEach(() => {
   mocks.save.mockImplementation(async (rules) => ({ rules, outbounds, restart_required: false }));
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+
+it("saves reject and restores the rule without marking its egress unavailable", async () => {
+  let saved = [{ match_type: "process", value: "app.exe", outbound: "direct" }];
+  mocks.snapshot.mockImplementation(async () => ({ rules: saved, outbounds, restart_required: false }));
+  mocks.save.mockImplementation(async (rules) => {
+    saved = rules;
+    return { rules, outbounds, restart_required: false };
+  });
+  const view = renderPage();
+  const input = await screen.findByDisplayValue("app.exe");
+  const row = within(input.closest('[role="row"]') as HTMLElement);
+  fireEvent.click(row.getByRole("combobox"));
+  fireEvent.click(screen.getByRole("option", { name: "routing_outbound_reject" }));
+  await waitFor(() => expect(mocks.save).toHaveBeenCalledWith(
+    [expect.objectContaining({ outbound: "reject" })], expect.any(Array),
+  ), { timeout: 4000 });
+  view.unmount();
+  renderPage();
+  await screen.findByDisplayValue("app.exe");
+  expect(screen.queryByText(/Outbound reject is disabled or unavailable/)).toBeNull();
+  expect(screen.getByRole("switch", { name: "Enable rule app.exe" })).toHaveProperty("checked", true);
+});
 
 it("preserves row identity when the backend normalizes priority and casing", () => {
   const submitted = [{ id: "selected-rule", match_type: "process", value: "App.exe", outbound: "direct", priority: 70, disabled: true }];

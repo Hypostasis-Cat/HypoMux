@@ -16,9 +16,10 @@ import (
 )
 
 const (
-	MatchProcess = "process"
-	MatchDomain  = "domain"
-	MatchIP      = "ip"
+	MatchProcess   = "process"
+	MatchDomain    = "domain"
+	MatchIP        = "ip"
+	OutboundReject = "reject"
 
 	RoutingBatchMaxValues = 2000
 
@@ -207,6 +208,7 @@ func (s *RoutingRuleService) availableOutbounds() ([]Outbound, error) {
 	outbounds := []Outbound{
 		{ID: "aggregation", Label: "多网卡聚合"},
 		{ID: "direct", Label: "直连 / 绕过"},
+		{ID: OutboundReject, Label: "拒绝连接"},
 	}
 	adapters, listErr := s.adapters.List()
 	if listErr != nil {
@@ -585,7 +587,7 @@ func (s *RoutingRuleService) validateSelectedOutbounds(rules []RoutingRule) erro
 }
 
 func validateRoutingOutbounds(rules []RoutingRule, adapters []AdapterView) error {
-	available := map[string]struct{}{"aggregation": {}, "direct": {}}
+	available := map[string]struct{}{"aggregation": {}, "direct": {}, OutboundReject: {}}
 	for _, adapter := range adapters {
 		if adapter.Selected && adapter.Operational {
 			available["nic_"+adapter.ID] = struct{}{}
@@ -676,7 +678,7 @@ func canonicalMatchType(value string) string {
 }
 
 func isValidOutbound(value string) bool {
-	return value == "aggregation" || value == "direct" || value == "nic_ethernet" ||
+	return value == "aggregation" || value == "direct" || value == OutboundReject || value == "nic_ethernet" ||
 		value == "nic_wifi" || (strings.HasPrefix(value, "nic_") && len(value) > 4)
 }
 

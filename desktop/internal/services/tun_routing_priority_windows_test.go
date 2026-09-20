@@ -141,6 +141,9 @@ func priorityRouteFor(t *testing.T, path string, flow priorityFlow) string {
 			continue
 		}
 		if priorityRuleMatches(t, rule, sets, flow) {
+			if rule["action"] == "reject" {
+				return OutboundReject
+			}
 			if rule["action"] == "hijack-dns" {
 				return "hijack-dns"
 			}

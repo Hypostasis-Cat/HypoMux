@@ -112,6 +112,10 @@ func writeSingBoxRuleSetPlanLocked(
 		reference := map[string]any{
 			"rule_set": []string{binding.Tag}, "outbound": binding.Outbound,
 		}
+		if binding.Outbound == OutboundReject {
+			delete(reference, "outbound")
+			reference["action"] = "reject"
+		}
 		if binding.Scope == ruleSetScopeEarlyIP {
 			plan.EarlyRouteRules = append(plan.EarlyRouteRules, reference)
 		} else if binding.Scope == ruleSetScopeCustomIP {

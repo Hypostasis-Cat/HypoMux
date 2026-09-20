@@ -125,7 +125,8 @@ func writeSingBoxConfigWithOptions(
 			processPaths = append(processPaths, absolute)
 		}
 	}
-	ruleSetOutbounds := []string{"nic_ethernet", "nic_wifi", "aggregation", "direct"}
+	// Reserve reject rule-sets even when empty so blocking can be hot-reloaded.
+	ruleSetOutbounds := []string{"nic_ethernet", "nic_wifi", "aggregation", "direct", OutboundReject}
 	for name := range endpoints {
 		if strings.HasPrefix(name, "nic_") {
 			ruleSetOutbounds = append(ruleSetOutbounds, name)

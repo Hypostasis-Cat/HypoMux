@@ -623,6 +623,7 @@ export function RoutingPage() {
   const outboundLabel = useCallback((id: string) => {
     if (id === "aggregation") return t("routing_outbound_aggregation");
     if (id === "direct") return t("routing_outbound_direct");
+    if (id === "reject") return t("routing_outbound_reject");
     return (outbounds ?? []).find((outbound) => outbound.id === id)?.label ?? id.replace(/^nic_/, "");
   }, [outbounds, t]);
 
@@ -733,8 +734,8 @@ export function RoutingPage() {
         {engineRuntime.mode !== "tun" ? (
           <MessageBar intent="info">
             <MessageBarBody>{text(
-              "分流规则仅由 TUN 模式加载；当前系统代理流量不会根据这些规则切换出口。",
-              "Routing rules are loaded only in TUN mode; current system-proxy traffic does not switch egress based on these rules.",
+              "分流规则仅由 TUN 模式加载；当前系统代理流量不会根据这些规则切换出口或拒绝连接。",
+              "Routing rules are loaded only in TUN mode; current system-proxy traffic is not routed or blocked by these rules.",
             )}</MessageBarBody>
           </MessageBar>
         ) : (engineRuntime.phase === "running" || engineRuntime.phase === "degraded") ? (
