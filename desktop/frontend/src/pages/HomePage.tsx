@@ -127,6 +127,9 @@ export function HomePage({
   const preflightIssues = preflightDialog?.issues ?? [];
   const blockerCount = preflightIssues.filter((issue) => issue.level === "blocker").length;
   const warningCount = preflightIssues.filter((issue) => issue.level === "warning").length;
+  const aggregating = engine.phase === "running" || engine.phase === "degraded";
+  const feedback = engine.adapterFeedback;
+  const applyingAdapters = feedback?.status === "pending";
 
   return (
     <main className="home-page">
@@ -173,7 +176,7 @@ export function HomePage({
               size="small"
               appearance="subtle"
               icon={<CheckmarkCircle20Regular />}
-              disabled={engine.loading || engine.transitioning || engine.visibleAdapters.length === 0}
+              disabled={engine.loading || engine.transitioning || applyingAdapters || engine.visibleAdapters.length === 0}
               onClick={() => engine.selectAll(true)}
             >
               {t("home_select_all")}
@@ -182,7 +185,7 @@ export function HomePage({
               size="small"
               appearance="subtle"
               icon={<Dismiss20Regular />}
-              disabled={engine.loading || engine.transitioning || !engine.visibleAdapters.some((adapter) => adapter.selected)}
+              disabled={engine.loading || engine.transitioning || applyingAdapters || !engine.visibleAdapters.some((adapter) => adapter.selected)}
               onClick={() => engine.selectAll(false)}
             >
               {t("home_deselect_all")}
@@ -191,19 +194,41 @@ export function HomePage({
               size="small"
               appearance="subtle"
               icon={engine.refreshing ? <Spinner size="tiny" /> : <ArrowSync20Regular />}
-              disabled={engine.refreshing || engine.transitioning}
+              disabled={engine.refreshing || engine.transitioning || applyingAdapters}
               onClick={engine.refreshAdapters}
             >
               {t("home_refresh_tip")}
             </Button>
           </div>
         </div>
-        {(engine.phase === "running" || engine.phase === "degraded") && (
+        {aggregating && !feedback && (
           <p className="health-lock-note">{text(
             "修改会自动应用于新连接；已有连接和指定网卡的分流规则保持原路径。运行中至少保留一张参与网卡。",
             "Changes apply automatically to new connections. Existing connections and explicit adapter routes keep their paths. Keep at least one adapter enabled.",
           )}</p>
         )}
+        <div role="status" aria-live="polite" aria-atomic="true">
+          {feedback && (
+            <div className={`adapter-feedback is-${feedback.status}`}>
+              {applyingAdapters ? <Spinner size="tiny" /> : feedback.status === "success" ? <CheckmarkCircle20Regular /> : <Warning20Regular />}
+              <div>
+                <div className="adapter-feedback-title">
+                <strong>{applyingAdapters
+                  ? text("正在应用网卡变更…", "Applying adapter changes…")
+                  : feedback.status === "error"
+                    ? text("网卡变更未完成", "Adapter changes not completed")
+                    : text(aggregating ? "聚合网卡已更新" : "网卡选择已保存", aggregating ? "Aggregation adapters updated" : "Adapter selection saved")}</strong>
+                <span>{feedback.changes.map((change) => `${change.name} · ${text(change.selected ? "加入" : "移出", change.selected ? "add" : "remove")}`).join(" / ")}</span>
+                </div>
+                <span>{feedback.status === "success"
+                  ? text(aggregating ? "变更已应用于新连接，已有连接和指定网卡规则保持原路径；暂无流量不代表添加失败。" : "下次启动聚合时将使用已选网卡。", aggregating ? "Applied to new connections; existing connections and explicit routes keep their paths. No traffic yet does not mean adding failed." : "Selected adapters will be used when aggregation starts.")
+                  : feedback.status === "error"
+                    ? text("请核对当前勾选状态后重新选择；可在错误提示中重试。", "Check the current selection and try again, or retry from the error notification.")
+                    : text("正在等待应用结果，请稍候。", "Waiting for confirmation. Please wait.")}</span>
+              </div>
+            </div>
+          )}
+        </div>
         <div className="network-adapter-list">
           {engine.loading ? (
             <div className="adapter-empty hm-card"><Spinner label={text("正在扫描活动网络适配器", "Scanning active network adapters")} /></div>
@@ -226,7 +251,9 @@ export function HomePage({
               adapter={adapter}
               weighted={engine.weighted}
               percentage={adapter.selected ? Math.round((adapter.weight / engine.totalWeight) * 100) || 0 : 0}
-              disabled={engine.transitioning}
+              disabled={engine.transitioning || applyingAdapters}
+              aggregating={aggregating}
+              feedback={feedback?.changes.some((change) => change.id === adapter.id) ? feedback.status : undefined}
               onOpenConnections={() => onNavigate?.("connections", adapter.name)}
               onSelectedChange={(checked) => engine.toggleAdapter(adapter.id, checked)}
               onWeightChange={(value) => engine.updateWeight(adapter.id, value)}

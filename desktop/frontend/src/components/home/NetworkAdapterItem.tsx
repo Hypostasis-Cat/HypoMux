@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
-import { Button, Checkbox, Input, Tooltip } from "@fluentui/react-components";
+import { Button, Checkbox, Input, Spinner, Tooltip } from "@fluentui/react-components";
 import {
   Add16Regular,
+  CheckmarkCircle16Regular,
+  Warning16Regular,
   ArrowDownload20Regular,
   ArrowUpload20Regular,
   PlugConnected20Regular,
@@ -9,7 +11,7 @@ import {
   Subtract16Regular,
   Wifi124Regular,
 } from "@fluentui/react-icons";
-import type { HomeAdapter } from "../../state/useEngineState";
+import type { AdapterFeedback, HomeAdapter } from "../../state/useEngineState";
 import { NetworkHealthBadge } from "./NetworkHealthBadge";
 import { useI18n } from "../../i18n/i18n";
 
@@ -24,6 +26,8 @@ export function NetworkAdapterItem({
   percentage,
   weighted,
   disabled,
+  aggregating = false,
+  feedback,
   onOpenConnections,
   onSelectedChange,
   onWeightChange,
@@ -32,6 +36,8 @@ export function NetworkAdapterItem({
   percentage: number;
   weighted: boolean;
   disabled: boolean;
+  aggregating?: boolean;
+  feedback?: AdapterFeedback["status"];
   onOpenConnections: () => void;
   onSelectedChange: (checked: boolean) => void;
   onWeightChange: (value: number) => void;
@@ -50,7 +56,8 @@ export function NetworkAdapterItem({
   };
   return (
     <article
-      className={`network-adapter hm-card${adapter.selected ? " is-selected" : " is-muted"}${disabled ? " is-selection-disabled" : " is-selectable"}`}
+      className={`network-adapter hm-card${adapter.selected ? " is-selected" : " is-muted"}${disabled ? " is-selection-disabled" : " is-selectable"}${feedback ? ` has-${feedback}` : ""}`}
+      aria-busy={feedback === "pending"}
       onClick={toggleSelection}
     >
       <div className="adapter-primary">
@@ -68,6 +75,16 @@ export function NetworkAdapterItem({
         <span className="adapter-name">
           <strong title={adapter.name}>{adapter.name}</strong>
           <span>{adapter.address}</span>
+          <span className={`adapter-membership is-${feedback === "pending" || feedback === "error" ? feedback : aggregating && adapter.selected ? "success" : "idle"}`}>
+            {feedback === "pending" ? <Spinner size="tiny" /> : feedback === "error" ? <Warning16Regular /> : adapter.selected ? <CheckmarkCircle16Regular /> : <Add16Regular />}
+            {feedback === "pending"
+              ? text(adapter.selected ? "正在加入…" : "正在移出…", adapter.selected ? "Adding…" : "Removing…")
+              : feedback === "error"
+                ? text("应用失败，请重试", "Could not apply; retry")
+                : aggregating
+                  ? adapter.selected ? text("已加入聚合", "Added to aggregation") : text("未参与聚合", "Not in aggregation")
+                  : adapter.selected ? text("已选中 · 启动后生效", "Selected · applies on start") : text("点击加入", "Click to add")}
+          </span>
         </span>
       </div>
 

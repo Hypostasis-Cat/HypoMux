@@ -18,6 +18,10 @@ import { ADAPTER_VISIBILITY_EVENT, selectVisibleAdapters, visibleHomeAdapters } 
 export type EnginePhase = "stopped" | "starting" | "running" | "degraded" | "stopping" | "failed";
 export type EngineMode = "proxy" | "tun";
 export type AdapterHealth = "idle" | "healthy" | "unstable" | "cooldown" | "probing" | "failed";
+export type AdapterFeedback = {
+  status: "pending" | "success" | "error";
+  changes: { id: string; name: string; selected: boolean }[];
+};
 export const HOME_TELEMETRY_POLL_MS = 800;
 
 export const shouldPollEngineSnapshot = (
@@ -161,6 +165,8 @@ export function useEngineState(
   const [adapters, setAdapters] = useState<AdapterView[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [adapterFeedback, setAdapterFeedback] = useState<AdapterFeedback | null>(null);
+  const selectionChanges = useRef<AdapterFeedback["changes"]>([]);
   const [preview, setPreview] = useState(false);
   const [ports, setPorts] = useState({ socks: 10800, http: 10801 });
   const [systemProxyTakeover, setSystemProxyTakeover] = useState(true);
@@ -184,6 +190,14 @@ export function useEngineState(
   transitionRef.current = transition;
   previewRef.current = preview;
   onErrorRef.current = onError;
+
+  useEffect(() => {
+    // A later refresh or external selection change must not leave a stale
+    // success message beside a different authoritative selection.
+    if (adapterFeedback?.status === "success" && adapterFeedback.changes.some((change) =>
+      !adapters.some((adapter) => adapter.id === change.id && adapter.selected === change.selected),
+    )) setAdapterFeedback(null);
+  }, [adapters, adapterFeedback]);
 
   const applySnapshot = useCallback((
     next: EngineSnapshot,
@@ -337,18 +351,42 @@ export function useEngineState(
       return Promise.resolve(adaptersRef.current);
     }
     ++snapshotEpoch.current;
+    const changes = next.filter((adapter) =>
+      adaptersRef.current.find((previous) => previous.id === adapter.id)?.selected !== adapter.selected,
+    );
+    const pendingChanges = new Map(selectionChanges.current.map((change) => [change.id, change]));
+    changes.forEach(({ id, name, selected }) => pendingChanges.set(id, { id, name, selected }));
+    selectionChanges.current = [...pendingChanges.values()];
+    const feedbackChanges = selectionChanges.current;
+    if (feedbackChanges.length) setAdapterFeedback({ status: "pending", changes: feedbackChanges });
     adaptersRef.current = next;
     setAdapters(next);
-    if (preview) return Promise.resolve(next);
+    if (preview) {
+      if (feedbackChanges.length) setAdapterFeedback({ status: "success", changes: feedbackChanges });
+      selectionChanges.current = [];
+      return Promise.resolve(next);
+    }
     const handle = adapterSaveQueue.enqueue(adapterSaveInput(nextMode, nextWeighted, next));
     void handle.done.then((saved) => {
       if (!mounted.current || !adapterSaveQueue.isCurrent(handle.revision)) return;
       const authoritative = saved ?? next;
       adaptersRef.current = authoritative;
       setAdapters(authoritative);
+      if (feedbackChanges.length) {
+        const applied = feedbackChanges.every((change) =>
+          authoritative.some((adapter) => adapter.id === change.id && adapter.selected === change.selected),
+        );
+        setAdapterFeedback({ status: applied ? "success" : "error", changes: feedbackChanges });
+      }
+      selectionChanges.current = [];
     }).catch((error) => {
       if (!mounted.current || !adapterSaveQueue.isCurrent(handle.revision)) return;
-      onErrorRef.current(error instanceof Error ? error.message : String(error), () => void persistAdapters(next, nextMode, nextWeighted));
+      if (feedbackChanges.length) setAdapterFeedback({ status: "error", changes: feedbackChanges });
+      selectionChanges.current = [];
+      onErrorRef.current(error instanceof Error ? error.message : String(error), () => {
+        selectionChanges.current = feedbackChanges;
+        void persistAdapters(next, nextMode, nextWeighted);
+      });
       void load(false);
     });
     return handle.done;
@@ -521,6 +559,7 @@ export function useEngineState(
 
   return {
     visibleAdapters,
+    adapterFeedback,
     hiddenAdapterCount: homeAdapters.length - visibleAdapters.length,
     hiddenSelectedCount: hideVirtualAdapters ? selected.filter((adapter) => adapter.is_virtual).length : 0,
     phase, mode, weighted, adapters: homeAdapters, selected, totalWeight, history,

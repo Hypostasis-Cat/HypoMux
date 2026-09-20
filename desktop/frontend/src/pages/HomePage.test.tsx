@@ -91,6 +91,22 @@ const engineState = () => ({
 });
 
 describe("HomePage adapter interactions", () => {
+  it("shows pending and confirmed membership without relying on traffic", () => {
+    const state = { ...engineState(), phase: "running", totalDownload: 0 };
+    const changes = [{ id: adapter.id, name: adapter.name, selected: true }];
+    mocks.useEngineState.mockReturnValue({ ...state, adapterFeedback: { status: "pending", changes } });
+    const { rerender } = renderPage(<HomePage />);
+    expect(screen.getByText("Applying adapter changes…")).toBeTruthy();
+    expect(screen.queryByText("Added to aggregation")).toBeNull();
+    expect((screen.getByRole("checkbox", { name: "Disable Ethernet" }) as HTMLInputElement).disabled).toBe(true);
+    mocks.useEngineState.mockReturnValue({ ...state, adapterFeedback: { status: "success", changes } });
+    rerender(<HomePage />);
+    expect(screen.getByText("Aggregation adapters updated")).toBeTruthy();
+    expect(screen.getByText("Added to aggregation")).toBeTruthy();
+    expect(screen.getByText(/No traffic yet does not mean adding failed/)).toBeTruthy();
+    expect((screen.getByRole("checkbox", { name: "Disable Ethernet" }) as HTMLInputElement).disabled).toBe(false);
+  });
+
   beforeEach(() => {
     localStorage.clear();
     mocks.useEngineState.mockReturnValue(engineState());
