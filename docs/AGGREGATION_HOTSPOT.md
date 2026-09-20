@@ -22,7 +22,7 @@ Windows 10 22H2（19045）实测：`Get-NetConnectionProfile` 可见 TUN，但 W
 
 频段 API 使用运行时能力检测：Windows 10 2004 之前缺少 Band/IsBandSupported 时，自动频段沿用系统选择；指定 2.4/5 GHz 则明确提示改选自动或升级系统，不再因访问不存在的成员而失败。频段 API 版本依据：[Microsoft Band 文档](https://learn.microsoft.com/en-us/uwp/api/windows.networking.networkoperators.networkoperatortetheringaccesspointconfiguration.band)。此分支已通过模拟回归，仍需旧版 Windows 实机确认。
 
-`WiFiDeviceOff` 表示 Windows 无线设备未开启：需打开 Wi-Fi 并关闭飞行模式，无需连接另一个 Wi-Fi。失败后若工作进程已经退出，下一次启动会重新执行实时热点关闭状态和 ICS 检查，不再被旧的“清理未完成”标记永久锁住。系统仍有热点或共享时依旧拒绝接管。停止接口报错但 Windows 已确认 Off 时，按已经关闭处理；未确认关闭仍保留清理失败提示。
+`WiFiDeviceOff` 是 Windows 返回的启动状态，不能单独证明 Wi-Fi 开关关闭。AX201 实机反馈：指定 5 GHz 时失败，自动频段下设备可获取 IP 并上网；尚未确定具体驱动或信道原因。指定 5 GHz 时对 `WiFiDeviceOff`、`RadioRestriction`、`BandInterference` 给出频段相关提示，并记录 `requested_band` 和 `start_status`；不暗中改为自动后声称 5 GHz 成功。需要强制 5 GHz 时，应对照测试 Windows 移动热点，并检查驱动与当地信道限制。Intel 的说明见 https://www.intel.com/content/www/us/en/support/articles/000029083/wireless.html 。失败后若工作进程已经退出，下一次启动会重新执行实时热点关闭状态和 ICS 检查，不再被旧的“清理未完成”标记永久锁住。系统仍有热点或共享时依旧拒绝接管。停止接口报错但 Windows 已确认 Off 时，按已经关闭处理；未确认关闭仍保留清理失败提示。
 
 - 需要 Windows 10/11、支持移动热点的无线网卡，以及系统暴露的可共享 TUN 连接配置。系统策略、无线驱动或 WinRT 权限拒绝会明确报错，不会伪造成功。
 - Windows 热点 API 本机只读能力检查已通过；自动测试会在没有 TUN 时验证真实脚本拒绝启动，测试不修改网络。

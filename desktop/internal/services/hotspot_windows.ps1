@@ -205,9 +205,12 @@ function Publish-Running([string]$verdict) {
     Publish-State 'running' $message ($verdict -eq 'verified')
 }
 
-function Get-StartFailure([string]$status) {
+function Get-StartFailure([string]$status, [string]$band = 'auto') {
+    if ($band -eq '5' -and $status -in @('WiFiDeviceOff', 'RadioRestriction', 'BandInterference')) {
+        return ('Windows 无法按指定的 5 GHz 频段启动热点（' + $status + '）。此状态不能单独证明 Wi-Fi 开关已关闭；也可能与驱动、当前无线连接或地区信道限制有关。请先尝试自动频段；若必须使用 5 GHz，请对照测试 Windows 移动热点，并检查无线驱动及上游路由器的当地可用信道。')
+    }
     if ($status -eq 'WiFiDeviceOff') {
-        return 'Wi-Fi 无线设备未开启（WiFiDeviceOff）。请在 Windows 快速设置中开启 Wi-Fi、关闭飞行模式；无需连接其他 Wi-Fi，然后重试。若 Wi-Fi 已开启，请检查无线网卡是否被禁用或驱动异常。'
+        return 'Windows 返回 WiFiDeviceOff，未能启动无线热点。请检查 Wi-Fi 开关和飞行模式；若 Wi-Fi 已开启，请尝试自动频段，并检查无线网卡及驱动状态。'
     }
     return ('Windows tethering status: ' + $status)
 }
@@ -360,7 +363,8 @@ public static class HypoMuxHotspotLifetime {
     $attempted = $true
     $hotspotOffConfirmed = $false
     $result = Await-Operation ($manager.StartTetheringAsync()) $resultType
-    if ([string]$result.Status -ne 'Success') { throw (Get-StartFailure ([string]$result.Status)) }
+    $sharingDetail += '; requested_band=' + [string]$config.band + '; start_status=' + [string]$result.Status
+    if ([string]$result.Status -ne 'Success') { throw (Get-StartFailure ([string]$result.Status) ([string]$config.band)) }
     $phase = 'shared egress verification'
     $networkReady = $false
     $verificationDeadline = [DateTime]::UtcNow.AddSeconds(20)

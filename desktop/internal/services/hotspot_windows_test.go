@@ -319,6 +319,15 @@ if ($message -notlike '*stopped during*') { throw 'discovery ignored TUN disappe
 
 func TestHotspotWindowsBandAPIVersionCompatibility(t *testing.T) {
 	runHotspotFunctions(t, `
+foreach ($status in @('WiFiDeviceOff', 'RadioRestriction', 'BandInterference')) {
+    $message = Get-StartFailure $status '5'
+    if (-not $message.Contains($status) -or $message -notlike '*5 GHz*' -or $message -notlike '*自动频段*') { throw '5 GHz failure lacks actionable context' }
+}
+foreach ($band in @('auto', '2.4')) {
+    $message = Get-StartFailure 'WiFiDeviceOff' $band
+    if ($message -notlike '*WiFiDeviceOff*' -or $message -like '*指定的 5 GHz*') { throw 'radio failure incorrectly attributed to 5 GHz' }
+}
+if ((Get-StartFailure 'Unknown' '5') -ne 'Windows tethering status: Unknown') { throw 'unrelated failure incorrectly attributed to band' }
 $legacy = [PSCustomObject]@{ Ssid = 'test' }
 Set-HotspotBand $legacy 'auto' $false
 foreach ($band in @('2.4', '5')) {
