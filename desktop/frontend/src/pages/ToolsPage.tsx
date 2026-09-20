@@ -77,6 +77,7 @@ export function ToolsPage() {
     : !enabled ? text("已关闭", "Off")
     : statusError ? text("已开启 · 状态暂不可用", "Enabled · status unavailable")
     : !status ? text("已开启 · 正在读取状态", "Enabled · checking status")
+    : status.runtime_state === "unsupported" ? text("已开启 · 需要更新 Core", "Enabled · Core update required")
     : !status.enabled ? text("已开启 · 等待引擎", "Enabled · waiting for engine")
     : status.probing > 0 ? text("正在验证节点", "Checking candidates")
     : status.entries.some(entry => entry.preferred) ? text("正在优选 · 已有优先节点", "Optimizing · preferred nodes available")
@@ -100,7 +101,7 @@ export function ToolsPage() {
         <h1 ref={titleRef} tabIndex={-1}>{name}</h1>
         <p>{text("查看下载表现、候选节点与诊断。开关作用于新连接。", "Inspect downloads, candidate nodes and diagnostics. Changes apply to new connections.")}</p>
       </div></header>
-      <GlassSurface className="tool-card" aria-label={name}>
+      <GlassSurface className="tool-card steam-tool-card" aria-label={name}>
         <header className="tool-card-heading">
           <span className="tool-icon" aria-hidden="true"><Games24Regular /></span>
           <div className="tool-card-copy"><div className="tool-title"><h2>{text("下载节点优选", "Download node optimization")}</h2><Badge appearance="tint">{text("实验性", "Experimental")}</Badge></div><p>{text("根据实际下载表现，学习适合当前网络的节点。", "Learn suitable nodes from actual download performance.")}</p></div>

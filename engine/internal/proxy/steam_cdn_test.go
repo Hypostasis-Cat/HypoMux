@@ -421,6 +421,11 @@ func TestSteamCDNProxyAndTUNRelayFallbackAndDirect(t *testing.T) {
 			if mode != "tun-direct" && s.Snapshot(false).Adapters[0].Connections != 1 {
 				t.Fatal("replacement double-counted connection")
 			}
+			if mode != "tun-direct" {
+				if links := s.scheduler.performanceSnapshot().Links; len(links) != 1 || links[0].Load != 1 {
+					t.Fatalf("CDN replacement lost or duplicated scheduling load: %+v", links)
+				}
+			}
 		})
 	}
 }

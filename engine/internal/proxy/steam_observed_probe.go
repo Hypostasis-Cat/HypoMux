@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/Hypostasis-Cat/HypoMux/engine/internal/dns"
@@ -53,15 +54,14 @@ func (s *Server) validateObservedSteam(ctx context.Context, gen uint64, adapter 
 		c.note(gen, host, adapter.Name, "", "dns_no_candidates")
 		return
 	}
-	alternatives := 0
-	var verified []cdnCandidate
-	for _, candidate := range steamCandidatesForAdapter(candidates, adapter, originalIP, c.now()) {
+	pool := steamCandidatesForAdapter(candidates, adapter, originalIP, c.now())
+	passed := make([]bool, len(pool))
+	validate := func(candidate cdnCandidate) bool {
 		if candidate.ip == originalIP || !adapterSupportsNetwork(adapter, networkForIP("tcp", net.ParseIP(candidate.ip))) {
-			continue
+			return false
 		}
-		alternatives++
 		if ctx.Err() != nil {
-			return
+			return false
 		}
 		sample, e := s.probeSteamHTTPRange(ctx, adapter, host, candidate.ip, uri, len(baseline), total)
 		stage := "verified"
@@ -84,13 +84,18 @@ func (s *Server) validateObservedSteam(ctx context.Context, gen uint64, adapter 
 				}
 				c.mu.Unlock()
 			}
-			continue
+			return false
 		}
 		c.mu.Lock()
-		if c.enabled && c.generation == gen && len(c.entries) < 512 && candidate.expires.After(c.now()) {
+		admitted := false
+		if c.enabled && c.generation == gen && ctx.Err() == nil && candidate.expires.After(c.now()) {
 			key := cdnKey{adapter.Name, host, "80", candidate.ip}
 			entry := c.entries[key]
 			if entry == nil {
+				if len(c.entries) >= 512 {
+					c.mu.Unlock()
+					return false
+				}
 				entry = &SteamCDNEntry{Adapter: adapter.Name, Domain: host, Port: "80", IP: candidate.ip}
 				c.entries[key] = entry
 			}
@@ -103,11 +108,36 @@ func (s *Server) validateObservedSteam(ctx context.Context, gen uint64, adapter 
 				entry.DecisionReason = "stale_samples"
 			}
 			entry.ExpiresAt = candidate.expires
+			admitted = true
 		}
 		c.mu.Unlock()
-		verified = append(verified, candidate)
+		return admitted
 	}
-	if alternatives == 0 {
+	// Two bounded workers let a healthy candidate become usable even while a
+	// different CDN times out. Existing request/byte budgets remain shared.
+	jobs := make(chan int, len(pool))
+	for i := range pool {
+		jobs <- i
+	}
+	close(jobs)
+	var workers sync.WaitGroup
+	for range min(2, len(pool)) {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			for i := range jobs {
+				passed[i] = validate(pool[i])
+			}
+		}()
+	}
+	workers.Wait()
+	var verified []cdnCandidate
+	for i, candidate := range pool {
+		if passed[i] {
+			verified = append(verified, candidate)
+		}
+	}
+	if len(pool) == 0 {
 		c.note(gen, host, adapter.Name, originalIP, "only_original")
 	}
 	s.measureSteamCandidates(ctx, gen, adapter, host, uri, baseline, total, verified)
@@ -180,6 +210,25 @@ func (c *steamCDN) useTrial(adapter, host, port, original string) (string, uint6
 	c.decisions[key]++
 	explore := c.decisions[key]%8 == 0
 	baseline := c.entries[cdnKey{adapter, host, port, original}]
+	now := c.now()
+	hasPreferred := false
+	for k, e := range c.entries {
+		if k.adapter != adapter || k.domain != host || k.port != port || k.ip == original || !e.Validated {
+			continue
+		}
+		if e.baselineIP != original {
+			e.advantageWindows = 0
+			e.Preferred = false
+		}
+		e.baselineIP = original
+		c.evaluateEntryLocked(k, e, baseline, now)
+		hasPreferred = hasPreferred || e.Preferred
+	}
+	// Keep a small original-node control stream so successful selection cannot
+	// starve its own baseline and oscillate between preferred and stale states.
+	if hasPreferred && c.decisions[key]%8 == 7 {
+		return "", gen
+	}
 
 	groupTrials := c.groupTrialsLocked(adapter, host, port)
 	var selected *SteamCDNEntry
@@ -194,8 +243,6 @@ func (c *steamCDN) useTrial(adapter, host, port, original string) (string, uint6
 			e.DecisionReason = "route_paused"
 			continue
 		}
-		e.baselineIP = original
-		c.evaluateEntryLocked(k, e, baseline, c.now())
 		// Score active trials before enforcing admission limits: a long download
 		// must be able to earn promotion without first closing its connection.
 		if t := c.traffic[k]; t != nil && ((!e.Preferred && t.trials > 0) || (e.Preferred && t.trials >= 4)) {
@@ -208,10 +255,14 @@ func (c *steamCDN) useTrial(adapter, host, port, original string) (string, uint6
 		if e.CooldownUntil.After(c.now()) {
 			continue
 		}
-		if !explore && !e.Preferred {
+		// A fresh original baseline can start the first unused candidate without
+		// waiting for eight more connections. Never bootstrap beside another trial
+		// or after a preferred route has already been found.
+		bootstrap := !hasPreferred && groupTrials == 0 && e.Selections == 0 && baseline != nil && baseline.Samples >= 3 && now.Sub(baseline.lastSample) < 10*time.Second
+		if !explore && !e.Preferred && !bootstrap {
 			continue
 		}
-		if selected == nil || explore && steamExploreBefore(e, selected, c.now()) || !explore && e.DownloadBPS > selected.DownloadBPS {
+		if selected == nil || (explore || bootstrap) && steamExploreBefore(e, selected, now) || !explore && !bootstrap && (e.DownloadBPS > selected.DownloadBPS || e.DownloadBPS == selected.DownloadBPS && e.IP < selected.IP) {
 			selected = e
 		}
 	}
@@ -250,8 +301,7 @@ func (c *steamCDN) finishTransfer(key cdnKey, gen uint64, amount uint64, failed 
 		return
 	}
 	if failed {
-		e.Preferred = false
-		e.advantageWindows = 0
+		resetSteamPerformance(e)
 		e.CooldownUntil = c.now().Add(time.Minute)
 		return
 	}

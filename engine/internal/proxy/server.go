@@ -18,6 +18,7 @@ type Server struct {
 	cdn              *steamCDN
 	config           Config
 	tcpTuningMode    tcpTuningMode
+	performance      *performanceTable
 	scheduler        *scheduler
 	schedulers       map[string]*scheduler
 	health           *healthTable
@@ -75,6 +76,12 @@ func New(config Config) (*Server, error) {
 			health,
 		)
 	}
+	server.performance = newPerformanceTable()
+	server.scheduler.strategy = normalized.Strategy
+	server.scheduler.performance = server.performance
+	for _, scheduler := range server.schedulers {
+		scheduler.performance = server.performance
+	}
 	server.dialTCP = func(
 		ctx context.Context,
 		dialer *net.Dialer,
@@ -121,6 +128,8 @@ func (s *Server) Start() (Endpoints, error) {
 	resolver.SetFallbackHandler(s.dnsFallbackHandler)
 	s.resolver = resolver
 	s.cdn = newSteamCDN(s.ctx, s.config.SteamCDNEnabled)
+	s.wg.Add(1)
+	go func(ctx context.Context) { defer s.wg.Done(); s.performance.run(ctx) }(s.ctx)
 
 	if len(s.config.Channels) > 0 {
 		return s.startChannelListeners()
@@ -231,6 +240,7 @@ func (s *Server) Endpoints() Endpoints {
 
 func (s *Server) Snapshot(includeConnections bool) TelemetrySnapshot {
 	result := s.registry.Snapshot(includeConnections)
+	result.Scheduling = s.scheduler.performanceSnapshot()
 	result.TCPProfile = s.tcpProfileName()
 	result.SteamCDN = s.cdn.snapshot()
 	health, quarantines := s.health.snapshot()
@@ -519,6 +529,9 @@ func (s *Server) relay(clientReader io.Reader, client net.Conn, upstream net.Con
 		if session.cdnKey.domain != "" {
 			writer = steamTimedWriter{Writer: steamObserverWriter{Writer: client, observer: session.cdnObserver}, blocked: &blocked, failed: &clientWriteFailed}
 		}
+		if tracked, ok := upstream.(*leasedConn); ok {
+			writer = performanceWriter{writer: writer, lease: tracked.lease}
+		}
 		_, copyErr := io.CopyBuffer(accountingWriter{
 			Writer: writer,
 			add: func(amount uint64) {
@@ -573,7 +586,7 @@ func (w accountingWriter) Write(payload []byte) (int, error) {
 }
 
 func closeWrite(connection net.Conn) {
-	if tcp, ok := connection.(*net.TCPConn); ok {
+	if tcp, ok := connection.(interface{ CloseWrite() error }); ok {
 		_ = tcp.CloseWrite()
 	}
 }

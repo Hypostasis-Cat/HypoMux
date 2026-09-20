@@ -1,5 +1,26 @@
 # HypoMux engine protocol v1
 
+## Experimental adaptive scheduling
+
+`engine.hello.scheduling_strategies` advertises `round-robin`, `weighted`, and
+`adaptive-throughput`. This is a separate optional field; `capabilities` remains
+the RPC method list. Missing strategy support means legacy boolean scheduling only.
+
+Both `engine.start` and `engine.scheduling` accept optional `strategy`. If omitted,
+`weighted: true` means weighted and false means round-robin. An explicit strategy
+is authoritative; unknown values fail validation. Returned scheduling configuration
+includes the strategy and a normalized `weighted` flag for rollback. Clients must
+not send adaptive mode to a Core that does not advertise it.
+
+Adaptive scheduling is experimental TCP download scheduling, based on recent
+observed throughput and projected transfer load, with periodic exploration. It
+does not migrate existing connections; UDP uses round-robin in adaptive mode.
+`engine.telemetry.scheduling` reports actual TCP/UDP strategies, learning state,
+decision reason counters and per-link samples, observed rate, load and sample age.
+Rates are observations, not bandwidth capacity or measured speedup.
+
+See [design and implementation scope](../../docs/architecture/adaptive-scheduling-implementation.md).
+
 ## Optional Steam CDN optimization
 
 `engine.start.steam_cdn_enabled` defaults to false in both `proxy` and

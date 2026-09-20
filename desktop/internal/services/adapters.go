@@ -193,6 +193,17 @@ func (s *AdapterService) saveSelection(mode string, weighted bool, adapters []Ad
 }
 
 func (s *AdapterService) persistSelection(mode string, weighted bool, adapters []AdapterView) error {
+	return s.persistSelectionStrategy(mode, weighted, adapters, "")
+}
+
+func (s *AdapterService) saveSelectionStrategy(mode string, weighted bool, adapters []AdapterView, strategy string) ([]AdapterView, error) {
+	if err := s.persistSelectionStrategy(mode, weighted, adapters, strategy); err != nil {
+		return nil, err
+	}
+	return s.List()
+}
+
+func (s *AdapterService) persistSelectionStrategy(mode string, weighted bool, adapters []AdapterView, strategy string) error {
 	selected := make([]string, 0, len(adapters))
 	weights := make(map[string]int, len(adapters))
 	for _, adapter := range adapters {
@@ -204,7 +215,7 @@ func (s *AdapterService) persistSelection(mode string, weighted bool, adapters [
 			selected = append(selected, adapter.ID)
 		}
 	}
-	if _, err := s.settings.UpdateHome(mode, weighted, selected, weights); err != nil {
+	if _, err := s.settings.updateHomeStrategy(mode, weighted, selected, weights, strategy); err != nil {
 		return err
 	}
 	return nil

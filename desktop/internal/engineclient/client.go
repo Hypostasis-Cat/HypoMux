@@ -99,17 +99,18 @@ type Client struct {
 }
 
 type Hello struct {
-	Engine          string              `json:"engine"`
-	EngineVersion   string              `json:"engine_version"`
-	Commit          string              `json:"commit"`
-	ProtocolVersion int                 `json:"protocol_version"`
-	Capabilities    []string            `json:"capabilities"`
-	Modes           []string            `json:"modes"`
-	ModeFeatures    map[string][]string `json:"mode_features"`
-	Elevated        bool                `json:"elevated"`
-	PID             int                 `json:"pid"`
-	Launcher        string              `json:"-"`
-	Fallback        bool                `json:"-"`
+	Engine               string              `json:"engine"`
+	EngineVersion        string              `json:"engine_version"`
+	Commit               string              `json:"commit"`
+	ProtocolVersion      int                 `json:"protocol_version"`
+	SchedulingStrategies []string            `json:"scheduling_strategies"`
+	Capabilities         []string            `json:"capabilities"`
+	Modes                []string            `json:"modes"`
+	ModeFeatures         map[string][]string `json:"mode_features"`
+	Elevated             bool                `json:"elevated"`
+	PID                  int                 `json:"pid"`
+	Launcher             string              `json:"-"`
+	Fallback             bool                `json:"-"`
 }
 
 func New() *Client {

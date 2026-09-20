@@ -5,11 +5,18 @@ import "fmt"
 // SchedulingConfig changes only the aggregation pool. Explicit NIC channels
 // and established TCP/UDP flows retain their bindings.
 type SchedulingConfig struct {
+	Strategy string    `json:"strategy,omitempty"`
 	Weighted bool      `json:"weighted"`
 	Adapters []Adapter `json:"adapters"`
 }
 
 func ValidateScheduling(config SchedulingConfig) (SchedulingConfig, error) {
+	strategy, err := NormalizeStrategy(config.Strategy, config.Weighted)
+	if err != nil {
+		return SchedulingConfig{}, err
+	}
+	config.Strategy = strategy
+	config.Weighted = strategy == StrategyWeighted
 	for _, adapter := range config.Adapters {
 		if adapter.Weight < 1 || adapter.Weight > 100 {
 			return SchedulingConfig{}, fmt.Errorf("adapter %q weight must be between 1 and 100", adapter.Name)
@@ -26,13 +33,13 @@ func ValidateScheduling(config SchedulingConfig) (SchedulingConfig, error) {
 func (s *scheduler) snapshot() SchedulingConfig {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return SchedulingConfig{Weighted: s.weighted, Adapters: append([]Adapter(nil), s.adapters...)}
+	return SchedulingConfig{Strategy: s.strategy, Weighted: s.weighted, Adapters: append([]Adapter(nil), s.adapters...)}
 }
 
 func (s *scheduler) update(config SchedulingConfig) SchedulingConfig {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	previous := SchedulingConfig{Weighted: s.weighted, Adapters: s.adapters}
+	previous := SchedulingConfig{Strategy: s.strategy, Weighted: s.weighted, Adapters: s.adapters}
 	s.health.mu.Lock()
 	for _, adapter := range config.Adapters {
 		if s.health.adapters[adapter.Name] == nil {
@@ -42,6 +49,7 @@ func (s *scheduler) update(config SchedulingConfig) SchedulingConfig {
 	s.health.mu.Unlock()
 	s.adapters = config.Adapters
 	s.weighted = config.Weighted
+	s.strategy = config.Strategy
 	s.next = 0
 	s.currentWeight = make(map[string]int, len(config.Adapters))
 	return previous
@@ -57,5 +65,14 @@ func (s *Server) UpdateScheduling(config SchedulingConfig) (SchedulingConfig, er
 	if !s.running {
 		return SchedulingConfig{}, fmt.Errorf("proxy engine is not running")
 	}
-	return s.scheduler.update(next), nil
+	previous := s.scheduler.update(next)
+	// Keep explicit NIC channels observable even when removed from the pool.
+	bindings := append([]Adapter(nil), next.Adapters...)
+	for _, scheduler := range s.schedulers {
+		if scheduler != s.scheduler {
+			bindings = append(bindings, scheduler.snapshot().Adapters...)
+		}
+	}
+	s.performance.retain(bindings)
+	return previous, nil
 }

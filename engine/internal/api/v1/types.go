@@ -70,19 +70,20 @@ func Capabilities() []string {
 }
 
 type HelloResult struct {
-	Engine          string              `json:"engine"`
-	EngineVersion   string              `json:"engine_version"`
-	Commit          string              `json:"commit"`
-	ProtocolVersion int                 `json:"protocol_version"`
-	Transport       string              `json:"transport"`
-	Capabilities    []string            `json:"capabilities"`
-	Modes           []string            `json:"modes"`
-	ModeFeatures    map[string][]string `json:"mode_features"`
-	OS              string              `json:"os"`
-	Arch            string              `json:"arch"`
-	PID             int                 `json:"pid"`
-	Elevated        bool                `json:"elevated"`
-	StartedAt       time.Time           `json:"started_at"`
+	Engine               string              `json:"engine"`
+	EngineVersion        string              `json:"engine_version"`
+	Commit               string              `json:"commit"`
+	ProtocolVersion      int                 `json:"protocol_version"`
+	Transport            string              `json:"transport"`
+	SchedulingStrategies []string            `json:"scheduling_strategies"`
+	Capabilities         []string            `json:"capabilities"`
+	Modes                []string            `json:"modes"`
+	ModeFeatures         map[string][]string `json:"mode_features"`
+	OS                   string              `json:"os"`
+	Arch                 string              `json:"arch"`
+	PID                  int                 `json:"pid"`
+	Elevated             bool                `json:"elevated"`
+	StartedAt            time.Time           `json:"started_at"`
 }
 
 func NewHelloResult(
@@ -94,13 +95,14 @@ func NewHelloResult(
 	startedAt time.Time,
 ) HelloResult {
 	return HelloResult{
-		Engine:          engine,
-		EngineVersion:   engineVersion,
-		Commit:          commit,
-		ProtocolVersion: protocol.Version,
-		Transport:       protocol.Transport,
-		Capabilities:    Capabilities(),
-		Modes:           []string{"proxy", "tun_tcp_pool"},
+		Engine:               engine,
+		EngineVersion:        engineVersion,
+		Commit:               commit,
+		ProtocolVersion:      protocol.Version,
+		Transport:            protocol.Transport,
+		Capabilities:         Capabilities(),
+		SchedulingStrategies: []string{proxy.StrategyRoundRobin, proxy.StrategyWeighted, proxy.StrategyAdaptive},
+		Modes:                []string{"proxy", "tun_tcp_pool"},
 		ModeFeatures: map[string][]string{
 			"proxy": {
 				"socks5_connect",
@@ -175,6 +177,7 @@ type EngineStartParams struct {
 	ListenHost            string                       `json:"listen_host"`
 	SOCKSPort             int                          `json:"socks_port"`
 	HTTPPort              int                          `json:"http_port"`
+	Strategy              string                       `json:"strategy,omitempty"`
 	Weighted              bool                         `json:"weighted"`
 	Adapters              []proxy.Adapter              `json:"adapters"`
 	Channels              []proxy.Channel              `json:"channels,omitempty"`
@@ -210,6 +213,7 @@ func (p EngineStartParams) ProxyConfig() proxy.Config {
 		ListenHost:            p.ListenHost,
 		SOCKSPort:             p.SOCKSPort,
 		HTTPPort:              p.HTTPPort,
+		Strategy:              p.Strategy,
 		Weighted:              p.Weighted,
 		Adapters:              p.Adapters,
 		Channels:              p.Channels,

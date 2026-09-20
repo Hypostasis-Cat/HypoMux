@@ -22,6 +22,8 @@ export function EngineHero({
   history,
   transitioning,
   weighted,
+  selectedStrategy,
+  onStrategyChange,
   socksPort,
   httpPort,
   systemProxyTakeover,
@@ -38,6 +40,8 @@ export function EngineHero({
   history: number[];
   transitioning: boolean;
   weighted: boolean;
+  selectedStrategy?: string;
+  onStrategyChange?: (value: string) => void;
   socksPort: number;
   httpPort: number;
   systemProxyTakeover: boolean;
@@ -49,7 +53,7 @@ export function EngineHero({
   const text = (zh: string, en: string) => locale === "en" ? en : zh;
   const strategyId = useId();
   const strategyHintId = useId();
-  const strategy = getSchedulingStrategy(weighted);
+  const strategy = getSchedulingStrategy(weighted, selectedStrategy);
   const language = locale === "en" ? "en" : "zh";
   const active = phase === "running" || phase === "degraded" || phase === "starting";
   const actionLabel = phase === "starting"
@@ -134,7 +138,7 @@ export function EngineHero({
               disabled={transitioning}
               onOptionSelect={(_, data) => {
                 const next = schedulingStrategies.find((item) => item.id === data.optionValue);
-                if (next) onWeightedChange(next.weighted);
+                if (next) { if (onStrategyChange) onStrategyChange(next.strategy); else onWeightedChange(next.weighted); }
               }}
             >
               {schedulingStrategies.map((item) => (
@@ -145,7 +149,7 @@ export function EngineHero({
         </div>
         <p id={strategyHintId} className="scheduling-hint">
           {strategy.description[language]}
-          {(transitioning || active) && <> {text("停止聚合后可切换策略。", "Stop aggregation to change strategy.")}</>}
+          {active && !transitioning && <> {text("切换仅影响新连接。", "Changes apply to new connections.")}</>}
         </p>
       </div>
       <ThroughputDisplay download={download} upload={upload} connections={connections} history={history} active={active} />

@@ -7,6 +7,8 @@ import (
 type scheduler struct {
 	mu            sync.Mutex
 	adapters      []Adapter
+	strategy      string
+	performance   *performanceTable
 	weighted      bool
 	next          int
 	currentWeight map[string]int
@@ -44,6 +46,10 @@ func (s *scheduler) SelectForDomain(
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	return s.selectLocked(excluded, domain)
+}
+
+func (s *scheduler) selectLocked(excluded map[string]struct{}, domain string) (Adapter, bool) {
 	candidates := s.health.candidates(s.adapters, excluded, domain)
 	if len(candidates) == 0 {
 		return Adapter{}, false
@@ -89,4 +95,20 @@ func (s *scheduler) selectWeighted(candidates []Adapter) Adapter {
 	}
 	s.currentWeight[selected.Name] -= total
 	return selected
+}
+
+func (s *scheduler) acquireTCP(excluded map[string]struct{}, domain string) (Adapter, *performanceLease, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	fallback, ok := s.selectLocked(excluded, domain)
+	if !ok || s.performance == nil {
+		return fallback, nil, ok
+	}
+	candidates := s.health.candidates(s.adapters, excluded, domain)
+	// Health state can expire between reads, but no explicit exclusion may be bypassed.
+	if len(candidates) == 0 {
+		return Adapter{}, nil, false
+	}
+	adapter, lease := s.performance.acquire(candidates, s.strategy == StrategyAdaptive, fallback)
+	return adapter, lease, true
 }

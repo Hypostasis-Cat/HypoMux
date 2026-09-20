@@ -50,6 +50,7 @@ type ConnectionSnapshot struct {
 }
 
 type TelemetrySnapshot struct {
+	Scheduling        SchedulingTelemetry         `json:"scheduling"`
 	SteamCDN          SteamCDNStatus              `json:"steam_cdn"`
 	StartedAt         time.Time                   `json:"started_at"`
 	SampledAt         time.Time                   `json:"sampled_at"`

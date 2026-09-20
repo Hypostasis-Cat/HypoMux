@@ -160,6 +160,8 @@ export function useEngineState(
 ) {
   const [mode, setModeState] = useState<EngineMode>("proxy");
   const [weighted, setWeightedState] = useState(false);
+  const [strategy, setStrategyState] = useState("round-robin");
+  const strategyRef = useRef(strategy);
   const [phase, setPhase] = useState<EnginePhase>("stopped");
   const [snapshot, setSnapshot] = useState<EngineSnapshot>(emptySnapshot());
   const [adapters, setAdapters] = useState<AdapterView[]>([]);
@@ -186,6 +188,7 @@ export function useEngineState(
   const onErrorRef = useRef(onError);
   modeRef.current = mode;
   weightedRef.current = weighted;
+  strategyRef.current = strategy;
   adaptersRef.current = adapters;
   transitionRef.current = transition;
   previewRef.current = preview;
@@ -225,6 +228,8 @@ export function useEngineState(
     }
     void desktopPlatform.setEngineTrayStatus(nextPhase, next.mode);
     setWeightedState(next.weighted);
+    const nextStrategy = next.strategy ?? (next.weighted ? "weighted" : "round-robin");
+    setStrategyState(nextStrategy); strategyRef.current = nextStrategy;
     setHistory((current) => [...current.slice(-17), next.download_bps / (1024 * 1024)]);
     const compatibilityNotice = next.reason?.startsWith("提示：") === true;
     if ((nextPhase === "failed" || nextPhase === "degraded" || compatibilityNotice) && next.reason && next.reason !== lastRuntimeFailure.current) {
@@ -282,6 +287,8 @@ export function useEngineState(
       setAdapters(nextAdapters ?? []);
       adaptersRef.current = nextAdapters ?? [];
       setWeightedState(settings.weighted);
+      const savedStrategy = settings.strategy ?? (settings.weighted ? "weighted" : "round-robin");
+      setStrategyState(savedStrategy); strategyRef.current = savedStrategy;
       weightedRef.current = settings.weighted;
       setPorts({ socks: settings.socks_port, http: settings.http_port });
       setSystemProxyTakeover(settings.system_proxy_takeover);
@@ -351,7 +358,7 @@ export function useEngineState(
     return () => window.removeEventListener(ADAPTER_VISIBILITY_EVENT, onVisibilityChange);
   }, []);
 
-  const persistAdapters = useCallback((next: AdapterView[], nextMode = modeRef.current, nextWeighted = weightedRef.current) => {
+  const persistAdapters = useCallback((next: AdapterView[], nextMode = modeRef.current, nextWeighted = weightedRef.current, nextStrategy = strategyRef.current) => {
     if ((phase === "running" || phase === "degraded") && !next.some((adapter) => adapter.selected)) {
       onErrorRef.current("聚合运行时至少需要保留一张参与网卡 / Keep at least one adapter enabled while aggregation is running.");
       return Promise.resolve(adaptersRef.current);
@@ -372,7 +379,7 @@ export function useEngineState(
       selectionChanges.current = [];
       return Promise.resolve(next);
     }
-    const handle = adapterSaveQueue.enqueue(adapterSaveInput(nextMode, nextWeighted, next));
+    const handle = adapterSaveQueue.enqueue(adapterSaveInput(nextMode, nextWeighted, next, nextStrategy));
     void handle.done.then((saved) => {
       if (!mounted.current || !adapterSaveQueue.isCurrent(handle.revision)) return;
       const authoritative = saved ?? next;
@@ -391,7 +398,7 @@ export function useEngineState(
       selectionChanges.current = [];
       onErrorRef.current(error instanceof Error ? error.message : String(error), () => {
         selectionChanges.current = feedbackChanges;
-        void persistAdapters(next, nextMode, nextWeighted);
+        void persistAdapters(next, nextMode, nextWeighted, nextStrategy);
       });
       void load(false);
     });
@@ -404,11 +411,13 @@ export function useEngineState(
     void persistAdapters(adaptersRef.current, nextMode, weightedRef.current);
   }, [persistAdapters]);
 
-  const setWeighted = useCallback((value: boolean) => {
-    setWeightedState(value);
-    weightedRef.current = value;
-    void persistAdapters(adaptersRef.current, modeRef.current, value);
+  const setStrategy = useCallback((value: string) => {
+    setStrategyState(value); strategyRef.current = value;
+    const weighted = value === "weighted";
+    setWeightedState(weighted); weightedRef.current = weighted;
+    void persistAdapters(adaptersRef.current, modeRef.current, weighted, value);
   }, [persistAdapters]);
+  const setWeighted = useCallback((value: boolean) => setStrategy(value ? "weighted" : "round-robin"), [setStrategy]);
 
   const toggleAdapter = useCallback((id: string, checked: boolean) => {
     void persistAdapters(adaptersRef.current.map((adapter) => adapter.id === id ? { ...adapter, selected: checked } : adapter));
@@ -568,7 +577,7 @@ export function useEngineState(
     adapterFeedback,
     hiddenAdapterCount: homeAdapters.length - visibleAdapters.length,
     hiddenSelectedCount: hideVirtualAdapters ? selected.filter((adapter) => adapter.is_virtual).length : 0,
-    phase, mode, weighted, adapters: homeAdapters, selected, totalWeight, history,
+    phase, mode, weighted, strategy, adapters: homeAdapters, selected, totalWeight, history,
     loading, refreshing, preview, transitioning: transition,
     coreConnected: snapshot.core_connected, coreVersion: snapshot.core_version ?? "—",
     coreElevated: snapshot.core_elevated,
@@ -577,6 +586,6 @@ export function useEngineState(
     totalUpload: snapshot.upload_bps,
     totalConnections: snapshot.connections,
     sessionBytes: snapshot.session_bytes,
-    setMode, setWeighted, toggleEngine, toggleAdapter, updateWeight, selectAll, refreshAdapters,
+    setMode, setWeighted, setStrategy, toggleEngine, toggleAdapter, updateWeight, selectAll, refreshAdapters,
   };
 }

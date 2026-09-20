@@ -34,6 +34,7 @@ export function RuntimeStatusBar({
   connections,
   sessionTraffic,
   weighted,
+  strategy,
   coreVersion,
   preview,
   onOpenConnections,
@@ -42,6 +43,7 @@ export function RuntimeStatusBar({
   connections: number;
   sessionTraffic: string;
   weighted: boolean;
+  strategy?: string;
   coreVersion: string;
   preview: boolean;
   onOpenConnections?: () => void;
@@ -68,7 +70,7 @@ export function RuntimeStatusBar({
       />
       <StatusItem icon={<PlugConnected20Regular />} label={t("home_metric_connections")} value={connections} />
       <StatusItem icon={<DataUsage20Regular />} label={text("会话流量", "Session traffic")} value={sessionTraffic} />
-      <StatusItem icon={<ArrowRouting20Regular />} label={text("调度策略", "Scheduling")} value={getSchedulingStrategy(weighted).label[locale === "en" ? "en" : "zh"]} />
+      <StatusItem icon={<ArrowRouting20Regular />} label={text("调度策略", "Scheduling")} value={getSchedulingStrategy(weighted, strategy).label[locale === "en" ? "en" : "zh"]} />
       <Button appearance="primary" size="small" icon={<AppsListDetail20Regular />} onClick={onOpenConnections}>
         {text("活动连接", "Connections")}
       </Button>

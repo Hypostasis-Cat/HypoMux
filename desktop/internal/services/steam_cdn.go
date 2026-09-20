@@ -46,6 +46,7 @@ type SteamCDNDiagnostic struct {
 	At      time.Time `json:"at"`
 }
 type SteamCDNStatus struct {
+	RuntimeState    string `json:"runtime_state"`
 	SpeedProbeBytes int    `json:"speed_probe_bytes"`
 	SpeedProbeLimit int    `json:"speed_probe_limit"`
 	CoreVersion     string `json:"core_version,omitempty"`
@@ -116,12 +117,15 @@ func (s *EngineService) SetSteamCDNEnabled(enabled bool) (AppSettings, error) {
 }
 
 func (s *EngineService) configureSteamCDNLocked(enabled *bool, reset bool) (SteamCDNStatus, error) {
-	result := SteamCDNStatus{Entries: []SteamCDNEntry{}}
+	result := SteamCDNStatus{RuntimeState: "offline", Entries: []SteamCDNEntry{}}
 	hello := s.client.Hello()
 	if hello.ProtocolVersion == 0 {
 		return result, nil
 	}
+	result.CoreVersion, result.CoreCommit = hello.EngineVersion, hello.Commit
+	result.ConfiguredMode = s.settings.Get().Mode
 	if !slices.Contains(hello.Capabilities, "steam_cdn.configure") {
+		result.RuntimeState = "unsupported"
 		if enabled != nil && *enabled {
 			return result, errors.New("当前 Core 不支持 Steam 下载优选，请更新核心")
 		}
@@ -139,5 +143,12 @@ func (s *EngineService) configureSteamCDNLocked(enabled *bool, reset bool) (Stea
 	result.CoreVersion, result.CoreCommit = hello.EngineVersion, hello.Commit
 	result.ConfiguredMode = s.settings.Get().Mode
 	result.Available = true
+	result.RuntimeState = "stopped"
+	if !result.StartedAt.IsZero() {
+		result.RuntimeState = "disabled"
+	}
+	if result.Enabled {
+		result.RuntimeState = "running"
+	}
 	return result, nil
 }

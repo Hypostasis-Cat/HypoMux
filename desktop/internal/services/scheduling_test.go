@@ -14,7 +14,7 @@ import (
 func TestSchedulingCommitRollsBackOnlyFailedPersistence(t *testing.T) {
 	for _, stage := range []string{"success", "apply", "persist", "rollback"} {
 		t.Run(stage, func(t *testing.T) {
-			previous := json.RawMessage(`{"weighted":false,"adapters":[{"name":"original"}]}`)
+			previous := json.RawMessage(`{"strategy":"adaptive-throughput","weighted":false,"adapters":[{"name":"original"}]}`)
 			calls, saves := 0, 0
 			request := func(ctx context.Context, method string, params any, result any) error {
 				calls++

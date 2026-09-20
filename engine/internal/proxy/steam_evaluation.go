@@ -11,6 +11,21 @@ type steamLoadSample struct {
 	at             time.Time
 }
 
+// Keep attribution and validation, but discard performance evidence from a
+// previous network condition or failed transfer before learning again.
+func resetSteamPerformance(e *SteamCDNEntry) {
+	e.Samples, e.EffectiveBytes, e.scoredSamples = 0, 0, 0
+	e.DownloadBPS = 0
+	e.lastSample = time.Time{}
+	e.loadSamples = nil
+	e.sampleLoad = 0
+	e.Preferred = false
+	e.advantageWindows, e.slowWindows = 0, 0
+	e.slowSince = time.Time{}
+	e.lastScoreWindow = 0
+	e.slowSampleEligible = false
+}
+
 func (c *steamCDN) saveLoadLocked(e *SteamCDNEntry) {
 	if e.loadSamples == nil {
 		e.loadSamples = make(map[int]steamLoadSample)
@@ -88,10 +103,7 @@ func (c *steamCDN) evaluateEntryLocked(k cdnKey, e, base *SteamCDNEntry, now tim
 	if e.performanceCooldown {
 		// A new trial must establish fresh evidence after the cooldown.
 		e.performanceCooldown = false
-		e.Samples, e.EffectiveBytes, e.scoredSamples = 0, 0, 0
-		e.loadSamples = nil
-		e.slowSince = time.Time{}
-		e.slowWindows = 0
+		resetSteamPerformance(e)
 	}
 	window := now.Unix() / 5
 	if e.lastScoreWindow == window {
@@ -105,7 +117,10 @@ func (c *steamCDN) evaluateEntryLocked(k cdnKey, e, base *SteamCDNEntry, now tim
 	fresh := e.Samples > e.scoredSamples && now.Sub(e.lastSample) < 10*time.Second
 	// Slow decisions require fresh useful samples on both paths. No-data stalls
 	// and client-backpressure samples never advance this decision.
-	slow := fresh && e.slowSampleEligible && e.Samples >= 5 && base != nil && base.Samples >= 3 && now.Sub(base.lastSample) < 10*time.Second && base.DownloadBPS > 0 && (e.sampleLoad == 0 || base.sampleLoad == e.sampleLoad) && e.DownloadBPS < base.DownloadBPS*0.25
+	comparable := fresh && e.slowSampleEligible && e.Samples >= 5 && base != nil && base.Samples >= 3 && now.Sub(base.lastSample) < 10*time.Second && base.DownloadBPS > 0 && (e.sampleLoad == 0 || base.sampleLoad == e.sampleLoad)
+	// Severe regressions retain their early exit. Moderate regressions require
+	// enough useful bytes as well as four consecutive comparison windows.
+	slow := comparable && (e.DownloadBPS < base.DownloadBPS*0.25 || e.EffectiveBytes >= 8<<20 && e.DownloadBPS < base.DownloadBPS*0.75)
 	if slow {
 		if e.slowWindows == 0 || !consecutive {
 			e.slowSince = now

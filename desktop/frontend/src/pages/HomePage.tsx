@@ -148,6 +148,8 @@ export function HomePage({
         systemProxyTakeover={engine.systemProxyTakeover}
         onModeChange={engine.setMode}
         onWeightedChange={engine.setWeighted}
+        selectedStrategy={engine.strategy}
+        onStrategyChange={engine.setStrategy}
         onToggle={engine.toggleEngine}
       />
 
@@ -235,7 +237,7 @@ export function HomePage({
         </div>
       </section>
 
-      <RuntimeStatusBar
+      <RuntimeStatusBar strategy={engine.strategy}
         phase={engine.phase}
         connections={engine.totalConnections}
         sessionTraffic={engine.sessionBytes > 0 ? formatBytes(engine.sessionBytes) : "—"}

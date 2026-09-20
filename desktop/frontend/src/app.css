@@ -5614,3 +5614,46 @@ svg {
 .hotspot-qr-content > strong { overflow-wrap: anywhere; max-width: 100%; }
 .hotspot-qr-content svg { flex-shrink: 0; width: 224px; max-width: 100%; }
 .hotspot-connect-intro { padding-top: 8px; }
+/* Steam: live overview, actionable empty states and searchable node inventory. */
+.steam-status-banner { display: flex; align-items: flex-start; gap: 14px; margin-top: 24px; padding: 20px; border: 1px solid var(--hm-outer-border); border-radius: 14px; background: rgba(var(--hm-surface-secondary-rgb), .45); }
+.steam-status-banner[data-active="true"] { background: var(--hm-accent-soft); }
+.steam-status-banner > div:not(.fui-Badge) { flex: 1; min-width: 0; }
+.steam-status-banner strong { color: var(--hm-text-primary); font-size: 16px; }
+.steam-status-banner p { margin: 7px 0 0; color: var(--hm-text-secondary); font-size: 12px; line-height: 1.8; }
+.steam-status-orb { flex: 0 0 9px; height: 9px; margin-top: 6px; border-radius: 50%; background: var(--hm-text-tertiary); }
+.steam-status-banner[data-active="true"] .steam-status-orb { background: var(--hm-accent); box-shadow: 0 0 0 4px var(--hm-accent-soft); }
+.steam-live-summary { display: grid; grid-template-columns: 1fr 1fr; gap: 20px 32px; padding: 26px 4px 6px; }
+.steam-live-summary span { color: var(--hm-text-secondary); font-size: 12px; }
+.steam-live-summary strong { display: block; margin-top: 8px; font-size: clamp(24px, 3vw, 36px); font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -1px; }
+.steam-live-summary small { color: var(--hm-text-secondary); font-size: 13px; font-weight: 400; letter-spacing: normal; }
+.steam-live-summary > p { grid-column: 1 / -1; margin: 0; color: var(--hm-text-tertiary); font-size: 11px; line-height: 1.7; }
+.steam-node-heading p { margin: 6px 0 0; color: var(--hm-text-tertiary); font-size: 11px; font-variant-numeric: tabular-nums; }
+.steam-node-heading h3 { display: flex; align-items: center; gap: 8px; }
+.steam-action-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+.steam-node-filters { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin: 16px 0; }
+.steam-node-filters > .fui-Input { flex: 1; min-width: 180px; }
+.steam-node-filters > span:last-child { color: var(--hm-text-tertiary); font-size: 12px; font-variant-numeric: tabular-nums; }
+.steam-empty { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 30px 24px; margin-top: 16px; border: 1px dashed var(--hm-outer-border); border-radius: 14px; text-align: center; background: rgba(var(--hm-surface-secondary-rgb), .25); }
+.steam-empty > strong { font-size: 15px; }
+.steam-empty p { max-width: 600px; margin: 0; color: var(--hm-text-secondary); font-size: 12px; line-height: 1.8; }
+.steam-empty ol { display: flex; justify-content: center; flex-wrap: wrap; gap: 10px 32px; margin: 10px 0 0; padding-left: 18px; color: var(--hm-text-secondary); font-size: 12px; line-height: 1.8; }
+.steam-feedback { border-left: 3px solid var(--hm-accent); padding: 12px 16px; margin: 16px 0; background: var(--hm-accent-soft); font-size: 12px; line-height: 1.8; overflow-wrap: anywhere; }
+.steam-feedback p { margin: 6px 0; }
+.steam-core-info { display: flex; gap: 16px; flex-wrap: wrap; padding: 12px 0; font-variant-numeric: tabular-nums; }
+.steam-state-label[data-state="preferred"], .steam-state-label[data-state="trial"] { color: var(--hm-accent); }
+.steam-state-label[data-state="cooldown"], .steam-state-label[data-state="paused"] { color: var(--hm-warning); }
+.steam-tool-card .tool-diagnostics summary:focus-visible, .steam-tool-card .tool-node-table:focus-visible { outline: 2px solid var(--hm-focus-ring); outline-offset: 4px; }
+@media (max-width: 760px) {
+  .steam-node-heading { align-items: flex-start; flex-direction: column; }
+  .steam-status-banner { padding: 16px; }
+  .steam-status-banner > .fui-Badge { display: none; }
+  .steam-empty { padding: 24px 16px; }
+  .steam-empty ol { display: block; text-align: start; }
+  .steam-empty li + li { margin-top: 8px; }
+  .steam-node-filters > .fui-Input { flex-basis: 100%; }
+}
+.steam-node-evidence { margin-top: 8px; }
+.steam-node-evidence summary { cursor: pointer; color: var(--hm-accent); font-size: 11px; }
+.steam-node-evidence summary:focus-visible { outline: 2px solid var(--hm-focus-ring); outline-offset: 3px; }
+.steam-node-evidence dl { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; margin: 8px 0 0; color: var(--hm-text-secondary); font-size: 11px; }
+.steam-node-evidence dd { margin: 0; text-align: end; font-variant-numeric: tabular-nums; }

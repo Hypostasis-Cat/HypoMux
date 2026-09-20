@@ -40,6 +40,7 @@ type Config struct {
 	ListenHost            string                 `json:"listen_host"`
 	SOCKSPort             int                    `json:"socks_port"`
 	HTTPPort              int                    `json:"http_port"`
+	Strategy              string                 `json:"strategy,omitempty"`
 	Weighted              bool                   `json:"weighted"`
 	Adapters              []Adapter              `json:"adapters"`
 	Channels              []Channel              `json:"channels,omitempty"`
@@ -63,6 +64,12 @@ type Endpoints struct {
 }
 
 func normalizeConfig(config Config) (Config, error) {
+	strategy, err := NormalizeStrategy(config.Strategy, config.Weighted)
+	if err != nil {
+		return Config{}, err
+	}
+	config.Strategy = strategy
+	config.Weighted = strategy == StrategyWeighted
 	config.ListenHost = strings.TrimSpace(config.ListenHost)
 	if config.ListenHost == "" {
 		config.ListenHost = DefaultListenHost

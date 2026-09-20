@@ -11,6 +11,16 @@ import (
 // Use the lifecycle gate for both runtime updates and persistence, preventing
 // a queued edit from racing start/stop or another configuration transaction.
 func (s *EngineService) saveRuntimeSelection(mode string, weighted bool, adapters []AdapterView) ([]AdapterView, error) {
+	strategy, _ := normalizeSchedulingStrategy("", weighted)
+	return s.SaveScheduling(mode, strategy, adapters)
+}
+
+func (s *EngineService) SaveScheduling(mode, strategy string, adapters []AdapterView) ([]AdapterView, error) {
+	strategy, err := normalizeSchedulingStrategy(strategy, false)
+	if err != nil {
+		return nil, err
+	}
+	weighted := strategy == "weighted"
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := s.acquireLifecycle(ctx); err != nil {
@@ -26,14 +36,14 @@ func (s *EngineService) saveRuntimeSelection(mode string, weighted bool, adapter
 		}
 	}
 	if s.client.Hello().ProtocolVersion == 0 {
-		return s.adapters.saveSelection(mode, weighted, adapters)
+		return s.adapters.saveSelectionStrategy(mode, weighted, adapters, strategy)
 	}
 	var status engineStatusResult
 	if err := s.client.Request(ctx, "engine.status", nil, &status); err != nil {
 		return nil, err
 	}
 	if status.Engine.State == "stopped" || status.Engine.State == "failed" {
-		return s.adapters.saveSelection(mode, weighted, adapters)
+		return s.adapters.saveSelectionStrategy(mode, weighted, adapters, strategy)
 	}
 	if status.Engine.State != "running" && status.Engine.State != "degraded" {
 		return nil, fmt.Errorf("引擎正在切换状态，请稍后重试")
@@ -43,6 +53,9 @@ func (s *EngineService) saveRuntimeSelection(mode string, weighted bool, adapter
 	}
 	if !slices.Contains(s.client.Hello().Capabilities, "engine.scheduling") {
 		return nil, fmt.Errorf("当前核心不支持运行中修改聚合配置，请更新核心")
+	}
+	if strategy == "adaptive-throughput" && !slices.Contains(s.client.Hello().SchedulingStrategies, strategy) {
+		return nil, fmt.Errorf("当前 Core 不支持自适应调度，请更新核心或选择轮询")
 	}
 	// Bind using freshly enumerated OS data, never addresses supplied by the UI.
 	available, err := s.adapters.List()
@@ -54,8 +67,8 @@ func (s *EngineService) saveRuntimeSelection(mode string, weighted bool, adapter
 		return nil, err
 	}
 	err = commitScheduling(ctx, s.client.Request, map[string]any{
-		"weighted": weighted, "adapters": engineAdapters(selected),
-	}, func() error { return s.adapters.persistSelection(mode, weighted, adapters) })
+		"strategy": strategy, "weighted": weighted, "adapters": engineAdapters(selected),
+	}, func() error { return s.adapters.persistSelectionStrategy(mode, weighted, adapters, strategy) })
 	if err != nil {
 		return nil, err
 	}
@@ -111,4 +124,22 @@ func schedulingAdapters(requested, available []AdapterView) ([]AdapterView, erro
 		return nil, err
 	}
 	return selected, nil
+}
+
+func normalizeSchedulingStrategy(strategy string, weighted bool) (string, error) {
+	if strategy == "" {
+		if weighted {
+			return "weighted", nil
+		}
+		return "round-robin", nil
+	}
+	switch strategy {
+	case "round-robin", "weighted", "adaptive-throughput":
+		return strategy, nil
+	}
+	return "", fmt.Errorf("未知调度策略：%s", strategy)
+}
+func effectiveSchedulingStrategy(settings AppSettings) string {
+	strategy, _ := normalizeSchedulingStrategy(settings.Strategy, settings.Weighted)
+	return strategy
 }

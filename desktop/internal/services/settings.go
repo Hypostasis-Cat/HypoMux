@@ -28,6 +28,7 @@ type AppSettings struct {
 	SOCKSPort           int                   `json:"socks_port"`
 	HTTPPort            int                   `json:"http_port"`
 	SystemProxyTakeover bool                  `json:"system_proxy_takeover"`
+	Strategy            string                `json:"strategy,omitempty"`
 	Weighted            bool                  `json:"weighted"`
 	StrictRoute         bool                  `json:"strict_route"`
 	TUNStack            string                `json:"tun_stack"`
@@ -336,6 +337,14 @@ func (s *SettingsService) UpdateHome(
 	selectedIDs []string,
 	weights map[string]int,
 ) (AppSettings, error) {
+	return s.updateHomeStrategy(mode, weighted, selectedIDs, weights, "")
+}
+
+func (s *SettingsService) updateHomeStrategy(mode string, weighted bool, selectedIDs []string, weights map[string]int, strategy string) (AppSettings, error) {
+	strategy, err := normalizeSchedulingStrategy(strategy, weighted)
+	if err != nil {
+		return AppSettings{}, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if mode != "proxy" && mode != "tun" {
@@ -350,7 +359,8 @@ func (s *SettingsService) UpdateHome(
 	}
 	next := cloneSettings(s.settings)
 	next.Mode = mode
-	next.Weighted = weighted
+	next.Strategy = strategy
+	next.Weighted = strategy == "weighted"
 	next.SelectedAdapterIDs = uniqueNonEmpty(selectedIDs)
 	next.AdapterWeights = cleanWeights
 	if err := s.commitLocked(next); err != nil {
@@ -566,6 +576,9 @@ func (s *SettingsService) ClearWFPCompatibilityFailure() error {
 }
 
 func validateSettings(value AppSettings) error {
+	if _, err := normalizeSchedulingStrategy(value.Strategy, value.Weighted); err != nil {
+		return err
+	}
 	if _, err := normalizeTunStack(value.TUNStack); err != nil {
 		return err
 	}
@@ -624,6 +637,12 @@ func limitSettingText(value string, limit int) string {
 }
 
 func (s *SettingsService) commitLocked(next AppSettings) error {
+	strategy, err := normalizeSchedulingStrategy(next.Strategy, next.Weighted)
+	if err != nil {
+		return err
+	}
+	next.Strategy = strategy
+	next.Weighted = strategy == "weighted"
 	if s.loadErr != nil {
 		return fmt.Errorf("设置文件尚未成功加载，拒绝覆盖原文件：%w", s.loadErr)
 	}

@@ -15,6 +15,10 @@ func TestSteamCDNPreferenceDefaultsOffAndPersistsWithoutStartingCore(t *testing.
 		t.Fatal("must default off")
 	}
 	service := &EngineService{settings: settings, client: engineclient.New(), lifecycleGate: make(chan struct{}, 1)}
+	status, err := service.SteamCDNStatus(false)
+	if err != nil || status.RuntimeState != "offline" || status.Available || status.Enabled || status.Entries == nil {
+		t.Fatalf("offline status must be explicit and contain an empty node list: %+v, %v", status, err)
+	}
 	for _, enabled := range []bool{true, false} {
 		value, err := service.SetSteamCDNEnabled(enabled)
 		if err != nil || value.SteamCDNEnabled != enabled {

@@ -10,7 +10,7 @@ import type {
   AdapterView as GeneratedAdapterView,
   DiagnosticResult,
   DiagnosticSnapshot,
-  EngineSnapshot,
+  EngineSnapshot as GeneratedEngineSnapshot,
   RunningProcess,
   RoutingBatchPreview,
   RoutingRule,
@@ -25,7 +25,6 @@ import type {
 export type {
   DiagnosticResult,
   DiagnosticSnapshot,
-  EngineSnapshot,
   RunningProcess,
   RoutingBatchPreview,
   RoutingRule,
@@ -36,11 +35,14 @@ export type {
   TunPreflightSnapshot,
 };
 
+export type EngineSnapshot = GeneratedEngineSnapshot & { strategy?: string };
+
 export type RoutingSnapshot = Omit<GeneratedRoutingSnapshot, "match_order"> & { match_order?: string[] | null };
 
 export type AdapterView = GeneratedAdapterView & { is_virtual?: boolean };
 
 export type CompleteAppSettings = AppSettings & {
+  strategy?: string;
   steam_cdn_enabled?: boolean;
   hide_virtual_adapters?: boolean;
   tun_stack: string;
@@ -54,7 +56,7 @@ export type CompleteAppSettings = AppSettings & {
 };
 
 export type SteamCDNStatus = {
-
+ runtime_state?: "offline" | "unsupported" | "stopped" | "disabled" | "running";
  speed_probe_bytes?: number; speed_probe_limit?: number;
  core_version?: string; core_commit?: string; configured_mode?: string;
  accounting_version?: number; started_at?: string; sampled_at?: string; switched_bytes?: number; original_bytes?: number; transfer_failures?: number;
@@ -236,8 +238,8 @@ export const appServices = {
   adapters: {
     list: () => AdapterService.List(),
     refresh: () => AdapterService.Refresh(),
-    save: (mode: string, weighted: boolean, adapters: AdapterView[]) =>
-      AdapterService.SaveSelection(mode, weighted, adapters),
+    save: (mode: string, weighted: boolean, adapters: AdapterView[], strategy?: string) =>
+      strategy ? EngineService.SaveScheduling(mode, strategy, adapters) : AdapterService.SaveSelection(mode, weighted, adapters),
   },
   engine: {
     trayStatus: () => Call.ByName(engineMethod("TrayStatus")) as Promise<{ phase: string; mode: string }>,

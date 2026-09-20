@@ -46,8 +46,19 @@ func (s *Server) dialUpstream(
 		domain = normalizeDomain(host)
 	}
 	var comparativeFailures []string
+	var pending *performanceLease
+	defer func() {
+		if pending != nil {
+			pending.finish()
+		}
+	}()
 	for range attempts {
-		adapter, ok := channelScheduler.SelectForDomain(excluded, domain)
+		if pending != nil {
+			pending.finish()
+			pending = nil
+		}
+		adapter, lease, ok := channelScheduler.acquireTCP(excluded, domain)
+		pending = lease
 		if !ok {
 			break
 		}
@@ -120,6 +131,11 @@ func (s *Server) dialUpstream(
 					failedAdapter,
 					domain,
 				)
+			}
+			if pending != nil {
+				pending.attach()
+				connection = &leasedConn{Conn: connection, lease: pending}
+				pending = nil
 			}
 			return connection, adapter, nil
 		}

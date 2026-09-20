@@ -140,6 +140,21 @@ describe("HomePage adapter interactions", () => {
     expect(state.setWeighted).toHaveBeenLastCalledWith(false);
   });
 
+  it("selects the explicit experimental strategy without enabling manual weights", () => {
+    const setStrategy = vi.fn();
+    const state = { ...engineState(), strategy: "round-robin", setStrategy };
+    mocks.useEngineState.mockReturnValue(state);
+    const { rerender } = renderPage(<HomePage />);
+    fireEvent.click(screen.getByRole("combobox", { name: "Scheduling strategy" }));
+    fireEvent.click(screen.getByRole("option", { name: "Adaptive speed (experimental)" }));
+    expect(setStrategy).toHaveBeenCalledWith("adaptive-throughput");
+    expect(state.setWeighted).not.toHaveBeenCalled();
+    mocks.useEngineState.mockReturnValue({ ...state, strategy: "adaptive-throughput" });
+    rerender(<HomePage />);
+    expect(screen.getByRole("combobox", { name: "Scheduling strategy" }).textContent).toContain("Adaptive speed");
+    expect(screen.queryByRole("textbox", { name: "Ethernet Weight" })).toBeNull();
+  });
+
   it.each(["starting", "stopping"])("locks the strategy while %s", (phase) => {
     mocks.useEngineState.mockReturnValue({ ...engineState(), phase, transitioning: phase === "starting" || phase === "stopping" });
     renderPage(<HomePage />);

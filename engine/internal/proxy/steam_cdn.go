@@ -402,6 +402,10 @@ func (c *steamCDN) observe(key cdnKey, generation uint64, bytes uint64, elapsed 
 	if entry == nil || !entry.ExpiresAt.After(c.now()) {
 		return
 	}
+	if !entry.lastSample.IsZero() && c.now().Sub(entry.lastSample) >= 10*time.Second {
+		resetSteamPerformance(entry)
+		entry.DecisionReason = "insufficient_samples"
+	}
 	load := 1
 	if traffic := c.traffic[key]; traffic != nil {
 		load = max(1, traffic.active)
@@ -449,8 +453,7 @@ func (c *steamCDN) outcome(key cdnKey, generation uint64, success bool) {
 	c.fallbacks++
 	if entry := c.entries[key]; entry != nil {
 		entry.CooldownUntil = c.now().Add(time.Minute)
-		entry.DownloadBPS = 0
-		entry.Samples = 0
+		resetSteamPerformance(entry)
 	}
 }
 
@@ -764,6 +767,11 @@ func (s *Server) prepareSteamCDN(session *connection, original net.Conn, adapter
 			if usable {
 				if s.shouldTuneTCP(session.channel) {
 					tuneTCPConnection(replacement)
+				}
+				if _, tracked := original.(*leasedConn); tracked && s.performance != nil {
+					_, lease := s.performance.acquire([]Adapter{adapter}, false, adapter)
+					lease.attach()
+					replacement = &leasedConn{Conn: replacement, lease: lease}
 				}
 				session.upstream, session.remote = replacement, replacement.RemoteAddr().String()
 			}

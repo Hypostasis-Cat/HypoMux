@@ -73,6 +73,9 @@ type connectionTelemetry struct {
 }
 
 type telemetryResult struct {
+	Scheduling struct {
+		Strategy string `json:"strategy"`
+	} `json:"scheduling"`
 	SteamCDN          SteamCDNStatus        `json:"steam_cdn"`
 	StartedAt         time.Time             `json:"started_at"`
 	SampledAt         time.Time             `json:"sampled_at"`
@@ -105,6 +108,7 @@ type AdapterRuntime struct {
 type EngineSnapshot struct {
 	Phase         string           `json:"phase"`
 	Mode          string           `json:"mode"`
+	Strategy      string           `json:"strategy,omitempty"`
 	Weighted      bool             `json:"weighted"`
 	Reason        string           `json:"reason,omitempty"`
 	CoreConnected bool             `json:"core_connected"`
@@ -390,7 +394,7 @@ func (s *EngineService) Snapshot() (EngineSnapshot, error) {
 	if phase := s.currentTransition(); phase != "" {
 		settings := s.settings.Get()
 		return EngineSnapshot{
-			Phase: phase, Mode: settings.Mode, Weighted: settings.Weighted,
+			Phase: phase, Mode: settings.Mode, Weighted: settings.Weighted, Strategy: effectiveSchedulingStrategy(settings),
 			CoreConnected: s.client.Hello().ProtocolVersion != 0, SampledAt: time.Now(),
 		}, nil
 	}
@@ -406,7 +410,7 @@ func (s *EngineService) Snapshot() (EngineSnapshot, error) {
 	}
 	settings := s.settings.Get()
 	snapshot := EngineSnapshot{
-		Phase: status.Engine.State, Mode: settings.Mode, Weighted: settings.Weighted, Reason: status.Engine.Reason,
+		Phase: status.Engine.State, Mode: settings.Mode, Weighted: settings.Weighted, Strategy: effectiveSchedulingStrategy(settings), Reason: status.Engine.Reason,
 		CoreConnected: true, CoreVersion: hello.EngineVersion, CoreElevated: hello.Elevated,
 		SampledAt: time.Now(),
 	}
@@ -444,6 +448,10 @@ func (s *EngineService) Snapshot() (EngineSnapshot, error) {
 	}
 	snapshot.SampledAt = telemetry.SampledAt
 	snapshot.TCPProfile = telemetry.TCPProfile
+	if telemetry.Scheduling.Strategy != "" {
+		snapshot.Strategy = telemetry.Scheduling.Strategy
+		snapshot.Weighted = snapshot.Strategy == "weighted"
+	}
 	snapshot.Connections = telemetry.Total.Connections
 	snapshot.SessionBytes = telemetry.Total.BytesDown + telemetry.Total.BytesUp
 	s.mu.Lock()
@@ -724,6 +732,7 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 			"http_port":             settings.HTTPPort,
 			"system_proxy_takeover": settings.SystemProxyTakeover,
 			"weighted":              settings.Weighted,
+			"strategy":              effectiveSchedulingStrategy(settings),
 			"dns_policy":            settings.DNSPolicy,
 			"dns_egress_mode":       settings.DNSEgressMode,
 		})
@@ -796,6 +805,9 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 		})
 		return EngineSnapshot{}, err
 	}
+	if effectiveSchedulingStrategy(settings) == "adaptive-throughput" && !slices.Contains(hello.SchedulingStrategies, "adaptive-throughput") {
+		return EngineSnapshot{}, errors.New("当前 Core 不支持自适应调度，请更新核心或选择轮询")
+	}
 	if settings.SteamCDNEnabled && !slices.Contains(hello.Capabilities, "steam_cdn.configure") {
 		return EngineSnapshot{}, errors.New("当前 Core 不支持 Steam 下载优选，请更新核心或关闭此功能")
 	}
@@ -807,7 +819,7 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 	if settings.Mode != mode {
 		previousMode := settings.Mode
 		settings.Mode = mode
-		_, err = s.settings.UpdateHome(mode, settings.Weighted, settings.SelectedAdapterIDs, settings.AdapterWeights)
+		_, err = s.settings.updateHomeStrategy(mode, settings.Weighted, settings.SelectedAdapterIDs, settings.AdapterWeights, effectiveSchedulingStrategy(settings))
 		if err != nil {
 			return EngineSnapshot{}, err
 		}
@@ -824,8 +836,8 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 			// mode, weighting and adapter selection together, and the user may
 			// have changed the latter two while this start was in flight.
 			current := s.settings.Get()
-			if _, restoreErr := s.settings.UpdateHome(
-				previousMode, current.Weighted, current.SelectedAdapterIDs, current.AdapterWeights,
+			if _, restoreErr := s.settings.updateHomeStrategy(
+				previousMode, current.Weighted, current.SelectedAdapterIDs, current.AdapterWeights, effectiveSchedulingStrategy(current),
 			); restoreErr != nil && s.logs != nil {
 				s.logs.RecordEvent("engine", "mode_restore_failed", map[string]any{
 					"mode": previousMode, "message": restoreErr.Error(),
@@ -842,7 +854,7 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 		_ = s.client.Request(ctx, "engine.stop", nil, &ignored)
 	}
 	startPayload := map[string]any{
-		"mode": mode, "listen_host": "127.0.0.1", "weighted": settings.Weighted,
+		"mode": mode, "listen_host": "127.0.0.1", "weighted": settings.Weighted, "strategy": effectiveSchedulingStrategy(settings),
 		"connect_timeout_ms": 6000,
 		"dns": map[string]any{
 			"policy": effectiveDNSPolicy, "legacy_servers": []string{settings.DNSServer},
@@ -1085,7 +1097,7 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 		})
 	}
 	return EngineSnapshot{
-		Phase: "running", Mode: mode, Weighted: settings.Weighted, CoreConnected: true,
+		Phase: "running", Mode: mode, Weighted: settings.Weighted, Strategy: effectiveSchedulingStrategy(settings), CoreConnected: true,
 		CoreVersion: hello.EngineVersion, CoreElevated: hello.Elevated, SampledAt: time.Now(),
 	}, nil
 }
@@ -1202,7 +1214,7 @@ func (s *EngineService) Stop() (EngineSnapshot, error) {
 		firstError = ensureErr
 	}
 	snapshot := EngineSnapshot{
-		Phase: "stopped", Mode: s.settings.Get().Mode, Weighted: s.settings.Get().Weighted, CoreConnected: ensureErr == nil,
+		Phase: "stopped", Mode: s.settings.Get().Mode, Weighted: s.settings.Get().Weighted, Strategy: effectiveSchedulingStrategy(s.settings.Get()), CoreConnected: ensureErr == nil,
 		CoreVersion: hello.EngineVersion, CoreElevated: hello.Elevated, SampledAt: time.Now(),
 	}
 	if s.logs != nil {
