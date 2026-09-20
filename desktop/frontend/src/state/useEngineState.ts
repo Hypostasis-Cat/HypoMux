@@ -199,6 +199,12 @@ export function useEngineState(
     )) setAdapterFeedback(null);
   }, [adapters, adapterFeedback]);
 
+  useEffect(() => {
+    if (phase === "starting" || phase === "stopping") {
+      setAdapterFeedback((current) => current?.status === "pending" ? current : null);
+    }
+  }, [phase]);
+
   const applySnapshot = useCallback((
     next: EngineSnapshot,
     acceptDuringOperation = false,

@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { HomeAdapter } from "../../state/useEngineState";
+import type { AdapterFeedback, HomeAdapter } from "../../state/useEngineState";
 import { NetworkAdapterItem } from "./NetworkAdapterItem";
 
 vi.mock("../../i18n/i18n", () => ({
@@ -49,7 +49,29 @@ const renderAdapter = (disabled = false) => {
 };
 
 describe("NetworkAdapterItem interactions", () => {
-  afterEach(cleanup);
+  afterEach(() => { cleanup(); vi.useRealTimers(); });
+
+  it("plays confirmation only after success, restores the icon, and replays for a later change", () => {
+    vi.useFakeTimers();
+    const changes = [{ id: adapter.id, name: adapter.name, selected: true }];
+    const item = (token: AdapterFeedback) => <NetworkAdapterItem
+      adapter={adapter} weighted={false} percentage={100} disabled={token.status === "pending"}
+      feedback={token.status} feedbackToken={token}
+      onOpenConnections={vi.fn()} onSelectedChange={vi.fn()} onWeightChange={vi.fn()}
+    />;
+    const { rerender, container } = render(item({ status: "pending", changes }));
+    expect(container.querySelector(".adapter-operation-ring")).not.toBeNull();
+    expect(container.querySelector(".adapter-operation-icon.is-success")).toBeNull();
+    rerender(item({ status: "success", changes }));
+    expect(container.querySelector(".adapter-operation-icon.is-success")).not.toBeNull();
+    act(() => vi.advanceTimersByTime(1800));
+    expect(container.querySelector(".adapter-operation-icon")).toBeNull();
+    rerender(item({ status: "success", changes }));
+    expect(container.querySelector(".adapter-operation-icon.is-success")).not.toBeNull();
+    rerender(item({ status: "error", changes }));
+    expect(container.querySelector(".adapter-operation-icon.is-success")).toBeNull();
+    expect(container.querySelector(".adapter-operation-icon.is-error")).not.toBeNull();
+  });
 
   it("uses the card for selection and the live metrics only for navigation", () => {
     const { onOpenConnections, onSelectedChange } = renderAdapter();

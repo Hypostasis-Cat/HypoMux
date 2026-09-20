@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react";
-import { Button, Checkbox, Input, Spinner, Tooltip } from "@fluentui/react-components";
+import { Button, Checkbox, Input, Tooltip } from "@fluentui/react-components";
 import {
   Add16Regular,
-  CheckmarkCircle16Regular,
   Warning16Regular,
   ArrowDownload20Regular,
   ArrowUpload20Regular,
@@ -28,6 +27,7 @@ export function NetworkAdapterItem({
   disabled,
   aggregating = false,
   feedback,
+  feedbackToken,
   onOpenConnections,
   onSelectedChange,
   onWeightChange,
@@ -38,6 +38,7 @@ export function NetworkAdapterItem({
   disabled: boolean;
   aggregating?: boolean;
   feedback?: AdapterFeedback["status"];
+  feedbackToken?: AdapterFeedback;
   onOpenConnections: () => void;
   onSelectedChange: (checked: boolean) => void;
   onWeightChange: (value: number) => void;
@@ -46,6 +47,22 @@ export function NetworkAdapterItem({
   const text = (zh: string, en: string) => locale === "en" ? en : zh;
   const [inputValue, setInputValue] = useState(String(adapter.weight));
   useEffect(() => setInputValue(String(adapter.weight)), [adapter.weight]);
+  const [resultSignal, setResultSignal] = useState<{ status?: "success" | "error"; sequence: number }>({ sequence: 0 });
+  useEffect(() => {
+    setResultSignal((previous) => ({
+      status: feedback === "success" || feedback === "error" ? feedback : undefined,
+      sequence: previous.sequence + 1,
+    }));
+    if (feedback !== "success") return;
+    const timeout = window.setTimeout(() => setResultSignal((previous) => ({ ...previous, status: undefined })), 1800);
+    return () => window.clearTimeout(timeout);
+  }, [feedback, feedbackToken]);
+  const visualFeedback = feedback === "pending" ? "pending" : resultSignal.status;
+  const feedbackLabel = feedback === "pending"
+    ? text("正在应用网卡变更", "Applying adapter changes")
+    : feedback === "error"
+      ? text("网卡变更失败，请重试", "Adapter changes failed; retry")
+      : text(aggregating ? "网卡变更已应用于新连接" : "网卡选择已保存", aggregating ? "Adapter changes applied to new connections" : "Adapter selection saved");
   const toggleSelection = () => {
     if (!disabled) onSelectedChange(!adapter.selected);
   };
@@ -56,10 +73,12 @@ export function NetworkAdapterItem({
   };
   return (
     <article
-      className={`network-adapter hm-card${adapter.selected ? " is-selected" : " is-muted"}${disabled ? " is-selection-disabled" : " is-selectable"}${feedback ? ` has-${feedback}` : ""}`}
+      className={`network-adapter hm-card${adapter.selected ? " is-selected" : " is-muted"}${disabled ? " is-selection-disabled" : " is-selectable"}${visualFeedback ? ` has-${visualFeedback}` : ""}`}
       aria-busy={feedback === "pending"}
       onClick={toggleSelection}
     >
+      {visualFeedback && <span key={resultSignal.sequence} className={`adapter-operation-glow is-${visualFeedback}`} aria-hidden="true" />}
+      <span className="visually-hidden" role="status" aria-live="polite" aria-atomic="true">{feedback ? `${adapter.name}: ${feedbackLabel}` : ""}</span>
       <div className="adapter-primary">
         <span className="adapter-selection-control" onClick={(event) => event.stopPropagation()}>
           <Checkbox
@@ -69,22 +88,21 @@ export function NetworkAdapterItem({
             aria-label={`${adapter.selected ? text("停用", "Disable") : text("启用", "Enable")} ${adapter.name}`}
           />
         </span>
-        <span className="adapter-icon" aria-hidden="true">
-          {adapter.kind === "wifi" ? <Wifi124Regular /> : <Router24Regular />}
-        </span>
+        <Tooltip content={feedback ? feedbackLabel : text("网络适配器", "Network adapter")} relationship="description">
+          <span className="adapter-icon">
+            <span className="adapter-device-icon" aria-hidden="true">{adapter.kind === "wifi" ? <Wifi124Regular /> : <Router24Regular />}</span>
+            {visualFeedback && (
+              <span key={resultSignal.sequence} className={`adapter-operation-icon is-${visualFeedback}`} aria-hidden="true">
+                {visualFeedback === "pending" ? <span className="adapter-operation-ring" />
+                  : visualFeedback === "error" ? <Warning16Regular />
+                    : <svg viewBox="0 0 24 24" fill="none"><path d="m5 12 4 4 10-10" /></svg>}
+              </span>
+            )}
+          </span>
+        </Tooltip>
         <span className="adapter-name">
           <strong title={adapter.name}>{adapter.name}</strong>
           <span>{adapter.address}</span>
-          <span className={`adapter-membership is-${feedback === "pending" || feedback === "error" ? feedback : aggregating && adapter.selected ? "success" : "idle"}`}>
-            {feedback === "pending" ? <Spinner size="tiny" /> : feedback === "error" ? <Warning16Regular /> : adapter.selected ? <CheckmarkCircle16Regular /> : <Add16Regular />}
-            {feedback === "pending"
-              ? text(adapter.selected ? "正在加入…" : "正在移出…", adapter.selected ? "Adding…" : "Removing…")
-              : feedback === "error"
-                ? text("应用失败，请重试", "Could not apply; retry")
-                : aggregating
-                  ? adapter.selected ? text("已加入聚合", "Added to aggregation") : text("未参与聚合", "Not in aggregation")
-                  : adapter.selected ? text("已选中 · 启动后生效", "Selected · applies on start") : text("点击加入", "Click to add")}
-          </span>
         </span>
       </div>
 

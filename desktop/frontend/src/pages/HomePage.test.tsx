@@ -91,19 +91,22 @@ const engineState = () => ({
 });
 
 describe("HomePage adapter interactions", () => {
-  it("shows pending and confirmed membership without relying on traffic", () => {
+  it("keeps feedback inside the card without inserting a banner or membership row", () => {
     const state = { ...engineState(), phase: "running", totalDownload: 0 };
     const changes = [{ id: adapter.id, name: adapter.name, selected: true }];
     mocks.useEngineState.mockReturnValue({ ...state, adapterFeedback: { status: "pending", changes } });
     const { rerender } = renderPage(<HomePage />);
-    expect(screen.getByText("Applying adapter changes…")).toBeTruthy();
-    expect(screen.queryByText("Added to aggregation")).toBeNull();
+    expect(screen.getByRole("article").getAttribute("aria-busy")).toBe("true");
+    expect(screen.getByRole("article").classList.contains("has-pending")).toBe(true);
+    const note = screen.getByText(/Changes while running apply to new connections/);
     expect((screen.getByRole("checkbox", { name: "Disable Ethernet" }) as HTMLInputElement).disabled).toBe(true);
     mocks.useEngineState.mockReturnValue({ ...state, adapterFeedback: { status: "success", changes } });
     rerender(<HomePage />);
-    expect(screen.getByText("Aggregation adapters updated")).toBeTruthy();
-    expect(screen.getByText("Added to aggregation")).toBeTruthy();
-    expect(screen.getByText(/No traffic yet does not mean adding failed/)).toBeTruthy();
+    expect(screen.getByRole("article").classList.contains("has-success")).toBe(true);
+    expect(screen.getByRole("article").getAttribute("aria-busy")).toBe("false");
+    expect(screen.queryByText("Aggregation adapters updated")).toBeNull();
+    expect(screen.queryByText("Added to aggregation")).toBeNull();
+    expect(screen.getByText(/Changes while running apply to new connections/)).toBe(note);
     expect((screen.getByRole("checkbox", { name: "Disable Ethernet" }) as HTMLInputElement).disabled).toBe(false);
   });
 

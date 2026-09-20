@@ -201,34 +201,10 @@ export function HomePage({
             </Button>
           </div>
         </div>
-        {aggregating && !feedback && (
-          <p className="health-lock-note">{text(
-            "修改会自动应用于新连接；已有连接和指定网卡的分流规则保持原路径。运行中至少保留一张参与网卡。",
-            "Changes apply automatically to new connections. Existing connections and explicit adapter routes keep their paths. Keep at least one adapter enabled.",
-          )}</p>
-        )}
-        <div role="status" aria-live="polite" aria-atomic="true">
-          {feedback && (
-            <div className={`adapter-feedback is-${feedback.status}`}>
-              {applyingAdapters ? <Spinner size="tiny" /> : feedback.status === "success" ? <CheckmarkCircle20Regular /> : <Warning20Regular />}
-              <div>
-                <div className="adapter-feedback-title">
-                <strong>{applyingAdapters
-                  ? text("正在应用网卡变更…", "Applying adapter changes…")
-                  : feedback.status === "error"
-                    ? text("网卡变更未完成", "Adapter changes not completed")
-                    : text(aggregating ? "聚合网卡已更新" : "网卡选择已保存", aggregating ? "Aggregation adapters updated" : "Adapter selection saved")}</strong>
-                <span>{feedback.changes.map((change) => `${change.name} · ${text(change.selected ? "加入" : "移出", change.selected ? "add" : "remove")}`).join(" / ")}</span>
-                </div>
-                <span>{feedback.status === "success"
-                  ? text(aggregating ? "变更已应用于新连接，已有连接和指定网卡规则保持原路径；暂无流量不代表添加失败。" : "下次启动聚合时将使用已选网卡。", aggregating ? "Applied to new connections; existing connections and explicit routes keep their paths. No traffic yet does not mean adding failed." : "Selected adapters will be used when aggregation starts.")
-                  : feedback.status === "error"
-                    ? text("请核对当前勾选状态后重新选择；可在错误提示中重试。", "Check the current selection and try again, or retry from the error notification.")
-                    : text("正在等待应用结果，请稍候。", "Waiting for confirmation. Please wait.")}</span>
-              </div>
-            </div>
-          )}
-        </div>
+        <p className="health-lock-note">{text(
+          "运行中修改会自动应用于新连接；已有连接和指定网卡的分流规则保持原路径。运行中至少保留一张参与网卡。",
+          "Changes while running apply to new connections. Existing connections and explicit adapter routes keep their paths. Keep at least one adapter enabled while running.",
+        )}</p>
         <div className="network-adapter-list">
           {engine.loading ? (
             <div className="adapter-empty hm-card"><Spinner label={text("正在扫描活动网络适配器", "Scanning active network adapters")} /></div>
@@ -254,6 +230,7 @@ export function HomePage({
               disabled={engine.transitioning || applyingAdapters}
               aggregating={aggregating}
               feedback={feedback?.changes.some((change) => change.id === adapter.id) ? feedback.status : undefined}
+              feedbackToken={feedback ?? undefined}
               onOpenConnections={() => onNavigate?.("connections", adapter.name)}
               onSelectedChange={(checked) => engine.toggleAdapter(adapter.id, checked)}
               onWeightChange={(value) => engine.updateWeight(adapter.id, value)}

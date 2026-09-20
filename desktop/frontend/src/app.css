@@ -1507,33 +1507,60 @@ svg {
   opacity: 0.72;
 }
 
-.adapter-feedback {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 12px 14px;
-  margin-bottom: 12px;
-  border: 1px solid color-mix(in srgb, var(--hm-accent) 30%, var(--hm-outer-border));
-  border-radius: var(--hm-radius);
-  background: color-mix(in srgb, var(--hm-accent) 7%, transparent);
-  color: var(--hm-accent-strong);
-}
+.network-adapter.has-pending,
+.network-adapter.has-success,
+.network-adapter.has-error { opacity: 1; }
 
-.adapter-feedback > svg { flex-shrink: 0; }
-.adapter-feedback > div { display: grid; gap: 4px; min-width: 0; }
-.adapter-feedback-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
-.adapter-feedback strong { font-size: 13px; }
-.adapter-feedback span { font-size: 12px; color: var(--hm-text-secondary); overflow-wrap: anywhere; }
-.adapter-feedback.is-success { color: var(--hm-success); border-color: color-mix(in srgb, var(--hm-success) 30%, var(--hm-outer-border)); background: color-mix(in srgb, var(--hm-success) 7%, transparent); }
-.adapter-feedback.is-error { color: var(--hm-warning); border-color: color-mix(in srgb, var(--hm-warning) 35%, var(--hm-outer-border)); background: color-mix(in srgb, var(--hm-warning) 7%, transparent); }
-.network-adapter.has-pending { border-color: var(--hm-accent); }
-.network-adapter.has-success.is-selected { border-color: color-mix(in srgb, var(--hm-success) 55%, var(--hm-outer-border)); }
-.network-adapter.has-error { border-color: var(--hm-warning); }
-.adapter-name .adapter-membership { display: flex; align-items: center; gap: 5px; white-space: normal; line-height: 16px; }
-.adapter-membership > svg { flex-shrink: 0; }
-.adapter-name .adapter-membership.is-success { color: var(--hm-success); }
-.adapter-name .adapter-membership.is-pending { color: var(--hm-accent-strong); }
-.adapter-name .adapter-membership.is-error { color: var(--hm-warning); }
+/* All operation feedback is painted inside the existing card bounds. */
+.adapter-operation-glow {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  color: var(--hm-accent);
+  box-shadow: inset 0 0 0 2px currentColor;
+}
+.adapter-operation-glow.is-pending { animation: adapter-pending-glow 1.2s ease-in-out infinite; }
+.adapter-operation-glow.is-success {
+  color: var(--hm-success);
+  background: color-mix(in srgb, var(--hm-success) 8%, transparent);
+  animation: adapter-confirm-glow 1.8s ease-out both;
+}
+.adapter-operation-glow.is-error {
+  color: var(--hm-warning);
+  animation: adapter-error-glow 700ms ease-out both;
+}
+.network-adapter .adapter-icon { position: relative; }
+.adapter-device-icon { display: grid; place-items: center; transition: opacity 140ms ease; }
+.network-adapter:is(.has-pending, .has-success, .has-error) .adapter-device-icon { opacity: 0; }
+.adapter-operation-icon {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  border-radius: inherit;
+  pointer-events: none;
+}
+.adapter-operation-icon.is-success { color: var(--hm-success); background: color-mix(in srgb, var(--hm-success) 12%, transparent); animation: adapter-confirm-icon 1.8s ease-out both; }
+.adapter-operation-icon.is-error { color: var(--hm-warning); background: color-mix(in srgb, var(--hm-warning) 12%, transparent); }
+.adapter-operation-icon > svg { width: 23px; height: 23px; }
+.adapter-operation-icon.is-success path { stroke: currentColor; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+.adapter-operation-icon.is-success path { stroke-dasharray: 24; stroke-dashoffset: 24; animation: adapter-draw-check 320ms 80ms ease-out forwards; }
+.adapter-operation-ring { width: 21px; height: 21px; border: 2px solid color-mix(in srgb, var(--hm-accent) 20%, transparent); border-top-color: var(--hm-accent); border-radius: 50%; animation: adapter-ring-spin 700ms linear infinite; }
+@keyframes adapter-ring-spin { to { transform: rotate(360deg); } }
+@keyframes adapter-pending-glow { 0%, 100% { opacity: .25; } 50% { opacity: .7; } }
+@keyframes adapter-confirm-glow { 0% { opacity: 0; } 15%, 45% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes adapter-confirm-icon { 0% { transform: scale(.75); opacity: 0; } 15%, 80% { transform: scale(1); opacity: 1; } 100% { transform: scale(1); opacity: 0; } }
+@keyframes adapter-draw-check { to { stroke-dashoffset: 0; } }
+@keyframes adapter-error-glow { 0%, 40% { opacity: .2; } 20%, 60%, 100% { opacity: .85; } }
+@media (prefers-reduced-motion: reduce) {
+  .adapter-operation-glow,
+  .adapter-operation-icon,
+  .adapter-operation-icon.is-success path,
+  .adapter-operation-ring { animation: none; }
+  .adapter-operation-icon.is-success path { stroke-dashoffset: 0; }
+  .adapter-device-icon { transition: none; }
+}
 
 .network-adapter.is-selectable {
   cursor: pointer;
