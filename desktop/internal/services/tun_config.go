@@ -210,7 +210,11 @@ func writeSingBoxConfigWithOptions(
 	}
 	address := []string{ipv4Address}
 	if options.IPv6Available {
-		address = append(address, "fdfe:dcba:9876::1/126")
+		ipv6Address, addressErr := availableTunIPv6Address()
+		if addressErr != nil {
+			return "", "", clashAPIConfig{}, addressErr
+		}
+		address = append(address, ipv6Address)
 	}
 	tunInbound := map[string]any{
 		"type": "tun", "tag": "tun-in", "interface_name": "HypoMux-Tun",
@@ -220,9 +224,7 @@ func writeSingBoxConfigWithOptions(
 	if dnsMode != "" {
 		tunInbound["dns_mode"] = dnsMode
 	}
-	if exclusions := dnsBootstrapRouteExclusions(dnsResult); len(exclusions) > 0 && dnsPolicy != "system" {
-		tunInbound["route_exclude_address"] = exclusions
-	}
+	tunInbound["route_exclude_address"] = tunRouteExclusions(dnsResult, dnsPolicy, options.IPv6Available)
 	// Keep the database outside runtime: config staging, IPv4 fallback and
 	// sidecar restarts must all reuse the same persistent FakeIP/rule-set store.
 	cacheDirectory := filepath.Join(settingsDirectory(), "cache")

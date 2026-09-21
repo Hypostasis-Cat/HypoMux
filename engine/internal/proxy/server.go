@@ -77,6 +77,7 @@ func New(config Config) (*Server, error) {
 		)
 	}
 	server.performance = newPerformanceTable()
+	server.scheduler.latency = newLatencyTable()
 	server.scheduler.strategy = normalized.Strategy
 	server.scheduler.performance = server.performance
 	for _, scheduler := range server.schedulers {
@@ -128,6 +129,8 @@ func (s *Server) Start() (Endpoints, error) {
 	resolver.SetFallbackHandler(s.dnsFallbackHandler)
 	s.resolver = resolver
 	s.cdn = newSteamCDN(s.ctx, s.config.SteamCDNEnabled)
+	s.wg.Add(1)
+	go func(ctx context.Context) { defer s.wg.Done(); s.scheduler.latency.run(ctx, s.scheduler) }(s.ctx)
 	s.wg.Add(1)
 	go func(ctx context.Context) { defer s.wg.Done(); s.performance.run(ctx) }(s.ctx)
 

@@ -1,6 +1,6 @@
 import { useId } from "react";
 import { getSchedulingStrategy, schedulingStrategies } from "./schedulingStrategies";
-import { Badge, Button, Spinner, Dropdown, Option, Tab, TabList } from "@fluentui/react-components";
+import { Badge, Button, Spinner, Dropdown, Option, Tab, TabList, Tooltip } from "@fluentui/react-components";
 import {
   Navigation20Regular,
   Play20Filled,
@@ -147,10 +147,15 @@ export function EngineHero({
             </Dropdown>
           </div>
         </div>
-        <p id={strategyHintId} className="scheduling-hint">
-          {strategy.description[language]}
-          {active && !transitioning && <> {text("切换仅影响新连接。", "Changes apply to new connections.")}</>}
-        </p>
+        <Tooltip
+          content={<>{strategy.description[language]}{active && !transitioning && strategy.strategy !== "latency-first" && <> {text("切换仅影响新连接。", "Changes apply to new connections.")}</>}</>}
+          relationship="label"
+        >
+          <p id={strategyHintId} className="scheduling-hint" tabIndex={0}>
+            {strategy.description[language]}
+            {active && !transitioning && strategy.strategy !== "latency-first" && <> {text("切换仅影响新连接。", "Changes apply to new connections.")}</>}
+          </p>
+        </Tooltip>
       </div>
       <ThroughputDisplay download={download} upload={upload} connections={connections} history={history} active={active} />
     </GlassSurface>

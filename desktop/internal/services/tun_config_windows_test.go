@@ -314,7 +314,7 @@ func TestGeneratedTunConfigProtectsLiteralDNSBootstrapAndOmitsIPv6WhenUnavailabl
 	if !reflect.DeepEqual(config.Inbounds[0].Address, []string{"10.255.255.1/30"}) {
 		t.Fatalf("IPv4-only TUN address = %#v", config.Inbounds[0].Address)
 	}
-	if !reflect.DeepEqual(config.Inbounds[0].RouteExcludeAddress, []string{"223.5.5.5/32"}) {
+	if !reflect.DeepEqual(config.Inbounds[0].RouteExcludeAddress, []string{"169.254.0.0/16", "224.0.0.0/4", "255.255.255.255/32", "223.5.5.5/32"}) {
 		t.Fatalf("DNS route exclusions = %#v", config.Inbounds[0].RouteExcludeAddress)
 	}
 	if len(config.DNS.Servers) != 2 || config.DNS.Servers[1]["type"] != "fakeip" {

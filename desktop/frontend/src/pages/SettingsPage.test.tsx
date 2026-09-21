@@ -71,6 +71,15 @@ afterEach(() => {
 });
 
 describe("TUN settings", () => {
+  it("shows a recoverable read failure instead of claiming settings are synced", async () => {
+    mocks.get.mockRejectedValueOnce(new Error("Temporarily unavailable"));
+    render(<SettingsPage adapterRuntime={[]} onOpenBlockedDomains={() => {}} />);
+    expect(await screen.findByText("Settings unavailable")).toBeTruthy();
+    expect(screen.queryByText("Settings synced")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByText("Settings synced")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+  });
   it("opens the aggregation hotspot from the toolbox and restores entry focus", async () => {
     render(<ToolsPage />);
     const entry = screen.getByRole("button", { name: "View aggregation hotspot details" });

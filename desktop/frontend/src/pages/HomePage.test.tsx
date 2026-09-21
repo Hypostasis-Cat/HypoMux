@@ -146,13 +146,28 @@ describe("HomePage adapter interactions", () => {
     mocks.useEngineState.mockReturnValue(state);
     const { rerender } = renderPage(<HomePage />);
     fireEvent.click(screen.getByRole("combobox", { name: "Scheduling strategy" }));
-    fireEvent.click(screen.getByRole("option", { name: "Adaptive speed (experimental)" }));
+    fireEvent.click(screen.getByRole("option", { name: "Adaptive speed" }));
     expect(setStrategy).toHaveBeenCalledWith("adaptive-throughput");
     expect(state.setWeighted).not.toHaveBeenCalled();
     mocks.useEngineState.mockReturnValue({ ...state, strategy: "adaptive-throughput" });
     rerender(<HomePage />);
     expect(screen.getByRole("combobox", { name: "Scheduling strategy" }).textContent).toContain("Adaptive speed");
     expect(screen.queryByRole("textbox", { name: "Ethernet Weight" })).toBeNull();
+  });
+
+  it("selects low latency and explains the local failover limit", () => {
+    const setStrategy = vi.fn();
+    const state = { ...engineState(), strategy: "round-robin", setStrategy };
+    mocks.useEngineState.mockReturnValue(state);
+    const { rerender } = renderPage(<HomePage />);
+    fireEvent.click(screen.getByRole("combobox", { name: "Scheduling strategy" }));
+    fireEvent.click(screen.getByRole("option", { name: "Low latency first" }));
+    expect(setStrategy).toHaveBeenCalledWith("latency-first");
+    mocks.useEngineState.mockReturnValue({ ...state, strategy: "latency-first", phase: "running" });
+    rerender(<HomePage />);
+    expect(screen.getByRole("combobox", { name: "Scheduling strategy" }).textContent).toContain("Low latency first");
+    expect(screen.getByText(/Game sessions may reconnect/, { selector: "p" })).toBeTruthy();
+    expect(screen.queryByText(/Changes apply to new connections/)).toBeNull();
   });
 
   it.each(["starting", "stopping"])("locks the strategy while %s", (phase) => {

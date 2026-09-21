@@ -23,10 +23,18 @@ export const schedulingStrategies = [
   },
   {
     id: "adaptive-throughput", strategy: "adaptive-throughput", weighted: false,
-    label: { zh: "自适应速度（实验）", en: "Adaptive speed (experimental)" },
+    label: { zh: "自适应速度", en: "Adaptive speed" },
     description: {
       zh: "根据近期 TCP 下载表现和传输负载分配新连接，保留少量探索。UDP 使用轮询；不迁移已有连接。",
       en: "Assign new TCP connections using recent download performance and load, with limited exploration. UDP rotates; established connections stay bound.",
+    },
+  },
+  {
+    id: "latency-first", strategy: "latency-first", weighted: false,
+    label: { zh: "低延迟优先", en: "Low latency first" },
+    description: {
+      zh: "按目标探测择优，数据不足时使用公共探测估计。游戏请使用虚拟网卡模式；UDP 故障时尝试切换，已有 TCP 不迁移，不保证游戏不断线。",
+      en: "Prefer lower latency, jitter and probe loss; public probes are fallback estimates. Use TUN mode for games. Attempts UDP failover; established TCP stays bound. Game sessions may reconnect.",
     },
   },
 ] as const;

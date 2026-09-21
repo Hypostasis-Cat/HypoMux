@@ -3,7 +3,8 @@ package proxy
 import "fmt"
 
 // SchedulingConfig changes only the aggregation pool. Explicit NIC channels
-// and established TCP/UDP flows retain their bindings.
+// and established TCP flows retain their bindings. UDP flows stay bound except
+// for evidence-based recovery while latency-first is selected.
 type SchedulingConfig struct {
 	Strategy string    `json:"strategy,omitempty"`
 	Weighted bool      `json:"weighted"`

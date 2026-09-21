@@ -20,31 +20,6 @@ import (
 
 const tunPreflightPowerShellTimeout = 8 * time.Second
 
-// Windows chooses equal-prefix routes by route metric plus interface metric.
-// Installed overlay adapters can keep a high-cost default route even while
-// their UI is closed; that alone is not evidence of default-route takeover.
-const tunDefaultRouteInspectionScript = `
-  $routePattern = 'meta|clash|mihomo|tun|wintun|wireguard|tailscale|vpn|tap'
-  $connectedInterfaces = @{}
-  foreach ($item in @(Get-NetIPInterface -AddressFamily IPv4 -ErrorAction Stop)) {
-    if ($item.ConnectionState -eq 'Connected') {
-      $connectedInterfaces[[int]$item.InterfaceIndex] = $item
-    }
-  }
-  $defaultRoutes = @(Get-NetRoute -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' -PolicyStore ActiveStore -ErrorAction Stop |
-    Where-Object { $connectedInterfaces.ContainsKey([int]$_.InterfaceIndex) -and $_.State -ne 'Dead' })
-  $rankedRoutes = @($defaultRoutes | ForEach-Object {
-    [PSCustomObject]@{
-      Alias = $_.InterfaceAlias
-      Metric = ([long]$_.RouteMetric + [long]$connectedInterfaces[[int]$_.InterfaceIndex].InterfaceMetric)
-    }
-  })
-  $bestMetric = ($rankedRoutes | Measure-Object -Property Metric -Minimum).Minimum
-  $aliases = @($rankedRoutes |
-    Where-Object { $_.Alias -match $routePattern -and ($_.Metric -eq $bestMetric -or $_.Alias -eq 'HypoMux-Tun') } |
-    Select-Object -ExpandProperty Alias -Unique)
-`
-
 func inspectTunPlatform(checkWFP bool) tunPlatformSnapshot {
 	snapshot := tunPlatformSnapshot{
 		HostElevated:             windows.GetCurrentProcessToken().IsElevated(),
@@ -55,7 +30,19 @@ func inspectTunPlatform(checkWFP bool) tunPlatformSnapshot {
 	} else {
 		snapshot.WFPDetail = "严格路由已由用户关闭；未执行 WFP 探测"
 	}
-	snapshot.DefaultRouteAliases, snapshot.NetworkRisks, snapshot.RouteScanError = inspectForeignNetworkState()
+	routes, routeErr := readNetworkRoutes()
+	snapshot.DefaultRouteAliases, snapshot.NetworkRisks = assessNetworkRoutes(routes)
+	_, extraRisks, extraError := inspectForeignNetworkState()
+	snapshot.NetworkRisks = append(snapshot.NetworkRisks, extraRisks...)
+	if routeErr != nil {
+		snapshot.RouteScanError = routeErr.Error()
+	}
+	if extraError != "" {
+		if snapshot.RouteScanError != "" {
+			snapshot.RouteScanError += "；"
+		}
+		snapshot.RouteScanError += extraError
+	}
 	return snapshot
 }
 
@@ -100,12 +87,6 @@ function Write-InspectionSnapshot {
     errors = @($inspectionErrors)
   } -Compress
 }
-try {
-` + tunDefaultRouteInspectionScript + `
-} catch {
-  $inspectionErrors += ('默认路由检查失败：' + $_.Exception.Message)
-}
-Write-InspectionSnapshot
 try {
   $adapterPattern = '(?i)(tun|tap|wintun|wireguard|tailscale|vpn|virtual|vgate)'
   $adapters = @(Get-NetAdapter -ErrorAction Stop)

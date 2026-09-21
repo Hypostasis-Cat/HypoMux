@@ -50,6 +50,7 @@ type udpFlow struct {
 	connection  net.Conn
 	session     *connection
 	lastActive  atomic.Int64
+	lastReply   atomic.Int64
 	closeOnce   sync.Once
 	sendMu      sync.Mutex
 }
@@ -169,6 +170,10 @@ func (a *udpAssociation) serve(controlDone <-chan struct{}) error {
 }
 
 func (a *udpAssociation) forward(clientAddress *net.UDPAddr, packet socksUDPPacket) {
+	if a.scheduler != nil {
+		a.scheduler.watchLatency(packet.target)
+	}
+	exclude := ""
 	a.mu.Lock()
 	if a.closed {
 		a.mu.Unlock()
@@ -177,10 +182,24 @@ func (a *udpAssociation) forward(clientAddress *net.UDPAddr, packet socksUDPPack
 	flow := a.flows[packet.target]
 	if flow != nil {
 		a.mu.Unlock()
-		if err := flow.send(packet.payload); err != nil {
+		// Outbound writes are not proof of connectivity. Require missing replies
+		// AND comparative probes before retiring a silent flow. Never replay a
+		// datagram already written to the old path.
+		if a.scheduler != nil && time.Since(time.Unix(0, flow.lastReply.Load())) >= 3*time.Second && a.scheduler.latencyFailover(flow.adapter, packet.target) {
+			exclude = flow.adapter.Name
 			flow.close()
+		} else {
+			if err := flow.send(packet.payload); err != nil {
+				flow.recordFailure(err)
+				flow.close()
+			}
+			return
 		}
-		return
+		a.mu.Lock()
+		if a.closed {
+			a.mu.Unlock()
+			return
+		}
 	}
 	if len(a.flows) >= a.flowLimit {
 		a.mu.Unlock()
@@ -188,7 +207,7 @@ func (a *udpAssociation) forward(clientAddress *net.UDPAddr, packet socksUDPPack
 	}
 	a.mu.Unlock()
 
-	flow, err := a.createFlow(clientAddress, packet.target, packet.payload)
+	flow, err := a.createFlow(clientAddress, packet.target, packet.payload, exclude)
 	if err != nil {
 		return
 	}
@@ -217,6 +236,7 @@ func (a *udpAssociation) createFlow(
 	clientAddress *net.UDPAddr,
 	target string,
 	firstPayload []byte,
+	skip ...string,
 ) (*udpFlow, error) {
 	host, _, err := net.SplitHostPort(target)
 	if err != nil {
@@ -232,6 +252,13 @@ func (a *udpAssociation) createFlow(
 	}
 	adapters := a.scheduler.snapshot().Adapters
 	excluded := make(map[string]struct{}, len(adapters))
+	for _, name := range skip {
+		for _, adapter := range adapters {
+			if adapter.Name == name {
+				excluded[name] = struct{}{}
+			}
+		}
+	}
 	for _, adapter := range adapters {
 		if !adapterSupportsNetwork(adapter, network) {
 			excluded[adapter.Name] = struct{}{}
@@ -243,7 +270,7 @@ func (a *udpAssociation) createFlow(
 	}
 	var failures []error
 	for range attempts {
-		adapter, ok := a.scheduler.Select(excluded)
+		adapter, ok := a.scheduler.selectForTarget(excluded, target)
 		if !ok {
 			break
 		}
@@ -298,6 +325,7 @@ func (a *udpAssociation) createFlow(
 			connection:  upstream,
 			session:     telemetry,
 		}
+		flow.lastReply.Store(time.Now().UnixNano())
 		flow.touch()
 		return flow, nil
 	}
@@ -384,8 +412,10 @@ func (f *udpFlow) receiveLoop(clientAddress *net.UDPAddr) {
 					continue
 				}
 			}
+			f.recordFailure(err)
 			return
 		}
+		f.lastReply.Store(time.Now().UnixNano())
 		if count == 0 {
 			continue
 		}
@@ -522,4 +552,15 @@ func writeSOCKSBindReply(client net.Conn, reply byte, address *net.UDPAddr) bool
 	binary.BigEndian.PutUint16(payload[8:10], uint16(address.Port))
 	_, err := client.Write(payload)
 	return err == nil
+}
+
+// Remote refusal and idle timeouts must not poison adapter health.
+func (f *udpFlow) recordFailure(err error) {
+	s := f.association.scheduler
+	if s == nil || !isLocalConnectFailure(err) {
+		return
+	}
+	if s.snapshot().Strategy == StrategyLatency {
+		s.MarkFailure(f.adapter.Name)
+	}
 }

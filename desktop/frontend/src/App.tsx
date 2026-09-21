@@ -14,7 +14,7 @@ import { HomePage } from "./pages/HomePage";
 import { advanceConnectionsNavigation } from "./pages/connectionNavigation";
 import type { EnginePhase, HomeAdapter } from "./state/useEngineState";
 import { AppearanceProvider, useAppearance } from "./theme/appearance.store";
-import { LanguageProvider } from "./i18n/i18n";
+import { LanguageProvider, useI18n } from "./i18n/i18n";
 import { desktopPlatform } from "./platform/desktop";
 import { resolveWallpaperBackground } from "./theme/wallpaper";
 import { TrayMenu } from "./components/tray/TrayMenu";
@@ -63,6 +63,7 @@ function NotificationVisualFixture() {
 }
 
 function HypoMuxWindow() {
+  const { locale } = useI18n();
   const [page, setPage] = useState<AppPage>(() => {
     const requested = new URLSearchParams(window.location.search).get("page");
     if (import.meta.env.DEV && (
@@ -140,7 +141,7 @@ function HypoMuxWindow() {
             />
           )}
         >
-          <Suspense fallback={<div className="page-loading"><Spinner /></div>}>
+          <Suspense fallback={<div className="page-loading"><Spinner size="small" label={locale === "en" ? "Loading page…" : "正在加载页面…"} /></div>}>
           {page === "appearance" && import.meta.env.DEV
             ? <AppearanceLab />
             : page === "about"

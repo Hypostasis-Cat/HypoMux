@@ -237,6 +237,8 @@ export function SettingsPage({
   const [adapters, setAdapters] = useState<AdapterView[]>([]);
   const [configPath, setConfigPath] = useState("");
   const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [loadRevision, setLoadRevision] = useState(0);
   const [saving, setSaving] = useState(false);
   const [wfpStatus, setWfpStatus] = useState("");
   const [migration, setMigration] = useState<ConfigMigrationStatus | null>(null);
@@ -338,6 +340,9 @@ export function SettingsPage({
   }, [adapterRuntime]);
 
   useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setLoadFailed(false);
     Promise.all([
       appServices.settings.get(),
       appServices.settings.configPath(),
@@ -347,14 +352,20 @@ export function SettingsPage({
         : appServices.adapters.list().catch(() => []),
     ])
       .then(([loaded, path, migrationStatus, loadedAdapters]) => {
+        if (cancelled) return;
         setSettings({ ...emptySettings, ...loaded });
         setConfigPath(path);
         setMigration(migrationStatus);
         setAdapters(adapterRuntimeRef.current !== undefined ? [...adapterRuntimeRef.current] : loadedAdapters ?? []);
       })
-      .catch((error) => notify(text("设置读取失败", "Failed to load settings"), String(error), "error"))
-      .finally(() => setLoading(false));
-  }, []);
+      .catch((error) => {
+        if (cancelled) return;
+        setLoadFailed(true);
+        notify(text("设置读取失败", "Failed to load settings"), String(error), "error");
+      })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [loadRevision]);
 
   const save = (next: CompleteAppSettings, success?: string, fields: string[] | null = null): Promise<void> => {
     setSettings(next);
@@ -537,11 +548,16 @@ export function SettingsPage({
             "Changes are saved to the current user profile. Network options are applied by the independent Core while the engine runs.",
           )}</p>
         </div>
-        <span key={loading ? "loading" : saving ? "saving" : "synced"} className="save-state motion-inline-swap" role="status" aria-live="polite">{loading
-          ? text("正在读取…", "Loading…")
-          : saving
-            ? text("正在保存…", "Saving…")
-            : text("配置已同步", "Settings synced")}</span>
+        <div className="settings-save-feedback">
+          <span key={loading ? "loading" : loadFailed ? "error" : saving ? "saving" : "synced"} className="save-state motion-inline-swap" data-error={loadFailed || undefined} role="status" aria-live="polite">{loading
+            ? text("正在读取…", "Loading…")
+            : loadFailed
+              ? text("配置未读取", "Settings unavailable")
+              : saving
+                ? text("正在保存…", "Saving…")
+                : text("配置已同步", "Settings synced")}</span>
+          {loadFailed && <Button size="small" appearance="subtle" icon={<ArrowSync20Regular />} onClick={() => setLoadRevision(value => value + 1)}>{text("重试", "Retry")}</Button>}
+        </div>
       </header>
 
       <span ref={sectionIndexSentinelRef} className="settings-section-index-sentinel" aria-hidden="true" />
@@ -554,7 +570,10 @@ export function SettingsPage({
             ["settings-advanced", t("settings_advanced_network")],
             ["settings-config", t("settings_config_group")],
           ].map(([id, label]) => (
-            <button key={id} type="button" onClick={() => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" })}>
+            <button key={id} type="button" onClick={() => document.getElementById(id)?.scrollIntoView({
+              behavior: appearance.motion === "standard" && !window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "smooth" : "instant",
+              block: "start",
+            })}>
               {label}
             </button>
           ))}
@@ -621,8 +640,8 @@ export function SettingsPage({
           <SettingRow
             title={text("界面动效", "Interface motion")}
             description={text(
-              "控制页面切换、侧栏滑块与控件过渡；仅使用 HypoMux 的设置，不跟随 Windows 动效选项。",
-              "Controls page transitions, the navigation slider, and control animations. Uses only the HypoMux setting.",
+              "统一控制页面与控件过渡；系统开启减少动态效果时，将自动精简动画。",
+              "Controls page and control transitions. Animations are reduced when your system requests reduced motion.",
             )}
           >
             <SettingDropdown

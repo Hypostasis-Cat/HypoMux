@@ -54,8 +54,8 @@ func (s *EngineService) SaveScheduling(mode, strategy string, adapters []Adapter
 	if !slices.Contains(s.client.Hello().Capabilities, "engine.scheduling") {
 		return nil, fmt.Errorf("当前核心不支持运行中修改聚合配置，请更新核心")
 	}
-	if strategy == "adaptive-throughput" && !slices.Contains(s.client.Hello().SchedulingStrategies, strategy) {
-		return nil, fmt.Errorf("当前 Core 不支持自适应调度，请更新核心或选择轮询")
+	if (strategy == "adaptive-throughput" || strategy == "latency-first") && !slices.Contains(s.client.Hello().SchedulingStrategies, strategy) {
+		return nil, fmt.Errorf("当前 Core 不支持所选调度策略，请更新核心或选择轮询")
 	}
 	// Bind using freshly enumerated OS data, never addresses supplied by the UI.
 	available, err := s.adapters.List()
@@ -134,7 +134,7 @@ func normalizeSchedulingStrategy(strategy string, weighted bool) (string, error)
 		return "round-robin", nil
 	}
 	switch strategy {
-	case "round-robin", "weighted", "adaptive-throughput":
+	case "round-robin", "weighted", "adaptive-throughput", "latency-first":
 		return strategy, nil
 	}
 	return "", fmt.Errorf("未知调度策略：%s", strategy)

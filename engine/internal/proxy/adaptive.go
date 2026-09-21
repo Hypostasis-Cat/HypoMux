@@ -24,7 +24,7 @@ func NormalizeStrategy(strategy string, weighted bool) (string, error) {
 		return StrategyRoundRobin, nil
 	}
 	switch strategy {
-	case StrategyRoundRobin, StrategyWeighted, StrategyAdaptive:
+	case StrategyRoundRobin, StrategyWeighted, StrategyAdaptive, StrategyLatency:
 		return strategy, nil
 	default:
 		return "", fmt.Errorf("unknown scheduling strategy %q", strategy)
@@ -244,6 +244,7 @@ func (p *performanceTable) run(ctx context.Context) {
 }
 
 type SchedulingTelemetry struct {
+	Latency     []LatencyTelemetry        `json:"latency,omitempty"`
 	Strategy    string                    `json:"strategy"`
 	UDPStrategy string                    `json:"udp_strategy"`
 	State       string                    `json:"state"`
@@ -266,6 +267,11 @@ func (s *scheduler) performanceSnapshot() SchedulingTelemetry {
 	if strategy == StrategyAdaptive {
 		result.UDPStrategy = StrategyRoundRobin
 		result.State = "learning"
+	}
+	if strategy == StrategyLatency && s.latency != nil {
+		result.State = "estimating"
+		result.Latency, result.Decisions = s.latency.snapshot(s.adapters)
+		return result
 	}
 	if s.performance == nil {
 		return result

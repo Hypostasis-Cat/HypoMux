@@ -192,7 +192,7 @@ func (s *TunService) evaluateSelected(selected []AdapterView, reusableForStartup
 		} else if snapshot.ForeignTUN == "" {
 			snapshot.ForeignTUN = clean
 			snapshot.Issues = append(snapshot.Issues, tunBlocker(
-				"foreign_tun", "第三方虚拟隧道正在接管默认路由",
+				"foreign_tun", "第三方虚拟隧道正在接管大范围网络路由",
 				fmt.Sprintf("检测到 %s。请先关闭对应代理或 VPN，再启动虚拟网卡模式。", clean),
 			))
 		}

@@ -1,5 +1,5 @@
 import { Badge, Button, Dropdown, Field, Input, Option, Spinner, Switch } from "@fluentui/react-components";
-import { Wifi124Regular, Phone24Regular, ShieldCheckmark24Regular } from "@fluentui/react-icons";
+import { Wifi124Regular, Phone24Regular } from "@fluentui/react-icons";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n/i18n";
 import { appServices, type HotspotConfig, type HotspotStatus } from "../platform/services";
@@ -89,7 +89,6 @@ export function HotspotPanel() {
   const settingsRef = useContentTransition(loadingConfig ? "loading" : active ? "active" : "editable");
   const connectionState = qrVisible ? "qr" : pollError ? "unavailable" : !status ? "loading" : `${status.state}-${status.ready}-${!!status.devices_available}-${!!status.devices?.length}`;
   const connectionRef = useContentTransition(connectionState);
-  const prerequisiteRef = useContentTransition(String(!!(status?.ready || active)));
   const band = (active ? status?.band : config.band) ?? "auto";
   const bandLabel = band === "5" ? "5 GHz" : band === "2.4" ? "2.4 GHz" : text("自动", "Automatic");
   const validName = config.ssid.trim().length > 0 && new TextEncoder().encode(config.ssid).length <= 32 && !/[\0\r\n]/.test(config.ssid);
@@ -150,7 +149,6 @@ export function HotspotPanel() {
         disabled={pending || status?.state === "stopping" || !status || (!active && (loadingConfig || !!pollError || !status.ready || !validName || !validPassword))}
         onChange={(_, data) => void change(data.checked)} />
     </div>
-    <div className="hotspot-prerequisite"><ShieldCheckmark24Regular aria-hidden="true" /><div ref={prerequisiteRef}><strong>{status?.ready || active ? text("聚合网络共享", "Aggregation network sharing") : text("先启动聚合，再分享网络", "Start aggregation to share your network")}</strong><p>{status?.ready || active ? text("以 TUN 聚合网络作为热点出口；停止聚合时，热点会自动关闭。", "Shares your TUN aggregation connection. Stopping aggregation also closes the hotspot.") : text("请先在首页选择网卡，以 TUN 模式启动聚合，然后在这里开启热点。", "Select your adapters and start aggregation in TUN mode on Home, then enable the hotspot here.")}</p></div></div>
     <div className="hotspot-layout"><div className="hotspot-settings hotspot-surface glass-surface">
     <header className="hotspot-section-heading"><h2>{text("网络设置", "Network settings")}</h2><span>{active ? text("使用中", "In use") : text("开启前可编辑", "Edit before sharing")}</span></header>
     <div className="hotspot-settings-content" ref={settingsRef}>

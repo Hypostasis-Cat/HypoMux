@@ -18,6 +18,7 @@ const clearCardLight = (card: HTMLElement) => {
 export function useCardGlowField() {
   useEffect(() => {
     const finePointer = window.matchMedia("(hover: hover) and (pointer: fine)");
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
     if (!finePointer.matches) return;
 
     let frame = 0;
@@ -63,12 +64,14 @@ export function useCardGlowField() {
       const nextLitCards = new Set<HTMLElement>();
       const cards = document.querySelectorAll<HTMLElement>(".hm-card");
 
-      cards.forEach((card) => {
+      // Read every rectangle before updating styles to avoid repeated layout
+      // work as the pointer crosses multiple translucent surfaces.
+      const measurements = Array.from(cards, (card) => ({ card, rect: card.getBoundingClientRect() }));
+      measurements.forEach(({ card, rect }) => {
         // Nested interactive cards own the light; their containing surface
         // stays neutral so a hover never resembles a selected page section.
         if (card !== sourceCard && card.contains(sourceCard)) return;
 
-        const rect = card.getBoundingClientRect();
         if (rect.width === 0 || rect.height === 0 || rect.bottom < 0 || rect.top > window.innerHeight) return;
 
         const nearestX = Math.max(rect.left, Math.min(pointerX, rect.right));
@@ -100,6 +103,10 @@ export function useCardGlowField() {
     };
 
     const onPointerMove = (event: PointerEvent) => {
+      if (reducedMotion.matches || ["reduced", "off"].includes(document.documentElement.dataset.motion ?? "")) {
+        if (litCards.size) clear();
+        return;
+      }
       if (event.pointerType && event.pointerType !== "mouse" && event.pointerType !== "pen") return;
       pointerX = event.clientX;
       pointerY = event.clientY;

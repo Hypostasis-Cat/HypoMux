@@ -101,7 +101,7 @@ func NewHelloResult(
 		ProtocolVersion:      protocol.Version,
 		Transport:            protocol.Transport,
 		Capabilities:         Capabilities(),
-		SchedulingStrategies: []string{proxy.StrategyRoundRobin, proxy.StrategyWeighted, proxy.StrategyAdaptive},
+		SchedulingStrategies: []string{proxy.StrategyRoundRobin, proxy.StrategyWeighted, proxy.StrategyAdaptive, proxy.StrategyLatency},
 		Modes:                []string{"proxy", "tun_tcp_pool"},
 		ModeFeatures: map[string][]string{
 			"proxy": {

@@ -48,6 +48,7 @@ type AppNotification = Required<Pick<AppNotificationInput, "title" | "intent">> 
   detail?: string;
   action?: NotificationAction;
   occurrences: number;
+  timeout: number;
   code?: string;
 };
 
@@ -58,6 +59,7 @@ type AppNotificationContextValue = {
   notifications: AppNotification[];
   detailsOpen: boolean;
   setDetailsOpen: (open: boolean | ((current: boolean) => boolean)) => void;
+  setInteractionPaused: (paused: boolean) => void;
 };
 
 const AppNotificationContext = createContext<AppNotificationContextValue | null>(null);
@@ -73,19 +75,16 @@ export function AppNotificationProvider({ children }: PropsWithChildren) {
   const { locale } = useI18n();
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [detailsOpen, setDetailsOpen] = useState(false);
-  const timers = useRef(new Map<string, ReturnType<typeof window.setTimeout>>());
+  const [interactionPaused, setInteractionPaused] = useState(false);
+  const [documentHidden, setDocumentHidden] = useState(document.hidden);
+  const countdown = useRef<{ notification: AppNotification; remaining: number }>();
 
   const dismiss = useCallback((id: string) => {
-    const timer = timers.current.get(id);
-    if (timer !== undefined) window.clearTimeout(timer);
-    timers.current.delete(id);
     setNotifications((current) => current.filter((notification) => notification.id !== id));
     setDetailsOpen(false);
   }, []);
 
   const clear = useCallback(() => {
-    for (const timer of timers.current.values()) window.clearTimeout(timer);
-    timers.current.clear();
     setNotifications([]);
     setDetailsOpen(false);
   }, []);
@@ -109,6 +108,8 @@ export function AppNotificationProvider({ children }: PropsWithChildren) {
       detail,
       action: input.action,
       occurrences: 1,
+      // Actions must remain available until the user makes a choice.
+      timeout: input.timeout ?? (input.action ? 0 : intent === "success" ? 3200 : intent === "info" ? 4200 : 0),
       code,
     };
 
@@ -119,17 +120,29 @@ export function AppNotificationProvider({ children }: PropsWithChildren) {
     });
     setDetailsOpen(false);
 
-    const currentTimer = timers.current.get(id);
-    if (currentTimer !== undefined) window.clearTimeout(currentTimer);
-    const timeout = input.timeout ?? (intent === "success" ? 3200 : intent === "info" ? 4200 : 0);
-    if (timeout > 0) {
-      timers.current.set(id, window.setTimeout(() => dismiss(id), timeout));
-    }
-  }, [dismiss, locale]);
+  }, [locale]);
 
-  useEffect(() => () => {
-    for (const timer of timers.current.values()) window.clearTimeout(timer);
+  useEffect(() => {
+    const onVisibilityChange = () => setDocumentHidden(document.hidden);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", onVisibilityChange);
   }, []);
+
+  const active = notifications[0];
+  useEffect(() => {
+    if (!active || active.timeout <= 0) return;
+    if (countdown.current?.notification !== active) {
+      countdown.current = { notification: active, remaining: active.timeout };
+    }
+    if (interactionPaused || detailsOpen || documentHidden) return;
+    const current = countdown.current;
+    const started = Date.now();
+    const timer = window.setTimeout(() => dismiss(active.id), current.remaining);
+    return () => {
+      window.clearTimeout(timer);
+      current.remaining = Math.max(0, current.remaining - (Date.now() - started));
+    };
+  }, [active, detailsOpen, dismiss, documentHidden, interactionPaused]);
 
   const value = useMemo(() => ({
     notify,
@@ -138,6 +151,7 @@ export function AppNotificationProvider({ children }: PropsWithChildren) {
     notifications,
     detailsOpen,
     setDetailsOpen,
+    setInteractionPaused,
   }), [clear, detailsOpen, dismiss, notifications, notify]);
 
   return (
@@ -162,9 +176,20 @@ function AppNotificationViewport({
   wallpaperBackground?: string;
 }) {
   const { locale } = useI18n();
-  const { notifications, detailsOpen, setDetailsOpen, dismiss, clear } = context;
+  const { notifications, detailsOpen, setDetailsOpen, setInteractionPaused, dismiss, clear } = context;
   const active = notifications[0];
   const [rendered, setRendered] = useState<AppNotification | undefined>(active);
+  const [hovered, setHovered] = useState(false);
+  const [focused, setFocused] = useState(false);
+
+  useEffect(() => {
+    setInteractionPaused(Boolean(active) && (hovered || focused));
+    return () => setInteractionPaused(false);
+  }, [active, hovered, focused, setInteractionPaused]);
+
+  useEffect(() => {
+    if (!active) { setHovered(false); setFocused(false); }
+  }, [active]);
 
   useEffect(() => {
     if (active) {
@@ -189,6 +214,18 @@ function AppNotificationViewport({
       role={shown.intent === "error" ? "alert" : "status"}
       aria-live={shown.intent === "error" ? "assertive" : "polite"}
       aria-atomic="true"
+      onPointerEnter={() => setHovered(true)}
+      onPointerLeave={() => setHovered(false)}
+      onFocusCapture={() => setFocused(true)}
+      onBlurCapture={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFocused(false);
+      }}
+      onKeyDown={(event) => {
+        if (event.key !== "Escape" || isLeaving) return;
+        event.stopPropagation();
+        if (detailsOpen) setDetailsOpen(false);
+        else dismiss(shown.id);
+      }}
     >
       <span className="global-notification-frost" aria-hidden="true" />
       <div className="global-notification-bar">
@@ -222,6 +259,7 @@ function AppNotificationViewport({
             icon={detailsOpen ? <ChevronUp16Regular /> : <ChevronDown16Regular />}
             onClick={() => setDetailsOpen((open) => !open)}
             aria-expanded={detailsOpen}
+            aria-controls={detailsOpen ? "notification-details" : undefined}
           >
             {detailsOpen ? (locale === "en" ? "Hide" : "收起") : (locale === "en" ? "Details" : "详情")}
           </Button>
@@ -246,7 +284,7 @@ function AppNotificationViewport({
         />
       </div>
       {detailsOpen && shown.detail && (
-        <div className="global-notification-details">
+        <div id="notification-details" className="global-notification-details">
           <pre>{shown.detail}</pre>
           {notifications.length > 1 && (
             <Button className="global-notification-button" appearance="subtle" size="small" onClick={clear}>

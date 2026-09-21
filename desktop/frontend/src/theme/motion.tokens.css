@@ -2,13 +2,15 @@
   --hm-motion-instant: 100ms;
   --hm-motion-fast: 150ms;
   --hm-motion-normal: 250ms;
-  --hm-motion-page: 350ms;
+  --hm-motion-page: 280ms;
+  --hm-motion-enter: 280ms;
+  --hm-motion-exit: 180ms;
   --hm-motion-background: 400ms;
   --hm-motion-ease: cubic-bezier(0.25, 0.1, 0.25, 1);
   --hm-motion-ease-out: cubic-bezier(0, 0, 0.2, 1);
   --hm-motion-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
   --hm-motion-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
-  --hm-motion-rise-distance: 6px;
+  --hm-motion-rise-distance: 4px;
   --hm-motion-row-distance: 7px;
 }
 
@@ -18,8 +20,8 @@
   --hm-motion-normal: 100ms;
   --hm-motion-page: 120ms;
   --hm-motion-background: 150ms;
-  --hm-motion-rise-distance: 2px;
-  --hm-motion-row-distance: 2px;
+  --hm-motion-rise-distance: 0px;
+  --hm-motion-row-distance: 0px;
 }
 
 [data-motion="off"] *,
@@ -30,4 +32,29 @@
   transition-delay: 0ms !important;
   animation-duration: 0ms !important;
   animation-delay: 0ms !important;
+  animation-iteration-count: 1 !important;
+}
+
+/* Apply to portals too: preferences live on the document root. Short,
+ * single-iteration animations retain completion events without visible motion. */
+[data-motion="reduced"] *,
+[data-motion="reduced"] *::before,
+[data-motion="reduced"] *::after {
+  scroll-behavior: auto !important;
+  animation-duration: 0.01ms !important;
+  animation-delay: 0ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 80ms !important;
+  transition-delay: 0ms !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0ms !important;
+    transition-delay: 0ms !important;
+  }
 }

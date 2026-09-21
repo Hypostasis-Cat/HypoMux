@@ -61,7 +61,17 @@ export function CompactNavigation({
   }, [navigationPage]);
 
   return (
-    <nav ref={navigationRef} className="compact-navigation" aria-label={locale === "en" ? "Main navigation" : "主导航"}>
+    <nav ref={navigationRef} className="compact-navigation" aria-label={locale === "en" ? "Main navigation" : "主导航"}
+      onKeyDown={(event) => {
+        if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+        const buttons = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>(".nav-button"));
+        const current = buttons.indexOf(event.target as HTMLButtonElement);
+        if (current < 0) return;
+        event.preventDefault();
+        const next = event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1
+          : (current + (event.key === "ArrowDown" ? 1 : -1) + buttons.length) % buttons.length;
+        buttons[next]?.focus();
+      }}>
       <span
         className="nav-selection-window"
         data-visible={indicatorTop !== null}

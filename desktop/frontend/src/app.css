@@ -81,6 +81,7 @@ html.window-closing #root > .hypomux-provider {
 
 .page-loading {
   display: grid;
+  height: 100%;
   min-width: 0;
   min-height: 0;
   place-items: center;
@@ -490,7 +491,7 @@ svg {
     0 0 18px var(--hm-accent-soft);
   pointer-events: none;
   transition:
-    transform 300ms cubic-bezier(0.34, 1.3, 0.64, 1),
+    transform var(--hm-motion-page) var(--hm-motion-ease-out),
     opacity var(--hm-motion-normal) var(--hm-motion-ease-out),
     background var(--hm-motion-normal) var(--hm-motion-ease-out),
     border-color var(--hm-motion-normal) var(--hm-motion-ease-out);
@@ -575,7 +576,7 @@ svg {
 }
 
 .nav-button.is-active > svg {
-  animation: nav-icon-in 400ms var(--hm-motion-spring) both;
+  animation: nav-icon-in var(--hm-motion-normal) var(--hm-motion-ease-out) both;
 }
 
 .page-viewport {
@@ -620,15 +621,15 @@ svg {
     0 3px 10px color-mix(in srgb, var(--hm-island-shadow) 48%, transparent),
     inset 0 1px 0 var(--hm-island-highlight);
   --wails-draggable: no-drag;
-  animation: dynamic-island-arrive 440ms var(--hm-motion-spring) both;
+  transform-origin: top center;
+  animation: dynamic-island-arrive var(--hm-motion-enter) var(--hm-motion-ease-out) both;
   transition:
-    width 420ms var(--hm-motion-spring),
-    border-radius 320ms var(--hm-motion-ease-out),
-    box-shadow 320ms var(--hm-motion-ease-out);
+    border-color var(--hm-motion-fast) var(--hm-motion-ease-out),
+    box-shadow var(--hm-motion-normal) var(--hm-motion-ease-out);
 }
 
 .global-notification-region.is-leaving {
-  animation: dynamic-island-leave 220ms cubic-bezier(0.4, 0, 1, 1) both;
+  animation: dynamic-island-leave var(--hm-motion-exit) var(--hm-motion-ease-in-out) both;
   pointer-events: none;
 }
 
@@ -850,6 +851,11 @@ svg {
   flex: 1;
   overflow: auto;
   color: var(--hm-island-muted);
+  max-height: 145px;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  user-select: text;
+  -webkit-user-select: text;
   font-family: Consolas, "Cascadia Mono", monospace;
   font-size: 10.5px;
   line-height: 1.55;
@@ -870,11 +876,7 @@ svg {
 @keyframes dynamic-island-arrive {
   0% {
     opacity: 0;
-    transform: translateY(-10px) scale(0.92, 0.76);
-  }
-  62% {
-    opacity: 1;
-    transform: translateY(1px) scale(1.012, 1.025);
+    transform: translateY(-6px) scale(0.98);
   }
   100% {
     opacity: 1;
@@ -884,7 +886,7 @@ svg {
 
 @keyframes dynamic-island-leave {
   from { opacity: 1; transform: translateY(0) scale(1); }
-  to { opacity: 0; transform: translateY(-7px) scale(0.96, 0.84); }
+  to { opacity: 0; transform: translateY(-4px) scale(0.98); }
 }
 
 @keyframes dynamic-island-details {
@@ -908,14 +910,19 @@ svg {
 }
 
 .page-transition-layer.is-entering {
-  --hm-page-enter-offset: 10px;
+  --hm-page-enter-offset: 6px;
   /*
    * Backdrop-filter descendants cannot live below an animated opacity or
    * transform layer without WebView2 rebuilding their background snapshot.
    * Animate the layout offset instead: it preserves the slide while keeping
    * every glass surface in the stable root compositor layer.
    */
-  animation: page-content-in 400ms var(--hm-motion-ease-out);
+  animation: page-content-in var(--hm-motion-page) var(--hm-motion-ease-out);
+}
+
+/* A nested tool view already travels with the entering page. */
+.page-transition-layer.is-entering .page-transition-layer.is-entering {
+  animation: none;
 }
 
 [data-motion="reduced"] .page-transition-layer.is-entering,
@@ -924,7 +931,7 @@ svg {
 }
 
 .page-transition-layer.is-entering[data-direction="backward"] {
-  --hm-page-enter-offset: -10px;
+  --hm-page-enter-offset: -6px;
 }
 
 @keyframes page-content-in {
@@ -993,26 +1000,14 @@ svg {
   animation-delay: 75ms;
 }
 
-.fui-Button,
-.fui-ToolbarButton {
-  transition-property: background, border, color, transform !important;
-  transition-duration: var(--hm-motion-fast) !important;
-  transition-timing-function: var(--hm-motion-ease-out) !important;
-}
-
-.fui-Button:not(:disabled):active,
-.fui-ToolbarButton:not(:disabled):active {
-  transform: scale(0.975);
-}
-
 @keyframes motion-inline-swap {
   from {
-    top: 3px;
+    transform: translateY(3px);
     opacity: 0;
   }
 
   to {
-    top: 0;
+    transform: translateY(0);
     opacity: 1;
   }
 }
@@ -1232,6 +1227,14 @@ svg {
 }
 
 .scheduling-hint {
+  /* Reserve the same two lines for every strategy so switching never moves
+   * the hero or adapter list. Full copy is available on hover and focus. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  height: 3em;
+  flex-shrink: 0;
+  overflow: hidden;
   max-width: 410px;
   margin: 8px 0 0;
   color: var(--hm-text-secondary);
@@ -4651,6 +4654,17 @@ svg {
   font-size: 11.5px;
 }
 
+.settings-save-feedback {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--hm-space-2);
+  min-height: 28px;
+  flex: 0 0 auto;
+}
+
+.save-state[data-error="true"] { color: var(--hm-danger); }
+
 .settings-section-index-sentinel {
   display: block;
   width: 1px;
@@ -5453,10 +5467,6 @@ svg {
 .hotspot-control p { color: var(--hm-text-secondary); font-size: 12px; }
 .hotspot-summary { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
 .hotspot-control.is-running { border-color: var(--hm-accent-muted); }
-.hotspot-prerequisite { display: flex; align-items: center; gap: 12px; padding: 12px 16px; background: rgba(var(--hm-surface-secondary-rgb), .6); border-radius: var(--hm-radius); border: 1px solid var(--hm-outer-border); }
-.hotspot-prerequisite > svg { color: var(--hm-text-tertiary); flex-shrink: 0; }
-.hotspot-prerequisite strong { font-size: 12px; font-weight: 600; }
-.hotspot-prerequisite p { font-size: 12px; color: var(--hm-text-secondary); }
 .hotspot-layout { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(260px, 1fr); gap: 16px; align-items: start; }
 .hotspot-surface { border: 1px solid var(--hm-outer-border); border-radius: var(--hm-radius); background: rgba(var(--hm-surface-rgb), var(--hm-panel-opacity)); padding: 22px; min-width: 0; }
 .hotspot-settings { display: flex; flex-direction: column; gap: 18px; }
@@ -5602,8 +5612,6 @@ svg {
 
 /* Keep hotspot state changes within stable card regions. */
 .hotspot-summary { min-height: 24px; flex-wrap: nowrap; }
-.hotspot-prerequisite { min-height: 76px; box-sizing: border-box; }
-.hotspot-prerequisite p { min-height: 40px; }
 .hotspot-save-hint { min-height: 36px; }
 .hotspot-feedback { height: 96px; flex-shrink: 0; overflow: auto; scrollbar-gutter: stable; display: flex; flex-direction: column; gap: 8px; }
 .hotspot-connect { min-height: 480px; box-sizing: border-box; display: flex; flex-direction: column; gap: 16px; }

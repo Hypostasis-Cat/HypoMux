@@ -163,6 +163,7 @@ type EngineService struct {
 	lastCDNLog             time.Time
 	lastPerformanceLog     time.Time
 	lastTUNHealthCheck     time.Time
+	tunNetworkFingerprint  string
 	tunHealthFailures      int
 	watchdogStopping       bool
 	blockedDomains         *BlockedDomainService
@@ -510,6 +511,7 @@ func (s *EngineService) Snapshot() (EngineSnapshot, error) {
 	}
 	s.mu.Unlock()
 	if shouldCheckTUN {
+		s.recordTUNNetworkEnvironment(false)
 		probeContext, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 		s.mu.Lock()
 		aggregationEndpoint := s.tunAggregationEndpoint
@@ -805,8 +807,8 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 		})
 		return EngineSnapshot{}, err
 	}
-	if effectiveSchedulingStrategy(settings) == "adaptive-throughput" && !slices.Contains(hello.SchedulingStrategies, "adaptive-throughput") {
-		return EngineSnapshot{}, errors.New("当前 Core 不支持自适应调度，请更新核心或选择轮询")
+	if (effectiveSchedulingStrategy(settings) == "adaptive-throughput" || effectiveSchedulingStrategy(settings) == "latency-first") && !slices.Contains(hello.SchedulingStrategies, effectiveSchedulingStrategy(settings)) {
+		return EngineSnapshot{}, errors.New("当前 Core 不支持所选调度策略，请更新核心或选择轮询")
 	}
 	if settings.SteamCDNEnabled && !slices.Contains(hello.Capabilities, "steam_cdn.configure") {
 		return EngineSnapshot{}, errors.New("当前 Core 不支持 Steam 下载优选，请更新核心或关闭此功能")
@@ -1011,7 +1013,7 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 				"adapter":            dnsEgress.Adapter.Name,
 				"transport":          dnsResult.Transport,
 				"server":             dnsResult.Server,
-				"route_exclusions":   dnsBootstrapRouteExclusions(dnsResult),
+				"route_exclusions":   tunRouteExclusions(dnsResult, effectiveDNSPolicy, configOptions.IPv6Available),
 				"ipv6_available":     configOptions.IPv6Available,
 				"tun_stack":          configOptions.Stack,
 				"ipv4_fallback_file": ipv4FallbackPath,
@@ -1052,6 +1054,7 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 		s.tunAggregationEndpoint = started.Endpoints.Channels["aggregation"]
 		s.tunDNSBootstrap = dnsResult
 		s.mu.Unlock()
+		s.recordTUNNetworkEnvironment(true)
 		if effectiveStrictRoute {
 			_ = s.settings.ClearWFPCompatibilityFailure()
 		}

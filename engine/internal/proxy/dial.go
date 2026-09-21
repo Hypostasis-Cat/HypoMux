@@ -57,7 +57,7 @@ func (s *Server) dialUpstream(
 			pending.finish()
 			pending = nil
 		}
-		adapter, lease, ok := channelScheduler.acquireTCP(excluded, domain)
+		adapter, lease, ok := channelScheduler.acquireTCP(excluded, domain, host)
 		pending = lease
 		if !ok {
 			break
@@ -110,6 +110,7 @@ func (s *Server) dialUpstream(
 			)
 			continue
 		}
+		channelScheduler.watchLatency(resolvedIP.String())
 		dialTarget := net.JoinHostPort(resolvedIP.String(), port)
 		dialer, err := boundNetworkDialer(adapter, s.config.ConnectTimeout, network)
 		if err != nil {

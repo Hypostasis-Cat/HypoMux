@@ -9,6 +9,7 @@ type scheduler struct {
 	adapters      []Adapter
 	strategy      string
 	performance   *performanceTable
+	latency       *latencyTable
 	weighted      bool
 	next          int
 	currentWeight map[string]int
@@ -59,6 +60,9 @@ func (s *scheduler) selectLocked(excluded map[string]struct{}, domain string) (A
 	if len(candidates) == 1 {
 		return candidates[0], true
 	}
+	if s.strategy == StrategyLatency && s.latency != nil {
+		return s.latency.selectAdapter(candidates, ""), true
+	}
 	if s.weighted {
 		return s.selectWeighted(candidates), true
 	}
@@ -97,9 +101,21 @@ func (s *scheduler) selectWeighted(candidates []Adapter) Adapter {
 	return selected
 }
 
-func (s *scheduler) acquireTCP(excluded map[string]struct{}, domain string) (Adapter, *performanceLease, bool) {
+func (s *scheduler) acquireTCP(excluded map[string]struct{}, domain string, target ...string) (Adapter, *performanceLease, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.strategy == StrategyLatency && s.latency != nil && len(target) > 0 {
+		candidates := s.health.candidates(s.adapters, excluded, domain)
+		if len(candidates) == 0 {
+			return Adapter{}, nil, false
+		}
+		chosen := s.latency.selectAdapter(candidates, target[0])
+		if s.performance == nil {
+			return chosen, nil, true
+		}
+		chosen, lease := s.performance.acquire(candidates, false, chosen)
+		return chosen, lease, true
+	}
 	fallback, ok := s.selectLocked(excluded, domain)
 	if !ok || s.performance == nil {
 		return fallback, nil, ok

@@ -1,7 +1,7 @@
 /* Shared control surfaces. Keep Fluent's appearance, validation and keyboard
  * behavior; customize its neutral tokens without flattening primary buttons. */
 :root {
-  --hm-control-radius: 8px;
+  --hm-control-radius: var(--hm-radius-md);
   --hm-control-fill: rgba(var(--hm-surface-rgb), 0.36);
   --hm-control-hover: color-mix(in srgb, var(--hm-control-fill) 96%, var(--hm-text-primary));
   --hm-control-pressed: color-mix(in srgb, var(--hm-control-fill) 92%, var(--hm-text-primary));
@@ -89,14 +89,16 @@
   border-radius: var(--hm-control-radius);
   transition: background-color var(--hm-motion-fast) var(--hm-motion-ease),
     border-color var(--hm-motion-fast) var(--hm-motion-ease),
-    box-shadow var(--hm-motion-fast) var(--hm-motion-ease);
+    box-shadow var(--hm-motion-fast) var(--hm-motion-ease),
+    color var(--hm-motion-fast) var(--hm-motion-ease),
+    transform var(--hm-motion-fast) var(--hm-motion-ease-out);
 }
 
 .fui-Listbox.fui-Listbox,
 .fui-MenuPopover.fui-MenuPopover {
   padding: 6px;
   border: 1px solid var(--hm-control-border);
-  border-radius: 10px;
+  border-radius: var(--hm-radius-base);
   background: rgba(var(--hm-surface-rgb), 0.94);
   backdrop-filter: blur(20px);
   color: var(--hm-text-primary);
@@ -105,7 +107,7 @@
 
 .fui-Option.fui-Option,
 .fui-MenuItem.fui-MenuItem {
-  border-radius: 6px;
+  border-radius: var(--hm-radius-sm);
 }
 
 .fui-Option.fui-Option:hover,
@@ -123,6 +125,91 @@
 
 .fui-Option__checkIcon {
   color: var(--hm-accent);
+}
+
+/* Shared interaction language across Fluent controls and custom actions. */
+:is(button, a, input, select, textarea, [role="switch"], [role="tab"]) {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.fui-Button:not(:disabled):not([aria-disabled="true"]):active,
+.fui-ToolbarButton:not(:disabled):not([aria-disabled="true"]):active {
+  transform: scale(0.975);
+  transition-duration: var(--hm-motion-instant);
+}
+
+.fui-Button[aria-busy="true"] { cursor: progress; }
+
+.fui-Option.fui-Option,
+.fui-MenuItem.fui-MenuItem,
+.fui-Tab.fui-Tab,
+.fui-Switch__indicator,
+.fui-Checkbox__indicator {
+  transition: background-color var(--hm-motion-fast) var(--hm-motion-ease-out),
+    color var(--hm-motion-fast) var(--hm-motion-ease-out),
+    border-color var(--hm-motion-fast) var(--hm-motion-ease-out);
+}
+
+.fui-Listbox.fui-Listbox,
+.fui-MenuPopover.fui-MenuPopover {
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+
+.fui-DialogSurface.fui-DialogSurface,
+.fui-PopoverSurface.fui-PopoverSurface {
+  border-radius: var(--hm-radius-lg);
+  overscroll-behavior: contain;
+}
+
+/* Fade content only: translating a glass popup can invalidate its backdrop. */
+.fui-Listbox > .fui-Option,
+.fui-MenuList > .fui-MenuItem {
+  animation: hm-popup-enter var(--hm-motion-fast) var(--hm-motion-ease-out);
+}
+
+@keyframes hm-popup-enter {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.skip-to-content {
+  position: fixed;
+  z-index: var(--hm-z-tooltip);
+  top: 8px;
+  left: 72px;
+  padding: 8px 12px;
+  border-radius: var(--hm-control-radius);
+  background: var(--hm-accent);
+  color: var(--hm-text-on-accent);
+  text-decoration: none;
+  transform: translateY(-160%);
+}
+
+.skip-to-content:focus-visible { transform: translateY(0); }
+
+.page-viewport:focus-visible { outline-offset: -3px; }
+
+:is(.page-heading, .routing-page-heading) h1 { text-wrap: balance; }
+:is(.page-heading, .routing-page-heading) p { text-wrap: pretty; }
+
+.global-notification-copy { overflow-wrap: anywhere; }
+:is(.global-notification-count, .global-notification-queue, .global-notification-code) {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Reduced motion keeps hover/pressed color cues, without zooming controls. */
+:is([data-motion="reduced"], [data-motion="off"]) :is(.fui-Button, .fui-ToolbarButton, .nav-button):active {
+  transform: none !important;
+}
+
+:is([data-motion="reduced"], [data-motion="off"]) .hm-card::before,
+:is([data-motion="reduced"], [data-motion="off"]) .hm-card::after { opacity: 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  :is(.fui-Button, .fui-ToolbarButton, .nav-button):active { transform: none !important; }
+  .hm-card::before, .hm-card::after { opacity: 0; }
 }
 
 @media (forced-colors: active) {
