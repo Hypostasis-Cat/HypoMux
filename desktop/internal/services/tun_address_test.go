@@ -1,6 +1,7 @@
 package services
 
 import (
+	"fmt"
 	"net/netip"
 	"testing"
 )
@@ -29,6 +30,28 @@ func TestSelectTunIPv4Address(t *testing.T) {
 				t.Fatalf("address = %q, error = %v; want %q", got, err, test.want)
 			}
 		})
+	}
+}
+
+func TestSelectTunIPv6BeyondFixedCandidates(t *testing.T) {
+	// Occupy every fixed /32 candidate while almost the entire ULA pool is
+	// free. This used to abort dual-stack startup before IPv4 fallback existed.
+	var occupied []netip.Prefix
+	for subnet := 0; subnet < 256; subnet++ {
+		occupied = append(occupied, netip.MustParsePrefix(fmt.Sprintf("fd%02x:dcba::/32", subnet)))
+	}
+	got, err := selectTunIPv6Address(occupied)
+	if err != nil {
+		t.Fatalf("free IPv6 space incorrectly reported exhausted: %v", err)
+	}
+	prefix := netip.MustParsePrefix(got)
+	if prefix.Bits() != 126 || !netip.MustParsePrefix("fd00::/8").Contains(prefix.Addr()) {
+		t.Fatalf("invalid IPv6 TUN allocation: %s", got)
+	}
+	for _, other := range occupied {
+		if prefix.Overlaps(other) {
+			t.Fatalf("allocated occupied subnet: %s overlaps %s", got, other)
+		}
 	}
 }
 

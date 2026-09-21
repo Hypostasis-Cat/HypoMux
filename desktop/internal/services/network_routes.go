@@ -49,9 +49,8 @@ func (r networkRoute) tunnel() bool {
 	return tunnelNamePattern.MatchString(r.Alias + " " + r.Description)
 }
 
-// Inspect the eight /3 regions of each family. Fragmented defaults can use
-// /2 or /3 after exclusions, not just /1. These routes beat /0 regardless of
-// metric. Smaller destination-specific routes are not global takeover.
+// Only broad routes are candidates for a global takeover, but every more
+// specific route participates in deciding whether a candidate can win.
 func assessNetworkRoutes(routes []networkRoute) (aliases, risks []string) {
 	aliasSet, riskSet := map[string]bool{}, map[string]bool{}
 	for _, r := range routes {
@@ -59,35 +58,28 @@ func assessNetworkRoutes(routes []networkRoute) (aliases, risks []string) {
 			aliasSet[r.Alias] = true // preserve stale-device cleanup even for backup routes
 		}
 	}
-	for _, target := range []string{
-		"0.0.0.0", "32.0.0.0", "64.0.0.0", "96.0.0.0", "128.0.0.0", "160.0.0.0", "192.0.0.0", "224.0.0.0",
-		"::", "2000::", "4000::", "6000::", "8000::", "a000::", "c000::", "e000::",
-	} {
-		address := netip.MustParseAddr(target)
-		bestBits, bestMetric := -1, ^uint64(0)
-		var winners []networkRoute
-		for _, r := range routes {
-			if !r.Connected || !r.Prefix.IsValid() || r.Prefix.Bits() > 3 || !r.Prefix.Contains(address) {
+	for _, r := range routes {
+		if !r.Connected || !r.Prefix.IsValid() || r.Prefix.Bits() > 3 || r.ownTUN() {
+			continue
+		}
+		var overrides []netip.Prefix
+		for _, other := range routes {
+			if !other.Connected || !other.Prefix.Overlaps(r.Prefix) {
 				continue
 			}
-			bits := r.Prefix.Bits()
-			if bits > bestBits || (bits == bestBits && r.Metric < bestMetric) {
-				bestBits, bestMetric, winners = bits, r.Metric, nil
-			}
-			if bits == bestBits && r.Metric == bestMetric {
-				winners = append(winners, r)
+			if other.Prefix.Bits() > r.Prefix.Bits() ||
+				(other.Prefix.Bits() == r.Prefix.Bits() && other.Metric < r.Metric) {
+				overrides = append(overrides, other.Prefix)
 			}
 		}
-		for _, r := range winners {
-			if r.ownTUN() {
-				continue
-			}
-			if r.tunnel() {
-				aliasSet[r.Alias] = true
-			}
-			if r.tunnel() || !r.MetadataKnown || !r.Hardware {
-				riskSet[fmt.Sprintf("接口 %s 的优先路由 %s（接口索引 %d，总跃点 %d）", r.Alias, r.Prefix.Masked(), r.InterfaceIndex, r.Metric)] = true
-			}
+		if _, wins := findUnoccupiedPrefix(r.Prefix.Masked(), r.Prefix.Addr().BitLen(), overrides); !wins {
+			continue
+		}
+		if r.tunnel() {
+			aliasSet[r.Alias] = true
+		}
+		if r.tunnel() || !r.MetadataKnown || !r.Hardware {
+			riskSet[fmt.Sprintf("接口 %s 的优先路由 %s（接口索引 %d，总跃点 %d）", r.Alias, r.Prefix.Masked(), r.InterfaceIndex, r.Metric)] = true
 		}
 	}
 	for alias := range aliasSet {
@@ -99,6 +91,39 @@ func assessNetworkRoutes(routes []networkRoute) (aliases, risks []string) {
 	sort.Strings(aliases)
 	sort.Strings(risks)
 	return
+}
+
+// Search a prefix tree, pruning covered subtrees. This is bounded by the
+// supplied prefixes and address width, not by the number of host addresses.
+func findUnoccupiedPrefix(pool netip.Prefix, bits int, occupied []netip.Prefix) (netip.Prefix, bool) {
+	if !pool.IsValid() || bits < pool.Bits() || bits > pool.Addr().BitLen() {
+		return netip.Prefix{}, false
+	}
+	pool = pool.Masked()
+	var overlapping []netip.Prefix
+	for _, existing := range occupied {
+		if !pool.Overlaps(existing) {
+			continue
+		}
+		if existing.Bits() <= pool.Bits() {
+			return netip.Prefix{}, false
+		}
+		overlapping = append(overlapping, existing)
+	}
+	if len(overlapping) == 0 {
+		return netip.PrefixFrom(pool.Addr(), bits), true
+	}
+	if pool.Bits() == bits {
+		return netip.Prefix{}, false
+	}
+	childBits := pool.Bits() + 1
+	if free, ok := findUnoccupiedPrefix(netip.PrefixFrom(pool.Addr(), childBits), bits, overlapping); ok {
+		return free, true
+	}
+	address := pool.Addr().AsSlice()
+	address[pool.Bits()/8] |= 1 << (7 - pool.Bits()%8)
+	right, _ := netip.AddrFromSlice(address)
+	return findUnoccupiedPrefix(netip.PrefixFrom(right, childBits), bits, overlapping)
 }
 
 func occupiedRoutePrefixes(routes []networkRoute) []netip.Prefix {

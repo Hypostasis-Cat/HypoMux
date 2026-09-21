@@ -12,7 +12,7 @@ import (
 // Inspect all interfaces, including hidden/disabled virtual interfaces and
 // adapters not selected for aggregation. Never change their configuration.
 func availableTunIPv4Address() (string, error) {
-	occupied, err := occupiedTunNetworks()
+	occupied, err := occupiedTunNetworks(false)
 	if err != nil {
 		return "", err
 	}
@@ -20,21 +20,23 @@ func availableTunIPv4Address() (string, error) {
 }
 
 func availableTunIPv6Address() (string, error) {
-	occupied, err := occupiedTunNetworks()
+	occupied, err := occupiedTunNetworks(true)
 	if err != nil {
 		return "", err
 	}
 	return selectTunIPv6Address(occupied)
 }
 
-func occupiedTunNetworks() ([]netip.Prefix, error) {
+func occupiedTunNetworks(ipv6 bool) ([]netip.Prefix, error) {
 	interfaces, err := net.Interfaces()
 	if err != nil {
 		return nil, fmt.Errorf("检查 TUN 地址冲突失败：%w", err)
 	}
 	var occupied []netip.Prefix
+	var ownIndices = map[uint32]bool{}
 	for _, device := range interfaces {
 		if strings.EqualFold(device.Name, "HypoMux-Tun") {
+			ownIndices[uint32(device.Index)] = true
 			continue // The core removes its own stale device before activation.
 		}
 		addresses, err := device.Addrs()
@@ -46,12 +48,21 @@ func occupiedTunNetworks() ([]netip.Prefix, error) {
 			if err != nil {
 				return nil, fmt.Errorf("读取网卡 %s 的地址 %q 失败：%w", device.Name, address, err)
 			}
-			occupied = append(occupied, prefix.Masked())
+			if prefix.Addr().Is6() == ipv6 {
+				occupied = append(occupied, prefix.Masked())
+			}
 		}
 	}
-	routes, err := readNetworkRoutes()
+	routes, err := readAddressNetworkRoutes(ipv6)
 	if err != nil {
 		return nil, fmt.Errorf("检查 TUN 路由地址冲突失败：%w", err)
+	}
+	// The optional descriptive metadata may be unreadable. Interface indices
+	// from net.Interfaces still identify our stale device without guessing.
+	for i := range routes {
+		if ownIndices[routes[i].InterfaceIndex] {
+			routes[i].Alias = "HypoMux-Tun"
+		}
 	}
 	return append(occupied, occupiedRoutePrefixes(routes)...), nil
 }
@@ -78,6 +89,9 @@ func selectTunIPv6Address(occupied []netip.Prefix) (string, error) {
 		if !conflict {
 			return candidate, nil
 		}
+	}
+	if free, ok := findUnoccupiedPrefix(netip.MustParsePrefix("fd00::/8"), 126, occupied); ok {
+		return free.Addr().Next().String() + "/126", nil
 	}
 	return "", fmt.Errorf("找不到不与现有网卡及路由重叠的 TUN IPv6 地址；请检查 VPN 与局域网地址配置")
 }

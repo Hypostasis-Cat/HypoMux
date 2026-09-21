@@ -133,3 +133,51 @@ func TestIPv6TransitionRoutesDoNotBlockTUN(t *testing.T) {
 		})
 	}
 }
+
+func TestMoreSpecificRoutesCanFullyShadowVPN(t *testing.T) {
+	for _, prefixes := range [][]string{
+		{"0.0.0.0/3", "0.0.0.0/4", "16.0.0.0/4"},
+		{"2000::/3", "2000::/4", "3000::/4"},
+	} {
+		vpn := routeFixture(prefixes[0], "VPN", 1)
+		left := routeFixture(prefixes[1], "Ethernet", 9999)
+		right := routeFixture(prefixes[2], "Ethernet", 9999)
+		left.Hardware, right.Hardware = true, true
+		aliases, _ := assessNetworkRoutes([]networkRoute{vpn, left, right})
+		if len(aliases) != 0 {
+			t.Fatalf("fully shadowed route %s falsely blocks startup: %v", prefixes[0], aliases)
+		}
+		aliases, _ = assessNetworkRoutes([]networkRoute{vpn, left})
+		if !reflect.DeepEqual(aliases, []string{"VPN"}) {
+			t.Fatalf("partially shadowed route lost: %v", aliases)
+		}
+	}
+}
+
+func TestUnoccupiedPrefixSearchMatchesHostCoverage(t *testing.T) {
+	// Exhaustively compare every occupancy pattern in a /28 against a
+	// simple host-based oracle. Even one occupied host forbids a whole /30.
+	pool := netip.MustParsePrefix("192.0.2.0/28")
+	for mask := 0; mask < 1<<16; mask++ {
+		var occupied []netip.Prefix
+		for host := 0; host < 16; host++ {
+			if mask&(1<<host) != 0 {
+				occupied = append(occupied, netip.PrefixFrom(netip.AddrFrom4([4]byte{192, 0, 2, byte(host)}), 32))
+			}
+		}
+		want := -1
+		for start := 0; start < 16; start += 4 {
+			if (mask>>start)&15 == 0 {
+				want = start
+				break
+			}
+		}
+		got, ok := findUnoccupiedPrefix(pool, 30, occupied)
+		if ok != (want >= 0) || (ok && got.Addr().As4()[3] != byte(want)) {
+			t.Fatalf("mask=%x got=%s ok=%t want host=%d", mask, got, ok, want)
+		}
+	}
+	if _, ok := findUnoccupiedPrefix(netip.MustParsePrefix("fd00::/8"), 126, []netip.Prefix{netip.MustParsePrefix("fc00::/7")}); ok {
+		t.Fatal("covering prefix was ignored")
+	}
+}

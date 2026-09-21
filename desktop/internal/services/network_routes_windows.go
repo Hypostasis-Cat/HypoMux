@@ -14,11 +14,40 @@ import (
 // Read each family independently; a failure must not discard the other
 // family's evidence. Cache metadata per interface, not per route.
 func readNetworkRoutes() ([]networkRoute, error) {
-	metadata := map[uint32]windows.MibIfRow2{}
-	metadataErrors := map[uint32]error{}
-	return collectNetworkRoutes(func(family uint16) ([]networkRoute, error) {
-		return readNetworkRouteFamily(family, metadata, metadataErrors)
-	})
+	reader := newNetworkRouteReader(true)
+	return collectNetworkRoutes(reader.readFamily)
+}
+
+func readAddressNetworkRoutes(ipv6 bool) ([]networkRoute, error) {
+	reader := newNetworkRouteReader(false)
+	return reader.readAddressFamily(ipv6)
+}
+
+type networkRouteReader struct {
+	metadata             map[uint32]windows.MibIfRow2
+	metadataErrors       map[uint32]error
+	reportMetadataErrors bool
+	getTable             func(uint16, **windows.MibIpForwardTable2) error
+	freeTable            func(unsafe.Pointer)
+	getInterface         func(*windows.MibIpInterfaceRow) error
+	getAdapter           func(uint32, *windows.MibIfRow2) error
+}
+
+func newNetworkRouteReader(reportMetadataErrors bool) *networkRouteReader {
+	return &networkRouteReader{
+		metadata: map[uint32]windows.MibIfRow2{}, metadataErrors: map[uint32]error{},
+		reportMetadataErrors: reportMetadataErrors,
+		getTable:             windows.GetIpForwardTable2, freeTable: windows.FreeMibTable,
+		getInterface: windows.GetIpInterfaceEntry, getAdapter: windows.GetIfEntry2Ex,
+	}
+}
+
+func (r *networkRouteReader) readAddressFamily(ipv6 bool) ([]networkRoute, error) {
+	family := uint16(windows.AF_INET)
+	if ipv6 {
+		family = windows.AF_INET6
+	}
+	return r.readFamily(family)
 }
 
 func collectNetworkRoutes(readFamily func(uint16) ([]networkRoute, error)) ([]networkRoute, error) {
@@ -34,9 +63,9 @@ func collectNetworkRoutes(readFamily func(uint16) ([]networkRoute, error)) ([]ne
 	return routes, errors.Join(failures...)
 }
 
-func readNetworkRouteFamily(family uint16, metadata map[uint32]windows.MibIfRow2, metadataErrors map[uint32]error) ([]networkRoute, error) {
+func (r *networkRouteReader) readFamily(family uint16) ([]networkRoute, error) {
 	var table *windows.MibIpForwardTable2
-	if err := windows.GetIpForwardTable2(family, &table); err != nil {
+	if err := r.getTable(family, &table); err != nil {
 		// An absent/disabled IP stack is a valid empty family, not a failure
 		// that should prevent a usable IPv4-only machine from starting TUN.
 		if errors.Is(err, windows.ERROR_NOT_FOUND) || errors.Is(err, windows.ERROR_NOT_SUPPORTED) {
@@ -47,7 +76,7 @@ func readNetworkRouteFamily(family uint16, metadata map[uint32]windows.MibIfRow2
 	if table == nil {
 		return nil, fmt.Errorf("地址族 %d 返回了空路由表", family)
 	}
-	defer windows.FreeMibTable(unsafe.Pointer(table))
+	defer r.freeTable(unsafe.Pointer(table))
 	interfaces := map[uint32]windows.MibIpInterfaceRow{}
 	interfaceErrors := map[uint32]error{}
 	var routes []networkRoute
@@ -64,7 +93,7 @@ func readNetworkRouteFamily(family uint16, metadata map[uint32]windows.MibIfRow2
 		}
 		if _, seen := interfaceErrors[row.InterfaceIndex]; !seen {
 			entry := windows.MibIpInterfaceRow{Family: family, InterfaceLuid: row.InterfaceLuid, InterfaceIndex: row.InterfaceIndex}
-			err := windows.GetIpInterfaceEntry(&entry)
+			err := r.getInterface(&entry)
 			interfaces[row.InterfaceIndex], interfaceErrors[row.InterfaceIndex] = entry, err
 			if err != nil {
 				failures = append(failures, fmt.Errorf("读取接口 %d 地址族 %d 失败：%w", row.InterfaceIndex, family, err))
@@ -77,15 +106,15 @@ func readNetworkRouteFamily(family uint16, metadata map[uint32]windows.MibIfRow2
 		if entry.DisableDefaultRoutes != 0 && prefix.Bits() == 0 {
 			continue
 		}
-		if _, seen := metadataErrors[row.InterfaceIndex]; !seen {
+		if _, seen := r.metadataErrors[row.InterfaceIndex]; !seen {
 			adapter := windows.MibIfRow2{InterfaceLuid: row.InterfaceLuid, InterfaceIndex: row.InterfaceIndex}
-			err := windows.GetIfEntry2Ex(windows.MibIfEntryNormalWithoutStatistics, &adapter)
-			metadata[row.InterfaceIndex], metadataErrors[row.InterfaceIndex] = adapter, err
-			if err != nil {
+			err := r.getAdapter(windows.MibIfEntryNormalWithoutStatistics, &adapter)
+			r.metadata[row.InterfaceIndex], r.metadataErrors[row.InterfaceIndex] = adapter, err
+			if err != nil && r.reportMetadataErrors {
 				failures = append(failures, fmt.Errorf("读取接口 %d 类型失败：%w", row.InterfaceIndex, err))
 			}
 		}
-		adapter := metadata[row.InterfaceIndex]
+		adapter := r.metadata[row.InterfaceIndex]
 		nextHop, _ := routePrefixAddress(row.NextHop)
 		alias := windows.UTF16ToString(adapter.Alias[:])
 		if alias == "" {
@@ -95,7 +124,7 @@ func readNetworkRouteFamily(family uint16, metadata map[uint32]windows.MibIfRow2
 			Prefix: prefix.Masked(), NextHop: nextHop, InterfaceIndex: row.InterfaceIndex, Alias: alias,
 			Description: windows.UTF16ToString(adapter.Description[:]), InterfaceType: adapter.Type,
 			TunnelType:    adapter.TunnelType,
-			MetadataKnown: metadataErrors[row.InterfaceIndex] == nil,
+			MetadataKnown: r.metadataErrors[row.InterfaceIndex] == nil,
 			Hardware:      adapter.InterfaceAndOperStatusFlags&1 != 0, Connected: true,
 			Metric: uint64(row.Metric) + uint64(entry.Metric),
 		})
