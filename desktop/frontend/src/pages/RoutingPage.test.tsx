@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { FluentProvider, webLightTheme } from "@fluentui/react-components";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { RoutingPage, reconcileSavedDrafts } from "./RoutingPage";
@@ -134,7 +134,10 @@ it.each([{ rules: [] }, { rules: [{ match_type: "process", value: "app.exe", out
 it("keeps a disabled conflict disabled when a batch replaces its egress", async () => {
   mocks.snapshot.mockResolvedValue({ rules: [{ match_type: "process", value: "app.exe", outbound: "direct", disabled: true, priority: 2 }], outbounds, restart_required: false });
   // Even an older or stale preview missing the state must not re-enable it.
-  mocks.previewBatch.mockResolvedValue({ add_count: 0, duplicate_count: 0, conflict_count: 1, invalid_count: 0, items: [{ status: "conflict", input: "app.exe", existing_outbound: "direct", rule: { match_type: "process", value: "app.exe", outbound: "aggregation" } }] });
+  let finishPreview!: () => void;
+  mocks.previewBatch.mockImplementation(() => new Promise(resolve => {
+    finishPreview = () => resolve({ add_count: 0, duplicate_count: 0, conflict_count: 1, invalid_count: 0, items: [{ status: "conflict", input: "app.exe", existing_outbound: "direct", rule: { match_type: "process", value: "app.exe", outbound: "aggregation" } }] });
+  }));
   renderPage();
   await screen.findByRole("switch", { name: "Enable rule app.exe" });
   fireEvent.click(screen.getByRole("button", { name: /Batch add/ }));
@@ -142,14 +145,31 @@ it("keeps a disabled conflict disabled when a batch replaces its egress", async 
   const dialog = within(surface);
   await waitFor(() => expect(surface.contains(document.activeElement)).toBe(true));
   fireEvent.change(await dialog.findByPlaceholderText(/browser\.exe/), { target: { value: "app.exe" } });
-  fireEvent.click(dialog.getByRole("button", { name: "Preview 1" }));
+  const previewButton = dialog.getByRole("button", { name: "Preview 1" });
+  // fireEvent.click does not perform the focus step of an actual mouse or
+  // keyboard interaction. Exercise focus across the asynchronous update.
+  act(() => previewButton.focus());
+  fireEvent.click(previewButton);
+  expect(previewButton.getAttribute("aria-disabled")).toBe("true");
+  expect(document.activeElement).toBe(previewButton);
+  fireEvent.click(previewButton);
+  expect(mocks.previewBatch).toHaveBeenCalledTimes(1);
+  await act(async () => { finishPreview(); });
+  const blockedAdd = dialog.getByRole("button", { name: "Add 0 rules" });
+  expect(blockedAdd).toBe(previewButton);
+  expect(blockedAdd.getAttribute("aria-disabled")).toBe("true");
+  expect(document.activeElement).toBe(blockedAdd);
+  fireEvent.click(blockedAdd);
+  expect(mocks.save).not.toHaveBeenCalled();
   const replaceConflict = await dialog.findByRole("checkbox", { name: "Update conflicting rules to the selected egress" });
+  act(() => replaceConflict.focus());
   fireEvent.click(replaceConflict);
   await waitFor(() => expect(replaceConflict).toHaveProperty("checked", true));
   const addRules = await waitFor(() => {
     expect(surface.getAttribute("aria-hidden")).not.toBe("true");
     expect(surface.contains(document.activeElement)).toBe(true);
     const button = dialog.getByRole("button", { name: "Add 1 rules" });
+    expect(button.getAttribute("aria-disabled")).not.toBe("true");
     expect(button).toHaveProperty("disabled", false);
     return button;
   }, { timeout: 4000 });

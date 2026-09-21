@@ -1066,6 +1066,7 @@ export function RoutingPage() {
               {batchPreview ? (
                 <Button
                   appearance="primary"
+                  disabledFocusable={batchPreview.invalid_count > 0 || batchApplying || (batchPreview.add_count === 0 && (!replaceBatchConflicts || batchPreview.conflict_count === 0))}
                   disabled={batchPreview.invalid_count > 0 || batchApplying || (batchPreview.add_count === 0 && (!replaceBatchConflicts || batchPreview.conflict_count === 0))}
                   icon={batchApplying ? <Spinner size="tiny" /> : <Add20Regular />}
                   onClick={() => void confirmBatch()}
@@ -1076,6 +1077,7 @@ export function RoutingPage() {
               ) : (
                 <Button
                   appearance="primary"
+                  disabledFocusable={batchChecking || batchApplying || !batchText.trim()}
                   disabled={batchChecking || batchApplying || !batchText.trim()}
                   icon={batchChecking ? <Spinner size="tiny" /> : <CheckmarkCircle16Regular />}
                   onClick={() => void previewBatch()}
