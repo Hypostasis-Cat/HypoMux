@@ -25,8 +25,8 @@ export const schedulingStrategies = [
     id: "adaptive-throughput", strategy: "adaptive-throughput", weighted: false,
     label: { zh: "自适应速度", en: "Adaptive speed" },
     description: {
-      zh: "根据近期 TCP 下载表现和传输负载分配新连接，保留少量探索。UDP 使用轮询；不迁移已有连接。",
-      en: "Assign new TCP connections using recent download performance and load, with limited exploration. UDP rotates; established connections stay bound.",
+      zh: "先均匀分配，持续观测后缓慢调整新连接比例，并保留每张可用网卡的最低份额。总吞吐明显下降时撤回调整；已有连接不迁移。",
+      en: "Start evenly, then gradually adjust new-connection shares from sustained observations while keeping a minimum share per eligible link. Roll back on a marked aggregate-throughput drop. Established connections stay bound.",
     },
   },
   {

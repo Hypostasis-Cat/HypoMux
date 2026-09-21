@@ -12,12 +12,19 @@ is authoritative; unknown values fail validation. Returned scheduling configurat
 includes the strategy and a normalized `weighted` flag for rollback. Clients must
 not send adaptive mode to a Core that does not advertise it.
 
-Adaptive scheduling is experimental TCP download scheduling, based on recent
-observed throughput and projected transfer load, with periodic exploration. It
-does not migrate existing connections; UDP uses round-robin in adaptive mode.
-`engine.telemetry.scheduling` reports actual TCP/UDP strategies, learning state,
-decision reason counters and per-link samples, observed rate, load and sample age.
-Rates are observations, not bandwidth capacity or measured speedup.
+Adaptive TCP scheduling starts with uniform rotation, then slowly adjusts shares
+using sustained observations and sufficient natural connection arrivals. Half of
+the budget remains uniformly allocated across eligible adapters; share changes
+are bounded to five percentage points per five valid samples. Marked aggregate
+throughput drops trigger uniform rotation and a 30-second cooldown. The heuristic
+does not estimate physical capacity or establish causality of speed changes.
+
+`engine.telemetry.scheduling.strategy` retains the requested strategy;
+`effective_tcp_strategy` is `adaptive-throughput` only while adjusting shares,
+otherwise `round-robin`. States include `warming-up`, `insufficient-demand`,
+`balanced`, `adapting` and `throughput-guard`. Per-link `allocation_share` is a new-connection
+share, not a bandwidth guarantee. UDP remains round-robin and existing TCP
+connections are not migrated. Decision counters and observed rates remain available.
 
 See [design and implementation scope](../../docs/architecture/adaptive-scheduling-implementation.md).
 

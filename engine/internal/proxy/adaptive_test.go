@@ -51,41 +51,61 @@ func TestAdaptiveReservationsConcurrentAndIdempotent(t *testing.T) {
 	}
 }
 
-func TestAdaptiveRateLoadExplorationAndStaleness(t *testing.T) {
-	p, adapters, now := adaptiveFixture()
-	for i, a := range adapters {
-		l := p.link(a)
-		l.samples = 5
-		l.updated = *now
-		l.rate = 100 / float64(1+9*i)
+// A fast start on one link must not cause positive feedback that starves
+// the other link. Compare actual scheduler sequences, not predicted scores.
+func TestAdaptiveUnqualifiedSamplesMatchRoundRobin(t *testing.T) {
+	for _, mode := range []string{"cold", "asymmetric", "stale", "uneven-load"} {
+		t.Run(mode, func(t *testing.T) {
+			p, adapters, now := adaptiveFixture()
+			adaptive := newScheduler(adapters, false)
+			adaptive.strategy = StrategyAdaptive
+			adaptive.performance = p
+			baseline := newScheduler(adapters, false)
+			for i, a := range adapters {
+				l := p.link(a)
+				if mode != "cold" {
+					l.samples = 10
+					l.updated = *now
+					l.rate = 1000000 / float64(1+99*i)
+				}
+				if mode == "stale" {
+					l.updated = now.Add(-time.Minute)
+				}
+			}
+			var held []*performanceLease
+			defer func() {
+				for _, l := range held {
+					l.finish()
+				}
+			}()
+			if mode == "uneven-load" {
+				for range 20 {
+					_, l := p.acquire(adapters, false, adapters[0])
+					held = append(held, l)
+				}
+			}
+			for i := 0; i < 80; i++ {
+				var excluded map[string]struct{}
+				if i%7 == 0 {
+					excluded = map[string]struct{}{adapters[0].Name: {}}
+				}
+				want, ok := baseline.SelectForDomain(excluded, "example.test")
+				got, l, gotOK := adaptive.acquireTCP(excluded, "example.test")
+				if gotOK != ok || got.Name != want.Name {
+					t.Fatalf("decision %d: got %s want %s", i, got.Name, want.Name)
+				}
+				held = append(held, l)
+				if i%3 == 0 {
+					l.finish()
+				}
+				*now = now.Add(time.Second)
+			}
+			status := adaptive.performanceSnapshot()
+			if status.State != "warming-up" || status.EffectiveTCPStrategy != StrategyRoundRobin || status.Strategy != StrategyAdaptive {
+				t.Fatalf("warmup not disclosed: %+v", status)
+			}
+		})
 	}
-	chosen, l := p.acquire(adapters, true, adapters[1])
-	if chosen.Name != "fast" {
-		t.Fatal(chosen)
-	}
-	l.finish()
-	p.link(adapters[0]).load = 20
-	chosen, l = p.acquire(adapters, true, adapters[0])
-	if chosen.Name != "slow" {
-		t.Fatal("ignored projected load", chosen)
-	}
-	l.finish()
-	p.link(adapters[0]).load = 0
-	p.decisions = 19
-	*now = now.Add(time.Second)
-	p.link(adapters[1]).selected = now.Add(-10 * time.Second)
-	chosen, l = p.acquire(adapters, true, adapters[0])
-	if chosen.Name != "slow" {
-		t.Fatal("missing exploration", chosen)
-	}
-	l.finish()
-	*now = now.Add(time.Minute)
-	p.link(adapters[0]).load = 2
-	chosen, l = p.acquire(adapters, true, adapters[0])
-	if chosen.Name != "slow" {
-		t.Fatal("stale rate overrode load", chosen)
-	}
-	l.finish()
 }
 
 func TestAdaptiveAccountingCompletedIdleAndBackpressure(t *testing.T) {
@@ -214,8 +234,8 @@ func TestAdaptiveRuntimeRollbackAndExplicitChannelLoad(t *testing.T) {
 	_, bound, _ := explicit.acquireTCP(nil, "")
 	defer bound.finish()
 	chosen, pending, ok := s.scheduler.acquireTCP(nil, "")
-	if !ok || chosen.Name != adapters[1].Name {
-		t.Fatal("explicit channel load ignored", chosen)
+	if !ok || chosen.Name != adapters[0].Name {
+		t.Fatal("protection changed baseline rotation", chosen)
 	}
 	defer pending.finish()
 	previous, err := s.UpdateScheduling(SchedulingConfig{Strategy: StrategyRoundRobin, Adapters: adapters})
@@ -226,7 +246,7 @@ func TestAdaptiveRuntimeRollbackAndExplicitChannelLoad(t *testing.T) {
 		t.Fatal(err)
 	}
 	status := s.scheduler.performanceSnapshot()
-	if status.Strategy != StrategyAdaptive || status.UDPStrategy != StrategyRoundRobin || status.Links[0].Load != 1 || status.Links[1].Load != 1 {
+	if status.Strategy != StrategyAdaptive || status.UDPStrategy != StrategyRoundRobin || status.Links[0].Load != 2 || status.Links[1].Load != 0 {
 		t.Fatalf("rollback corrupted active reservations: %+v", status)
 	}
 }

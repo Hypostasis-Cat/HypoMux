@@ -41,6 +41,13 @@ func (s *scheduler) update(config SchedulingConfig) SchedulingConfig {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	previous := SchedulingConfig{Strategy: s.strategy, Weighted: s.weighted, Adapters: s.adapters}
+	if s.performance != nil {
+		s.performance.mu.Lock()
+		if s.strategy != config.Strategy || !s.performance.allocation.matches(config.Adapters) {
+			s.performance.allocation = adaptiveAllocation{}
+		}
+		s.performance.mu.Unlock()
+	}
 	s.health.mu.Lock()
 	for _, adapter := range config.Adapters {
 		if s.health.adapters[adapter.Name] == nil {
