@@ -13,8 +13,8 @@ func networkEnvironmentFingerprint(routes []networkRoute) string {
 	// locally; do not put the full routing table into periodic support logs.
 	unique := map[string]bool{}
 	for _, route := range routes {
-		unique[fmt.Sprintf("%s|%s|%d|%s|%s|%d|%t|%t|%t|%d", route.Prefix.Masked(), route.NextHop, route.InterfaceIndex,
-			route.Alias, route.Description, route.InterfaceType, route.MetadataKnown, route.Hardware, route.Connected, route.Metric)] = true
+		unique[fmt.Sprintf("%s|%s|%d|%s|%s|%d|%d|%t|%t|%t|%d", route.Prefix.Masked(), route.NextHop, route.InterfaceIndex,
+			route.Alias, route.Description, route.InterfaceType, route.TunnelType, route.MetadataKnown, route.Hardware, route.Connected, route.Metric)] = true
 	}
 	rows := make([]string, 0, len(unique))
 	for row := range unique {

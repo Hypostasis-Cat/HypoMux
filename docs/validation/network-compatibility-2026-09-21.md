@@ -50,6 +50,14 @@ go test ./...
 4. IPv4-only/双栈、严格路由开关、三种 DNS 策略下的互联网、DNS 和局域网单播。
 5. 停止 HypoMux 后检查其他软件网络正常，确认只回收本应用拥有的资源。
 
+## Teredo 启动误拦修复
+
+初版将 `IF_TYPE_TUNNEL=131` 直接视为第三方 VPN 证据，且没有保留 Windows 的 `TunnelType` 子类型。用户报告正常 IPv4 出口与唯一 Teredo IPv6 默认路由 `::/0`（总跃点 331）并存时被阻止启动。此前全量测试通过没有覆盖这一场景，不能代表实际环境兼容性验证充分。
+
+修复后读取原生隧道子类型，6to4（11）、ISATAP（13）、Teredo（14）只保留网络环境信息。普通隧道类型和通用的 `Tunnel` 名称也不再单独触发阻断；已识别的 TUN/VPN 名称及驱动证据仍参与竞争判断。未知隧道可能不能被主动阻断，继续依靠实际数据通路验证和故障恢复。
+
+新增用例覆盖截图拓扑、三种过渡隧道、改名后的 Teredo、普通未知隧道，以及同时出现真实 WireGuard 拆分默认路由时仍保留该 VPN 的检查。无需关闭系统 Teredo、IPv6 或防火墙。
+
 ## 参考
 
 - [GetIpForwardTable2：路由表和协议栈缺失状态](https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-getipforwardtable2)

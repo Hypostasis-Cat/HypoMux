@@ -94,6 +94,7 @@ func readNetworkRouteFamily(family uint16, metadata map[uint32]windows.MibIfRow2
 		routes = append(routes, networkRoute{
 			Prefix: prefix.Masked(), NextHop: nextHop, InterfaceIndex: row.InterfaceIndex, Alias: alias,
 			Description: windows.UTF16ToString(adapter.Description[:]), InterfaceType: adapter.Type,
+			TunnelType:    adapter.TunnelType,
 			MetadataKnown: metadataErrors[row.InterfaceIndex] == nil,
 			Hardware:      adapter.InterfaceAndOperStatusFlags&1 != 0, Connected: true,
 			Metric: uint64(row.Metric) + uint64(entry.Metric),

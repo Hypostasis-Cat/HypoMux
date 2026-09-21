@@ -41,7 +41,7 @@ func TestNetworkRouteTakeoverScenarios(t *testing.T) {
 		{"only VPN route", []networkRoute{routeFixture("0.0.0.0/0", "Radmin VPN", 9257)}, []string{"Radmin VPN"}, true},
 		{"no connected routes", []networkRoute{disconnected}, nil, false},
 		{"renamed VPN description", []networkRoute{physical, renamed}, []string{"工作网络"}, true},
-		{"unknown tunnel type", []networkRoute{physical, unknownTunnel}, []string{"工作网络"}, true},
+		{"unknown tunnel type is not VPN evidence", []networkRoute{physical, unknownTunnel}, nil, true},
 		{"physical name is not evidence", []networkRoute{physicalVPNName}, nil, false},
 		{"Hyper-V host uplink is allowed", []networkRoute{routeFixture("0.0.0.0/0", "vEthernet (External)", 1)}, nil, true},
 		{"unknown virtual uplink is allowed", []networkRoute{routeFixture("0.0.0.0/0", "Vendor Network", 1)}, nil, true},
@@ -92,5 +92,44 @@ func TestSpecificVPNRoutesReserveTunAddressSpace(t *testing.T) {
 	address, err := selectTunIPv4Address(occupiedRoutePrefixes(routes))
 	if err != nil || address != "10.255.255.1/30" {
 		t.Fatalf("specific VPN subnet must be preserved: %s %v", address, err)
+	}
+}
+
+func TestIPv6TransitionRoutesDoNotBlockTUN(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		subtype uint32
+	}{
+		{"Teredo Tunneling Pseudo-Interface", 14},
+		{"Microsoft 6to4 Adapter", 11},
+		{"Microsoft ISATAP Adapter", 13},
+		{"renamed VPN Tunnel", 14}, // native subtype takes precedence over alias
+		{"Generic Tunnel", 0},      // encapsulation alone is not VPN evidence
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			physical := routeFixture("0.0.0.0/0", "Ethernet", 25)
+			physical.Hardware = true
+			transition := routeFixture("::/0", tc.name, 331)
+			transition.InterfaceIndex, transition.InterfaceType, transition.TunnelType = 15, 131, tc.subtype
+			// Exact reported shape: usable IPv4 uplink, only IPv6 default via
+			// Teredo. Route metrics must not be compared across families.
+			aliases, risks := assessNetworkRoutes([]networkRoute{physical, transition})
+			if len(aliases) != 0 || len(risks) != 1 {
+				t.Fatalf("transition route should be information only: %v %v", aliases, risks)
+			}
+			service := testTunService(t, tunPlatformSnapshot{
+				PrivilegeBrokerAvailable: true, WFPReady: true, DefaultRouteAliases: aliases, NetworkRisks: risks,
+			})
+			snapshot, err := service.Preflight([]string{"ethernet"})
+			if err != nil || !snapshot.Ready || snapshot.ForeignTUN != "" || hasTunIssue(snapshot, "foreign_tun") {
+				t.Fatalf("system transition tunnel blocked startup: %+v %v", snapshot, err)
+			}
+			// Exempting the transition interface must not mask a real VPN.
+			vpn := routeFixture("::/1", "WireGuard Tunnel", 9000)
+			aliases, _ = assessNetworkRoutes([]networkRoute{physical, transition, vpn})
+			if !reflect.DeepEqual(aliases, []string{"WireGuard Tunnel"}) {
+				t.Fatalf("real VPN was hidden by transition exemption: %v", aliases)
+			}
+		})
 	}
 }
