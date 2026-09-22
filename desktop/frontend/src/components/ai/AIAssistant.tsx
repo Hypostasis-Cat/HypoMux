@@ -69,6 +69,7 @@ export function AIAssistant({ open, onOpenChange, workspace = true, onOpenWorksp
       window.dispatchEvent(new CustomEvent("hypomux:ai-changed"));
     }
     setSnapshot(next);
+    return next;
   }, []);
   useEffect(() => {
     if (!native) return;
@@ -101,10 +102,10 @@ export function AIAssistant({ open, onOpenChange, workspace = true, onOpenWorksp
     return () => { window.removeEventListener("hypomux:ask-ai", fn); window.removeEventListener("hypomux:ai-settings", settings); };
   }, [onOpenChange, onOpenWorkspace]);
 
-  const action = async (fn: () => Promise<void>) => {
+  const action = async (fn: () => Promise<void>, onSuccess?: (next: AISnapshot) => void) => {
     if (busyRef.current) return;
     busyRef.current = true; setBusy(true); setError(""); setNotice("");
-    try { await fn(); await refresh(); } catch (e) { setError(errorText(e)); }
+    try { await fn(); const next = await refresh(); onSuccess?.(next); } catch (e) { setError(errorText(e)); }
     finally { busyRef.current = false; setBusy(false); }
   };
   const send = () => {
@@ -117,7 +118,7 @@ export function AIAssistant({ open, onOpenChange, workspace = true, onOpenWorksp
       <div className="ai-entry-label"><span>{entry.role === "user" ? text("你", "You") : entry.role === "tool" ? (locale === "en" ? entry.tool : toolNames[entry.tool ?? ""] ?? entry.tool) : text("HypoMux 助手", "HypoMux assistant")}</span><span>{entry.source === "mcp" ? "MCP · " : ""}{entry.state ? (locale === "en" ? entry.state : states[entry.state] ?? entry.state) : ""}</span></div>
       {entry.role === "tool" ? <>
         {entry.arguments && entry.arguments !== "{}" && <><p>{operationSummary(entry, locale)}</p><details><summary>{text("查看参数", "View parameters")}</summary><pre className="ai-arguments">{pretty(entry.arguments)}</pre></details></>}
-        {entry.state === "waiting" ? <><p>{text("允许执行上面的具体操作？这会修改本机网络或规则。", "Allow this operation? It changes local networking or routing rules.")}</p><div className="ai-actions"><Button appearance="primary" disabled={busy} onClick={() => void action(() => aiService.decide(entry.id, true))}>{text("允许此次操作", "Allow once")}</Button><Button disabled={busy} onClick={() => void action(() => aiService.decide(entry.id, false))}>{text("拒绝", "Deny")}</Button></div></> : <details><summary>{text("查看执行结果", "View result")}</summary><pre>{pretty(entry.text)}</pre></details>}
+        {entry.state === "waiting" ? <><p>{text("允许执行上面的具体操作？这会修改本机网络或规则。", "Allow this operation? It changes local networking or routing rules.")}</p><div className="ai-actions"><Button appearance="primary" disabled={busy} onClick={() => void action(() => aiService.decide(entry.id, true), next => { if (!workspace && next.pending === 0) onOpenChange(false); })}>{text("允许此次操作", "Allow once")}</Button><Button disabled={busy} onClick={() => void action(() => aiService.decide(entry.id, false))}>{text("拒绝", "Deny")}</Button></div></> : <details><summary>{text("查看执行结果", "View result")}</summary><pre>{pretty(entry.text)}</pre></details>}
       </> : entry.role === "assistant" ? <AssistantMessage text={entry.text} /> : <div className="ai-message">{entry.text}</div>}
     </article>
   );

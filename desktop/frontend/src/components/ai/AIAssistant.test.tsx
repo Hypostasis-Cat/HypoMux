@@ -128,6 +128,27 @@ describe("AI assistant", () => {
     fireEvent.click(screen.getByRole("button", { name: "Deny" }));
     await waitFor(() => expect(mocks.decide).toHaveBeenCalledWith("specific-id", false));
   });
+  it.each([
+    { workspace: false, remaining: 0, failure: false, close: true },
+    { workspace: false, remaining: 1, failure: false, close: false },
+    { workspace: true, remaining: 0, failure: false, close: false },
+    { workspace: false, remaining: 0, failure: true, close: false },
+  ])("handles approval without hiding errors or other pending actions: %j", async ({ workspace, remaining, failure, close }) => {
+    const onOpenChange = vi.fn();
+    mocks.snapshot.mockResolvedValue({ running: true, revision: 0, pending: 1, entries: [{ id: "approval", role: "tool", tool: "stop", state: "waiting", text: "", at: "" }] });
+    render(<AIAssistant open workspace={workspace} onOpenChange={onOpenChange} />);
+    await screen.findByRole("button", { name: "Allow once" });
+    mocks.snapshot.mockResolvedValue({ running: true, revision: 0, pending: remaining, entries: [] });
+    if (failure) mocks.decide.mockRejectedValueOnce(new Error("Approval failed"));
+    fireEvent.click(screen.getByRole("button", { name: "Allow once" }));
+    await waitFor(() => expect(mocks.decide).toHaveBeenCalledWith("approval", true));
+    if (close) await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+    else {
+      if (failure) await screen.findByRole("alert");
+      else await waitFor(() => expect(screen.queryByRole("button", { name: "Allow once" })).toBeNull());
+      expect(onOpenChange).not.toHaveBeenCalled();
+    }
+  });
   it("keeps credentials out of chat and tests only after saving configuration", async () => {
     mocks.saveConfig.mockResolvedValue({ protocol: "openai", base_url: "https://example.com/v1", model: "test-model", has_key: true });
     mocks.test.mockResolvedValue("Tool calling verified");
