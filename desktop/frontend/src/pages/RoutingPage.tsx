@@ -155,6 +155,11 @@ export function RoutingPage() {
   const [activeType, setActiveType] = useState<MatchType>("process");
   const [filter, setFilter] = useState("");
   const [selected, setSelected] = useState<Set<TableRowId>>(new Set());
+  useEffect(() => {
+    const selection = rules.filter(rule => selected.has(rule.id)).slice(0, 10).map(rule => ({ type: rule.match_type, value: rule.value, outbound: rule.outbound }));
+    window.dispatchEvent(new CustomEvent("hypomux:ai-selection", { detail: { page: "routing", selection: selection.length ? JSON.stringify(selection) : "" } }));
+    return () => { window.dispatchEvent(new CustomEvent("hypomux:ai-selection", { detail: { page: "routing", selection: "" } })); };
+  }, [rules, selected]);
   const [newValue, setNewValue] = useState("");
   const [newOutbound, setNewOutbound] = useState("aggregation");
   const [loading, setLoading] = useState(true);
@@ -181,6 +186,7 @@ export function RoutingPage() {
   const [replaceBatchConflicts, setReplaceBatchConflicts] = useState(false);
   const batchValueCount = useMemo(() => parseRoutingBatchValues(batchText, batchType).length, [batchText, batchType]);
   const loaded = useRef(false);
+  const backendRevision = useRef<string>();
   const rulesRef = useRef<DraftRule[]>([]);
   const editRevision = useRef(0);
   const submittedRevision = useRef(-1);
@@ -189,7 +195,13 @@ export function RoutingPage() {
   const validationTimers = useRef(new Map<string, number>());
   const saveQueue = useRef<LatestSaveQueue<{ rules: RoutingRule[]; order: string[] }, RoutingSnapshot>>();
   if (!saveQueue.current) {
-    saveQueue.current = new LatestSaveQueue((next) => appServices.routing.save(next.rules, next.order));
+    saveQueue.current = new LatestSaveQueue(async (next) => {
+      const snapshot = backendRevision.current === undefined
+        ? await appServices.routing.save(next.rules, next.order)
+        : await appServices.routing.save(next.rules, next.order, backendRevision.current);
+      backendRevision.current = snapshot.revision;
+      return snapshot;
+    });
   }
   const addRuleInputRef = useRef<HTMLInputElement>(null);
   const { notify: pushNotification } = useAppNotifications();
@@ -239,6 +251,7 @@ export function RoutingPage() {
       .catch(() => undefined);
     try {
       const snapshot = await appServices.routing.snapshot();
+      backendRevision.current = snapshot.revision;
       orderRef.current = normalizeOrder(snapshot.match_order);
       setMatchOrder(orderRef.current);
       const available = new Set((snapshot.outbounds ?? []).map((outbound) => outbound.id));
@@ -279,6 +292,18 @@ export function RoutingPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    const changed = () => {
+      if (pendingSave || saving) {
+        notify(text("AI 已更新配置", "AI updated the configuration"), text("当前仍有本地编辑，请先核对最新规则，避免覆盖 AI 的修改。", "Local edits are pending. Review the latest rules before overwriting AI changes."), "warning");
+      } else {
+        void load();
+      }
+    };
+    window.addEventListener("hypomux:ai-changed", changed);
+    return () => window.removeEventListener("hypomux:ai-changed", changed);
+  }, [load, pendingSave, saving, notify, text]);
 
   useEffect(() => () => {
     if (autosaveTimer.current !== undefined) window.clearTimeout(autosaveTimer.current);
@@ -717,6 +742,9 @@ export function RoutingPage() {
           <p>{t("routing_hint")}</p>
         </div>
         <div className="routing-save-state">
+          <Button disabled={saving || loading} onClick={() => {
+            if (!pendingSave || window.confirm(text("重新载入会丢弃当前未保存的规则编辑，是否继续？", "Reloading discards unsaved rule edits. Continue?"))) void load();
+          }}>{text("重新载入", "Reload")}</Button>
           <span key={saving ? "saving" : pendingSave ? "pending" : savedAt ? "saved" : "loading"} className="motion-inline-swap">{saving
             ? text("正在保存…", "Saving…")
             : pendingSave

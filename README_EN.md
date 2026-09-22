@@ -48,7 +48,7 @@ The official Windows releases of HypoMux are built from this repository through 
 
 ### Privacy policy
 
-HypoMux does not collect, sell, or upload personal data or telemetry. The program contacts other networked systems only to perform functionality requested by the user or the person operating it: forwarding selected network traffic, checking the official signed update channel, downloading installers from GitHub or CNB Release, and validating connectivity after Virtual NIC mode has been enabled.
+HypoMux does not sell personal data or upload telemetry by default. Requested features communicate with network services to forward traffic, check the official signed update channel, download installers, and validate connectivity. The optional built-in AI assistant sends conversations and necessary tool results to the model API configured by the user. Enabling external MCP makes selected data available to the connected AI client. Diagnostics are redacted by default, but application names, adapter identifiers, routing values, and manually entered text can contain personal information. API credentials and conversation history are encrypted locally. See [AI assistant and external MCP](docs/AI_ASSISTANT.md) for scope and limitations.
 
 ---
 

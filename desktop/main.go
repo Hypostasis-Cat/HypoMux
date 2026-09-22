@@ -147,7 +147,11 @@ func main() {
 		supportLogs,
 	)
 	var diagnosticsService *services.DiagnosticsService
+	var aiService *services.AIService
 	desktop := wails.NewDesktopHost(app, mainWindow, startSilent, func() {
+		if aiService != nil {
+			aiService.Shutdown()
+		}
 		if diagnosticsService != nil {
 			diagnosticsService.Shutdown()
 		}
@@ -172,6 +176,8 @@ func main() {
 		},
 	)
 	routingService := services.NewRoutingRuleService(settingsService, adapterService, desktop)
+	aiService = services.NewAIService(settingsService, adapterService, engineService, routingService, diagnosticsService, tunService, supportLogs)
+	app.RegisterService(application.NewService(aiService))
 	app.RegisterService(application.NewService(desktop))
 	app.RegisterService(application.NewService(settingsService))
 	app.RegisterService(application.NewService(adapterService))

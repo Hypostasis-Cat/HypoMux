@@ -67,7 +67,7 @@ function HypoMuxWindow() {
   const [page, setPage] = useState<AppPage>(() => {
     const requested = new URLSearchParams(window.location.search).get("page");
     if (import.meta.env.DEV && (
-      requested === "tools" || requested === "appearance" || requested === "routing" ||
+      requested === "assistant" || requested === "tools" || requested === "appearance" || requested === "routing" ||
       requested === "health" || requested === "connections" || requested === "settings" ||
       requested === "blocked-domains" || requested === "about"
     )) {
@@ -84,6 +84,7 @@ function HypoMuxWindow() {
   const { fluentTheme, settings } = useAppearance();
   const pageOrder: AppPage[] = [
     "home",
+    "assistant",
     "routing",
     "health",
     "connections",

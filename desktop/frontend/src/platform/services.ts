@@ -37,7 +37,7 @@ export type {
 
 export type EngineSnapshot = GeneratedEngineSnapshot & { strategy?: string };
 
-export type RoutingSnapshot = Omit<GeneratedRoutingSnapshot, "match_order"> & { match_order?: string[] | null };
+export type RoutingSnapshot = Omit<GeneratedRoutingSnapshot, "match_order"> & { match_order?: string[] | null; revision?: string };
 
 export type AdapterView = GeneratedAdapterView & { is_virtual?: boolean };
 
@@ -266,7 +266,9 @@ export const appServices = {
       RoutingRuleService.Validate(rule, existing),
     previewBatch: (matchType: string, values: string[], outbound: string, existing: RoutingRule[]) =>
       RoutingRuleService.PreviewBatch(matchType, values, outbound, existing),
-    save: (rules: RoutingRule[], order: string[] = ["process", "domain", "ip"]) => Call.ByName("github.com/Hypostasis-Cat/HypoMux/desktop/internal/services.RoutingRuleService.SaveOrdered", rules, order) as Promise<RoutingSnapshot>,
+    save: (rules: RoutingRule[], order: string[] = ["process", "domain", "ip"], revision?: string) => (revision === undefined
+      ? Call.ByName("github.com/Hypostasis-Cat/HypoMux/desktop/internal/services.RoutingRuleService.SaveOrdered", rules, order)
+      : Call.ByName("github.com/Hypostasis-Cat/HypoMux/desktop/internal/services.RoutingRuleService.SaveOrderedChecked", rules, order, revision)) as Promise<RoutingSnapshot>,
     listProcesses: () => RoutingRuleService.ListProcesses(),
     listProcessChoices: () => RoutingRuleService.ListProcessChoices(),
     importRules: () => RoutingRuleService.Import(),

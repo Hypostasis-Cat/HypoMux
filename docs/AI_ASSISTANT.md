@@ -1,0 +1,82 @@
+# AI 助手与外部 MCP
+
+HypoMux 的内置助手和外部 MCP 共用桌面业务服务。模型负责选择工具，HypoMux 校验参数、请求操作确认并执行已有的启停、分流与诊断流程。没有通用命令执行、任意文件读取或任意 URL 抓取工具。
+
+## 内置助手
+
+1. 点击小精灵的设置图标，或打开左侧 **AI 助手 → 模型配置**。
+2. 选择协议，填写 API Base URL 和服务商要求的 API Key，点击 **获取模型列表** 后搜索选择模型；也可以手动填写 Model ID。
+   - OpenAI 兼容：使用 Chat Completions `/chat/completions`，Base URL 通常包含 `/v1`。
+   - Anthropic：使用 Messages `/messages`，Base URL 通常包含 `/v1`。
+   - 本机模型服务可使用 `http://127.0.0.1:端口/v1` 或 IPv6 回环地址。其他服务必须使用 HTTPS。
+3. 点击 **保存并测试工具调用**。测试会发送随机测试值，验证模型是否能返回正确的工具名称和参数，不会读取网络状态或修改网络。
+4. 在对话中提出需求，例如“开启聚合，并把 CS2 设置为直连”。AI 可以读取现有状态、设置模式和网卡、修改规则，并启停引擎。写入工具每次都需要在 HypoMux 中确认具体操作。
+
+模型由用户自行选择，服务商可能收取 API 费用。能聊天的模型不一定支持工具调用；接口兼容性需要通过测试验证。首版保存一份当前模型配置，支持逐轮回复和工具进度，不提供逐字流式输出、语音或图片输入。
+
+左侧导航的「AI 助手」打开独立工作区，包含对话、模型配置和外部 AI 连接。业务页面右下角的「小 Mux」是可拖动的应用内悬浮助手，点击它展开输入框，发送后收起，回复直接显示在小精灵旁的气泡里。气泡不会锁定页面或挤压布局，切页后更新当前页面标签与建议；展开图标可进入工作区继续同一段对话。此版本不悬浮在 Windows 桌面或其他应用上。
+
+发送消息时会携带当前页面名称，以及分流页中选中的规则（最多 10 条），并与该条消息一起保存。它不截图、不读取整个页面或密钥输入框；未选中对象时需要明确对象，业务实时状态仍通过工具查询。页面上下文固定在发送时刻，后续切页不会改变当前任务的对象。
+
+收起气泡或切换页面不会结束后台任务，小精灵会显示处理中或等待确认。**停止后续操作**取消模型请求及后续步骤；已经进入业务服务的网络操作会完成其自身清理流程，已完成的修改不会自动撤销。要停止聚合，请明确请求停止或使用原有停止按钮。
+
+## 操作与诊断
+
+工具包含 `get_status`、`get_rules`、`get_processes`、`get_connections`、`get_diagnostics`、`get_support_report`、`run_diagnostics`、`preflight`、`configure_network`、`set_rule`、`remove_rule`、`start`、`stop`。
+
+- 网卡与模式配置使用已有调度服务，要求聚合处于停止/失败状态；不会自动重启。
+- `start` 使用已保存的模式与网卡。运行中重复调用不会重启引擎。
+- 分流规则仅由 **TUN 模式**加载。系统代理模式下保存规则不代表该应用已直连。
+- 保存结果包含 `restart_required`。原有连接可能继续使用旧出口；“规则保存成功”与“实际连接已验证”应分别报告。
+- 连接查询最多返回 100 条，保留进程、出口与流量，省略目标域名和地址；规则查询最多返回 200 条并标明截断。
+- 诊断摘要包含当前状态、最近体检和最近运行会话最多 12 条脱敏错误摘要，不保证自动确定所有问题的根因。
+- 等待批准期间配置变化会使旧操作失效。界面的分流保存使用版本校验，拒绝覆盖 AI 更新后的配置；可点击“重新载入”核对。
+
+## 外部 AI
+
+打开 **AI 助手 → 外部 AI**，选择本机端口与是否只读，再启用连接。默认只开放查询与体检。界面提供地址和连接配置；把配置粘贴到支持自定义 **Streamable HTTP MCP** 的客户端配置界面，不要把密钥粘贴进聊天。
+
+不同客户端的配置文件格式可能不同；示例表示所需的 URL 和 Authorization Header：
+
+```json
+{
+  "mcpServers": {
+    "hypomux": {
+      "type": "http",
+      "url": "http://127.0.0.1:17863/mcp",
+      "headers": { "Authorization": "Bearer <界面生成的访问密钥>" }
+    }
+  }
+}
+```
+
+首版是无状态 HTTP JSON 响应传输，实现 initialize、ping、tools/list、tools/call，协商 MCP 2025-03-26、2025-06-18、2025-11-25。不提供旧 HTTP+SSE 或 stdio 桥接；不承诺所有客户端版本兼容。
+
+连接只在用户明确启用后监听 `127.0.0.1`，要求 Bearer 密钥，拒绝浏览器 Origin 和不匹配的 Host。每次启用生成新密钥，关闭连接或退出程序使当前连接失效。不会自动修改 Codex、Claude Code、豆包或其他客户端配置。AI 客户端必须运行在能访问该电脑回环地址的环境中，远程云端客户端不能直接连接。
+
+启用写入工具后，外部调用会在 HypoMux 中显示确认卡片及来源 `MCP`；不会因为已连接就自动执行修改。最多同时处理两个 MCP 请求，调用超时为三分钟。
+
+## 数据与隐私
+
+- 内置助手将用户对话和按需读取的工具结果发送到所配置的模型服务。应用名称、网卡名称/标识和用户配置的分流匹配值可能包含个人信息；规则值保留原义以支持操作。
+- 自动诊断会遮盖地址字段、IP、用户目录及常见密钥字段；错误摘要还遮盖主机名。脱敏并非能识别所有敏感内容，请勿在对话中输入密码等秘密。
+- 外部 MCP 将工具结果返回所连接客户端，由该客户端决定模型处理方式。只读模式同样具有数据读取权限。
+- API Key 与本机历史使用当前 Windows 用户的 DPAPI 加密，存于 HypoMux 数据目录 `ai/provider.bin` 和 `ai/history.bin`。前端不会读取已保存的 API Key；API 地址或协议变更时不会自动复用旧密钥。
+- 最近 100 条对话/操作记录保存在本机，每条记录最多约 16 KiB，可在助手中清除。重新启动后未完成的记录标记为中断，不自动重试。历史消息仅作上下文，当前状态应通过工具重新读取。
+- 不记录或展示模型服务原始错误正文，避免服务端回显凭据。模型请求禁止 HTTP 重定向，不会自动重试可能产生重复操作的请求。
+
+## 开发与验证
+
+Go 后端位于 `desktop/internal/services/ai_*.go`；前端位于 `desktop/frontend/src/components/ai/`，通过 `platform/ai.ts` 调用 Wails 服务。与桌面启动时创建的现有服务实例共享状态。
+
+```powershell
+go -C desktop test ./internal/services -run '^TestAI' -count=1
+npm --prefix desktop/frontend test -- src/components/ai/AIAssistant.test.tsx src/pages/RoutingPage.test.tsx
+npm --prefix desktop/frontend run build
+```
+
+自动测试使用本机假模型服务验证两种协议、工具返回、拒绝/取消/过期批准、MCP 认证与只读边界、DPAPI 存储和规则版本冲突；不会调用付费模型或修改系统网络。实际服务商接入、外部客户端互操作、管理员 TUN 操作和网络恢复仍需在真实桌面环境验证。
+
+协议参考：[OpenAI 工具调用](https://developers.openai.com/api/docs/guides/function-calling)、[Anthropic 工具调用](https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls)、[MCP HTTP 传输](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports)。
+
+模型发现使用当前表单的地址和密钥请求 `/models`，不保存表单，也不发送对话。更换地址或协议不会复用原地址的密钥。服务不支持模型列表时仍可手动输入；列表存在不代表该模型支持工具调用。协议参考：[OpenAI Models](https://platform.openai.com/docs/api-reference/models)、[Claude API](https://platform.claude.com/docs/en/api/overview)。

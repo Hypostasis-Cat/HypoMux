@@ -549,6 +549,7 @@ export function SettingsPage({
           )}</p>
         </div>
         <div className="settings-save-feedback">
+          <Button onClick={() => window.dispatchEvent(new Event("hypomux:ai-settings"))}>{text("AI 助手设置", "AI assistant settings")}</Button>
           <span key={loading ? "loading" : loadFailed ? "error" : saving ? "saving" : "synced"} className="save-state motion-inline-swap" data-error={loadFailed || undefined} role="status" aria-live="polite">{loading
             ? text("正在读取…", "Loading…")
             : loadFailed
@@ -648,7 +649,7 @@ export function SettingsPage({
               value={appearance.motion}
               options={[
                 { value: "standard", label: text("完整动效", "Full motion") },
-                { value: "reduced", label: text("精简动效", "Reduced motion") },
+                { value: "reduced", label: text("适中动画", "Moderate motion") },
                 { value: "off", label: text("关闭动效", "Off") },
               ]}
               onChange={(value) => updateAppearance({ motion: value as MotionMode })}

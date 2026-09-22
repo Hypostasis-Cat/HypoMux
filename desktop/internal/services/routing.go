@@ -1,6 +1,7 @@
 package services
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -9,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Hypostasis-Cat/HypoMux/desktop/internal/platform"
@@ -166,6 +168,7 @@ type RoutingBatchPreview struct {
 }
 
 type RoutingSnapshot struct {
+	Revision        string        `json:"revision"`
 	MatchOrder      []string      `json:"match_order"`
 	Rules           []RoutingRule `json:"rules"`
 	Outbounds       []Outbound    `json:"outbounds"`
@@ -189,7 +192,8 @@ func NewRoutingRuleService(settings *SettingsService, adapters *AdapterService, 
 }
 
 func (s *RoutingRuleService) Snapshot() (RoutingSnapshot, error) {
-	rules, err := normalizeRules(s.settings.Get().RoutingRules)
+	settings := s.settings.Get()
+	rules, err := normalizeRules(settings.RoutingRules)
 	if err != nil {
 		return RoutingSnapshot{}, err
 	}
@@ -199,7 +203,8 @@ func (s *RoutingRuleService) Snapshot() (RoutingSnapshot, error) {
 	}
 	restartRequired, restartReason := singBoxRuleSetRestartRequirement(rules)
 	return RoutingSnapshot{
-		Rules: rules, Outbounds: outbounds, MatchOrder: routingMatchOrder(s.settings.Get()),
+		Revision: routingRevision(settings),
+		Rules:    rules, Outbounds: outbounds, MatchOrder: routingMatchOrder(settings),
 		RestartRequired: restartRequired, RestartReason: restartReason,
 	}, nil
 }
@@ -361,7 +366,33 @@ func rulesWithMatchOrder(rules []RoutingRule, order []string) []RoutingRule {
 	return result
 }
 
+var routingMutationMu sync.Mutex
+
+func routingRevision(settings AppSettings) string {
+	data, _ := json.Marshal(struct {
+		Rules []RoutingRule
+		Order []string
+	}{settings.RoutingRules, settings.RoutingMatchOrder})
+	return fmt.Sprintf("%x", sha256.Sum256(data))
+}
+
+// SaveOrderedChecked prevents a stale desktop draft from overwriting external AI edits.
+func (s *RoutingRuleService) SaveOrderedChecked(rules []RoutingRule, order []string, revision string) (RoutingSnapshot, error) {
+	routingMutationMu.Lock()
+	defer routingMutationMu.Unlock()
+	if revision == "" || routingRevision(s.settings.Get()) != revision {
+		return RoutingSnapshot{}, fmt.Errorf("规则已被其他操作更新；请重新载入并核对后保存，当前草稿未覆盖新规则")
+	}
+	return s.saveOrderedUnlocked(rules, order)
+}
+
 func (s *RoutingRuleService) SaveOrdered(rules []RoutingRule, order []string) (RoutingSnapshot, error) {
+	routingMutationMu.Lock()
+	defer routingMutationMu.Unlock()
+	return s.saveOrderedUnlocked(rules, order)
+}
+
+func (s *RoutingRuleService) saveOrderedUnlocked(rules []RoutingRule, order []string) (RoutingSnapshot, error) {
 	if !validMatchOrder(order) {
 		return RoutingSnapshot{}, fmt.Errorf("匹配顺序必须包含进程、域名、IP，且不能重复")
 	}
@@ -386,8 +417,14 @@ func (s *RoutingRuleService) SaveOrdered(rules []RoutingRule, order []string) (R
 }
 
 func (s *RoutingRuleService) Save(rules []RoutingRule) (RoutingSnapshot, error) {
+	routingMutationMu.Lock()
+	defer routingMutationMu.Unlock()
+	return s.saveUnlocked(rules)
+}
+
+func (s *RoutingRuleService) saveUnlocked(rules []RoutingRule) (RoutingSnapshot, error) {
 	if order := s.settings.Get().RoutingMatchOrder; validMatchOrder(order) {
-		return s.SaveOrdered(rules, order)
+		return s.saveOrderedUnlocked(rules, order)
 	}
 	normalized, err := normalizeRulesStrict(rules)
 	if err != nil {
