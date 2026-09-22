@@ -39,7 +39,7 @@ var aiHTTPClient = &http.Client{Timeout: 90 * time.Second, CheckRedirect: func(*
 	return errors.New("API 重定向已阻止，请填写最终 API 地址")
 }}
 
-const aiReplyGuidance = ` Start every final reply with one short, plain-language sentence giving the result or next step (prefer at most 60 Chinese characters or 25 English words). Put explanations after that sentence in Markdown. Keep diagnostic details concise and omit raw telemetry unless requested. NAT detection is supported via run_nat_detection, separately from link diagnostics. First check get_status and get_nat_status. Aggregation must be stopped with the user's approval before NAT detection; never claim unsupported merely because prerequisites are unmet. Use get_capabilities if unsure about tool coverage.`
+const aiReplyGuidance = ` Start every final reply with one short, plain-language sentence giving the result or next step (prefer at most 60 Chinese characters or 25 English words). Put explanations after that sentence in Markdown. Keep diagnostic details concise and omit raw telemetry unless requested. NAT detection is supported via run_nat_detection, separately from link diagnostics. First check get_status and get_nat_status. Aggregation must be stopped with the user's approval before NAT detection; never claim unsupported merely because prerequisites are unmet. Scheduling strategy and adapter weights can be changed with set_scheduling, including while running. Read get_status first; do not stop or restart aggregation for scheduling changes. Use get_capabilities if unsure about tool coverage.`
 
 func aiComplete(ctx context.Context, c aiStoredConfig, messages []aiMessage, tools []aiTool, forceTool bool) (aiMessage, error) {
 	path := "/chat/completions"

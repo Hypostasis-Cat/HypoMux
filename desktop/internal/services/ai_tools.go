@@ -40,6 +40,7 @@ func aiTools() []aiTool {
 		{"get_diagnostics", "读取最近的结构化网络体检；检查 completed_at，旧结果不能代表当前状态", empty, true},
 		{"run_diagnostics", "对已选网卡发起网络体检（会产生少量探测流量）", empty, true},
 		{"preflight", "检查已选网卡的 TUN 启动条件", empty, true},
+		{"set_scheduling", "修改调度策略及可选网卡权重。round-robin=轮询，weighted=手动权重，adaptive-throughput=最大速度优先，latency-first=低延迟优先。先 get_status 获取当前策略和真实网卡 ID；省略 adapter_weights 保留原权重。保持当前模式和参与网卡。支持运行中热更新，不需要先停止或重启聚合；核心不支持时会返回错误，不得自动重启", schema(map[string]any{"strategy": stringField("round-robin", "weighted", "adaptive-throughput", "latency-first"), "adapter_weights": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "integer", "minimum": AdapterWeightMin, "maximum": AdapterWeightMax}}}, "strategy"), false},
 		{"configure_network", "聚合停止时设置模式和参与网卡。必须先 get_status 获取真实网卡 ID；保留现有调度策略。不会自动重启", schema(map[string]any{"mode": stringField("proxy", "tun"), "adapter_ids": map[string]any{"type": "array", "items": stringField(), "minItems": 1, "maxItems": 64}}, "mode", "adapter_ids"), false},
 		{"set_rule", "新增或修改一条分流规则。原规则会替换；保存不等于现有连接已改变", schema(map[string]any{"match_type": stringField("process", "domain", "ip"), "value": stringField(), "outbound": stringField()}, "match_type", "value", "outbound"), false},
 		{"remove_rule", "删除指定匹配类型和匹配值的规则", schema(map[string]any{"match_type": stringField("process", "domain", "ip"), "value": stringField()}, "match_type", "value"), false},
@@ -59,7 +60,7 @@ func aiRequiresApproval(source, name string) bool {
 		return true
 	}
 	switch name {
-	case "set_rule", "remove_rule", "configure_network", "select_nat_server", "start":
+	case "set_rule", "remove_rule", "configure_network", "select_nat_server", "start", "set_scheduling":
 		return false
 	default:
 		return true
@@ -76,6 +77,8 @@ func findAITool(name string) (aiTool, bool) {
 }
 
 type aiArguments struct {
+	Strategy         string         `json:"strategy"`
+	AdapterWeights   map[string]int `json:"adapter_weights"`
 	approvalRevision string
 	Mode             string   `json:"mode"`
 	AdapterIDs       []string `json:"adapter_ids"`
@@ -100,6 +103,8 @@ func parseAIArguments(name string, raw json.RawMessage) (aiArguments, error) {
 	}
 	allowed := map[string]bool{}
 	switch name {
+	case "set_scheduling":
+		allowed = map[string]bool{"strategy": true, "adapter_weights": true}
 	case "run_nat_detection":
 		allowed = map[string]bool{"adapter_id": true, "server_id": true}
 	case "select_nat_server":
@@ -123,6 +128,22 @@ func parseAIArguments(name string, raw json.RawMessage) (aiArguments, error) {
 	}
 	if d.Decode(new(any)) != io.EOF {
 		return args, errors.New("工具参数无效")
+	}
+	if name == "set_scheduling" {
+		if args.Strategy == "" {
+			return args, errors.New("必须指定调度策略")
+		}
+		if _, err := normalizeSchedulingStrategy(args.Strategy, false); err != nil {
+			return args, err
+		}
+		if len(args.AdapterWeights) > 64 {
+			return args, errors.New("最多设置 64 张网卡的权重")
+		}
+		for id, weight := range args.AdapterWeights {
+			if strings.TrimSpace(id) == "" || weight < AdapterWeightMin || weight > AdapterWeightMax {
+				return args, fmt.Errorf("网卡 ID 不能为空，权重必须在 %d–%d 之间", AdapterWeightMin, AdapterWeightMax)
+			}
+		}
 	}
 	if name == "set_rule" || name == "remove_rule" {
 		if args.MatchType != "process" && args.MatchType != "domain" && args.MatchType != "ip" {
@@ -195,7 +216,7 @@ func (s *AIService) executeAITool(name string, args aiArguments) (any, error) {
 		for _, a := range adapters {
 			safe = append(safe, map[string]any{"id": a.ID, "name": a.Name, "kind": a.Kind, "selected": a.Selected, "operational": a.Operational, "weight": a.Weight})
 		}
-		return map[string]any{"engine": snapshot, "adapters": safe, "saved_mode": s.settings.Get().Mode}, nil
+		return map[string]any{"engine": snapshot, "adapters": safe, "saved_mode": s.settings.Get().Mode, "saved_strategy": effectiveSchedulingStrategy(s.settings.Get()), "available_strategies": map[string]string{"round-robin": "轮询", "weighted": "手动权重", "adaptive-throughput": "最大速度优先", "latency-first": "低延迟优先"}}, nil
 	case "get_rules":
 		snapshot, err := s.routing.Snapshot()
 		if err != nil {
@@ -248,6 +269,36 @@ func (s *AIService) executeAITool(name string, args aiArguments) (any, error) {
 		return s.diagnostics.Run(s.settings.Get().SelectedAdapterIDs)
 	case "preflight":
 		return s.tun.Preflight(s.settings.Get().SelectedAdapterIDs)
+	case "set_scheduling":
+		adapters, err := s.adapters.List()
+		if err != nil {
+			return nil, err
+		}
+		found := map[string]bool{}
+		for i := range adapters {
+			if weight, ok := args.AdapterWeights[adapters[i].ID]; ok {
+				adapters[i].Weight = weight
+				found[adapters[i].ID] = true
+			}
+		}
+		if len(found) != len(args.AdapterWeights) {
+			return nil, errors.New("网卡列表已变化或 ID 不存在，请重新读取状态")
+		}
+		settings := s.settings.Get()
+		available := map[string]bool{}
+		for _, adapter := range adapters {
+			available[adapter.ID] = true
+		}
+		for _, id := range settings.SelectedAdapterIDs {
+			if !available[id] {
+				return nil, errors.New("已选网卡当前不可用，请先检查参与网卡；未修改调度配置")
+			}
+		}
+		mode := settings.Mode
+		if _, err := s.engine.SaveScheduling(mode, args.Strategy, adapters); err != nil {
+			return nil, err
+		}
+		return map[string]any{"saved": true, "strategy": args.Strategy, "mode": mode, "verification": "已通过调度配置接口保存；核心运行时已完成热更新，停止时将在下次启动使用。未重启聚合，不代表现有连接已迁移或性能已改善。"}, nil
 	case "configure_network":
 		current, err := s.engine.Snapshot()
 		if err != nil {

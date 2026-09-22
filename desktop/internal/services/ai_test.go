@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"github.com/Hypostasis-Cat/HypoMux/desktop/internal/engineclient"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -500,5 +501,52 @@ func TestAINATToolUsesExistingDetector(t *testing.T) {
 	s.diagnostics.natRunGuard = func() error { return context.Canceled }
 	if _, err := s.invoke(context.Background(), "assistant", "run_nat_detection", json.RawMessage(`{"adapter_id":"ethernet"}`)); err == nil {
 		t.Fatal("NAT guard bypassed")
+	}
+}
+
+func TestAISchedulingValidationAndPersistence(t *testing.T) {
+	for _, raw := range []string{`{}`, `{"strategy":"fastest"}`, `{"strategy":"weighted","adapter_weights":{"a":0}}`, `{"strategy":"weighted","adapter_weights":{"a":1.5}}`, `{"strategy":"round-robin","mode":"tun"}`} {
+		if _, err := parseAIArguments("set_scheduling", json.RawMessage(raw)); err == nil {
+			t.Fatalf("accepted invalid arguments: %s", raw)
+		}
+	}
+	s := testAIService(t)
+	t.Setenv("HYPOMUX_DATA_DIR", s.directory)
+	s.settings.path = filepath.Join(s.directory, "settings.json")
+	s.settings.settings.SelectedAdapterIDs = nil
+	s.adapters = NewAdapterService(s.settings)
+	s.engine = &EngineService{settings: s.settings, adapters: s.adapters, client: engineclient.New(), lifecycleGate: make(chan struct{}, 1)}
+	adapters, err := s.adapters.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	weights := map[string]int{}
+	if len(adapters) > 0 {
+		s.settings.settings.SelectedAdapterIDs = []string{adapters[0].ID}
+		weights[adapters[0].ID] = 3
+	}
+	originalMode := s.settings.Get().Mode
+	for _, strategy := range []string{"round-robin", "weighted", "adaptive-throughput", "latency-first"} {
+		raw, _ := json.Marshal(map[string]any{"strategy": strategy, "adapter_weights": weights})
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+		_, err := s.invoke(ctx, "assistant", "set_scheduling", raw)
+		cancel()
+		if err != nil {
+			t.Fatal(err)
+		}
+		current := s.settings.Get()
+		if effectiveSchedulingStrategy(current) != strategy || current.Mode != originalMode || s.Snapshot().Pending != 0 {
+			t.Fatalf("incorrect scheduling state: %+v", current)
+		}
+		if len(adapters) > 0 && (len(current.SelectedAdapterIDs) != 1 || current.SelectedAdapterIDs[0] != adapters[0].ID || current.AdapterWeights[adapters[0].ID] != 3) {
+			t.Fatal("lost selection or weights")
+		}
+	}
+	_, err = s.invoke(context.Background(), "assistant", "set_scheduling", json.RawMessage(`{"strategy":"weighted","adapter_weights":{"missing-adapter":2}}`))
+	if err == nil || effectiveSchedulingStrategy(s.settings.Get()) != "latency-first" {
+		t.Fatal("unknown adapter accepted or configuration changed")
+	}
+	if aiRequiresApproval("assistant", "set_scheduling") || !aiRequiresApproval("mcp", "set_scheduling") {
+		t.Fatal("incorrect approval policy")
 	}
 }
