@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useI18n } from "../../i18n/i18n";
 
-export function AssistantCompanion({ open, onOpenChange, running, pending, pageLabel, speech, sample = false, children }: {
-  open: boolean; onOpenChange: (open: boolean) => void; running: boolean; pending: number; pageLabel: string; speech?: string; sample?: boolean; children: ReactNode;
+export function AssistantCompanion({ open, onOpenChange, running, pending, pageLabel, speech, speechId, sample = false, onViewDetails, children }: {
+  open: boolean; onOpenChange: (open: boolean) => void; running: boolean; pending: number; pageLabel: string; speech?: string; speechId?: string; sample?: boolean; onViewDetails?: () => void; children: ReactNode;
 }) {
   const { locale } = useI18n();
   const [position, setPosition] = useState({ right: 24, bottom: 28 });
@@ -16,7 +16,7 @@ export function AssistantCompanion({ open, onOpenChange, running, pending, pageL
   useEffect(() => {
     if (!open) { setHovered(false); setFocused(false); }
   }, [open]);
-  useEffect(() => { setSpeechVisible(true); }, [speech]);
+  useEffect(() => { setSpeechVisible(true); }, [speech, speechId, running]);
   useEffect(() => {
     if (!speech || hovered || focused || open || running || pending || !speechVisible) return;
     const timer = window.setTimeout(() => setSpeechVisible(false), Math.min(14000, Math.max(6000, speech.length * 90)));
@@ -42,7 +42,7 @@ export function AssistantCompanion({ open, onOpenChange, running, pending, pageL
   const status = pending ? (locale === "en" ? "Your approval needed" : "等你确认一下") : running ? (locale === "en" ? "Working on it…" : "正在帮你处理…") : (locale === "en" ? "Ask me anything" : "有问题，叫我就好");
   return <div className={`ai-companion${open ? " is-open" : ""}${dragging ? " is-dragging" : ""}${leftSide ? " dock-left" : ""}${below ? " bubble-below" : ""}`} style={{ right, bottom }} data-state={pending ? "waiting" : running ? "thinking" : "idle"} onMouseEnter={() => { clearTimeout(hoverTimer.current); setHovered(true); }} onMouseLeave={() => { hoverTimer.current = setTimeout(() => setHovered(false), 250); }} onFocus={() => setFocused(true)} onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFocused(false); }}>
     {open && <section className="ai-pet-bubble" style={{ position: "fixed", left: bubbleLeft, right: "auto", top: below ? viewport.height - bottom + 10 : "auto", bottom: below ? "auto" : bottom + 116, maxHeight: Math.max(200, room) }} aria-label={locale === "en" ? "Companion chat" : "小精灵对话"} onKeyDown={event => { if (event.key === "Escape") { event.stopPropagation(); close(); } }}>{children}</section>}
-    {!open && (speech && !running && !pending ? (speechVisible || hovered || focused) && <div className="ai-pet-speech" role="status" tabIndex={0} style={{ left: speechLeft, width: speechWidth, bottom: below ? "auto" : bottom + 46, top: below ? viewport.height - bottom + 10 : "auto", maxHeight: Math.max(120, below ? bottom - 28 : viewport.height - bottom - 96) }}><div className="ai-pet-speech-text">{speech}</div>{sample && <small>{locale === "en" ? "Sample reply" : "示例回复"}</small>}</div> : (hovered || focused) && <span className="ai-pet-hint" role="status">{status}</span>)}
+    {!open && (speech && !running && !pending ? (speechVisible || hovered || focused) && <div className="ai-pet-speech" role="status" tabIndex={0} style={{ left: speechLeft, width: speechWidth, bottom: below ? "auto" : bottom + 46, top: below ? viewport.height - bottom + 10 : "auto", maxHeight: Math.max(120, below ? bottom - 28 : viewport.height - bottom - 96) }}><div className="ai-pet-speech-text">{speech}</div>{onViewDetails && <button className="ai-speech-details" onClick={onViewDetails}>{locale === "en" ? "View details" : "查看详情"} ↗</button>}{sample && <small>{locale === "en" ? "Sample reply" : "示例回复"}</small>}</div> : (hovered || focused) && <span className="ai-pet-hint" role="status">{status}</span>)}
     <button ref={trigger} className="ai-pet" aria-label={locale === "en" ? "Network companion" : "网络小精灵"} aria-expanded={open} title={locale === "en" ? `Viewing ${pageLabel} · Drag or Alt + arrow keys to move` : `正在查看：${pageLabel} · 拖动或 Alt + 方向键移动`} onClick={() => { if (!drag.current?.moved) onOpenChange(!open); }}
       onPointerDown={event => { if (event.button !== 0) return; drag.current = { x: event.clientX, y: event.clientY, right, bottom, moved: false }; event.currentTarget.setPointerCapture(event.pointerId); }}
       onPointerMove={event => { const start = drag.current; if (!start || event.buttons !== 1) return; const dx = event.clientX - start.x, dy = event.clientY - start.y; if (Math.abs(dx) + Math.abs(dy) > 5) start.moved = true; if (start.moved) { setDragging(true); setPosition({ right: Math.max(16, Math.min(start.right - dx, viewport.width - 152)), bottom: Math.max(16, Math.min(start.bottom + dy * -1, viewport.height - 148)) }); } }}

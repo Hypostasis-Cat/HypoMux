@@ -363,10 +363,12 @@ func (s *AIService) invoke(ctx context.Context, source, name string, args json.R
 		// Bind approval to the settings read before displaying the request.
 		revision := s.aiSettingsRevision()
 		parsed.approvalRevision = revision
-		s.updateEntry(id, "waiting", tool.Description+"\n确认后将修改本机网络或分流配置。")
-		if err = s.approve(ctx, id); err != nil {
-			s.updateEntry(id, "cancelled", safeAIError(err))
-			return nil, err
+		if aiRequiresApproval(source, name) {
+			s.updateEntry(id, "waiting", tool.Description+"\n确认后将修改本机网络或分流配置。")
+			if err = s.approve(ctx, id); err != nil {
+				s.updateEntry(id, "cancelled", safeAIError(err))
+				return nil, err
+			}
 		}
 		s.operation.Lock()
 		defer s.operation.Unlock()

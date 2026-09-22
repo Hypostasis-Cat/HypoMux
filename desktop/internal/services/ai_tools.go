@@ -26,6 +26,12 @@ func aiTools() []aiTool {
 		return map[string]any{"type": "object", "properties": props, "required": required, "additionalProperties": false}
 	}
 	return []aiTool{
+		{"get_capabilities", "查询当前 AI 工具支持的功能；不在列表内的功能不能宣称已执行", empty, true},
+		{"get_nat_status", "读取最近 NAT 检测、可用 STUN 服务器及主机防火墙状态；旧结果需核对 completed_at", empty, true},
+		{"run_nat_detection", "检测指定真实网卡的 NAT 类型。先 get_status 获取 adapter_id，再 get_nat_status 获取服务器 ID。聚合运行时会拒绝；必须先征得用户同意停止聚合。server_id 可省略使用当前服务器。返回结果后检查 state 和 host_firewall_limited，不可把 inconclusive 当确定结论", schema(map[string]any{"adapter_id": stringField(), "server_id": stringField()}, "adapter_id"), true},
+		{"cancel_nat_detection", "取消当前 NAT 类型检测，不修改网络配置", empty, true},
+		{"select_nat_server", "选择已有 STUN 服务器用于 NAT 类型检测；先 get_nat_status 获取 server_id", schema(map[string]any{"server_id": stringField()}, "server_id"), false},
+		{"allow_nat_firewall", "为 NAT 探测添加应用所需的 Windows 防火墙放行规则；只在用户明确同意时调用，需要系统权限及操作确认", empty, false},
 		{"get_status", "查询当前引擎状态、网卡和模式；不包含完整连接目标", empty, true},
 		{"get_rules", "查询分流规则、规则优先级和可用出口", empty, true},
 		{"get_processes", "查询正在运行的进程名称，不包含完整路径", empty, true},
@@ -41,6 +47,25 @@ func aiTools() []aiTool {
 		{"stop", "停止聚合并调用已有网络恢复流程", empty, false},
 	}
 }
+
+// External clients retain the desktop approval boundary. Routine built-in
+// assistant edits run directly; disruptive and security-sensitive changes wait.
+func aiRequiresApproval(source, name string) bool {
+	tool, ok := findAITool(name)
+	if !ok || tool.ReadOnly {
+		return false
+	}
+	if source != "assistant" {
+		return true
+	}
+	switch name {
+	case "set_rule", "remove_rule", "configure_network", "select_nat_server", "start":
+		return false
+	default:
+		return true
+	}
+}
+
 func findAITool(name string) (aiTool, bool) {
 	for _, t := range aiTools() {
 		if t.Name == name {
@@ -54,6 +79,8 @@ type aiArguments struct {
 	approvalRevision string
 	Mode             string   `json:"mode"`
 	AdapterIDs       []string `json:"adapter_ids"`
+	AdapterID        string   `json:"adapter_id"`
+	ServerID         string   `json:"server_id"`
 	MatchType        string   `json:"match_type"`
 	Value            string   `json:"value"`
 	Outbound         string   `json:"outbound"`
@@ -73,6 +100,10 @@ func parseAIArguments(name string, raw json.RawMessage) (aiArguments, error) {
 	}
 	allowed := map[string]bool{}
 	switch name {
+	case "run_nat_detection":
+		allowed = map[string]bool{"adapter_id": true, "server_id": true}
+	case "select_nat_server":
+		allowed = map[string]bool{"server_id": true}
 	case "set_rule":
 		allowed = map[string]bool{"match_type": true, "value": true, "outbound": true}
 	case "remove_rule":
@@ -100,6 +131,12 @@ func parseAIArguments(name string, raw json.RawMessage) (aiArguments, error) {
 		if strings.TrimSpace(args.Value) == "" {
 			return args, errors.New("规则匹配值不能为空")
 		}
+	}
+	if name == "run_nat_detection" && strings.TrimSpace(args.AdapterID) == "" {
+		return args, errors.New("必须指定要检测的网卡 ID，请先读取网卡状态")
+	}
+	if name == "select_nat_server" && strings.TrimSpace(args.ServerID) == "" {
+		return args, errors.New("必须指定已有的 STUN 服务器 ID")
 	}
 	if name == "set_rule" && args.Outbound == "" {
 		return args, errors.New("必须指定规则出口")
@@ -133,6 +170,18 @@ func (s *AIService) aiSettingsRevision() string {
 }
 func (s *AIService) executeAITool(name string, args aiArguments) (any, error) {
 	switch name {
+	case "get_capabilities":
+		return aiTools(), nil
+	case "get_nat_status":
+		return map[string]any{"latest": s.diagnostics.NATLatest(), "servers": s.diagnostics.NATServers(), "firewall": s.diagnostics.NATFirewallState(), "prerequisite": "先停止聚合；停止操作需要用户同意。检测结果可能受主机防火墙限制。"}, nil
+	case "run_nat_detection":
+		return s.diagnostics.RunNAT(args.AdapterID, args.ServerID)
+	case "cancel_nat_detection":
+		return s.diagnostics.CancelNAT(), nil
+	case "select_nat_server":
+		return s.diagnostics.SelectNATServer(args.ServerID)
+	case "allow_nat_firewall":
+		return s.diagnostics.AllowNATFirewallTraffic()
 	case "get_status":
 		snapshot, err := s.engine.Snapshot()
 		if err != nil {

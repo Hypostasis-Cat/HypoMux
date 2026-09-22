@@ -33,10 +33,15 @@ describe("AI assistant", () => {
     fireEvent.click(await screen.findByRole("option", { name: /Another model/ }));
     expect((screen.getByRole("combobox", { name: "Model ID" }) as HTMLInputElement).value).toBe("another-model");
   });
-  it("speaks in a standalone bubble while the input is collapsed", async () => {
+  it("hides restored replies and speaks only new replies with a details action", async () => {
     mocks.snapshot.mockResolvedValue({ running: false, revision: 0, pending: 0, entries: [{ id: "reply", role: "assistant", text: "I can help check this network.", at: "" }] });
     render(<AIAssistant open={false} workspace={false} onOpenChange={vi.fn()} />);
-    await screen.findByText("I can help check this network.");
+    await waitFor(() => expect(mocks.snapshot).toHaveBeenCalled());
+    expect(screen.queryByText("I can help check this network.")).toBeNull();
+    mocks.snapshot.mockResolvedValue({ running: false, revision: 0, pending: 0, entries: [{ id: "new-reply", role: "assistant", text: "**检查完成。**详细结果在这里。", at: "" }] });
+    await screen.findByText("检查完成。", {}, { timeout: 2500 });
+    expect(screen.queryByText(/详细结果在这里/)).toBeNull();
+    expect(screen.getByRole("button", { name: /View details/ })).toBeTruthy();
     expect(screen.queryByRole("textbox", { name: "Message" })).toBeNull();
     expect(screen.getByRole("button", { name: "Network companion" }).getAttribute("aria-expanded")).toBe("false");
   });

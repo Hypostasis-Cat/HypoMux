@@ -33,6 +33,21 @@
 .ai-entry--tool { padding: 12px; border: 1px solid var(--colorNeutralStroke2); border-radius: 8px; }
 .ai-entry-label { display: flex; justify-content: space-between; gap: 8px; color: var(--hm-text-tertiary); font-size: 12px; margin-bottom: 6px; }
 .ai-message { white-space: pre-wrap; }
+.ai-markdown { line-height: 1.7; overflow-wrap: anywhere; min-width: 0; }
+.ai-markdown > :first-child { margin-top: 0; }
+.ai-markdown > :last-child { margin-bottom: 0; }
+.ai-markdown p, .ai-markdown ul, .ai-markdown ol { margin: 8px 0; }
+.ai-markdown ul, .ai-markdown ol { padding-left: 24px; }
+.ai-markdown h1, .ai-markdown h2, .ai-markdown h3 { font-size: 16px; margin: 16px 0 8px; }
+.ai-markdown a { color: var(--colorBrandForegroundLink); text-decoration: underline; }
+.ai-markdown code { background: var(--hm-accent-soft); padding: 2px 4px; border-radius: 4px; }
+.ai-markdown pre code { background: transparent; padding: 0; }
+.ai-markdown table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
+.ai-markdown th, .ai-markdown td { border: 1px solid var(--colorNeutralStroke2); padding: 6px 10px; }
+.ai-markdown blockquote { margin: 10px 0; padding-left: 12px; border-left: 3px solid var(--colorBrandStroke1); color: var(--hm-text-secondary); }
+.ai-speech-details { display: block; padding: 3px 0; margin-top: 6px; border: 0; background: transparent; color: var(--colorBrandForegroundLink); cursor: pointer; font: inherit; font-size: 12px; }
+.ai-speech-details:hover { text-decoration: underline; }
+.ai-speech-details:focus-visible { outline: 2px solid var(--colorBrandForeground1); outline-offset: 2px; }
 .ai-entry pre { margin: 8px 0; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow: auto; font: 12px/1.6 Consolas, monospace; }
 .ai-entry summary { color: var(--hm-text-secondary); cursor: pointer; }
 .ai-compose { padding: 12px 16px; display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--colorNeutralStroke2); }

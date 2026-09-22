@@ -412,7 +412,7 @@ func TestAIApprovedRulePatchPreservesOtherRules(t *testing.T) {
 	s.routing = NewRoutingRuleService(s.settings, s.adapters, nil)
 	done := make(chan error, 1)
 	go func() {
-		_, err := s.invoke(context.Background(), "assistant", "set_rule", json.RawMessage(`{"match_type":"process","value":"cs2.exe","outbound":"direct"}`))
+		_, err := s.invoke(context.Background(), "mcp", "set_rule", json.RawMessage(`{"match_type":"process","value":"cs2.exe","outbound":"direct"}`))
 		done <- err
 	}()
 	id := waitAIApproval(t, s)
@@ -445,5 +445,60 @@ func TestAIApprovedRulePatchPreservesOtherRules(t *testing.T) {
 	}
 	if err := s.Decide(id, true); err == nil {
 		t.Fatal("approval replayed")
+	}
+}
+
+func TestAIRoutineApprovalPolicy(t *testing.T) {
+	for _, name := range []string{"set_rule", "remove_rule", "configure_network", "select_nat_server", "start"} {
+		if aiRequiresApproval("assistant", name) {
+			t.Fatalf("routine action prompts: %s", name)
+		}
+		if !aiRequiresApproval("mcp", name) {
+			t.Fatalf("external write bypassed approval: %s", name)
+		}
+	}
+	for _, name := range []string{"stop", "allow_nat_firewall"} {
+		if !aiRequiresApproval("assistant", name) {
+			t.Fatalf("sensitive action unconfirmed: %s", name)
+		}
+	}
+	s := testAIService(t)
+	t.Setenv("HYPOMUX_DATA_DIR", s.directory)
+	s.settings.path = filepath.Join(s.directory, "settings.json")
+	s.adapters = NewAdapterService(s.settings)
+	s.routing = NewRoutingRuleService(s.settings, s.adapters, nil)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if _, err := s.invoke(ctx, "assistant", "set_rule", json.RawMessage(`{"match_type":"process","value":"cs2.exe","outbound":"direct"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if s.Snapshot().Pending != 0 || len(s.settings.Get().RoutingRules) != 1 {
+		t.Fatal("routine rule did not complete directly")
+	}
+}
+
+func TestAINATToolUsesExistingDetector(t *testing.T) {
+	s := testAIService(t)
+	s.diagnostics = newTestDiagnostics(t, &fakeDiagnosticProbe{})
+	s.diagnostics.detectNAT = func(_ context.Context, adapter AdapterView, _ []NATServer) NATDetectionResult {
+		return NATDetectionResult{State: "completed", AdapterID: adapter.ID, NATType: "full_cone", PublicEndpoint: "198.51.100.8:42000"}
+	}
+	result, err := s.invoke(context.Background(), "assistant", "run_nat_detection", json.RawMessage(`{"adapter_id":"ethernet"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, _ := json.Marshal(result)
+	if !strings.Contains(string(data), "full_cone") || strings.Contains(string(data), "198.51.100.8") {
+		t.Fatalf("incorrect or unredacted result: %s", data)
+	}
+	if s.diagnostics.NATLatest().AdapterID != "ethernet" || s.Snapshot().Pending != 0 {
+		t.Fatal("NAT detection not integrated")
+	}
+	if _, err := parseAIArguments("run_nat_detection", json.RawMessage(`{}`)); err == nil {
+		t.Fatal("missing adapter accepted")
+	}
+	s.diagnostics.natRunGuard = func() error { return context.Canceled }
+	if _, err := s.invoke(context.Background(), "assistant", "run_nat_detection", json.RawMessage(`{"adapter_id":"ethernet"}`)); err == nil {
+		t.Fatal("NAT guard bypassed")
 	}
 }

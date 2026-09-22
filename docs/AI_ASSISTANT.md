@@ -10,7 +10,7 @@ HypoMux 的内置助手和外部 MCP 共用桌面业务服务。模型负责选�
    - Anthropic：使用 Messages `/messages`，Base URL 通常包含 `/v1`。
    - 本机模型服务可使用 `http://127.0.0.1:端口/v1` 或 IPv6 回环地址。其他服务必须使用 HTTPS。
 3. 点击 **保存并测试工具调用**。测试会发送随机测试值，验证模型是否能返回正确的工具名称和参数，不会读取网络状态或修改网络。
-4. 在对话中提出需求，例如“开启聚合，并把 CS2 设置为直连”。AI 可以读取现有状态、设置模式和网卡、修改规则，并启停引擎。写入工具每次都需要在 HypoMux 中确认具体操作。
+4. 在对话中提出需求，例如“开启聚合，并把 CS2 设置为直连”。AI 可以读取现有状态、设置模式和网卡、修改规则，并启停引擎。内置助手的普通规则修改、网卡配置、启动聚合和 STUN 服务器选择直接执行；停止聚合和防火墙放行仍需确认。外部 MCP 的写入操作保留应用内确认。
 
 模型由用户自行选择，服务商可能收取 API 费用。能聊天的模型不一定支持工具调用；接口兼容性需要通过测试验证。首版保存一份当前模型配置，支持逐轮回复和工具进度，不提供逐字流式输出、语音或图片输入。
 
@@ -80,3 +80,9 @@ npm --prefix desktop/frontend run build
 协议参考：[OpenAI 工具调用](https://developers.openai.com/api/docs/guides/function-calling)、[Anthropic 工具调用](https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls)、[MCP HTTP 传输](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports)。
 
 模型发现使用当前表单的地址和密钥请求 `/models`，不保存表单，也不发送对话。更换地址或协议不会复用原地址的密钥。服务不支持模型列表时仍可手动输入；列表存在不代表该模型支持工具调用。协议参考：[OpenAI Models](https://platform.openai.com/docs/api-reference/models)、[Claude API](https://platform.claude.com/docs/en/api/overview)。
+
+## 回复与 NAT 检测
+
+小精灵只显示新回复的一句话摘要，自动收起；点击“查看详情”进入工作区阅读完整 Markdown。启动时保留历史，但不弹出历史回复。
+
+支持读取 NAT 状态、检测指定网卡、取消检测、选择已有 STUN 服务器及确认后放行防火墙。检测复用网络体检页的 NAT 流程，需先停止聚合；受防火墙限制或探测不完整时，不将结果当成确定结论。`get_capabilities` 返回实际可调用工具，尚未接入的功能仍需手动操作。

@@ -5,6 +5,7 @@ import { aiService, type AIConfig, type AIEntry, type AISnapshot, type MCPConnec
 import { isDesktopRuntime } from "../../platform/runtime";
 import { useI18n } from "../../i18n/i18n";
 import "./assistant.css";
+import { AssistantMessage, summarizeReply } from "./AssistantMessage";
 import { AssistantCompanion } from "./AssistantCompanion";
 import { assistantPageContext } from "./pageContext";
 import type { AppPage } from "../shell/CompactNavigation";
@@ -12,6 +13,7 @@ import type { AppPage } from "../shell/CompactNavigation";
 const initial: AISnapshot = { running: false, entries: [], revision: 0, pending: 0 };
 const toolNames: Record<string, string> = { get_status: "查询聚合状态", get_rules: "读取分流规则", get_processes: "查询应用进程", get_connections: "检查实际连接出口", get_support_report: "读取诊断摘要", get_diagnostics: "读取体检结果", run_diagnostics: "执行网络体检", preflight: "检查启动条件", set_rule: "设置分流规则", remove_rule: "删除分流规则", start: "开启聚合", stop: "停止聚合" };
 const states: Record<string, string> = { waiting: "等待确认", running: "执行中", completed: "已完成", error: "失败", cancelled: "已取消", interrupted: "已中断" };
+Object.assign(toolNames, { get_capabilities: "查询可用功能", get_nat_status: "读取 NAT 检测状态", run_nat_detection: "检测 NAT 类型", cancel_nat_detection: "取消 NAT 检测", select_nat_server: "选择 STUN 服务器", allow_nat_firewall: "放行 NAT 探测防火墙" });
 toolNames.configure_network = "配置模式和参与网卡";
 const errorText = (e: unknown) => e instanceof Error ? e.message : String(e);
 
@@ -43,6 +45,7 @@ export function AIAssistant({ open, onOpenChange, workspace = true, onOpenWorksp
   const [readOnly, setReadOnly] = useState(true);
   const [clearConfirm, setClearConfirm] = useState(false);
   const revision = useRef(0);
+  const startupEntries = useRef<Set<string> | null>(null);
   const list = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
   const busyRef = useRef(false);
@@ -60,6 +63,7 @@ export function AIAssistant({ open, onOpenChange, workspace = true, onOpenWorksp
 
   const refresh = useCallback(async () => {
     const next = await aiService.snapshot();
+    if (startupEntries.current === null) startupEntries.current = new Set(next.entries.map(entry => entry.id));
     if (next.revision !== revision.current) {
       revision.current = next.revision;
       window.dispatchEvent(new CustomEvent("hypomux:ai-changed"));
@@ -79,7 +83,7 @@ export function AIAssistant({ open, onOpenChange, workspace = true, onOpenWorksp
     return () => { disposed = true; clearTimeout(timer); };
   }, [native, refresh]);
   useEffect(() => {
-    if (open && view === "chat") input.current?.focus();
+    if (open && view === "chat") { input.current?.focus(); if (list.current) list.current.scrollTop = list.current.scrollHeight; }
   }, [open, view, workspace]);
   useEffect(() => {
     const el = list.current;
@@ -114,7 +118,7 @@ export function AIAssistant({ open, onOpenChange, workspace = true, onOpenWorksp
       {entry.role === "tool" ? <>
         {entry.arguments && entry.arguments !== "{}" && <><p>{operationSummary(entry, locale)}</p><details><summary>{text("查看参数", "View parameters")}</summary><pre className="ai-arguments">{pretty(entry.arguments)}</pre></details></>}
         {entry.state === "waiting" ? <><p>{text("允许执行上面的具体操作？这会修改本机网络或规则。", "Allow this operation? It changes local networking or routing rules.")}</p><div className="ai-actions"><Button appearance="primary" disabled={busy} onClick={() => void action(() => aiService.decide(entry.id, true))}>{text("允许此次操作", "Allow once")}</Button><Button disabled={busy} onClick={() => void action(() => aiService.decide(entry.id, false))}>{text("拒绝", "Deny")}</Button></div></> : <details><summary>{text("查看执行结果", "View result")}</summary><pre>{pretty(entry.text)}</pre></details>}
-      </> : <div className="ai-message">{entry.text}</div>}
+      </> : entry.role === "assistant" ? <AssistantMessage text={entry.text} /> : <div className="ai-message">{entry.text}</div>}
     </article>
   );
 
@@ -127,8 +131,9 @@ export function AIAssistant({ open, onOpenChange, workspace = true, onOpenWorksp
       {notice && <div className="ai-banner" role="status">{notice}</div>}
       {view === "chat" ? <>
         <div className="ai-conversation" ref={list}>
-          {!snapshot.entries.length && <div className="ai-welcome"><h2>{text("说说你想做什么", "What would you like to do?")}</h2><p>{text("配置聚合、管理分流，或一起查找网络问题。", "Set up aggregation, manage routes, or investigate network problems.")}</p>{["开启聚合，并把 CS2 设置为直连", "检查为什么只有一张网卡在跑流量", "查看当前分流规则"].map((zh, i) => <Button key={zh} appearance="secondary" onClick={() => { setDraft(locale === "en" ? ["Start aggregation and route CS2 directly", "Check why only one adapter carries traffic", "Show my routing rules"][i] : zh); input.current?.focus(); }}>{locale === "en" ? ["Start aggregation; route CS2 directly", "Diagnose adapter traffic", "Show routing rules"][i] : zh}</Button>)}{!config.model && <Button appearance="primary" onClick={() => { setView("model"); if (!workspace) onOpenWorkspace?.(); }}>{text("先连接一个模型", "Connect a model")}</Button>}</div>}
+          {!snapshot.entries.length && !previewReply && <div className="ai-welcome"><h2>{text("说说你想做什么", "What would you like to do?")}</h2><p>{text("配置聚合、管理分流，或一起查找网络问题。", "Set up aggregation, manage routes, or investigate network problems.")}</p>{["开启聚合，并把 CS2 设置为直连", "检查为什么只有一张网卡在跑流量", "查看当前分流规则"].map((zh, i) => <Button key={zh} appearance="secondary" onClick={() => { setDraft(locale === "en" ? ["Start aggregation and route CS2 directly", "Check why only one adapter carries traffic", "Show my routing rules"][i] : zh); input.current?.focus(); }}>{locale === "en" ? ["Start aggregation; route CS2 directly", "Diagnose adapter traffic", "Show routing rules"][i] : zh}</Button>)}{!config.model && <Button appearance="primary" onClick={() => { setView("model"); if (!workspace) onOpenWorkspace?.(); }}>{text("先连接一个模型", "Connect a model")}</Button>}</div>}
           {snapshot.entries.map(showEntry)}
+          {!native && previewReply && <article className="ai-entry"><small>{text("示例回复", "Sample reply")}</small><AssistantMessage text={previewReply} /></article>}
           {snapshot.running && <div className="ai-progress" role="status"><Spinner size="tiny" />{text("正在处理任务…", "Working…")}</div>}
         </div>
         <footer className="ai-compose"><small>{text("按需读取网络状态和规则 · 自动诊断数据脱敏", "Network state and rules on demand · diagnostics redacted")}</small><Textarea ref={input} disabled={busy} aria-label={text("消息", "Message")} value={draft} onChange={(_, d) => setDraft(d.value)} placeholder={text("例如：帮我把 CS2 设为直连", "For example: route CS2 directly")} resize="vertical" onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send(); } }} /><div className="ai-actions ai-compose-actions"><small>{config.model || text("未配置模型", "No model configured")}</small>{snapshot.running ? <Button disabled={busy} onClick={() => void action(() => aiService.cancel())}>{text("停止后续操作", "Stop next actions")}</Button> : <Button appearance="primary" icon={<Send20Regular />} disabled={busy || !draft.trim() || !native} onClick={send}>{text("发送", "Send")}</Button>}</div><div className="ai-history-actions">{clearConfirm ? <><span>{text("清除本机对话与操作记录？", "Clear local conversation and action history?")}</span><Button size="small" disabled={busy || snapshot.running || snapshot.pending > 0} onClick={() => void action(async () => { await aiService.clear(); setClearConfirm(false); })}>{text("清除", "Clear")}</Button><Button size="small" onClick={() => setClearConfirm(false)}>{text("取消", "Cancel")}</Button></> : <Button size="small" appearance="subtle" disabled={snapshot.running || snapshot.pending > 0} onClick={() => setClearConfirm(true)}>{text("清除历史", "Clear history")}</Button>}</div></footer>
@@ -163,16 +168,16 @@ export function AIAssistant({ open, onOpenChange, workspace = true, onOpenWorksp
       {(snapshot.running || snapshot.pending > 0) && <div className="ai-command-status" role="status" data-waiting={snapshot.pending > 0}><span className="ai-status-dot" />{snapshot.pending > 0 ? text("等你确认后，我再继续", "Waiting for your approval") : text("正在处理你的请求…", "Working on your request…")}</div>}
       {(error || snapshot.error) && <div className="ai-banner ai-error" role="alert">{error || snapshot.error}</div>}
     </div>
-    {!snapshot.entries.length && <div className="ai-pet-suggestions">{(page === "routing" ? [text("查看当前规则", "Show routing rules"), text("把 CS2 设为直连", "Route CS2 directly")] : page === "health" ? [text("帮我检查网络", "Check my network"), text("解释检测结果", "Explain diagnostics")] : [text("检查网络状态", "Check network status"), text("帮我开启聚合", "Start aggregation")]).map(prompt => <Button key={prompt} appearance="subtle" size="small" onClick={() => { setDraft(prompt); input.current?.focus(); }}>{prompt}<span aria-hidden="true">↗</span></Button>)}</div>}
+    {!snapshot.entries.length && !previewReply && <div className="ai-pet-suggestions">{(page === "routing" ? [text("查看当前规则", "Show routing rules"), text("把 CS2 设为直连", "Route CS2 directly")] : page === "health" ? [text("帮我检查网络", "Check my network"), text("解释检测结果", "Explain diagnostics")] : [text("检查网络状态", "Check network status"), text("帮我开启聚合", "Start aggregation")]).map(prompt => <Button key={prompt} appearance="subtle" size="small" onClick={() => { setDraft(prompt); input.current?.focus(); }}>{prompt}<span aria-hidden="true">↗</span></Button>)}</div>}
     <div className="ai-command-input">
       <textarea className="ai-pet-textarea" ref={input} disabled={busy} aria-label={text("消息", "Message")} value={draft} onChange={event => setDraft(event.target.value)} placeholder={text("和我说说你想做什么…", "Tell me what you have in mind…")} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send(); } }} />
       <div className="ai-command-input-footer"><Button className="ai-command-model" appearance="subtle" size="small" onClick={() => { setView("model"); onOpenWorkspace?.(); }}><span className="ai-model-dot" />{config.model || text("连接模型", "Connect a model")}</Button>{snapshot.running ? <Button size="small" disabled={busy} onClick={() => void action(() => aiService.cancel())}>{text("停止后续操作", "Stop next actions")}</Button> : <Button className="ai-command-send" appearance="primary" icon={<ArrowUp20Regular />} aria-label={text("发送", "Send")} disabled={busy || !draft.trim() || !native} onClick={send} />}</div>
     </div>
-    <footer className="ai-command-footnote">{native ? text("带上当前页面上下文 · 修改前请你确认", "Page context included · changes need your approval") : <><span>{text("界面预览 · 未连接模型", "Preview · no model connected")}</span><Button appearance="subtle" size="small" onClick={() => { setPreviewThinking(true); setPreviewReply(text(`嗨，我是小 Mux。看到你正在「${pageContext.label}」啦。\n\n${pageContext.greeting}\n\n你可以继续切换页面，我会在这里陪着你。`, `Hi, I'm Mux. You're viewing ${pageContext.label}.\n\n${pageContext.greeting}\n\nFeel free to switch pages. I'll be right here.`)); onOpenChange(false); }}>{text("预览思考与回复", "Preview thinking and reply")}</Button></>}</footer>
+    <footer className="ai-command-footnote">{native ? text("带上当前页面上下文 · 重要操作才需确认", "Page context included · confirmation for sensitive actions") : <><span>{text("界面预览 · 未连接模型", "Preview · no model connected")}</span><Button appearance="subtle" size="small" onClick={() => { setPreviewThinking(true); setPreviewReply(text(`嗨，我是小 Mux。看到你正在「${pageContext.label}」啦。\n\n${pageContext.greeting}\n\n你可以继续切换页面，我会在这里陪着你。`, `Hi, I'm Mux. You're viewing ${pageContext.label}.\n\n${pageContext.greeting}\n\nFeel free to switch pages. I'll be right here.`)); onOpenChange(false); }}>{text("预览思考与回复", "Preview thinking and reply")}</Button></>}</footer>
   </>;
   const latestReply = [...snapshot.entries].reverse().find(entry => ["assistant", "notice", "user"].includes(entry.role));
-  const speech = native ? (latestReply?.role !== "user" ? latestReply?.text : undefined) : previewReply;
-  return workspace ? <section id="ai-workspace" tabIndex={-1} className="ai-assistant ai-workspace" hidden={!open} aria-label={text("AI 助手工作区", "AI assistant workspace")}>{content}</section> : <AssistantCompanion open={open} onOpenChange={onOpenChange} running={snapshot.running || previewThinking} pending={snapshot.pending} speech={speech} sample={!native && !!previewReply} pageLabel={pageContext.label}>{quickContent}</AssistantCompanion>;
+  const speech = native ? (latestReply && latestReply.role !== "user" && !startupEntries.current?.has(latestReply.id) ? summarizeReply(latestReply.text) : undefined) : summarizeReply(previewReply);
+  return workspace ? <section id="ai-workspace" tabIndex={-1} className="ai-assistant ai-workspace" hidden={!open} aria-label={text("AI 助手工作区", "AI assistant workspace")}>{content}</section> : <AssistantCompanion open={open} onOpenChange={onOpenChange} running={snapshot.running || previewThinking} pending={snapshot.pending} speech={speech} speechId={latestReply?.id} onViewDetails={() => { setView("chat"); onOpenWorkspace?.(); }} sample={!native && !!previewReply} pageLabel={pageContext.label}>{quickContent}</AssistantCompanion>;
 
 }
 function pretty(value: string) { try { return JSON.stringify(JSON.parse(value), null, 2); } catch { return value; } }
