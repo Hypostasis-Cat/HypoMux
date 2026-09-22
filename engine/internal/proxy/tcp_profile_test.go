@@ -123,8 +123,9 @@ func TestRelayPreservesLargePayloadsAndHalfClose(t *testing.T) {
 	session := server.registry.Begin("test", "", proxyClient)
 	server.registry.Attach(session, proxyUpstream, "loopback", server.config.Adapters[0])
 	done := make(chan struct{})
+	trackedUpstream := &writerToTCPConn{TCPConn: proxyUpstream}
 	go func() {
-		server.relay(bufio.NewReaderSize(proxyClient, 64*1024), proxyClient, proxyUpstream, session)
+		server.relay(bufio.NewReaderSize(proxyClient, 64*1024), proxyClient, trackedUpstream, session)
 		close(done)
 	}()
 
@@ -175,6 +176,19 @@ func TestRelayPreservesLargePayloadsAndHalfClose(t *testing.T) {
 	if session.bytesUp.Load() != uint64(len(upload)) || session.bytesDown.Load() != uint64(len(download)) {
 		t.Fatalf("relay accounting up=%d down=%d", session.bytesUp.Load(), session.bytesDown.Load())
 	}
+	if trackedUpstream.writeToCalled {
+		t.Fatal("download bypassed the pooled relay buffer through TCP WriteTo")
+	}
+}
+
+type writerToTCPConn struct {
+	*net.TCPConn
+	writeToCalled bool
+}
+
+func (c *writerToTCPConn) WriteTo(w io.Writer) (int64, error) {
+	c.writeToCalled = true
+	return c.TCPConn.WriteTo(w)
 }
 
 type writerToReader struct {

@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"io"
@@ -38,7 +39,10 @@ func TestSOCKSUDPAssociationReusesFlowLocksClientAndReportsTelemetry(t *testing.
 	client := listenUDPClient(t)
 	defer client.Close()
 
-	for _, payload := range [][]byte{[]byte("one"), []byte("two")} {
+	payloads := [][]byte{[]byte("one"), bytes.Repeat([]byte{0xa5}, 1200), []byte("two"), bytes.Repeat([]byte{0x3c}, 8192), []byte("end")}
+	var totalBytes uint64
+	for _, payload := range payloads {
+		totalBytes += uint64(len(payload))
 		sendSOCKSUDP(t, client, relay, echoAddress, payload)
 		if reply := readSOCKSUDP(t, client); string(reply) != string(payload) {
 			t.Fatalf("UDP reply = %q, want %q", reply, payload)
@@ -47,15 +51,15 @@ func TestSOCKSUDPAssociationReusesFlowLocksClientAndReportsTelemetry(t *testing.
 	if udpDials.Load() != 1 {
 		t.Fatalf("physical UDP dials = %d, want 1", udpDials.Load())
 	}
-	if echoPackets.Load() != 2 {
-		t.Fatalf("echo packets = %d, want 2", echoPackets.Load())
+	if echoPackets.Load() != int64(len(payloads)) {
+		t.Fatalf("echo packets = %d, want %d", echoPackets.Load(), len(payloads))
 	}
 
 	flow := waitForUDPFlowTelemetry(
 		t,
 		server,
-		uint64(len("one")+len("two")),
-		uint64(len("one")+len("two")),
+		totalBytes,
+		totalBytes,
 		time.Second,
 	)
 	if flow.Channel != ChannelEthernet || flow.Adapter != "wired" {
@@ -69,7 +73,7 @@ func TestSOCKSUDPAssociationReusesFlowLocksClientAndReportsTelemetry(t *testing.
 	if _, _, err := spoof.ReadFromUDP(make([]byte, 128)); err == nil {
 		t.Fatal("different local UDP endpoint received a relay reply")
 	}
-	if echoPackets.Load() != 2 {
+	if echoPackets.Load() != int64(len(payloads)) {
 		t.Fatalf("spoofed packet reached upstream, count = %d", echoPackets.Load())
 	}
 

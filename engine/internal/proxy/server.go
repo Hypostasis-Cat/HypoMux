@@ -556,7 +556,7 @@ func (s *Server) relay(clientReader io.Reader, client net.Conn, upstream net.Con
 					}
 				}
 			},
-		}, upstream, buffer)
+		}, readerOnly{Reader: upstream}, buffer)
 		if session.cdnKey.domain != "" {
 			failed := steamUpstreamFailed(copyErr, clientWriteFailed, session.cdnResponseFailed) && session.cdnTrial
 			s.cdn.accountTransfer(session.cdnKey, session.cdnGeneration, 0, 0, session.cdnTrial, failed)

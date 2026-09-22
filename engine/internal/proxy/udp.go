@@ -398,8 +398,14 @@ func (f *udpFlow) send(payload []byte) error {
 }
 
 func (f *udpFlow) receiveLoop(clientAddress *net.UDPAddr) {
-	buffer := make([]byte, maxSOCKSUDPDatagramBytes)
 	defer f.close()
+	packet, headerSize, ok := newSOCKSUDPReplyBuffer(f.target)
+	if !ok {
+		return
+	}
+	// The target is immutable for this flow. Read directly after its cached
+	// SOCKS header; WriteToUDP finishes using the buffer before the next read.
+	buffer := packet[headerSize:]
 	for {
 		_ = f.connection.SetReadDeadline(
 			time.Now().Add(f.association.sweepInterval),
@@ -419,12 +425,11 @@ func (f *udpFlow) receiveLoop(clientAddress *net.UDPAddr) {
 		if count == 0 {
 			continue
 		}
-		packet, ok := packSOCKSUDPReply(f.target, buffer[:count])
-		if !ok {
+		written, err := f.association.relay.WriteToUDP(packet[:headerSize+count], clientAddress)
+		if err != nil {
 			return
 		}
-		written, err := f.association.relay.WriteToUDP(packet, clientAddress)
-		if err != nil {
+		if written != headerSize+count {
 			return
 		}
 		f.association.server.registry.AddDown(f.session, uint64(count))
@@ -538,6 +543,19 @@ func packSOCKSUDPReply(target string, payload []byte) ([]byte, bool) {
 		copy(packet[22:], payload)
 	}
 	return packet, true
+}
+
+// One allocation for packet storage per flow, rather than per datagram.
+// Preserve the full upstream read size; oversized encapsulated datagrams are
+// still rejected by the UDP socket instead of silently truncating their data.
+func newSOCKSUDPReplyBuffer(target string) ([]byte, int, bool) {
+	header, ok := packSOCKSUDPReply(target, nil)
+	if !ok {
+		return nil, 0, false
+	}
+	packet := make([]byte, len(header)+maxSOCKSUDPDatagramBytes)
+	copy(packet, header)
+	return packet, len(header), true
 }
 
 func writeSOCKSBindReply(client net.Conn, reply byte, address *net.UDPAddr) bool {
