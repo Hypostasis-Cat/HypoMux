@@ -37,7 +37,7 @@ export type {
 
 export type EngineSnapshot = GeneratedEngineSnapshot & { strategy?: string };
 
-export type RoutingSnapshot = Omit<GeneratedRoutingSnapshot, "match_order"> & { match_order?: string[] | null; revision?: string };
+export type RoutingSnapshot = Omit<GeneratedRoutingSnapshot, "match_order" | "revision"> & { match_order?: string[] | null; revision?: string };
 
 export type AdapterView = GeneratedAdapterView & { is_virtual?: boolean };
 
