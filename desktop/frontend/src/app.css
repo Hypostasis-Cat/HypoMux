@@ -5469,7 +5469,7 @@ svg {
 .hotspot-control p { color: var(--hm-text-secondary); font-size: 12px; }
 .hotspot-summary { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
 .hotspot-control.is-running { border-color: var(--hm-accent-muted); }
-.hotspot-layout { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(260px, 1fr); gap: 16px; align-items: start; }
+.hotspot-layout { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(260px, 1fr); gap: 16px; align-items: stretch; }
 .hotspot-surface { border: 1px solid var(--hm-outer-border); border-radius: var(--hm-radius); background: rgba(var(--hm-surface-rgb), var(--hm-panel-opacity)); padding: 22px; min-width: 0; }
 .hotspot-settings { display: flex; flex-direction: column; gap: 18px; }
 .hotspot-settings-content { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
@@ -5479,8 +5479,9 @@ svg {
 .hotspot-section-heading > svg { color: var(--hm-text-tertiary); }
 .hotspot-fields { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 16px; }
 .hotspot-fields > .fui-Field:nth-child(3) { grid-column: 1 / -1; }
-.hotspot-fields > .fui-Field { min-width: 0; }
-.hotspot-fields .fui-Input, .hotspot-fields .hotspot-band-dropdown { width: 100%; min-width: 0; min-height: 36px; }
+.hotspot-fields > .fui-Field { min-width: 0; align-self: start; }
+.hotspot-fields .fui-Input, .hotspot-fields .hotspot-band-dropdown { box-sizing: border-box; width: 100%; min-width: 0; height: 40px; min-height: 40px; }
+.hotspot-fields .fui-Field__hint { line-height: 1.5; }
 .hotspot-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .hotspot-save-hint { color: var(--hm-text-tertiary); font-size: 11px; }
 .hotspot-connect-intro { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 8px; padding: 20px 0; }
@@ -5509,7 +5510,7 @@ svg {
 .hotspot-error { overflow-wrap: anywhere; color: var(--hm-text-primary); }
 .hotspot-feedback > .hotspot-error { border-left: 3px solid var(--hm-warning); padding: 8px 12px; background: rgba(var(--hm-surface-secondary-rgb), .7); font-size: 12px; }
 .hotspot-notice { color: var(--hm-text-secondary); font-size: 12px; }
-@media (max-width: 820px) {
+@media (max-width: 1000px) {
   .hotspot-layout { grid-template-columns: minmax(0, 1fr); }
   .hotspot-control { padding: 20px; gap: 16px; flex-wrap: wrap; }
   .hotspot-control-copy { flex-basis: calc(100% - 90px); }
@@ -5613,10 +5614,10 @@ svg {
 .routing-action-buttons { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; margin-left: auto; }
 
 /* Keep hotspot state changes within stable card regions. */
-.hotspot-summary { min-height: 24px; flex-wrap: nowrap; }
-.hotspot-save-hint { min-height: 36px; }
-.hotspot-feedback { height: 96px; flex-shrink: 0; overflow: auto; scrollbar-gutter: stable; display: flex; flex-direction: column; gap: 8px; }
-.hotspot-connect { min-height: 480px; box-sizing: border-box; display: flex; flex-direction: column; gap: 16px; }
+.hotspot-summary { min-height: 24px; }
+.hotspot-feedback { max-height: 160px; flex-shrink: 0; overflow: auto; scrollbar-gutter: stable; display: flex; flex-direction: column; gap: 8px; }
+.hotspot-feedback:empty { display: none; }
+.hotspot-connect { box-sizing: border-box; display: flex; flex-direction: column; gap: 16px; }
 .hotspot-connect-body { flex: 1; min-width: 0; }
 .hotspot-devices ul { max-height: 170px; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; }
 .hotspot-qr-toggle { width: 100%; flex-shrink: 0; }
