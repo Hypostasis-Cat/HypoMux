@@ -96,6 +96,7 @@
       "privilege": "none",
       "cancellation": "host_context_only"
     },
+    {"name":"mtu.set","idempotency":"state_guarded","privilege":"administrator","cancellation":"not_supported_in_v1"},
     {
       "name": "wfp.inspect",
       "idempotency": "safe_retry",

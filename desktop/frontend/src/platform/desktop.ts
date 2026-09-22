@@ -1,6 +1,7 @@
 import { Browser, Call, Window } from "@wailsio/runtime";
 import * as DesktopHost from "../../bindings/github.com/Hypostasis-Cat/HypoMux/desktop/internal/platform/wails/desktophost";
 import type { NativeAppearanceResult, ResolvedAppearance, WindowMaterial } from "../theme/appearance.types";
+import { isDesktopRuntime } from "./runtime";
 
 const ignoreOutsideWails = (error: unknown) => {
   if (import.meta.env.DEV) {
@@ -46,6 +47,20 @@ const callAppearance = async (method: string, value: string): Promise<NativeAppe
 // This facade is the only frontend module allowed to import the Wails runtime.
 // Browser previews intentionally degrade to no-ops.
 export const desktopPlatform = {
+  supportsWindowDrag: isDesktopRuntime,
+  async windowDragState() {
+    const [position, maximised, fullscreen] = await Promise.all([
+      Window.Position(), Window.IsMaximised(), Window.IsFullscreen(),
+    ]);
+    return { ...position, maximised, fullscreen };
+  },
+  async restoreWindowForDrag() {
+    await Window.UnMaximise();
+    return Window.Size();
+  },
+  // Wails positions are device-independent pixels, matching screenX/screenY.
+  // Multiplying by devicePixelRatio would make touch drag overshoot at 125/150%.
+  moveWindow: (x: number, y: number) => Window.SetPosition(Math.round(x), Math.round(y)),
   resizeTray: (height: number) =>
     (Call.ByName("github.com/Hypostasis-Cat/HypoMux/desktop/internal/platform/wails.DesktopHost.ResizeTray", height) as Promise<void>).catch(ignoreOutsideWails),
   trayAction: (action: "show" | "hide" | "dismiss" | "quit") =>

@@ -8,14 +8,19 @@ import {
   WeatherSunny20Regular,
 } from "@fluentui/react-icons";
 import { Events } from "@wailsio/runtime";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useI18n } from "../../i18n/i18n";
 import { desktopPlatform } from "../../platform/desktop";
 import { productInfo } from "../../product";
 import { useAppearance } from "../../theme/appearance.store";
 import { ProductMark } from "./ProductMark";
+import { attachWindowTouchDrag } from "./windowTouchDrag";
 
 export function TitleBar() {
+  const titlebar = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (titlebar.current) return attachWindowTouchDrag(titlebar.current, desktopPlatform);
+  }, []);
   const { resolvedMode, update } = useAppearance();
   const { locale } = useI18n();
   const [maximised, setMaximised] = useState(false);
@@ -45,7 +50,7 @@ export function TitleBar() {
   const closeLabel = locale === "en" ? "Close" : "关闭窗口";
 
   return (
-    <header className="titlebar">
+    <header ref={titlebar} className="titlebar">
       <div className="titlebar-identity">
         <ProductMark />
         <strong>HypoMux</strong>

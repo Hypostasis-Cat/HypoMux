@@ -1,0 +1,14 @@
+.mtu-page { display: grid; gap: 18px; }
+.mtu-panel { padding: 24px; }
+.mtu-panel h2 { margin: 0 0 10px; font-size: 18px; }
+.mtu-panel p { line-height: 1.65; opacity: .85; }
+.mtu-panel-heading { display: flex; justify-content: space-between; gap: 16px; align-items: start; }
+.mtu-tag { border: 1px solid currentColor; border-radius: 999px; padding: 3px 10px; font-size: 12px; opacity: .7; }
+.mtu-fields { display: grid; grid-template-columns: 1fr 1fr; align-items: start; gap: 20px; margin: 20px 0; }
+.mtu-values { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; padding: 18px 0; }
+.mtu-values span { display: block; font-size: 12px; opacity: .75; }
+.mtu-values strong { display: block; margin-top: 8px; font-size: 30px; font-variant-numeric: tabular-nums; }
+.mtu-values small { margin-left: 8px; font-size: 12px; font-weight: 400; opacity: .7; }
+.mtu-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 18px; }
+.mtu-error { color: var(--colorPaletteRedForeground1, #b42318); overflow-wrap: anywhere; }
+@media (max-width: 600px) { .mtu-fields { grid-template-columns: 1fr; } .mtu-panel { padding: 18px; } .mtu-values strong { font-size: 24px; } }

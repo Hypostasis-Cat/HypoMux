@@ -224,6 +224,25 @@ func (s *Server) handle(ctx context.Context, line []byte) (protocol.Response, bo
 		}
 		result := diagnostic.Run(ctx, params.Config())
 		return protocol.Result(request.ID, result), false
+	case api.MethodMTUSet:
+		if !s.identity.Elevated {
+			return protocol.Failure(request.ID, "elevation_required", "修改 MTU 需要管理员 Core", nil), false
+		}
+		state := s.runtime.Snapshot().State
+		if state != "stopped" && state != "failed" {
+			return protocol.Failure(request.ID, "engine_running", "请先停止网络服务", nil), false
+		}
+		var params platform.MTUChange
+		if err := json.Unmarshal(request.Params, &params); err != nil {
+			return protocol.Failure(request.ID, "invalid_params", err.Error(), nil), false
+		}
+		if err := params.Validate(); err != nil {
+			return protocol.Failure(request.ID, "invalid_params", err.Error(), nil), false
+		}
+		if err := platform.SetMTU(ctx, params); err != nil {
+			return protocol.Failure(request.ID, "mtu_failed", err.Error(), nil), false
+		}
+		return protocol.Result(request.ID, map[string]any{"current": params.Value}), false
 	case api.MethodHotspotInspect:
 		if !s.identity.Elevated {
 			return protocol.Failure(request.ID, "elevation_required", "共享状态检查需要管理员 Core，请重新启动 TUN", nil), false

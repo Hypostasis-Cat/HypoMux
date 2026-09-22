@@ -61,8 +61,8 @@ export function EngineHero({
     : phase === "stopping"
       ? text("正在停止", "Stopping")
       : phase === "running" || phase === "degraded"
-        ? text("停止聚合", "Stop aggregation")
-        : text("启动聚合", "Start aggregation");
+        ? text("停止网络服务", "Stop network service")
+        : text("启动网络服务", "Start network service");
   const phaseLabel = phase === "running"
     ? text("运行中", "Running")
     : phase === "degraded"

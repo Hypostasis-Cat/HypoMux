@@ -373,6 +373,8 @@ svg {
   background: color-mix(in srgb, var(--hm-shell) 72%, transparent);
   user-select: none;
   --wails-draggable: drag;
+  /* Keep a touch gesture in the title bar instead of browser pan/zoom. */
+  touch-action: none;
 }
 
 .titlebar-identity {

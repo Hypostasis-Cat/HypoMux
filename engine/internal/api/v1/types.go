@@ -32,6 +32,7 @@ const (
 	MethodDNSStatus         = "dns.status"
 	MethodHealthCheck       = "health.check"
 	MethodDiagnosticRun     = "diagnostic.run"
+	MethodMTUSet            = "mtu.set"
 	MethodWFPInspect        = "wfp.inspect"
 	MethodHotspotInspect    = "hotspot.inspect"
 	MethodHostShutdown      = "host.shutdown"
@@ -58,6 +59,7 @@ var capabilities = []string{
 	MethodDNSStatus,
 	MethodHealthCheck,
 	MethodDiagnosticRun,
+	MethodMTUSet,
 	MethodWFPInspect,
 	MethodHotspotInspect,
 	MethodHostShutdown,

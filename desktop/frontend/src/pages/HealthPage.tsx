@@ -34,6 +34,7 @@ import { adapterSaveInput, adapterSaveQueue } from "../platform/adapterSaveQueue
 import { startSerialPoll } from "../platform/serialPoll";
 import type { EnginePhase } from "../state/useEngineState";
 import { adapterListKey } from "../state/adapterRuntime";
+import { MTUDetectionPage } from "./MTUDetectionPage";
 import { NATDetectionPage } from "./NATDetectionPage";
 import { isNATDetectionBlocked } from "./natDetectionPolicy";
 import type { HealthNoticeIntent } from "./healthNotice";
@@ -124,7 +125,7 @@ export function HealthPage({
   const [refreshing, setRefreshing] = useState(false);
   const [preview, setPreview] = useState(false);
   const [engineRunning, setEngineRunning] = useState(false);
-  const [healthView, setHealthView] = useState<"link" | "nat">("link");
+  const [healthView, setHealthView] = useState<"link" | "nat" | "mtu">("link");
   const adaptersRef = useRef<AdapterView[]>([]);
   const adapterRuntimeRef = useRef(adapterRuntime);
   const adapterRuntimeKeyRef = useRef<string>();
@@ -387,18 +388,18 @@ export function HealthPage({
         <div key={healthView} className="health-heading-copy">
           <span className="section-kicker">{healthView === "link"
             ? text("逐接口真实出口验证", "Per-interface exit verification")
-            : text("UDP 映射与过滤行为", "UDP mapping and filtering behavior")}</span>
-          <h1>{healthView === "link" ? text("网络体检", "Network diagnostics") : text("NAT 类型检测", "NAT type detection")}</h1>
+            : healthView === "mtu" ? text("IPv4 路径探测", "IPv4 path probing") : text("UDP 映射与过滤行为", "UDP mapping and filtering behavior")}</span>
+          <h1>{healthView === "link" ? text("网络体检", "Network diagnostics") : healthView === "mtu" ? text("MTU 检测", "MTU detection") : text("NAT 类型检测", "NAT type detection")}</h1>
           <p>{healthView === "link" ? text(
             "ICMP 负责质量数据，绑定 TCP 负责确认流量确实从所选网卡发出。",
             "ICMP measures link quality while bound TCP confirms traffic actually leaves through the selected adapter.",
-          ) : text(
+          ) : healthView === "mtu" ? text("检测所选网卡到目标地址的推荐 MTU，并按需应用或恢复。", "Detect a recommended MTU for an adapter and target, then apply or restore it.") : text(
             "使用 RFC 5780 分析所选出口的 UDP 映射与过滤行为，并给出经典 NAT 类型。",
             "Analyze UDP mapping and filtering behavior over the selected egress using RFC 5780.",
           )}</p>
         </div>
         <div key={`actions-${healthView}`} className="health-heading-actions health-heading-actions-enter">
-          {healthView === "nat" ? <span>RFC 5780 · UDP</span> : <span>{text("目标", "Target")} {snapshot.target_ip || "223.5.5.5"}</span>}
+          {healthView === "mtu" ? <span>IPv4 · ICMP DF</span> : healthView === "nat" ? <span>RFC 5780 · UDP</span> : <span>{text("目标", "Target")} {snapshot.target_ip || "223.5.5.5"}</span>}
           {healthView === "link" && (running ? (
             <Button appearance="secondary" icon={<Stop20Regular />} onClick={cancel}>{text("取消体检", "Cancel")}</Button>
           ) : (
@@ -417,10 +418,11 @@ export function HealthPage({
       <nav className="health-subnav" aria-label={text("网络体检页面", "Network diagnostic pages")}>
         <TabList
           selectedValue={healthView}
-          onTabSelect={(_, data) => setHealthView(data.value as "link" | "nat")}
+          onTabSelect={(_, data) => setHealthView(data.value as "link" | "nat" | "mtu")}
         >
           <Tab value="link">{text("链路体检", "Link diagnostics")}</Tab>
           <Tab value="nat">{text("NAT 类型检测", "NAT type detection")}</Tab>
+          <Tab value="mtu">{text("MTU 检测", "MTU detection")}</Tab>
         </TabList>
       </nav>
 
@@ -568,6 +570,8 @@ export function HealthPage({
         </div>
           </section>
         </div>
+      ) : healthView === "mtu" ? (
+        <MTUDetectionPage adapters={adapters} enginePhase={enginePhase} loading={loading} preview={preview} text={text} />
       ) : (
         <NATDetectionPage
           adapters={adapters}

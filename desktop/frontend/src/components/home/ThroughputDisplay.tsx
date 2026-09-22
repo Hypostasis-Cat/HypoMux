@@ -107,7 +107,7 @@ export function ThroughputDisplay({
         </svg>
       ) : (
         <div className="throughput-idle">
-          <span>{locale === "en" ? "Live throughput appears after aggregation starts" : "启动聚合后显示实时吞吐趋势"}</span>
+          <span>{locale === "en" ? "Live throughput appears after aggregation starts" : "启动网络服务后显示实时吞吐趋势"}</span>
         </div>
       )}
     </div>

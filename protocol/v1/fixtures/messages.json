@@ -1,4 +1,6 @@
 [
+  {"name":"mtu_set_request","kind":"request","method":"mtu.set","message":{"protocol":1,"id":"fixture-mtu","method":"mtu.set","params":{"if_index":7,"guid":"12345678-1234-1234-1234-123456789abc","expected":1500,"value":1492}}},
+  {"name":"mtu_set_response","kind":"response","method":"mtu.set","message":{"protocol":1,"id":"fixture-mtu","result":{"current":1492}}},
   {"name": "engine_scheduling_request", "kind": "request", "method": "engine.scheduling", "message": {"protocol": 1, "id": "fixture-scheduling", "method": "engine.scheduling", "params": {"weighted": true, "adapters": [{"name": "Ethernet", "source_ip": "192.0.2.10", "if_index": 7, "weight": 3}]}}},
   {"name": "engine_scheduling_response", "kind": "response", "method": "engine.scheduling", "message": {"protocol": 1, "id": "fixture-scheduling", "result": {"weighted": true, "adapters": [{"name": "Ethernet", "source_ip": "192.0.2.10", "if_index": 7, "weight": 3}]}}},
   {

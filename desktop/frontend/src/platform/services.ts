@@ -35,6 +35,9 @@ export type {
   TunPreflightSnapshot,
 };
 
+export type MTUInfo = { adapter_id: string; guid: string; if_index: number; address: string; current: number; original?: number };
+export type MTUResult = MTUInfo & { target: string; recommended: number; at_limit: boolean; tested_at: string };
+
 export type EngineSnapshot = GeneratedEngineSnapshot & { strategy?: string };
 
 export type RoutingSnapshot = Omit<GeneratedRoutingSnapshot, "match_order" | "revision"> & { match_order?: string[] | null; revision?: string };
@@ -273,6 +276,13 @@ export const appServices = {
     listProcessChoices: () => RoutingRuleService.ListProcessChoices(),
     importRules: () => RoutingRuleService.Import(),
     exportRules: (rules: RoutingRule[], order: string[] = ["process", "domain", "ip"]) => Call.ByName("github.com/Hypostasis-Cat/HypoMux/desktop/internal/services.RoutingRuleService.ExportOrdered", rules, order) as Promise<string>,
+  },
+  mtu: {
+    current: (id: string) => Call.ByName("github.com/Hypostasis-Cat/HypoMux/desktop/internal/services.MTUService.Current", id) as Promise<MTUInfo>,
+    detect: (id: string, target: string) => Call.ByName("github.com/Hypostasis-Cat/HypoMux/desktop/internal/services.MTUService.Detect", id, target) as Promise<MTUResult>,
+    cancel: () => Call.ByName("github.com/Hypostasis-Cat/HypoMux/desktop/internal/services.MTUService.Cancel") as Promise<void>,
+    apply: (id: string) => Call.ByName("github.com/Hypostasis-Cat/HypoMux/desktop/internal/services.MTUService.Apply", id) as Promise<MTUInfo>,
+    restore: (id: string) => Call.ByName("github.com/Hypostasis-Cat/HypoMux/desktop/internal/services.MTUService.Restore", id) as Promise<MTUInfo>,
   },
   diagnostics: {
     latest: () => DiagnosticsService.Latest(),
