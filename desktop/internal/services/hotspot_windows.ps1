@@ -27,6 +27,10 @@ $sharingRetryCount = 0
 $nextSharingCheck = [DateTime]::MinValue
 $privateNetworkDetail = ''
 $gatewayAddress = ''
+$configuredBand = 'auto'
+$bandFallback = ''
+$transmitLinkMbps = 0
+$receiveLinkMbps = 0
 
 function Publish-State([string]$state, [string]$message, [bool]$verified) {
     $clients = 0
@@ -51,6 +55,8 @@ function Publish-State([string]$state, [string]$message, [bool]$verified) {
         cleanup_error = $cleanupError
         diagnostics = $sharingDetail
         gateway_address = $gatewayAddress
+        configured_band = $configuredBand; band_fallback = $bandFallback
+        transmit_link_mbps = $transmitLinkMbps; receive_link_mbps = $receiveLinkMbps
         devices = $devices; devices_available = $devicesAvailable
         updated_at = [DateTime]::UtcNow.ToString('o')
     } | ConvertTo-Json -Depth 5 -Compress))
@@ -127,7 +133,7 @@ function Read-WirelessNetwork {
             $_.InterfaceIndex -eq $adapter.ifIndex -and $_.AddressState -eq 'Preferred' -and
             $_.IPAddress -ne '0.0.0.0' -and $_.IPAddress -notlike '169.254.*' -and $_.IPAddress -notlike '127.*'
         } | ForEach-Object { [string]$_.IPAddress } | Sort-Object -Unique)
-        [PSCustomObject]@{ Guid = [guid]$adapter.InterfaceGuid; Status = [string]$adapter.Status; Addresses = $valid; Uplink = ($adapter.ifIndex -in $uplinks) }
+        [PSCustomObject]@{ Guid = [guid]$adapter.InterfaceGuid; Status = [string]$adapter.Status; Addresses = $valid; Uplink = ($adapter.ifIndex -in $uplinks); TransmitMbps = ([double]$adapter.TransmitLinkSpeed / 1000000); ReceiveMbps = ([double]$adapter.ReceiveLinkSpeed / 1000000) }
     }
 }
 
@@ -139,6 +145,7 @@ function Save-NetworkBaseline {
 
 function Test-PrivateNetwork {
     $script:gatewayAddress = ''
+    $script:transmitLinkMbps = 0; $script:receiveLinkMbps = 0
     $script:networkQueryFailed = $false
     $script:privateNetworkDetail = 'WinRT is not On'
     if ([string]$manager.TetheringOperationalState -ne 'On') {
@@ -170,6 +177,8 @@ function Test-PrivateNetwork {
         $script:privateID = $ready[0].Guid
     }
     $script:gatewayAddress = $ready[0].Addresses[0]
+    $script:transmitLinkMbps = $ready[0].TransmitMbps
+    $script:receiveLinkMbps = $ready[0].ReceiveMbps
     return $true
 }
 
@@ -281,6 +290,44 @@ function Set-HotspotBand($desired, [string]$band, [bool]$bandAvailable) {
     if (-not $desired.IsBandSupported($desired.Band)) { throw 'The Wi-Fi adapter does not support the selected band' }
 }
 
+function Select-StartupBand($desired, [string]$requested, [bool]$available) {
+    if ($requested -eq 'auto' -and $available) {
+        $bandType = [Windows.Networking.NetworkOperators.TetheringWiFiBand, Windows.Networking.NetworkOperators, ContentType=WindowsRuntime]
+        try { if ($desired.IsBandSupported($bandType::FiveGigahertz)) { return '5' } }
+        catch { } # Optional capability query must not break automatic mode.
+    }
+    return $requested
+}
+
+function Start-ConfiguredHotspot($desired, [string]$requested, [bool]$available) {
+    if ($stopSignal.IsCompleted) { throw 'Desktop closed before hotspot configuration' }
+    $script:configuredBand = Select-StartupBand $desired $requested $available
+    $script:bandFallback = ''
+    Set-HotspotBand $desired $script:configuredBand $available
+    $script:configured = $true
+    $script:configurationRestored = $false
+    Await-Action ($manager.ConfigureAccessPointAsync($desired))
+    if ($stopSignal.IsCompleted) { throw 'Desktop closed before hotspot startup' }
+    $script:attempted = $true
+    $script:hotspotOffConfirmed = $false
+    $result = Await-Operation ($manager.StartTetheringAsync()) $resultType
+    # Retry only an automatic preference rejected for radio/band restrictions,
+    # with an explicitly Off AP. Never reconfigure a live or transitioning AP.
+    if ($requested -eq 'auto' -and $script:configuredBand -eq '5' -and
+        [string]$result.Status -in @('WiFiDeviceOff', 'RadioRestriction', 'BandInterference') -and
+        [string]$manager.TetheringOperationalState -eq 'Off') {
+        if ($stopSignal.IsCompleted) { throw 'Desktop closed before hotspot fallback' }
+        $script:bandFallback = [string]$result.Status
+        $script:configuredBand = 'auto'
+        Set-HotspotBand $desired 'auto' $available
+        Await-Action ($manager.ConfigureAccessPointAsync($desired))
+        if ($stopSignal.IsCompleted) { throw 'Desktop closed before hotspot fallback startup' }
+        $result = Await-Operation ($manager.StartTetheringAsync()) $resultType
+    }
+    $script:sharingDetail += '; requested_band=' + $requested + '; configured_band=' + $script:configuredBand + '; fallback=' + $script:bandFallback + '; start_status=' + [string]$result.Status
+    if ([string]$result.Status -ne 'Success') { throw (Get-StartFailure ([string]$result.Status) $script:configuredBand) }
+}
+
 function Stop-OwnedHotspot {
     # Transitional/off states can lag behind a failed Start/Stop result.
     $deadline = [DateTime]::UtcNow.AddSeconds(5)
@@ -351,20 +398,11 @@ public static class HypoMuxHotspotLifetime {
     $apiInformation = [Windows.Foundation.Metadata.ApiInformation, Windows.Foundation, ContentType=WindowsRuntime]
     $configurationType = 'Windows.Networking.NetworkOperators.NetworkOperatorTetheringAccessPointConfiguration'
     $bandAvailable = $apiInformation::IsPropertyPresent($configurationType, 'Band') -and $apiInformation::IsMethodPresent($configurationType, 'IsBandSupported')
-    Set-HotspotBand $desired ([string]$config.band) $bandAvailable
     if ($stopSignal.IsCompleted) { throw 'Desktop closed before hotspot startup' }
     $phase = 'network baseline'
     Save-NetworkBaseline
     $phase = 'access point configuration'
-    $configured = $true
-    $configurationRestored = $false
-    Await-Action ($manager.ConfigureAccessPointAsync($desired))
-    $phase = 'hotspot startup'
-    $attempted = $true
-    $hotspotOffConfirmed = $false
-    $result = Await-Operation ($manager.StartTetheringAsync()) $resultType
-    $sharingDetail += '; requested_band=' + [string]$config.band + '; start_status=' + [string]$result.Status
-    if ([string]$result.Status -ne 'Success') { throw (Get-StartFailure ([string]$result.Status) ([string]$config.band)) }
+    Start-ConfiguredHotspot $desired ([string]$config.band) $bandAvailable
     $phase = 'shared egress verification'
     $networkReady = $false
     $verificationDeadline = [DateTime]::UtcNow.AddSeconds(20)

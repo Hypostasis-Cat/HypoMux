@@ -7,10 +7,38 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestHotspotStatusLoggingIsDeduplicatedAndPrivate(t *testing.T) {
+	logs := newSupportLogStore(filepath.Join(t.TempDir(), "app.log"))
+	logs.Start("tun", []string{"test"}, nil)
+	record := newHotspotStatusLogger(logs)
+	status := HotspotStatus{State: "running", SSID: "private-ssid", Band: "auto", ConfiguredBand: "5",
+		Clients: 1, TransmitLinkMbps: 866, SharingVerified: true,
+		Devices: []HotspotDevice{{MAC: "private-mac", Hosts: []string{"private-host"}}}, Diagnostics: "private-detail"}
+	record(status)
+	status.UpdatedAt = "later"
+	record(status)
+	status.TransmitLinkMbps = 433
+	record(status)
+	status.State = "stopped"
+	record(status)
+	raw, err := logs.Raw()
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(raw)
+	if strings.Count(text, `"event":"status_changed"`) != 3 || !strings.Contains(text, `"transmit_link_mbps":433`) {
+		t.Fatalf("missing or duplicated hotspot events: %s", text)
+	}
+	if strings.Contains(text, "private-") {
+		t.Fatal("hotspot identity leaked into support log")
+	}
+}
 
 func TestHotspotConfigValidation(t *testing.T) {
 	valid := HotspotConfig{SSID: "HypoMux 手机", Password: "safe-'$`password", Band: "auto"}

@@ -24,6 +24,10 @@ type HotspotConfig struct {
 }
 
 type HotspotStatus struct {
+	ConfiguredBand        string          `json:"configured_band,omitempty"`
+	BandFallback          string          `json:"band_fallback,omitempty"`
+	TransmitLinkMbps      float64         `json:"transmit_link_mbps,omitempty"`
+	ReceiveLinkMbps       float64         `json:"receive_link_mbps,omitempty"`
 	Devices               []HotspotDevice `json:"devices,omitempty"`
 	DevicesAvailable      bool            `json:"devices_available"`
 	UpdatedAt             string          `json:"updated_at,omitempty"`
@@ -70,6 +74,7 @@ func validateHotspotConfig(config HotspotConfig) error {
 // configuration. Closing stdin asks it to stop and restore that configuration;
 // desktop crashes also close the pipe, without a persisted session lease.
 type hotspotSession struct {
+	onStatus      func(HotspotStatus)
 	mu            sync.Mutex
 	status        HotspotStatus
 	input         io.WriteCloser
@@ -185,6 +190,9 @@ func launchHotspotObserved(ctx context.Context, command *exec.Cmd, config Hotspo
 			}
 			h.status = status
 			h.mu.Unlock()
+			if h.onStatus != nil {
+				h.onStatus(status)
+			}
 			// A working AP is distinct from verified aggregation egress. Windows
 			// can omit legacy ICS entries; keep that state explicitly unverified.
 			if status.State == "running" && (status.SharingVerified || status.GatewayAddress != "") && !signalled {
@@ -202,7 +210,11 @@ func launchHotspotObserved(ctx context.Context, command *exec.Cmd, config Hotspo
 			h.status.State = "failed"
 			h.status.Message = "热点控制进程未正常结束"
 		}
+		finalStatus := h.status
 		h.mu.Unlock()
+		if h.onStatus != nil {
+			h.onStatus(finalStatus)
+		}
 	}()
 	inputMu.Lock()
 	encodeErr := json.NewEncoder(input).Encode(config)
@@ -291,6 +303,7 @@ func (s *EngineService) StartHotspot(config HotspotConfig) (HotspotStatus, error
 		return s.HotspotStatus(), err
 	}
 	_, err = launchHotspotObserved(ctx, command, config, func(h *hotspotSession) {
+		h.onStatus = newHotspotStatusLogger(s.logs)
 		s.mu.Lock()
 		s.hotspot = h
 		s.mu.Unlock()
@@ -304,6 +317,34 @@ func (s *EngineService) StartHotspot(config HotspotConfig) (HotspotStatus, error
 		return reply
 	})
 	return s.HotspotStatus(), err
+}
+
+// Worker callbacks are serialized. Keep the log useful without recording SSIDs,
+// passwords, client identities or repeatedly emitting the same polling result.
+func newHotspotStatusLogger(logs *SupportLogStore) func(HotspotStatus) {
+	var previous string
+	return func(status HotspotStatus) {
+		if logs == nil {
+			return
+		}
+		fields := hotspotPerformanceFields(status)
+		fields["cleanup_complete"] = status.CleanupComplete
+		encoded, _ := json.Marshal(fields)
+		if string(encoded) == previous {
+			return
+		}
+		previous = string(encoded)
+		logs.RecordEvent("hotspot", "status_changed", fields)
+	}
+}
+
+func hotspotPerformanceFields(status HotspotStatus) map[string]any {
+	return map[string]any{
+		"state": status.State, "requested_band": status.Band,
+		"configured_band": status.ConfiguredBand, "band_fallback": status.BandFallback,
+		"clients": status.Clients, "sharing_verified": status.SharingVerified,
+		"transmit_link_mbps": status.TransmitLinkMbps, "receive_link_mbps": status.ReceiveLinkMbps,
+	}
 }
 
 func (s *EngineService) stopHotspot(ctx context.Context) error {

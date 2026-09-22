@@ -72,6 +72,8 @@ export type SteamCDNStatus = {
 
 export type HotspotConfig = { ssid: string; password: string; band: "auto" | "2.4" | "5" };
 export type HotspotStatus = {
+  configured_band?: string; band_fallback?: string;
+  transmit_link_mbps?: number; receive_link_mbps?: number;
   devices?: Array<{ mac: string; hosts: string[] }>;
   devices_available?: boolean; updated_at?: string;
   state: "stopped" | "starting" | "running" | "stopping" | "failed";

@@ -489,6 +489,8 @@ func (s *EngineService) Snapshot() (EngineSnapshot, error) {
 			})
 		}
 		s.logs.RecordEvent("performance", "throughput_sample", map[string]any{
+			"rate_unit": "bytes_per_second", "strategy": snapshot.Strategy,
+			"sampled_at": snapshot.SampledAt, "hotspot": hotspotPerformanceFields(s.HotspotStatus()),
 			"tcp_profile": telemetry.TCPProfile, "download_bps": snapshot.DownloadBPS,
 			"upload_bps": snapshot.UploadBPS, "connections": snapshot.Connections,
 			"adapters": adapters,

@@ -156,7 +156,7 @@ export function HotspotPanel() {
       <Field label={text("热点名称", "Network name")} validationState={!active && !validName ? "error" : "none"} validationMessage={!active && !validName ? text("请输入 1–32 个 UTF-8 字节，不能包含换行。", "Enter 1–32 UTF-8 bytes without line breaks.") : undefined} hint={text("在手机 Wi-Fi 列表中显示的名称", "The name shown in your phone’s Wi-Fi list")}>
         <Input value={active ? status?.ssid : config.ssid} disabled={loadingConfig || pending || active} onChange={(_, data) => setConfig(value => ({ ...value, ssid: data.value }))} />
       </Field>
-      <Field label={text("Wi-Fi 频段", "Wi-Fi band")} hint={text("推荐自动，由 Windows 选择可用频段", "Automatic lets Windows choose an available band")}>
+      <Field label={text("Wi-Fi 频段", "Wi-Fi band")} hint={text("自动优先尝试 5 GHz，频段受限时回退；旧设备可手动选择 2.4 GHz", "Automatic prefers 5 GHz and falls back on band restrictions; choose 2.4 GHz for older devices")}>
         <Dropdown className="hotspot-band-dropdown" value={bandLabel} selectedOptions={[band]} disabled={loadingConfig || pending || active}
           onOptionSelect={(_, data) => {
             if (data.optionValue === "auto" || data.optionValue === "5" || data.optionValue === "2.4") {
@@ -206,17 +206,20 @@ export function HotspotPanel() {
     <Button className="hotspot-qr-toggle" disabled={!canShowQR} aria-pressed={qrVisible} aria-controls="hotspot-connection-content" onClick={() => setShowQR(value => !value)}>{qrVisible ? text("隐藏二维码", "Hide connection code") : text("扫码连接", "Scan to connect")}</Button>
     </aside></div>
     <details className="hotspot-error"><summary>{text("共享诊断", "Sharing diagnostics")}</summary>
+      {active && status?.configured_band && <p>{text("热点频段配置", "Configured hotspot band")}: {status.configured_band === "auto" ? text("Windows 自动选择", "Windows automatic selection") : `${status.configured_band} GHz`}{status.band_fallback ? text("（5 GHz 受限，已回退）", " (5 GHz restricted; fallback applied)") : ""}</p>}
+      {active && !!status?.transmit_link_mbps && <p>{text("热点网卡报告的发送链路速率", "Hotspot adapter reported transmit link rate")}: {status.transmit_link_mbps} Mbps. {text("这是驱动报告的链路值，不代表手机实测吞吐。", "This driver-reported link value is not measured phone throughput.")}</p>}
       <p>{text("热点已开启只表示 Wi-Fi 可接入；设备数量表示 Windows 已检测到连接。出口已校验表示共享接口匹配，但不是手机互联网测速结果。", "Hotspot on means Wi-Fi is available; the device count reflects Windows connections. Verified egress confirms the sharing interfaces, not a phone internet speed test.")}</p>
       {status?.state !== "failed" && status?.message && <p>{status.message}</p>}
       {!status?.sharing_verified && <p>{text("Windows 未提供共享接口记录时，仍可正常使用热点。若手机能连接但无法上网，请先检查电脑聚合是否能上网，再复制诊断排查。", "When Windows omits sharing records, the hotspot can still work. If a phone connects without internet, check internet access through PC aggregation, then copy these diagnostics.")}</p>}
       {status?.updated_at && <p>{text("状态采样时间", "Status sampled at")}: {new Date(status.updated_at).toLocaleString()}</p>}
       <p>{status?.diagnostics || text("暂无共享诊断，开启热点后将在这里显示。", "Sharing diagnostics will appear here after starting the hotspot.")}</p>
-      <Button disabled={!status?.diagnostics} onClick={() => status && void copy(JSON.stringify({ state: status.state, sampled_at: status.updated_at, sharing_verified: status.sharing_verified, gateway: status.gateway_address, diagnostics: status.diagnostics }, null, 2))}>{text("复制诊断", "Copy diagnostics")}</Button>
+      <Button disabled={!status?.diagnostics} onClick={() => status && void copy(JSON.stringify({ state: status.state, sampled_at: status.updated_at, requested_band: status.band, configured_band: status.configured_band, band_fallback: status.band_fallback, transmit_link_mbps: status.transmit_link_mbps, receive_link_mbps: status.receive_link_mbps, sharing_verified: status.sharing_verified, gateway: status.gateway_address, diagnostics: status.diagnostics }, null, 2))}>{text("复制诊断", "Copy diagnostics")}</Button>
     </details>
     <details className="hotspot-help"><summary>{text("使用说明与共享规则", "Usage and sharing details")}</summary><div>
       {active && status?.gateway_address && <p>{text("热点网关", "Hotspot gateway")}: {status.gateway_address}</p>}
       <p>{text("手机连接上面的 Wi-Fi 即可，无需安装客户端或设置代理。停止聚合或退出 HypoMux 时，热点会自动关闭。", "Connect your phone to this Wi-Fi network. No client or proxy settings are needed. The hotspot closes when aggregation stops or HypoMux exits.")}</p>
       <p>{text("沿用当前聚合线路和分流规则，多连接可利用多条线路，单连接速度不保证叠加。首次使用请在手机上验证网页、视频和下载。", "Uses your current aggregation links and routing rules. Multiple connections can use multiple links; single-connection bonding is not guaranteed. Verify browsing, video and downloads on your phone on first use.")}</p>
+      <p>{text("无线网卡同时接收上游 Wi-Fi 和发送热点时会共享无线资源。对比速度时，请在电脑和手机使用相同下载源及多连接方式，并避免同时测速。", "A Wi-Fi adapter shares radio resources between its upstream connection and hotspot. Compare PC and phone speeds using the same source and multiple connections, one test at a time.")}</p>
       {status?.sharing_verified && !pollError && <p>{text("共享出口已校验", "Shared egress verified")}: {status.shared_adapter}</p>}
     </div></details>
   </section>;

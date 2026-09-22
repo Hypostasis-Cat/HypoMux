@@ -33,6 +33,16 @@ Windows 10 22H2（19045）实测：`Get-NetConnectionProfile` 可见 TUN，但 W
 
 ## 验收步骤
 
+### 自动频段与吞吐诊断（2026-09-23）
+
+- 自动模式先通过 Windows `IsBandSupported` 检查 5 GHz，支持时优先尝试；旧系统或不支持时保留 Windows 自动选择。仅在 `WiFiDeviceOff`、`RadioRestriction`、`BandInterference` 且热点明确为 Off 时回退自动并重试一次。手动 5 GHz 不回退，运行中不切换频段。配置恢复仍使用启动前的原始配置。
+- 共享诊断显示 `configured_band` 和回退原因。它表示提交给 Windows 的配置；`auto` 不代表已经测得实际无线频段。发送/接收链路 Mbps 来自热点网卡驱动，不是手机实测吞吐，也不一定代表每台客户端的协商速率；驱动不提供时保持未知。
+- 支持日志新增去重的 `hotspot/status_changed`，吞吐采样同时记录热点状态、策略和 `rate_unit=bytes_per_second`。原有 `download_bps` / `upload_bps` 字段为字节/秒，换算 Mbps 需乘 8 再除 1,000,000。日志不记录热点密码、SSID 或设备身份。
+- 本次旧日志的两个下载采样约为 564.4 Mbps 和 316.8 Mbps，两个出口均有流量；这是引擎总吞吐，包含电脑自身流量，不能等同于手机测速结果。旧日志缺少热点状态及链路记录，无法据此确认无线或测速服务端瓶颈。
+- 性能验收应在电脑和手机分别使用同一下载源、相同并发方式，关闭其他下载，记录持续吞吐。电脑清华镜像下载与手机全球网测不能直接作为同条件对照；另可对比只用有线上游与双上游，观察同一无线网卡收发争用的影响。自动化测试验证启动及回退行为，不证明手机吞吐提升。
+
+API 依据：[Windows TetheringWiFiBand](https://learn.microsoft.com/en-us/uwp/api/windows.networking.networkoperators.tetheringwifiband)。
+
 1. 无 TUN、代理模式、无支持的无线网卡：拒绝启动，保留现有网络设置。
 2. 已有 Windows 热点或其他 ICS：拒绝接管；原热点名称、密码及出口不变。
 3. TUN 运行后开启热点：手机自动获得地址、网关与 DNS；ICS 公共接口为 HypoMux-Tun。手机不用代理即可浏览 HTTPS、播放视频和下载。

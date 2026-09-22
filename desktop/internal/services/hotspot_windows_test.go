@@ -323,6 +323,7 @@ foreach ($status in @('WiFiDeviceOff', 'RadioRestriction', 'BandInterference')) 
     $message = Get-StartFailure $status '5'
     if (-not $message.Contains($status) -or $message -notlike '*5 GHz*' -or $message -notlike '*自动频段*') { throw '5 GHz failure lacks actionable context' }
 }
+
 foreach ($band in @('auto', '2.4')) {
     $message = Get-StartFailure 'WiFiDeviceOff' $band
     if ($message -notlike '*WiFiDeviceOff*' -or $message -like '*指定的 5 GHz*') { throw 'radio failure incorrectly attributed to 5 GHz' }
@@ -346,6 +347,53 @@ $modern | Add-Member -Force ScriptMethod IsBandSupported { param($band) return $
 $rejected = $false
 try { Set-HotspotBand $modern '5' $true } catch { $rejected = $true }
 if (-not $rejected) { throw 'unsupported hardware band accepted' }
+`)
+}
+
+func TestHotspotWindowsAutomaticBandStartup(t *testing.T) {
+	runHotspotFunctions(t, `
+$desired = [PSCustomObject]@{ Band = $null }
+$desired | Add-Member ScriptMethod IsBandSupported { param($band) return $true }
+if ((Select-StartupBand $desired 'auto' $true) -ne '5') { throw 'automatic did not prefer 5 GHz' }
+if ((Select-StartupBand $desired '2.4' $true) -ne '2.4') { throw 'explicit band changed' }
+if ((Select-StartupBand $desired 'auto' $false) -ne 'auto') { throw 'legacy fallback lost' }
+$desired | Add-Member -Force ScriptMethod IsBandSupported { param($band) return $false }
+if ((Select-StartupBand $desired 'auto' $true) -ne 'auto') { throw 'unsupported 5 GHz preferred' }
+$desired | Add-Member -Force ScriptMethod IsBandSupported { param($band) throw 'query unavailable' }
+if ((Select-StartupBand $desired 'auto' $true) -ne 'auto') { throw 'query failure broke automatic' }
+$desired | Add-Member -Force ScriptMethod IsBandSupported { param($band) return $true }
+$resultType = [object]
+$stopSignal = [PSCustomObject]@{ IsCompleted = $false }
+function Await-Action($operation) { }
+function Await-Operation($operation, [Type]$resultType) { return $operation }
+foreach ($case in @(
+    @{ Requested = 'auto'; Failure = 'Success'; State = 'Off'; Calls = 1; FinalBand = '5' },
+    @{ Requested = 'auto'; Failure = 'BandInterference'; State = 'Off'; Calls = 2; FinalBand = 'auto' },
+    @{ Requested = 'auto'; Failure = 'RadioRestriction'; State = 'Off'; Calls = 2; FinalBand = 'auto' },
+    @{ Requested = 'auto'; Failure = 'WiFiDeviceOff'; State = 'Off'; Calls = 2; FinalBand = 'auto' },
+    @{ Requested = '5'; Failure = 'BandInterference'; State = 'Off'; Calls = 1; FinalBand = '5' },
+    @{ Requested = 'auto'; Failure = 'Unknown'; State = 'Off'; Calls = 1; FinalBand = '5' },
+    @{ Requested = 'auto'; Failure = 'BandInterference'; State = 'On'; Calls = 1; FinalBand = '5' },
+    @{ Requested = 'auto'; Failure = 'BandInterference'; State = 'InTransition'; Calls = 1; FinalBand = '5' }
+)) {
+    $script:starts = 0; $script:configures = 0
+    $manager = [PSCustomObject]@{ TetheringOperationalState = $case.State }
+    $manager | Add-Member ScriptMethod ConfigureAccessPointAsync { param($value) $script:configures++ }
+    $manager | Add-Member ScriptMethod StartTetheringAsync {
+        $script:starts++
+        if ($script:starts -eq 1) { return [PSCustomObject]@{ Status = $case.Failure } }
+        return [PSCustomObject]@{ Status = 'Success' }
+    }
+    $failed = $false
+    try { Start-ConfiguredHotspot $desired $case.Requested $true } catch { $failed = $true }
+    $shouldFail = $case.Calls -eq 1 -and $case.Failure -ne 'Success'
+    if ($failed -ne $shouldFail -or $script:starts -ne $case.Calls -or $script:configures -ne $case.Calls -or $configuredBand -ne $case.FinalBand) { throw ('unexpected startup: ' + ($case | ConvertTo-Json -Compress)) }
+    if ($case.Calls -eq 2 -and $bandFallback -ne $case.Failure) { throw 'fallback reason lost' }
+}
+$stopSignal.IsCompleted = $true
+$script:starts = 0
+try { Start-ConfiguredHotspot $desired 'auto' $true } catch { }
+if ($script:starts -ne 0) { throw 'started after shutdown request' }
 `)
 }
 
