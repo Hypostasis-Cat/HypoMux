@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useI18n } from "../../i18n/i18n";
 
-export function AssistantCompanion({ open, onOpenChange, running, pending, pageLabel, speech, speechId, sample = false, onViewDetails, children }: {
-  open: boolean; onOpenChange: (open: boolean) => void; running: boolean; pending: number; pageLabel: string; speech?: string; speechId?: string; sample?: boolean; onViewDetails?: () => void; children: ReactNode;
+export function AssistantCompanion({ open, onOpenChange, running, pending, pageLabel, speech, speechId, sample = false, onViewDetails, onSpeechDismiss, children }: {
+  open: boolean; onOpenChange: (open: boolean) => void; running: boolean; pending: number; pageLabel: string; speech?: string; speechId?: string; sample?: boolean; onViewDetails?: () => void; onSpeechDismiss?: () => void; children: ReactNode;
 }) {
   const { locale } = useI18n();
   const [position, setPosition] = useState({ right: 24, bottom: 28 });
@@ -16,12 +16,14 @@ export function AssistantCompanion({ open, onOpenChange, running, pending, pageL
   useEffect(() => {
     if (!open) { setHovered(false); setFocused(false); }
   }, [open]);
-  useEffect(() => { setSpeechVisible(true); }, [speech, speechId, running]);
+  const dismissRef = useRef(onSpeechDismiss);
+  dismissRef.current = onSpeechDismiss;
+  useEffect(() => { setSpeechVisible(true); }, [speech, speechId]);
   useEffect(() => {
     if (!speech || hovered || focused || open || running || pending || !speechVisible) return;
-    const timer = window.setTimeout(() => setSpeechVisible(false), Math.min(14000, Math.max(6000, speech.length * 90)));
+    const timer = window.setTimeout(() => { setSpeechVisible(false); dismissRef.current?.(); }, Math.min(14000, Math.max(6000, speech.length * 90)));
     return () => window.clearTimeout(timer);
-  }, [speech, hovered, focused, open, running, pending, speechVisible]);
+  }, [speech, speechId, hovered, focused, open, running, pending, speechVisible]);
   const drag = useRef<{ x: number; y: number; right: number; bottom: number; moved: boolean }>();
   const trigger = useRef<HTMLButtonElement>(null);
   useEffect(() => {

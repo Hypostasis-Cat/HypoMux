@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AIAssistant } from "./AIAssistant";
 
@@ -17,7 +17,7 @@ beforeEach(() => {
   mocks.mcpStatus.mockResolvedValue({ enabled: false, url: "", read_only: true });
   mocks.send.mockResolvedValue(undefined); mocks.decide.mockResolvedValue(undefined);
 });
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.useRealTimers(); });
 
 describe("AI assistant", () => {
   it("fetches models from the form without saving and allows selection", async () => {
@@ -44,6 +44,40 @@ describe("AI assistant", () => {
     expect(screen.getByRole("button", { name: /View details/ })).toBeTruthy();
     expect(screen.queryByRole("textbox", { name: "Message" })).toBeNull();
     expect(screen.getByRole("button", { name: "Network companion" }).getAttribute("aria-expanded")).toBe("false");
+  });
+  it("does not replay dismissed replies across pages, workspace remounts or task status changes", async () => {
+    vi.useFakeTimers();
+    const onOpenChange = vi.fn();
+    const { rerender } = render(<AIAssistant open={false} workspace={false} page="home" onOpenChange={onOpenChange} />);
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    const reply = (id: string, running = false) => ({ running, revision: 0, pending: 0, entries: [{ id, role: "assistant", text: "Done.", at: "" }] });
+    mocks.snapshot.mockResolvedValue(reply("first"));
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(screen.getByText("Done.")).toBeTruthy();
+    await act(async () => { await vi.advanceTimersByTimeAsync(6000); });
+    expect(screen.queryByText("Done.")).toBeNull();
+    rerender(<AIAssistant open workspace page="assistant" onOpenChange={onOpenChange} />);
+    expect(screen.getByText("Done.")).toBeTruthy(); // History remains readable.
+    rerender(<AIAssistant open={false} workspace={false} page="home" onOpenChange={onOpenChange} />);
+    expect(screen.queryByText("Done.")).toBeNull();
+    mocks.snapshot.mockResolvedValue(reply("first", true));
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    mocks.snapshot.mockResolvedValue(reply("first"));
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(screen.queryByText("Done.")).toBeNull();
+    mocks.snapshot.mockResolvedValue(reply("second"));
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(screen.getByText("Done.")).toBeTruthy(); // Same text, genuinely new reply.
+    rerender(<AIAssistant open={false} workspace={false} page="health" onOpenChange={onOpenChange} />);
+    expect(screen.queryByText("Done.")).toBeNull();
+    rerender(<AIAssistant open={false} workspace={false} page="home" onOpenChange={onOpenChange} />);
+    expect(screen.queryByText("Done.")).toBeNull();
+    rerender(<AIAssistant open workspace page="assistant" onOpenChange={onOpenChange} />);
+    mocks.snapshot.mockResolvedValue(reply("third"));
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(screen.getByText("Done.")).toBeTruthy();
+    rerender(<AIAssistant open={false} workspace={false} page="home" onOpenChange={onOpenChange} />);
+    expect(screen.queryByText("Done.")).toBeNull();
   });
   it("tracks page changes and sends a frozen context with selected rules", async () => {
     const onOpenChange = vi.fn();

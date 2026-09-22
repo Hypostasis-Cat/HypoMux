@@ -176,8 +176,15 @@ export function AIAssistant({ open, onOpenChange, workspace = true, onOpenWorksp
     <footer className="ai-command-footnote">{native ? text("带上当前页面上下文 · 重要操作才需确认", "Page context included · confirmation for sensitive actions") : <><span>{text("界面预览 · 未连接模型", "Preview · no model connected")}</span><Button appearance="subtle" size="small" onClick={() => { setPreviewThinking(true); setPreviewReply(text(`嗨，我是小 Mux。看到你正在「${pageContext.label}」啦。\n\n${pageContext.greeting}\n\n你可以继续切换页面，我会在这里陪着你。`, `Hi, I'm Mux. You're viewing ${pageContext.label}.\n\n${pageContext.greeting}\n\nFeel free to switch pages. I'll be right here.`)); onOpenChange(false); }}>{text("预览思考与回复", "Preview thinking and reply")}</Button></>}</footer>
   </>;
   const latestReply = [...snapshot.entries].reverse().find(entry => ["assistant", "notice", "user"].includes(entry.role));
-  const speech = native ? (latestReply && latestReply.role !== "user" && !startupEntries.current?.has(latestReply.id) ? summarizeReply(latestReply.text) : undefined) : summarizeReply(previewReply);
-  return workspace ? <section id="ai-workspace" tabIndex={-1} className="ai-assistant ai-workspace" hidden={!open} aria-label={text("AI 助手工作区", "AI assistant workspace")}>{content}</section> : <AssistantCompanion open={open} onOpenChange={onOpenChange} running={snapshot.running || previewThinking} pending={snapshot.pending} speech={speech} speechId={latestReply?.id} onViewDetails={() => { setView("chat"); onOpenWorkspace?.(); }} sample={!native && !!previewReply} pageLabel={pageContext.label}>{quickContent}</AssistantCompanion>;
+  const speechId = native ? latestReply?.id : previewReply;
+  const [dismissedSpeechId, setDismissedSpeechId] = useState<string>();
+  const previousPage = useRef(page);
+  useEffect(() => {
+    if (workspace || previousPage.current !== page) setDismissedSpeechId(speechId);
+    previousPage.current = page;
+  }, [workspace, page, speechId]);
+  const speech = speechId === dismissedSpeechId ? undefined : native ? (latestReply && latestReply.role !== "user" && !startupEntries.current?.has(latestReply.id) ? summarizeReply(latestReply.text) : undefined) : summarizeReply(previewReply);
+  return workspace ? <section id="ai-workspace" tabIndex={-1} className="ai-assistant ai-workspace" hidden={!open} aria-label={text("AI 助手工作区", "AI assistant workspace")}>{content}</section> : <AssistantCompanion open={open} onOpenChange={onOpenChange} running={snapshot.running || previewThinking} pending={snapshot.pending} speech={speech} speechId={speechId} onSpeechDismiss={() => setDismissedSpeechId(speechId)} onViewDetails={() => { setView("chat"); onOpenWorkspace?.(); }} sample={!native && !!previewReply} pageLabel={pageContext.label}>{quickContent}</AssistantCompanion>;
 
 }
 function pretty(value: string) { try { return JSON.stringify(JSON.parse(value), null, 2); } catch { return value; } }
