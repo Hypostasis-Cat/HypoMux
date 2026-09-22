@@ -13,7 +13,7 @@ import type { AppPage } from "../shell/CompactNavigation";
 const initial: AISnapshot = { running: false, entries: [], revision: 0, pending: 0 };
 const toolNames: Record<string, string> = { get_status: "查询聚合状态", get_rules: "读取分流规则", get_processes: "查询应用进程", get_connections: "检查实际连接出口", get_support_report: "读取诊断摘要", get_diagnostics: "读取体检结果", run_diagnostics: "执行网络体检", preflight: "检查启动条件", set_rule: "设置分流规则", remove_rule: "删除分流规则", start: "开启聚合", stop: "停止聚合" };
 const states: Record<string, string> = { waiting: "等待确认", running: "执行中", completed: "已完成", error: "失败", cancelled: "已取消", interrupted: "已中断" };
-Object.assign(toolNames, { set_scheduling: "修改调度策略与权重", get_capabilities: "查询可用功能", get_nat_status: "读取 NAT 检测状态", run_nat_detection: "检测 NAT 类型", cancel_nat_detection: "取消 NAT 检测", select_nat_server: "选择 STUN 服务器", allow_nat_firewall: "放行 NAT 探测防火墙" });
+Object.assign(toolNames, { get_steam_cdn_status: "读取 Steam 优选状态", set_steam_cdn: "设置 Steam 下载优选", get_hotspot_status: "读取热点状态", start_saved_hotspot: "启动已配置热点", stop_hotspot: "停止聚合热点", repair_wfp: "修复 WFP/BFE", cancel_diagnostics: "取消网络体检", add_nat_server: "添加 STUN 服务器", remove_nat_server: "删除 STUN 服务器", reset_nat_servers: "恢复默认 STUN 服务器", set_scheduling: "修改调度策略与权重", get_capabilities: "查询可用功能", get_nat_status: "读取 NAT 检测状态", run_nat_detection: "检测 NAT 类型", cancel_nat_detection: "取消 NAT 检测", select_nat_server: "选择 STUN 服务器", allow_nat_firewall: "放行 NAT 探测防火墙" });
 toolNames.configure_network = "配置模式和参与网卡";
 const errorText = (e: unknown) => e instanceof Error ? e.message : String(e);
 
@@ -191,6 +191,7 @@ function pretty(value: string) { try { return JSON.stringify(JSON.parse(value), 
 function operationSummary(entry: AIEntry, locale: string) {
   try {
     const args = JSON.parse(entry.arguments ?? "{}");
+    if (entry.tool === "set_steam_cdn") return args.enabled ? (locale === "en" ? "Enable Steam download optimization" : "开启 Steam 下载优选") : (locale === "en" ? "Disable Steam download optimization" : "关闭 Steam 下载优选");
     if (entry.tool === "set_scheduling") return `${locale === "en" ? "Scheduling strategy" : "调度策略"}：${locale === "en" ? args.strategy : ({ "round-robin": "轮询", weighted: "手动权重", "adaptive-throughput": "最大速度优先", "latency-first": "低延迟优先" } as Record<string, string>)[args.strategy] ?? args.strategy}`;
     if (entry.tool === "set_rule") return `${args.value} → ${locale === "en" ? args.outbound : ({ direct: "直连", aggregation: "聚合", reject: "拒绝连接" } as Record<string, string>)[args.outbound] ?? args.outbound}`;
     if (entry.tool === "remove_rule") return `${locale === "en" ? "Remove" : "删除规则"}：${args.value}`;

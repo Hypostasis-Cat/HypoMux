@@ -550,3 +550,90 @@ func TestAISchedulingValidationAndPersistence(t *testing.T) {
 		t.Fatal("incorrect approval policy")
 	}
 }
+
+func TestAICoverageTools(t *testing.T) {
+	for name, raw := range map[string]string{"set_steam_cdn": `{}`, "add_nat_server": `{"name":"test"}`, "remove_nat_server": `{}`, "run_diagnostics": `{"adapter_ids":[]}`, "start_saved_hotspot": `{"password":"secret"}`} {
+		if _, err := parseAIArguments(name, json.RawMessage(raw)); err == nil {
+			t.Fatalf("invalid args: %s", name)
+		}
+	}
+	for _, name := range []string{"start_saved_hotspot", "stop_hotspot", "repair_wfp", "reset_nat_servers"} {
+		s := testAIService(t)
+		done := make(chan error, 1)
+		go func() {
+			_, err := s.invoke(context.Background(), "assistant", name, json.RawMessage(`{}`))
+			done <- err
+		}()
+		if err := s.Decide(waitAIApproval(t, s), false); err != nil {
+			t.Fatal(err)
+		}
+		if err := <-done; err == nil {
+			t.Fatal("rejected operation executed")
+		}
+	}
+	encoded, _ := json.Marshal(aiHotspotSummary(HotspotStatus{SSID: "private-ssid", Diagnostics: "private-detail", Devices: []HotspotDevice{{MAC: "private-mac"}}, Clients: 1}))
+	if strings.Contains(string(encoded), "private-") || !strings.Contains(string(encoded), `"sharing_verified":false`) {
+		t.Fatalf("unsafe summary: %s", encoded)
+	}
+	s := testAIService(t)
+	t.Setenv("HYPOMUX_DATA_DIR", s.directory)
+	s.settings.path = filepath.Join(s.directory, "settings.json")
+	s.diagnostics = newTestDiagnostics(t, &fakeDiagnosticProbe{})
+	s.engine = &EngineService{settings: s.settings, client: engineclient.New(), lifecycleGate: make(chan struct{}, 1)}
+	call := func(name, raw string) any {
+		t.Helper()
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+		defer cancel()
+		result, err := s.invoke(ctx, "assistant", name, json.RawMessage(raw))
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		return result
+	}
+	call("set_steam_cdn", `{"enabled":true}`)
+	encoded, _ = json.Marshal(call("get_steam_cdn_status", `{}`))
+	if !strings.Contains(string(encoded), `"saved_enabled":true`) || !strings.Contains(string(encoded), `"runtime_state":"offline"`) {
+		t.Fatal("configuration confused with runtime")
+	}
+	call("set_steam_cdn", `{"enabled":false}`)
+	if s.settings.Get().SteamCDNEnabled {
+		t.Fatal("toggle not persisted")
+	}
+	call("add_nat_server", `{"name":"AI test","address":"stun.example.com:3478"}`)
+	var id string
+	for _, server := range s.diagnostics.NATServers().Servers {
+		if server.Name == "AI test" {
+			id = server.ID
+		}
+	}
+	if id == "" {
+		t.Fatal("server not added")
+	}
+	args, _ := json.Marshal(map[string]string{"server_id": id})
+	call("remove_nat_server", string(args))
+	for _, server := range s.diagnostics.NATServers().Servers {
+		if server.ID == id {
+			t.Fatal("server not removed")
+		}
+	}
+	call("run_diagnostics", `{"adapter_ids":["ethernet"]}`)
+	if s.diagnostics.Latest().Total != 1 {
+		t.Fatal("wrong diagnostic selection")
+	}
+	if _, err := s.invoke(context.Background(), "assistant", "run_diagnostics", json.RawMessage(`{"adapter_ids":["ethernet","missing"]}`)); err == nil {
+		t.Fatal("missing adapter ignored")
+	}
+	call("cancel_diagnostics", `{}`)
+	if _, err := s.executeAITool("start_saved_hotspot", aiArguments{}); err == nil || !strings.Contains(err.Error(), "工具箱") {
+		t.Fatal("missing credentials not handled")
+	}
+	encoded, _ = json.Marshal(call("get_capabilities", `{}`))
+	if !strings.Contains(string(encoded), "manual_features") || !strings.Contains(string(encoded), "repair_wfp") {
+		t.Fatal("coverage incomplete")
+	}
+	for _, name := range []string{"set_steam_cdn", "add_nat_server", "remove_nat_server"} {
+		if aiRequiresApproval("assistant", name) || !aiRequiresApproval("mcp", name) {
+			t.Fatal("incorrect approval policy")
+		}
+	}
+}
