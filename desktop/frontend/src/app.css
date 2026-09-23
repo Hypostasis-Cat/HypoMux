@@ -1064,7 +1064,7 @@ svg {
   min-height: 0;
   margin: 0 auto;
   padding: calc(18px * var(--hm-density-space));
-  grid-template-rows: auto minmax(0, max-content) auto;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   align-content: start;
   gap: calc(14px * var(--hm-density-space));
 }
@@ -1460,7 +1460,7 @@ svg {
   align-content: start;
   overflow-x: hidden;
   overflow-y: auto;
-  gap: 8px;
+  gap: 6px;
   padding-right: 4px;
   scrollbar-color: color-mix(in srgb, var(--hm-text-tertiary) 34%, transparent) transparent;
   scrollbar-width: thin;
@@ -1481,11 +1481,11 @@ svg {
 
 .network-adapter {
   display: grid;
-  min-height: calc(88px * var(--hm-density-space));
+  min-height: calc(68px * var(--hm-density-space));
   flex: 0 0 auto;
   align-items: center;
-  padding: calc(12px * var(--hm-density-space)) 16px;
-  grid-template-columns: minmax(190px, 1.1fr) minmax(260px, 1.35fr) minmax(140px, 0.8fr) minmax(190px, 1fr);
+  padding: calc(6px * var(--hm-density-space)) 16px;
+  grid-template-columns: minmax(170px, 1.1fr) minmax(240px, 1.35fr) minmax(190px, 0.9fr) minmax(150px, 0.8fr);
   gap: 14px;
   border: 1px solid color-mix(in srgb, var(--hm-outer-border) 72%, transparent);
   border-radius: var(--hm-radius);
@@ -1684,11 +1684,14 @@ svg {
   min-width: 0;
   align-items: flex-start;
   flex-wrap: wrap;
-  gap: 5px 10px;
+  flex-direction: column;
+  gap: 3px;
   color: var(--hm-text-tertiary);
   font-size: 12px;
   white-space: nowrap;
 }
+
+.adapter-quality-values { display: flex; flex-wrap: wrap; gap: 2px 8px; line-height: 18px; font-variant-numeric: tabular-nums; }
 
 .health-badge {
   white-space: nowrap;
@@ -1705,8 +1708,9 @@ svg {
 .adapter-weight {
   display: grid;
   align-items: center;
-  grid-template-columns: minmax(62px, 1fr) 108px;
-  gap: 8px;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 3px;
 }
 
 .adapter-weight.is-automatic {
@@ -1721,6 +1725,10 @@ svg {
   font-size: 12px;
 }
 
+.adapter-weight:not(.is-automatic) { width: 108px; justify-self: end; }
+
+.adapter-weight:not(.is-automatic) > div { flex-direction: row; justify-content: space-between; align-items: baseline; gap: 6px; }
+
 .adapter-weight strong {
   color: var(--hm-text-secondary);
   font-size: 12px;
@@ -1729,8 +1737,8 @@ svg {
 }
 
 .weight-stepper {
-  width: 108px;
-  height: 34px;
+  width: 100%;
+  height: 30px;
   min-width: 108px;
   padding: 0;
   background: color-mix(in srgb, var(--hm-row-hover) 68%, transparent);
@@ -5390,7 +5398,7 @@ svg {
   }
 
   .network-adapter {
-    grid-template-columns: minmax(170px, 1fr) minmax(235px, 1.2fr) minmax(105px, 0.65fr) minmax(175px, 0.9fr);
+    grid-template-columns: minmax(160px, 1fr) minmax(215px, 1.2fr) minmax(190px, 1fr) minmax(135px, 0.8fr);
     gap: 10px;
   }
 
@@ -5428,7 +5436,7 @@ svg {
   .home-page {
     padding-top: 12px;
     padding-bottom: 12px;
-    grid-template-rows: auto minmax(0, max-content) auto;
+    grid-template-rows: auto minmax(0, 1fr) auto;
     gap: 10px;
   }
 
@@ -5436,11 +5444,6 @@ svg {
     margin-top: 0;
   }
 
-  .network-adapter {
-    min-height: 72px;
-    padding-top: 6px;
-    padding-bottom: 6px;
-  }
 
   .health-page {
     padding-top: 12px;

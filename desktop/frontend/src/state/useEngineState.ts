@@ -552,9 +552,14 @@ export function useEngineState(
     [diagnostics],
   );
   const homeAdapters: HomeAdapter[] = useMemo(
-    () => adapters.map((adapter) => {
+    () => adapters.map((adapter, index) => {
       const runtime = runtimeByID.get(adapter.name) ?? runtimeByID.get(adapter.id);
-      const diagnostic = diagnosticByID.get(adapter.id);
+      const metricFixture = isBrowserPreview() && new URLSearchParams(window.location.search).get("metrics") === "demo";
+      const diagnostic = metricFixture ? {
+        status: "available", received: 4, sent: 4,
+        avg_latency_ms: [8, 128.45, 999.99, 1234.56][index % 4],
+        jitter_ms: 0, loss_rate: [0, 2.5, 33.333333333, 100][index % 4],
+      } : diagnosticByID.get(adapter.id);
       const diagnosticHealth = diagnostic?.status === "available"
         ? "healthy"
         : diagnostic?.status === "unstable"

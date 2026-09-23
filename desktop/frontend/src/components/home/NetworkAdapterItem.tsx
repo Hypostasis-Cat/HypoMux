@@ -127,15 +127,17 @@ export function NetworkAdapterItem({
 
       <div className="adapter-quality">
         <NetworkHealthBadge health={adapter.health} />
-        <span>{text("延迟", "Latency")} {adapter.latencyMS === undefined ? "—" : `${adapter.latencyMS} ms`}</span>
-        <span>{text("丢包", "Loss")} {adapter.lossRate === undefined ? "—" : `${adapter.lossRate}%`}</span>
+        <div className="adapter-quality-values">
+          <span>{text("延迟", "Latency")} {adapter.latencyMS === undefined ? "—" : `${adapter.latencyMS.toLocaleString(locale, { maximumFractionDigits: 1, useGrouping: false })} ms`}</span>
+          <span>{text("丢包", "Loss")} {adapter.lossRate === undefined ? "—" : `${adapter.lossRate.toLocaleString(locale, { maximumFractionDigits: 1, useGrouping: false })}%`}</span>
+        </div>
       </div>
 
       <div className={`adapter-weight${weighted ? "" : " is-automatic"}`} onClick={(event) => event.stopPropagation()}>
         {weighted ? <>
         <div>
           <span>{t("home_bw_column")}</span>
-          <strong>{percentage}% {text("新连接占比", "of new connections")}</strong>
+          <strong title={text("新连接占比", "Share of new connections")} aria-label={text(`新连接占比 ${percentage}%`, `${percentage}% of new connections`)}>{percentage}%</strong>
         </div>
         <Tooltip content={`${t("home_bw_column_hint")}${text("（可用 ↑↓ 键调整）", " (Use ↑↓ keys to adjust)")}`} relationship="description">
           <Input
