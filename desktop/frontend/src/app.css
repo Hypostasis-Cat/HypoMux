@@ -372,6 +372,8 @@ svg {
   align-items: stretch;
   background: color-mix(in srgb, var(--hm-shell) 72%, transparent);
   user-select: none;
+  /* Mouse uses Wails' drag handler; touch/pen use windowTouchDrag.
+   * A native caption region here would also move the window for touch. */
   --wails-draggable: drag;
   /* Keep a touch gesture in the title bar instead of browser pan/zoom. */
   touch-action: none;
@@ -382,7 +384,6 @@ svg {
   align-items: center;
   gap: 9px;
   padding-left: 14px;
-  --wails-non-client-region: caption;
 }
 
 .titlebar-identity strong {
@@ -397,8 +398,13 @@ svg {
 }
 
 .titlebar-drag {
-  --wails-non-client-region: caption;
   --wails-draggable: drag;
+}
+
+/* A touch drag owns the gesture even if WebView2 emits a compatibility mouse event. */
+.titlebar[data-touch-window-drag],
+.titlebar[data-touch-window-drag] * {
+  --wails-draggable: no-drag !important;
 }
 
 .titlebar-actions {

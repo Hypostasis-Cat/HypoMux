@@ -77,6 +77,51 @@
 .ai-workspace .ai-compose { padding: 16px 24px 12px; margin-bottom: 12px; border: 1px solid var(--colorNeutralStroke2); border-radius: 14px; width: min(calc(100% - 48px), 792px); box-shadow: var(--shadow4); }
 .ai-workspace .ai-settings { padding: 28px 32px; }
 
+/* Model and MCP setup share a compact deployment layout inside the desktop workspace. */
+.ai-workspace .ai-deploy { width: min(100%, 960px); gap: 14px; padding: 24px 28px 32px; }
+.ai-deploy-hero, .ai-deploy-steps, .ai-deploy-card, .ai-deploy-footer, .ai-deploy-footnote { flex-shrink: 0; }
+.ai-deploy-hero { position: relative; display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; padding: 26px 28px; overflow: hidden; border: 1px solid color-mix(in srgb, var(--colorBrandForeground1) 24%, var(--colorNeutralStroke2)); border-radius: 20px; background: linear-gradient(125deg, color-mix(in srgb, var(--colorBrandBackground2) 35%, var(--colorNeutralBackground1)), var(--colorNeutralBackground1) 70%); }
+.ai-deploy-hero::after { content: ""; position: absolute; width: 240px; height: 240px; right: -50px; top: -125px; border: 1px solid color-mix(in srgb, var(--colorBrandForeground1) 16%, transparent); border-radius: 50%; box-shadow: 0 0 0 30px color-mix(in srgb, var(--colorBrandForeground1) 3%, transparent), 0 0 0 68px color-mix(in srgb, var(--colorBrandForeground1) 3%, transparent); pointer-events: none; }
+.ai-deploy-hero-copy, .ai-deploy-status { position: relative; z-index: 1; }
+.ai-deploy-hero-copy { max-width: 540px; }
+.ai-deploy-eyebrow { display: block; margin-bottom: 10px; color: var(--colorBrandForeground1); font-size: 10px; font-weight: 700; letter-spacing: .16em; }
+.ai-deploy .ai-deploy-hero h2 { font-size: clamp(21px, 2.3vw, 28px); line-height: 1.25; letter-spacing: -.025em; }
+.ai-deploy-hero p { margin-top: 10px; font-size: 13px; line-height: 1.65; }
+.ai-deploy-status { display: flex; align-items: flex-start; gap: 9px; flex: 0 0 auto; max-width: 225px; padding: 11px 13px; border: 1px solid var(--colorNeutralStroke2); border-radius: 12px; background: color-mix(in srgb, var(--colorNeutralBackground1) 88%, transparent); box-shadow: var(--hm-shadow-xs); }
+.ai-deploy-status-dot { flex: 0 0 auto; width: 8px; height: 8px; margin-top: 5px; border-radius: 50%; background: var(--colorBrandForeground1); box-shadow: 0 0 0 4px var(--hm-accent-soft); }
+.ai-deploy-status[data-state="empty"] .ai-deploy-status-dot { background: var(--hm-text-tertiary); box-shadow: 0 0 0 4px var(--colorNeutralBackground3); }
+.ai-deploy-status[data-state="draft"] .ai-deploy-status-dot { background: var(--colorPaletteMarigoldForeground1); box-shadow: 0 0 0 4px color-mix(in srgb, var(--colorPaletteMarigoldForeground1) 12%, transparent); }
+.ai-deploy-status strong, .ai-deploy-status small { display: block; }
+.ai-deploy-status strong { font-size: 12px; line-height: 1.4; }
+.ai-deploy-status small { margin-top: 2px; font-size: 11px; line-height: 1.4; overflow-wrap: anywhere; }
+.ai-deploy-steps { display: flex; align-items: center; gap: 6px; padding: 1px 4px 3px; color: var(--hm-text-secondary); font-size: 11px; }
+.ai-deploy-steps span { display: flex; align-items: center; gap: 7px; white-space: nowrap; }
+.ai-deploy-steps span + span::before { content: ""; display: block; width: clamp(14px, 3vw, 34px); height: 1px; margin-right: 1px; background: var(--colorNeutralStroke2); }
+.ai-deploy-steps b { color: var(--colorBrandForeground1); font-size: 10px; letter-spacing: .05em; }
+.ai-deploy-card { display: flex; flex-direction: column; gap: 16px; padding: 21px 24px 22px; border: 1px solid var(--colorNeutralStroke2); border-radius: 16px; background: var(--colorNeutralBackground1); box-shadow: var(--hm-shadow-xs); }
+.ai-deploy-card-heading { display: flex; align-items: flex-start; gap: 13px; }
+.ai-deploy-card > :not(.ai-deploy-card-heading) { margin-left: 43px; }
+.ai-deploy-number { display: grid; place-items: center; flex: 0 0 30px; width: 30px; height: 30px; border: 1px solid color-mix(in srgb, var(--colorBrandForeground1) 22%, transparent); border-radius: 9px; color: var(--colorBrandForeground1); background: var(--hm-accent-soft); font-size: 11px; font-weight: 700; }
+.ai-deploy-card h3 { margin: 2px 0 4px; font-size: 15px; line-height: 1.3; }
+.ai-deploy-card-heading p { font-size: 12px; line-height: 1.5; }
+.ai-deploy-card .fui-Field { min-width: 0; }
+.ai-deploy-card .fui-Input, .ai-deploy-card .fui-Select, .ai-deploy-card .fui-Combobox { width: 100%; box-sizing: border-box; }
+.ai-deploy-field-grid { display: grid; grid-template-columns: minmax(220px, .9fr) minmax(0, 1.4fr); align-items: start; gap: 16px; }
+.ai-deploy-inline-action, .ai-deploy-mcp-options { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.ai-deploy-inline-action small { font-size: 11px; line-height: 1.5; }
+.ai-deploy-mcp-options .fui-Field { width: min(220px, 100%); }
+.ai-deploy-footer { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 18px 22px; border: 1px solid var(--colorNeutralStroke2); border-radius: 15px; background: var(--colorNeutralBackground2); }
+.ai-deploy-footer > div:first-child { min-width: 0; max-width: 460px; }
+.ai-deploy-footer strong, .ai-deploy-footer small { display: block; }
+.ai-deploy-footer strong { margin-bottom: 5px; font-size: 12px; }
+.ai-deploy-footer small { font-size: 11px; line-height: 1.55; }
+.ai-deploy-footer-actions { display: flex; flex: 0 0 auto; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.ai-deploy-external .ai-deploy-card > .fui-Button { align-self: flex-start; }
+.ai-deploy-external .ai-deploy-card .fui-Textarea { width: 100%; }
+.ai-deploy-footnote { padding: 0 4px 8px; font-size: 11px; line-height: 1.6; }
+@media (max-width: 900px) { .ai-deploy-hero { align-items: flex-start; flex-direction: column; } .ai-deploy-status { max-width: 100%; } .ai-deploy-footer { align-items: stretch; flex-direction: column; } .ai-deploy-footer-actions { justify-content: flex-start; } }
+@media (max-width: 660px) { .ai-workspace .ai-deploy { padding: 16px; } .ai-deploy-hero { padding: 21px; } .ai-deploy-card { padding: 18px; } .ai-deploy-card > :not(.ai-deploy-card-heading) { margin-left: 0; } .ai-deploy-field-grid { grid-template-columns: 1fr; } .ai-deploy-steps { overflow-x: auto; } .ai-deploy-steps span + span::before { width: 12px; } }
+
 /* The companion is a non-modal layer: navigation and page controls stay usable. */
 .ai-companion { position: fixed; z-index: 80; width: 88px; display: flex; flex-direction: column; align-items: center; isolation: isolate; color: var(--hm-text-primary); }
 .ai-pet { position: relative; width: 88px; height: 92px; padding: 0; border: 0; background: transparent; cursor: grab; touch-action: none; user-select: none; -webkit-app-region: no-drag; }

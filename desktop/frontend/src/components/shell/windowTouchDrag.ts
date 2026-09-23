@@ -34,6 +34,7 @@ export function attachWindowTouchDrag(element: HTMLElement, host: WindowDragHost
     gesture = undefined;
     if (frame !== undefined) cancelAnimationFrame(frame);
     frame = undefined;
+    element.removeAttribute("data-touch-window-drag");
     if (g) release(g);
   };
   const schedule = () => {
@@ -77,6 +78,9 @@ export function attachWindowTouchDrag(element: HTMLElement, host: WindowDragHost
       maximised: false, moved: false, moving: false, ended: false,
     };
     gesture = g;
+    // WebView2 may still emit compatibility mouse events for a touch gesture.
+    // Keep Wails' mouse drag listener inactive until this gesture is finished.
+    element.setAttribute("data-touch-window-drag", "");
     try { element.setPointerCapture(event.pointerId); } catch { abort(); return; }
     void host.windowDragState().then(state => {
       if (gesture !== g) return;

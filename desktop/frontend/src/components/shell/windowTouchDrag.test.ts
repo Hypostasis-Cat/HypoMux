@@ -38,6 +38,7 @@ afterEach(() => { dispose(); element.remove(); vi.useRealTimers(); vi.unstubAllG
 
 it("drags from a title child with touch and keeps the final position on release", async () => {
   expect(pointer("pointerdown", {}, element.querySelector("strong")!).defaultPrevented).toBe(true);
+  expect(element.hasAttribute("data-touch-window-drag")).toBe(true);
   pointer("pointermove", { screenX: 340, screenY: 150 });
   await frame();
   expect(host.moveWindow).toHaveBeenLastCalledWith(140, 130);
@@ -45,6 +46,7 @@ it("drags from a title child with touch and keeps the final position on release"
   await frame();
   expect(host.moveWindow).toHaveBeenLastCalledWith(150, 140);
   expect(captured.size).toBe(0);
+  expect(element.hasAttribute("data-touch-window-drag")).toBe(false);
 });
 
 it("does not intercept mouse, secondary touch, pen barrel buttons, or titlebar controls", async () => {
@@ -76,6 +78,7 @@ it.each(["pointercancel", "lostpointercapture"])("cancels pending movement on %s
   await frame();
   expect(host.moveWindow).not.toHaveBeenCalled();
   expect(captured.size).toBe(0);
+  expect(element.hasAttribute("data-touch-window-drag")).toBe(false);
 });
 
 it("does not issue stale movement after a delayed query and cancellation", async () => {
