@@ -26,19 +26,19 @@
 }
 
 [data-appearance="light"] {
-  --hm-window-base: #f3f3f3;
+  --hm-window-base: #f5f7fa;
   --hm-system-background:
     radial-gradient(circle at 78% 5%, rgba(0, 95, 184, 0.055), transparent 34%),
     radial-gradient(circle at 14% 92%, rgba(180, 91, 0, 0.035), transparent 38%),
     linear-gradient(135deg, #fafafa 0%, #f3f3f3 52%, #eeeeee 100%);
   --hm-window-tint: rgba(255, 255, 255, 0.62);
   --hm-shell: rgba(250, 250, 250, 0.56);
-  --hm-solid-chrome: #f9f9f9;
+  --hm-solid-chrome: #edf1f6;
   --hm-surface-rgb: 255, 255, 255;
-  --hm-surface-secondary-rgb: 250, 250, 250;
+  --hm-surface-secondary-rgb: 241, 244, 248;
   --hm-inner-highlight: rgba(255, 255, 255, calc(0.76 * var(--hm-border-brightness)));
-  --hm-outer-border: rgba(0, 0, 0, 0.075);
-  --hm-shadow-colour: 0, 0, 0;
+  --hm-outer-border: rgba(38, 57, 83, 0.09);
+  --hm-shadow-colour: 17, 29, 48;
   --hm-card-glow-spot: color-mix(in srgb, var(--hm-accent) 74%, white);
   --hm-card-glow-edge-opacity: 0.82;
   --hm-card-glow-halo-opacity: 0.5;
@@ -57,19 +57,19 @@
 }
 
 [data-appearance="dark"] {
-  --hm-window-base: #202020;
+  --hm-window-base: #171a21;
   --hm-system-background:
     radial-gradient(circle at 82% 4%, rgba(0, 120, 212, 0.075), transparent 34%),
     radial-gradient(circle at 12% 92%, rgba(116, 85, 195, 0.05), transparent 36%),
     linear-gradient(140deg, #181818 0%, #202020 52%, #151515 100%);
   --hm-window-tint: rgba(8, 8, 8, 0.62);
   --hm-shell: rgba(20, 20, 20, 0.58);
-  --hm-solid-chrome: #1c1c1c;
-  --hm-surface-rgb: 44, 44, 44;
-  --hm-surface-secondary-rgb: 36, 36, 36;
+  --hm-solid-chrome: #1c2029;
+  --hm-surface-rgb: 36, 42, 53;
+  --hm-surface-secondary-rgb: 28, 33, 43;
   --hm-inner-highlight: rgba(255, 255, 255, calc(0.16 * var(--hm-border-brightness)));
   --hm-outer-border: rgba(255, 255, 255, 0.083);
-  --hm-shadow-colour: 0, 0, 0;
+  --hm-shadow-colour: 17, 29, 48;
   --hm-card-glow-spot: color-mix(in srgb, var(--hm-accent) 80%, white);
   --hm-card-glow-edge-opacity: 1;
   --hm-card-glow-halo-opacity: 0.74;
@@ -79,10 +79,11 @@
   position: relative;
   border: 1px solid var(--hm-outer-border);
   border-radius: var(--hm-radius);
-  background: rgba(var(--hm-surface-rgb), var(--hm-panel-opacity));
+  background: var(--hm-surface-fill);
   box-shadow:
     inset 0 1px 0 var(--hm-inner-highlight),
-    0 14px 38px rgba(var(--hm-shadow-colour), calc(0.18 * var(--hm-shadow-strength)));
+    0 2px 5px rgba(var(--hm-shadow-colour), calc(0.1 * var(--hm-shadow-strength))),
+    0 8px 24px rgba(var(--hm-shadow-colour), calc(0.1 * var(--hm-shadow-strength)));
   backdrop-filter: none;
 }
 
@@ -91,31 +92,83 @@
 }
 
 .glass-surface[data-tone="secondary"] {
-  background: rgba(var(--hm-surface-secondary-rgb), calc(var(--hm-panel-opacity) * 0.9));
+  background: var(--hm-surface-secondary-fill);
   box-shadow:
     inset 0 1px 0 var(--hm-inner-highlight),
     0 8px 24px rgba(var(--hm-shadow-colour), calc(0.12 * var(--hm-shadow-strength)));
 }
 
-[data-background-source="local"][data-panel-material="blur"] .glass-surface,
-[data-background-source="local"][data-panel-material="blur"] .network-adapter {
+:is([data-background-source="local"], [data-background-source="builtin"])[data-panel-material="blur"] .glass-surface,
+:is([data-background-source="local"], [data-background-source="builtin"])[data-panel-material="blur"] .network-adapter {
   backdrop-filter: blur(var(--hm-panel-blur)) saturate(var(--hm-panel-saturation));
 }
 
-[data-background-source="local"][data-panel-material="solid"] .glass-surface,
-[data-background-source="local"][data-panel-material="solid"] .network-adapter {
+:is([data-background-source="local"], [data-background-source="builtin"])[data-panel-material="solid"] .glass-surface,
+:is([data-background-source="local"], [data-background-source="builtin"])[data-panel-material="solid"] .network-adapter {
   backdrop-filter: none;
 }
 
-[data-background-source="local"][data-panel-material="solid"] .glass-surface,
-[data-background-source="local"][data-panel-material="solid"] .network-adapter {
-  box-shadow: none;
-}
 
-[data-appearance="light"][data-background-source="local"][data-panel-material="blur"] .glass-surface,
-[data-appearance="light"][data-background-source="local"][data-panel-material="blur"] .network-adapter {
+[data-appearance="light"]:is([data-background-source="local"], [data-background-source="builtin"])[data-panel-material="blur"] .glass-surface,
+[data-appearance="light"]:is([data-background-source="local"], [data-background-source="builtin"])[data-panel-material="blur"] .network-adapter {
   backdrop-filter:
     blur(calc(var(--hm-panel-blur) + 3px))
     saturate(88%)
     brightness(1.035);
+}
+
+/* Companion-inspired wallpapers: CSS-only, with matching light and dark palettes. */
+:root, [data-appearance="light"] {
+  --hm-soft-dots: radial-gradient(ellipse at 50% 65%, #c6b3ee80, transparent 75%), radial-gradient(circle, #7784a84d 1px, transparent 1.3px), linear-gradient(145deg, #eef0fb, #f5e9e2);
+}
+[data-appearance="dark"] {
+  --hm-soft-dots: radial-gradient(ellipse at 50% 65%, #8571c640, transparent 75%), radial-gradient(circle, #b4c0df40 1px, transparent 1.3px), linear-gradient(145deg, #222b40, #342a3f);
+}
+
+/* Surface roles: one background field, distinct coverage for content and rows. */
+:root {
+  --hm-content-opacity: var(--hm-panel-opacity);
+  --hm-row-opacity: var(--hm-panel-opacity);
+  --hm-surface-fill: rgba(var(--hm-surface-rgb), var(--hm-content-opacity));
+  --hm-surface-secondary-fill: rgba(var(--hm-surface-secondary-rgb), var(--hm-content-opacity));
+  --hm-row-fill: rgba(var(--hm-surface-rgb), var(--hm-row-opacity));
+  --hm-selected-fill: color-mix(in srgb, var(--hm-accent) 9%, var(--hm-row-fill));
+}
+[data-background-source="system"], [data-background-source="solid"] {
+  --hm-content-opacity: max(0.9, var(--hm-panel-opacity));
+  --hm-row-opacity: max(0.94, var(--hm-panel-opacity));
+}
+[data-background-source="builtin"], [data-background-source="gradient"] {
+  --hm-content-opacity: var(--hm-panel-opacity);
+  --hm-row-opacity: calc(var(--hm-panel-opacity) * 0.84);
+}
+:root, [data-appearance="light"] {
+  --hm-soft-bloom:
+    radial-gradient(ellipse at 0% 100%, #b8efbc 0%, transparent 62%),
+    radial-gradient(ellipse at 6% 0%, #d0bcfa 0%, transparent 64%),
+    radial-gradient(ellipse at 65% 35%, #e3e2fc 0%, transparent 66%),
+    linear-gradient(120deg, #d8eee9, #f5f6fc 85%);
+}
+[data-appearance="dark"] {
+  --hm-soft-bloom:
+    radial-gradient(ellipse at 0% 100%, #234c43 0%, transparent 62%),
+    radial-gradient(ellipse at 6% 0%, #473969 0%, transparent 64%),
+    radial-gradient(ellipse at 65% 35%, #292c48 0%, transparent 66%),
+    linear-gradient(120deg, #1c3033, #191d29 85%);
+}
+
+/* White is an opaque neutral theme; wallpaper palettes remain independent. */
+[data-appearance="light"][data-material="solid"][data-background-source="system"] {
+  --hm-window-base: #ffffff;
+  --hm-solid-chrome: #fafafa;
+  --hm-surface-secondary-rgb: 248, 248, 248;
+  --hm-content-opacity: 1;
+  --hm-row-opacity: 1;
+  --hm-hero-fill: #ffffff;
+  --hm-outer-border: rgba(0, 0, 0, 0.08);
+  --hm-shadow-colour: 0, 0, 0;
+  --hm-text-primary: #242424;
+  --hm-text-secondary: #4a4a4a;
+  --hm-text-tertiary: #666666;
+  --hm-selected-fill: color-mix(in srgb, var(--hm-accent) 4%, white);
 }

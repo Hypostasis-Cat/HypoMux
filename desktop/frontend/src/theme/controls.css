@@ -2,10 +2,10 @@
  * behavior; customize its neutral tokens without flattening primary buttons. */
 :root {
   --hm-control-radius: var(--hm-radius-md);
-  --hm-control-fill: rgba(var(--hm-surface-rgb), 0.36);
+  --hm-control-fill: rgba(var(--hm-surface-secondary-rgb), 0.82);
   --hm-control-hover: color-mix(in srgb, var(--hm-control-fill) 96%, var(--hm-text-primary));
   --hm-control-pressed: color-mix(in srgb, var(--hm-control-fill) 92%, var(--hm-text-primary));
-  --hm-control-border: color-mix(in srgb, var(--hm-text-secondary) 22%, transparent);
+  --hm-control-border: color-mix(in srgb, var(--hm-text-secondary) 24%, transparent);
   --hm-control-border-hover: color-mix(in srgb, var(--hm-text-secondary) 34%, transparent);
 }
 
@@ -99,8 +99,8 @@
   padding: 6px;
   border: 1px solid var(--hm-control-border);
   border-radius: var(--hm-radius-base);
-  background: rgba(var(--hm-surface-rgb), 0.94);
-  backdrop-filter: blur(20px);
+  background: rgba(var(--hm-surface-rgb), 0.98);
+  backdrop-filter: none;
   color: var(--hm-text-primary);
   box-shadow: 0 8px 24px rgba(var(--hm-shadow-colour), 0.14);
 }
@@ -116,11 +116,11 @@
 }
 
 .fui-Option.fui-Option[aria-selected="true"] {
-  background: color-mix(in srgb, var(--hm-text-primary) 7%, transparent);
+  background: var(--hm-accent-soft);
 }
 
 .fui-Option.fui-Option[aria-selected="true"]:hover {
-  background: color-mix(in srgb, var(--hm-text-primary) 10%, transparent);
+  background: var(--hm-accent-muted);
 }
 
 .fui-Option__checkIcon {

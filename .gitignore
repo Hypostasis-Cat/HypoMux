@@ -66,3 +66,7 @@ pnpm-debug.log*
 
 # Runtime configuration is stored in the user's profile.
 /config.json
+
+# Local companion skin packages and generated sample assets
+*.muxskin
+/desktop/frontend/public/skins/mux-layered-source/

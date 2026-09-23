@@ -1,10 +1,18 @@
 import type { AppearanceSettings } from "./appearance.types";
 
 export const builtinBackgrounds = {
-  aurora:
-    "radial-gradient(circle at 78% 12%, rgba(74, 153, 198, .52), transparent 31%), radial-gradient(circle at 12% 86%, rgba(188, 136, 103, .34), transparent 34%), linear-gradient(135deg, #9cafb9, #d8d0c7 52%, #769aae)",
-  harbour:
-    "radial-gradient(circle at 18% 20%, rgba(53, 125, 157, .46), transparent 31%), radial-gradient(circle at 82% 72%, rgba(105, 84, 150, .32), transparent 34%), linear-gradient(145deg, #526c79, #a6aeb0 48%, #445c68)",
+  "soft-dots": "var(--hm-soft-dots)",
+  "soft-bloom": "var(--hm-soft-bloom)",
+};
+
+export const backgroundPresets = [
+  { id: "soft-bloom", name: "紫雾薄荷", english: "Lilac & mint", description: "紫雾融入薄荷 · 轻盈柔彩", englishDescription: "Soft lilac · fresh mint" },
+  { id: "soft-dots", name: "柔光点阵", english: "Soft dots", description: "淡紫柔光 · 细密点阵", englishDescription: "Lavender glow · fine dots" },
+] as const;
+
+export const builtinBackgroundSizes: Record<AppearanceSettings["builtinBackground"], string> = {
+  "soft-dots": "auto, 22px 22px, auto",
+  "soft-bloom": "cover",
 };
 
 export const resolveWallpaperBackground = (settings: AppearanceSettings) => {

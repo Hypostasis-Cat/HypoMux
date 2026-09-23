@@ -46,3 +46,27 @@ it("invalidates the recommendation when the target changes", async () => {
   fireEvent.change(screen.getByRole("textbox"), { target: { value: "1.1.1.1" } });
   expect((screen.getByRole("button", { name: "应用推荐值" }) as HTMLButtonElement).disabled).toBe(true);
 });
+
+it("keeps cancellation available during a probe without enabling changes", async () => {
+  let rejectProbe!: (reason: Error) => void;
+  api.detect.mockReturnValue(new Promise((_, reject) => { rejectProbe = reject; }));
+  api.cancel.mockImplementation(async () => { rejectProbe(new Error("Cancelled")); });
+  render(<MTUDetectionPage {...props} />);
+  await waitFor(() => expect((screen.getByRole("button", { name: "检测推荐 MTU" }) as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(screen.getByRole("button", { name: "检测推荐 MTU" }));
+  expect(screen.getByText("正在探测并复测，最长约 50 秒…")).toBeTruthy();
+  expect((screen.getByRole("button", { name: "应用推荐值" }) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(screen.getByRole("button", { name: "取消检测" }));
+  await screen.findByRole("alert");
+  expect(api.cancel).toHaveBeenCalledOnce();
+  expect(screen.queryByRole("button", { name: "取消检测" })).toBeNull();
+});
+it("explains the tested upper limit and prevents applying an unchanged MTU", async () => {
+  api.detect.mockResolvedValue({ ...info, recommended: 1500, target: "223.5.5.5", at_limit: true });
+  render(<MTUDetectionPage {...props} />);
+  await waitFor(() => expect((screen.getByRole("button", { name: "检测推荐 MTU" }) as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(screen.getByRole("button", { name: "检测推荐 MTU" }));
+  await screen.findByText(/当前 MTU 已通过检测，无需修改/);
+  expect((screen.getByRole("button", { name: "应用推荐值" }) as HTMLButtonElement).disabled).toBe(true);
+  expect(api.apply).not.toHaveBeenCalled();
+});

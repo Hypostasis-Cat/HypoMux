@@ -1,9 +1,10 @@
 import { useEffect, useSyncExternalStore } from "react";
 import { exportSkin, parseSkin, type Skin } from "./package";
 
-export interface SkinPreferences { selected: string; size: number; animate: boolean }
+export interface SkinPreferences { selected: string; sizes: Record<string, number>; animate: boolean }
 interface Snapshot { skins: Skin[]; preferences: SkinPreferences; loaded: boolean; error: string }
-const defaults: SkinPreferences = { selected: "builtin.default", size: 112, animate: true };
+const defaults: SkinPreferences = { selected: "builtin.default", sizes: {}, animate: true };
+export const getSkinSize = (preferences: SkinPreferences, id = preferences.selected) => typeof preferences.sizes[id] === "number" ? preferences.sizes[id] : 112;
 let snapshot: Snapshot = { skins: [], preferences: defaults, loaded: false, error: "" };
 const listeners = new Set<() => void>();
 function publish(next: Snapshot) { snapshot = next; listeners.forEach(listener => listener()); }
@@ -25,14 +26,19 @@ export async function loadSkins() {
       const tx = database.transaction("items", "readonly"), request = tx.objectStore("items").getAll();
       tx.oncomplete = () => resolve(request.result); tx.onerror = () => reject(tx.error); tx.onabort = () => reject(tx.error);
     });
-    const skins: Skin[] = []; let preferences = defaults, error = "";
+    const skins: Skin[] = []; let preferences = defaults, error = "", legacySize: number | undefined;
     for (const value of values) {
       if (value?.kind === "preferences") {
-        preferences = { selected: typeof value.selected === "string" ? value.selected : defaults.selected, size: typeof value.size === "number" && Number.isFinite(value.size) ? Math.max(72, Math.min(200, value.size)) : defaults.size, animate: typeof value.animate === "boolean" ? value.animate : true };
+        const sizes: Record<string, number> = Object.create(null);
+        if (value.sizes && typeof value.sizes === "object" && !Array.isArray(value.sizes)) {
+          for (const [id, size] of Object.entries(value.sizes)) if (typeof size === "number" && Number.isFinite(size)) sizes[id] = Math.max(72, Math.min(200, size));
+        } else if (typeof value.size === "number" && Number.isFinite(value.size)) legacySize = Math.max(72, Math.min(200, value.size));
+        preferences = { selected: typeof value.selected === "string" ? value.selected : defaults.selected, sizes, animate: typeof value.animate === "boolean" ? value.animate : true };
       } else {
         try { skins.push(parseSkin(value)); } catch { error = "A damaged skin was skipped. Reimport it to repair. / 已跳过损坏皮肤，可重新导入修复。"; }
       }
     }
+    if (legacySize !== undefined) preferences = { ...preferences, sizes: Object.fromEntries([defaults.selected, ...skins.map(s => s.manifest.id)].map(id => [id, legacySize!])) };
     if (!skins.some(s => s.manifest.id === preferences.selected)) preferences = { ...preferences, selected: defaults.selected };
     publish({ skins, preferences, loaded: true, error });
   } catch (error) { publish({ ...snapshot, loaded: true, error: `Cannot access skin storage / 无法访问皮肤存储: ${String(error)}` }); }
@@ -65,6 +71,14 @@ export function savePreferences(patch: Partial<SkinPreferences>) {
     return { ...snapshot, preferences };
   });
 }
+export function saveSkinSize(id: string, size: number) {
+  if (!Number.isFinite(size)) return Promise.reject(new Error("Invalid character size"));
+  return mutate(store => {
+    const preferences = { ...snapshot.preferences, sizes: { ...snapshot.preferences.sizes, [id]: Math.max(72, Math.min(200, size)) } };
+    store.put({ ...preferences, kind: "preferences" }, "preferences");
+    return { ...snapshot, preferences };
+  });
+}
 export function installSkin(skin: Skin) {
   const archive = exportSkin(skin);
   parseSkin(archive);
@@ -78,7 +92,9 @@ export function installSkin(skin: Skin) {
 export function removeSkin(id: string) {
   return mutate(store => {
     store.delete(id);
-    if (snapshot.preferences.selected === id) store.put({ ...snapshot.preferences, selected: defaults.selected, kind: "preferences" }, "preferences");
-    return { ...snapshot, skins: snapshot.skins.filter(s => s.manifest.id !== id), preferences: { ...snapshot.preferences, selected: snapshot.preferences.selected === id ? defaults.selected : snapshot.preferences.selected } };
+    const sizes = { ...snapshot.preferences.sizes }; delete sizes[id];
+    const preferences = { ...snapshot.preferences, sizes, selected: snapshot.preferences.selected === id ? defaults.selected : snapshot.preferences.selected };
+    store.put({ ...preferences, kind: "preferences" }, "preferences");
+    return { ...snapshot, skins: snapshot.skins.filter(s => s.manifest.id !== id), preferences };
   });
 }

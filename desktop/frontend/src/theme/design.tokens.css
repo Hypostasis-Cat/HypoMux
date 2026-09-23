@@ -129,16 +129,16 @@
    * Applied to spacing and sizing
    * ======================================== */
   --hm-density-multiplier: 1;
-  --hm-density-space: calc(8px * var(--hm-density-multiplier));
+  --hm-density-space: var(--hm-density-multiplier);
 }
 
 /* Density variants */
 [data-density="compact"] {
-  --hm-density-multiplier: 0.875;
+  --hm-density-multiplier: 0.84;
 }
 
 [data-density="comfortable"] {
-  --hm-density-multiplier: 1.125;
+  --hm-density-multiplier: 1.18;
 }
 
 /* ========================================

@@ -24,7 +24,7 @@ HypoMux 的内置助手和外部 MCP 共用桌面业务服务。模型负责选�
 
 在 **AI 助手 → 外观** 打开「小 Mux 衣柜」，导入 `.muxskin` / ZIP 皮肤包，预览各状态后安装并应用。也可以从透明 PNG 创建皮肤，填写名称、作者并调整气泡锚点后导出分享。支持大小调节、动画开关、删除和恢复默认；皮肤与选择保存在当前应用的本机 WebView 存储中，清除应用浏览数据会移除这些内容。
 
-皮肤只包含描述文件和 PNG 资源，不能更改模型、执行工具或跳过操作确认。支持待机、思考、等待确认、回复、悬停和拖动；缺失的动作回退到待机。详细格式和限制见 [皮肤创作规范](../desktop/frontend/public/skins/SKIN_SPEC.md)，可从衣柜下载 [示例皮肤包](../desktop/frontend/public/skins/mux-starter.muxskin)。
+V1 皮肤包含描述文件和 PNG 资源；V2 另外支持 Cubism 3/4 Live2D 模型、物理与动作数据。皮肤不能更改 AI 模型、执行工具或跳过操作确认。支持待机、思考、等待确认、回复、悬停和拖动；Live2D 的眨眼、呼吸、视线与状态动作依赖模型参数和绑定。关闭动画、隐藏页面或角色离开可视区域时暂停；加载失败显示 PNG 回退。详细格式和限制见 [皮肤创作规范](../desktop/frontend/public/skins/SKIN_SPEC.md)，可从衣柜下载 [示例皮肤包](../desktop/frontend/public/skins/mux-starter.muxskin)。
 
 ## 操作与诊断
 

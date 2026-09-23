@@ -88,6 +88,12 @@
 .mux-delete-confirm { margin-top: 12px; padding: 12px; background: var(--colorNeutralBackground2); border-radius: 8px; }
 .mux-wardrobe .mux-delete-confirm p { font-size: 12px; line-height: 1.7; margin-bottom: 8px; }
 .mux-skin-character { display: block; width: 100%; max-width: 100%; max-height: 100%; background-repeat: no-repeat; pointer-events: none; }
+.mux-live2d { display: block; position: relative; width: 100%; max-height: 100%; pointer-events: none; }
+.mux-preview-stage[data-live2d="true"] { height: 310px; }
+.mux-live2d-stage { position: absolute; inset: 0; }
+.mux-live2d-stage canvas { display: block; width: 100%; height: 100%; }
+.mux-live2d-loading { display: flex; width: 100%; height: 100%; min-height: 40px; align-items: center; justify-content: center; color: var(--hm-text-tertiary); font-size: 20px; letter-spacing: 4px; }
+.mux-live2d-error { position: absolute; bottom: 0; left: 0; right: 0; font-size: 10px; text-align: center; background: var(--colorNeutralBackground1); color: var(--colorPaletteRedForeground1); }
 .mux-skin-character[data-skin-motion] { transform-origin: 50% 75%; }
 .mux-skin-character[data-skin-motion="idle"] { animation: mux-skin-float 4s ease-in-out infinite; }
 .mux-skin-character[data-skin-motion="thinking"] { animation: mux-skin-think 2.8s ease-in-out infinite; }
@@ -110,3 +116,5 @@
 @media (max-width: 1000px) { .ai-workspace .ai-settings.mux-wardrobe { padding: 20px; } .mux-wardrobe-layout { grid-template-columns: minmax(260px, 310px) minmax(0, 1fr); gap: 20px; } .mux-header-actions { gap: 6px; } }
 @media (max-width: 760px) { .mux-wardrobe-heading { align-items: flex-start; flex-direction: column; gap: 14px; } .mux-wardrobe-layout { grid-template-columns: 1fr; } .mux-preview-stage { height: 260px; } .mux-preview-body { padding: 18px; } .mux-skin-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); } }
 @media (prefers-reduced-motion: reduce) { .mux-library, .mux-skin-card { transition: none; } }
+
+.mux-layered-character { display: block; position: relative; max-width: 100%; max-height: 100%; pointer-events: none; transform-origin: 50% 75%; }

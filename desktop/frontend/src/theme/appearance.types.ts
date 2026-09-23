@@ -18,7 +18,7 @@ export type AppearanceSettings = {
   accentPreset: AccentPreset;
   customAccent: string;
   backgroundSource: BackgroundSource;
-  builtinBackground: "aurora" | "harbour";
+  builtinBackground: "soft-dots" | "soft-bloom";
   localBackgroundUrl?: string;
   solidBackground: string;
   gradientBackground: string;

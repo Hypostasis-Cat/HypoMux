@@ -18,7 +18,7 @@ const baseSettings: AppearanceSettings = {
   accentPreset: "hypomux",
   customAccent: "#1677D2",
   backgroundSource: "system",
-  builtinBackground: "aurora",
+  builtinBackground: "soft-dots",
   solidBackground: "#DCE4EA",
   gradientBackground: "linear-gradient(135deg, #CBD8E2 0%, #E9E3DA 52%, #C7D9E4 100%)",
   backgroundBrightness: 100,

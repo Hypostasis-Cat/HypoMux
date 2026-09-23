@@ -1,10 +1,14 @@
 import { Unzip, UnzipInflate, zipSync, strFromU8, strToU8 } from "fflate";
+import { validateLayered, type LayeredSkin } from "./layeredPackage";
+import { validateLive2D, type Live2DSkin } from "./live2dPackage";
 
 export const skinStates = ["idle", "thinking", "waiting", "replying", "hover", "dragging"] as const;
 export type SkinState = typeof skinStates[number];
 export type SkinAnimation = { type: "image"; src: string } | { type: "spritesheet"; src: string; columns: number; frames: number; fps: number; loop: boolean };
 export interface SkinManifest {
-  schemaVersion: 1; id: string; name: string; author: string; version: string;
+  schemaVersion: 1 | 2 | 3; id: string; name: string; author: string; version: string;
+  live2d?: Live2DSkin;
+  layered?: LayeredSkin;
   preview?: string; canvas: { width: number; height: number }; anchor: { x: number; y: number };
   states: Partial<Record<SkinState, SkinAnimation>> & { idle: SkinAnimation };
 }
@@ -18,7 +22,7 @@ export function safePath(path: string): boolean {
   return path.length <= 160 && /^[A-Za-z0-9_./-]+$/.test(path) && !path.startsWith("/") && path.split("/").every(part => part !== "" && part !== "." && part !== "..");
 }
 export function validateManifest(value: unknown): SkinManifest {
-  if (!record(value) || value.schemaVersion !== 1) fail("Unsupported skin format / 不支持的皮肤格式版本");
+  if (!record(value) || ![1, 2, 3].includes(value.schemaVersion)) fail("Unsupported skin format / 不支持的皮肤格式版本");
   const v = value as Record<string, any>;
   if (!shortText(v.id) || !/^[a-z0-9][a-z0-9.-]{2,79}$/.test(v.id) || ["builtin.default", "preferences"].includes(v.id)) fail("Invalid skin ID / 皮肤 ID 无效");
   if (!shortText(v.name) || !shortText(v.author) || !shortText(v.version, 32)) fail("Invalid name, author or version / 名称、作者或版本无效");
@@ -36,7 +40,12 @@ export function validateManifest(value: unknown): SkinManifest {
     else if (a.type === "spritesheet" && integer(a.columns, 1, 64) && integer(a.frames, 1, 120) && a.columns <= a.frames && integer(a.fps, 1, 30) && typeof a.loop === "boolean") states[key] = { type: "spritesheet", src: a.src, columns: a.columns, frames: a.frames, fps: a.fps, loop: a.loop };
     else fail(`Invalid animation / 动画参数无效: ${key}`);
   }
-  return { schemaVersion: 1, id: v.id, name: v.name, author: v.author, version: v.version, ...(v.preview ? { preview: v.preview } : {}), canvas: { width: v.canvas.width, height: v.canvas.height }, anchor: { x: v.anchor.x, y: v.anchor.y }, states: states as SkinManifest["states"] };
+  const layered = v.layered === undefined ? undefined : validateLayered(v.layered);
+  if ((v.schemaVersion === 3) !== !!layered || (layered && v.live2d)) fail("Layered skins require schemaVersion 3 and cannot contain Live2D / 分层皮肤需版本 3 且不能同时包含 Live2D");
+  const live2d = v.live2d === undefined ? undefined : validateLive2D(v.live2d);
+  if (v.schemaVersion === 2 && !live2d) fail("Version 2 requires a Live2D model / 版本 2 需要 Live2D 模型");
+  if (live2d && v.schemaVersion !== 2) fail("Live2D requires schemaVersion 2 / Live2D 需要版本 2 格式");
+  return { schemaVersion: v.schemaVersion, ...(live2d ? { live2d } : {}), ...(layered ? { layered } : {}), id: v.id, name: v.name, author: v.author, version: v.version, ...(v.preview ? { preview: v.preview } : {}), canvas: { width: v.canvas.width, height: v.canvas.height }, anchor: { x: v.anchor.x, y: v.anchor.y }, states: states as SkinManifest["states"] };
 }
 
 export function pngSize(bytes: Uint8Array): { width: number; height: number } {
@@ -78,7 +87,7 @@ function inspectZip(bytes: Uint8Array): Map<string, { size: number; crc: number 
     if (p + 46 + nameLength + extra + comment > end) fail("Truncated ZIP entry / ZIP 条目不完整");
     const name = strFromU8(bytes.subarray(p + 46, p + 46 + nameLength));
     const directory = name.endsWith("/");
-    if (!safePath(directory ? name.slice(0, -1) : name) || entries.has(name) || (!directory && name !== "manifest.json" && !name.endsWith(".png"))) fail(`Unsupported or duplicate path / 不支持或重复的路径: ${name.slice(0, 160)}`);
+    if (!safePath(directory ? name.slice(0, -1) : name) || entries.has(name) || (!directory && name !== "manifest.json" && !/\.(png|moc3|model3\.json|motion3\.json|physics3\.json|exp3\.json|pose3\.json)$/.test(name))) fail(`Unsupported or duplicate path / 不支持或重复的路径: ${name.slice(0, 160)}`);
     if ((flags & ~0x080e) || ![0, 8].includes(method) || v.getUint16(p + 34, true) || ((v.getUint32(p + 38, true) >>> 16) & 0xf000) === 0xa000) fail("Encrypted files and links are not supported / 不支持加密文件或链接");
     total += size;
     if (total > limits.expanded || (name === "manifest.json" && size > 16384) || (directory && size !== 0)) fail("Expanded package too large / 解压后文件过大");
@@ -132,12 +141,15 @@ export function parseSkin(bytes: Uint8Array): Skin {
   for (const [path, data] of Object.entries(files)) if (path.endsWith(".png")) {
     const size = pngSize(data); pixels += size.width * size.height; sizes.set(path, size);
   }
-  if (pixels > limits.pixels) fail("Total decoded images exceed 16 megapixels / 图片总像素超过 1600 万");
+  if (pixels > limits.pixels * (manifest.live2d ? 2 : 1)) fail("Total decoded images exceed skin pixel limit / 图片总像素超过皮肤限制");
   if (manifest.preview && !sizes.has(manifest.preview)) fail("Missing preview / 缺少预览图");
   for (const animation of Object.values(manifest.states)) {
     const size = sizes.get(animation.src), columns = animation.type === "image" ? 1 : animation.columns, rows = animation.type === "image" ? 1 : Math.ceil(animation.frames / columns);
     if (!size || size.width !== manifest.canvas.width * columns || size.height !== manifest.canvas.height * rows) fail(`Image dimensions must match canvas and frame grid / 图片尺寸须匹配画布与帧网格: ${animation.src}`);
   }
+  for (const layer of manifest.layered?.layers ?? []) if (!sizes.has(layer.src)) fail(`Missing layer image / 缺少部件图片: ${layer.src}`);
+  if (manifest.live2d) validateLive2D(manifest.live2d, files);
+  else if (Object.keys(files).some(path => path !== "manifest.json" && !path.endsWith(".png"))) fail("Model files require a Live2D manifest / 模型文件需要 Live2D 描述");
   return { manifest, files };
 }
 export function exportSkin(skin: Skin): Uint8Array {

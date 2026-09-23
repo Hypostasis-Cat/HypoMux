@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { DefaultCharacter } from "./skins/DefaultCharacter";
 import { SkinCharacter } from "./skins/SkinCharacter";
-import { useSkins } from "./skins/store";
+import { getSkinSize, useSkins } from "./skins/store";
 import { useI18n } from "../../i18n/i18n";
 
 export function AssistantCompanion({ open, onOpenChange, running, pending, pageLabel, speech, speechId, sample = false, onViewDetails, onSpeechDismiss, children }: {
@@ -37,7 +37,7 @@ export function AssistantCompanion({ open, onOpenChange, running, pending, pageL
     return () => window.removeEventListener("resize", resize);
   }, []);
   const ratio = skin ? skin.manifest.canvas.width / skin.manifest.canvas.height : 88 / 92;
-  const size = Math.max(32, Math.min(preferences.size, viewport.width - 48, viewport.height - 72));
+  const size = Math.max(32, Math.min(getSkinSize(preferences), viewport.width - 48, viewport.height - 72));
   const petWidth = ratio >= 1 ? size : size * ratio;
   const petHeight = ratio >= 1 ? size / ratio : size;
   const characterState = pending ? "waiting" : running ? "thinking" : dragging ? "dragging" : hovered ? "hover" : speech && speechVisible && !open ? "replying" : "idle";

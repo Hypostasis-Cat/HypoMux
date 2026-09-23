@@ -3,6 +3,7 @@ import { desktopPlatform } from "../platform/desktop";
 import { appearancePersistence, loadLegacyBrowserAppearance } from "./background.service";
 import { appearancePresets, defaultAppearance, getAppearancePreset, resolveAccent } from "./appearance.presets";
 import { createHypoMuxTheme } from "./createFluentTheme";
+import { builtinBackgroundSizes } from "./wallpaper";
 import type {
   AppearancePresetId,
   AppearanceSettings,
@@ -39,6 +40,7 @@ const migrateAppearance = (value: Partial<AppearanceSettings>): Partial<Appearan
 const normaliseAppearance = (value: AppearanceSettings): AppearanceSettings => ({
   ...value,
   schemaVersion: 2,
+  builtinBackground: value.builtinBackground === "soft-bloom" ? "soft-bloom" : "soft-dots",
   material: value.material === "solid" ? "solid" : "mica",
   panelMaterial: value.panelMaterial === "solid" ? "solid" : "blur",
   presetId:
@@ -76,6 +78,7 @@ const applyDocumentTokens = (settings: AppearanceSettings, resolvedMode: Resolve
   root.dataset.material = settings.material;
   root.dataset.panelMaterial = settings.panelMaterial;
   root.dataset.backgroundSource = settings.backgroundSource;
+  root.dataset.builtinBackground = settings.builtinBackground;
   root.dataset.density = settings.density;
   root.dataset.motion = settings.motion;
   root.style.setProperty("--hm-accent", accent);
@@ -91,6 +94,9 @@ const applyDocumentTokens = (settings: AppearanceSettings, resolvedMode: Resolve
   root.style.setProperty("--hm-bg-overlay", `${settings.backgroundOverlay / 100}`);
   root.style.setProperty("--hm-bg-blur", `${settings.backgroundBlur}px`);
   root.style.setProperty("--hm-bg-scale", settings.backgroundScale);
+  root.style.setProperty("--hm-wallpaper-size", settings.backgroundSource === "builtin"
+    ? builtinBackgroundSizes[settings.builtinBackground] ?? settings.backgroundScale
+    : settings.backgroundScale);
   root.style.setProperty("--hm-bg-position", settings.backgroundAlignment);
   root.style.setProperty("--hm-solid-background", settings.solidBackground);
   root.style.setProperty("--hm-gradient-background", settings.gradientBackground);

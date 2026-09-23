@@ -35,6 +35,7 @@ import { ADAPTER_VISIBILITY_EVENT } from "../state/adapterVisibility";
 import { accentColours } from "../theme/appearance.presets";
 import { useAppearance } from "../theme/appearance.store";
 import { backgroundService } from "../theme/background.service";
+import { backgroundPresets, builtinBackgrounds, builtinBackgroundSizes } from "../theme/wallpaper";
 import type { AccentPreset, AppearanceMode, MotionMode, PanelMaterial, WindowMaterial } from "../theme/appearance.types";
 import { useI18n } from "../i18n/i18n";
 
@@ -596,27 +597,84 @@ export function SettingsPage({
           </SettingRow>
           <SettingRow
             title={text("窗口背景材质", "Window background material")}
-            description={
-              appearance.backgroundSource === "local"
-                ? text(
-                    "自定义背景图正在覆盖窗口材质；清除背景图后可切换 Mica 或纯色。",
-                    "The custom background covers the window material. Clear it to switch between Mica and solid.",
-                  )
-                : text(
-                    "默认浅色和深色使用稳定的纯色背景；如手动启用 Mica，将显示 Windows 11 原生窗口背景。卡片磨砂仅在使用自定义背景图时生效。",
-                    "Light and dark use a stable solid background by default. Mica may be enabled manually. Card frosting only applies to custom backgrounds.",
-                  )
-            }
+            description={text("标题栏与侧栏跟随背景。Mica 柔化背景细节；纯色模式关闭窗口磨砂，保留主题底色。", "The title bar and sidebar follow the background. Mica softens its details; Solid disables chrome frosting while keeping the theme colors.")}
           >
             <SettingDropdown
               value={appearance.material}
-              disabled={appearance.backgroundSource === "local"}
               options={[
                 { value: "mica", label: "Mica" },
                 { value: "solid", label: text("纯色", "Solid") },
               ]}
               onChange={(value) => updateAppearance({ material: value as WindowMaterial })}
             />
+          </SettingRow>
+          <SettingRow title={text("主题背景", "Theme background")} description={text("选择默认背景、内置预设或自己的图片，点击即刻应用。", "Choose the default, a preset, or your own image. Changes apply immediately.")}>
+            <div className="background-preset-picker">
+              <div className="background-preset-grid">
+                <button type="button" className="background-preset-card"
+                  aria-pressed={appearance.backgroundSource === "system"}
+                  onClick={() => updateAppearance({ backgroundSource: "system" })}>
+                  <span className="background-preset-art background-preset-default" aria-hidden="true" />
+                  <strong>{text("默认背景", "Default background")}</strong>
+                  <small>{text("简洁原生 · 跟随主题", "Native simplicity · follows theme")}</small>
+                </button>
+                {backgroundPresets.map((preset) => (
+                  <button type="button" key={preset.id} className="background-preset-card"
+                    aria-pressed={appearance.backgroundSource === "builtin" && appearance.builtinBackground === preset.id}
+                    onClick={() => updateAppearance({
+                      backgroundSource: "builtin", builtinBackground: preset.id,
+                      ...(preset.id === "soft-bloom" ? { panelOpacity: 72 } : {}),
+                    })}>
+                    <span className="background-preset-art" aria-hidden="true" style={{ background: builtinBackgrounds[preset.id], backgroundSize: builtinBackgroundSizes[preset.id] }} />
+                    <strong>{text(preset.name, preset.english)}</strong>
+                    <small>{text(preset.description, preset.englishDescription)}</small>
+                  </button>
+                ))}
+                <div className="background-custom-tile">
+                <button type="button" className="background-preset-card"
+                  aria-pressed={appearance.backgroundSource === "local"}
+                  onClick={() => appearance.localBackgroundUrl
+                    ? updateAppearance({ backgroundSource: "local" })
+                    : backgroundInput.current?.click()}>
+                  <span className="background-preset-art background-preset-custom" aria-hidden="true"
+                    style={appearance.localBackgroundUrl ? { backgroundImage: `url("${appearance.localBackgroundUrl}")` } : undefined}>
+                    {!appearance.localBackgroundUrl && <Image20Regular />}
+                  </span>
+                  <strong>{text("自定义图片", "Custom image")}</strong>
+                  <small>{text("上传喜欢的图片作为背景", "Use a picture of your own")}</small>
+                </button>
+              {appearance.localBackgroundUrl && <div className="background-custom-actions">
+                <Button size="small" icon={<Image20Regular />} aria-label={text("更换图片", "Replace image")} title={text("更换图片", "Replace image")} onClick={() => backgroundInput.current?.click()} />
+                <Button size="small" icon={<Delete20Regular />} aria-label={text("移除图片", "Remove image")} title={text("移除图片", "Remove image")} onClick={() => {
+                  backgroundService.release(appearance.localBackgroundUrl);
+                  updateAppearance({ localBackgroundUrl: undefined, ...(appearance.backgroundSource === "local" ? { backgroundSource: "system" as const } : {}) });
+                }} />
+              </div>}
+                </div>
+              </div>
+              <input
+                ref={backgroundInput}
+                className="visually-hidden"
+                type="file"
+                aria-label={t("settings_background_image_choose")}
+                accept=".png,.jpg,.jpeg,.bmp,.webp,image/png,image/jpeg,image/bmp,image/webp"
+                onChange={async (event) => {
+                  const file = event.target.files?.[0];
+                  if (!file) return;
+                  try {
+                    const dataURL = await backgroundService.fromFile(file);
+                  updateAppearance({
+                    localBackgroundUrl: dataURL,
+                    backgroundSource: "local",
+                  });
+                  } catch (error) {
+                    notify(t("settings_background_image_invalid"), String(error), "error");
+                  } finally {
+                    event.target.value = "";
+                  }
+                }}
+              />
+            </div>
           </SettingRow>
           <SettingRow title={t("settings_theme_color")} description={t("settings_theme_color_hint")}>
             <div className="accent-row settings-accent-row">
@@ -655,59 +713,16 @@ export function SettingsPage({
               onChange={(value) => updateAppearance({ motion: value as MotionMode })}
             />
           </SettingRow>
-          <SettingRow title={t("settings_background_image")} description={t("settings_background_image_hint")}>
-            <div className="background-actions">
-              <Button icon={<Image20Regular />} onClick={() => backgroundInput.current?.click()}>{t("settings_background_image_choose")}</Button>
-              <Button
-                appearance="subtle"
-                icon={<Delete20Regular />}
-                disabled={!appearance.localBackgroundUrl}
-                onClick={() => {
-                  backgroundService.release(appearance.localBackgroundUrl);
-                  updateAppearance({
-                    localBackgroundUrl: undefined,
-                    backgroundSource: "system",
-                    material: "mica",
-                    presetId: "windows-mica",
-                  });
-                }}
-              >
-                {t("settings_background_image_clear")}
-              </Button>
-              <input
-                ref={backgroundInput}
-                className="visually-hidden"
-                type="file"
-                aria-label={t("settings_background_image_choose")}
-                accept=".png,.jpg,.jpeg,.bmp,.webp,image/png,image/jpeg,image/bmp,image/webp"
-                onChange={async (event) => {
-                  const file = event.target.files?.[0];
-                  if (!file) return;
-                  try {
-                    const dataURL = await backgroundService.fromFile(file);
-                  updateAppearance({
-                    localBackgroundUrl: dataURL,
-                    backgroundSource: "local",
-                  });
-                  } catch (error) {
-                    notify(t("settings_background_image_invalid"), String(error), "error");
-                  } finally {
-                    event.target.value = "";
-                  }
-                }}
-              />
-            </div>
-          </SettingRow>
           <SettingRow
             title={text("卡片材质", "Card material")}
             description={text(
-              "仅在使用自定义背景图时生效，决定内容卡片使用高斯磨砂还是纯色。",
-              "Only available with a custom background; chooses frosted or solid cards.",
+              "适用于背景预设和自定义图片，选择高斯磨砂或清晰卡片。",
+              "Choose frosted or clear cards over a preset or custom image.",
             )}
           >
             <SettingDropdown
               value={appearance.panelMaterial}
-              disabled={appearance.backgroundSource !== "local"}
+              disabled={appearance.backgroundSource !== "local" && appearance.backgroundSource !== "builtin"}
               options={[
                 { value: "blur", label: text("高斯磨砂", "Gaussian frost") },
                 { value: "solid", label: text("纯色卡片", "Solid cards") },
@@ -718,8 +733,8 @@ export function SettingsPage({
           <SettingRow
             title={text("磨砂强度", "Frost strength")}
             description={text(
-              "仅在自定义背景和高斯磨砂卡片下生效；数值越高，背景细节越柔和。",
-              "Only applies to frosted cards over a custom background. Higher values soften more detail.",
+              "背景预设和自定义图片均可调节；选择高斯磨砂后，数值越高，卡片后的纹理越柔和。",
+              "Works with presets and custom images. With frosted cards, higher values soften the texture behind them.",
             )}
           >
             <div className="slider-value">
@@ -728,20 +743,20 @@ export function SettingsPage({
                 max={40}
                 value={appearance.panelBlur}
                 valueText={`${appearance.panelBlur}px`}
-                disabled={appearance.backgroundSource !== "local" || appearance.panelMaterial !== "blur"}
+                disabled={(appearance.backgroundSource !== "local" && appearance.backgroundSource !== "builtin") || appearance.panelMaterial !== "blur"}
                 onChange={(value) => updateAppearance({ panelBlur: value })}
               />
               <span>{appearance.panelBlur}px</span>
             </div>
           </SettingRow>
-          <SettingRow title={t("settings_content_card_opacity")} description={t("settings_content_card_opacity_hint")}>
+          <SettingRow title={t("settings_content_card_opacity")} description={text("适用于预设和自定义背景；提高不透明度可增强文字可读性。", "Available with presets and custom backgrounds. Higher opacity improves text readability.")}>
             <div className="slider-value">
               <SettingSlider
                 min={0}
                 max={100}
                 value={appearance.panelOpacity}
                 valueText={`${appearance.panelOpacity}%`}
-                disabled={appearance.backgroundSource !== "local"}
+                disabled={appearance.backgroundSource !== "local" && appearance.backgroundSource !== "builtin"}
                 onChange={(value) => updateAppearance({ panelOpacity: value })}
               />
               <span>{appearance.panelOpacity}%</span>

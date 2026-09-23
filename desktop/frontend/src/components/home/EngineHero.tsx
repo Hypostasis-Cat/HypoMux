@@ -85,12 +85,12 @@ export function EngineHero({
               {phaseLabel}
             </Badge>
           </div>
+          <p className="engine-summary">
+            {text(`${selectedCount} 张网卡参与调度`, `${selectedCount} NIC(s) selected`)}
+            <span aria-hidden="true">·</span>
+            {text(`${connections} 个连接`, `${connections} connection(s)`)}
+          </p>
         </div>
-        <p className="engine-summary">
-          {text(`${selectedCount} 张网卡参与调度`, `${selectedCount} NIC(s) selected`)}
-          <span aria-hidden="true">·</span>
-          {text(`${connections} 个连接`, `${connections} connection(s)`)}
-        </p>
         <TabList
           className="mode-tabs"
           selectedValue={mode}

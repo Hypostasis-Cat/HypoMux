@@ -1,7 +1,17 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
+import LayeredCharacter from "./LayeredCharacter";
 import { type Skin, type SkinState } from "./package";
 
-export function SkinCharacter({ skin, state, animate, fallback, onError }: { skin: Skin; state: SkinState; animate: boolean; fallback?: ReactNode; onError?: () => void }) {
+const Live2DCharacter = lazy(() => import("./Live2DCharacter"));
+interface CharacterProps { skin: Skin; state: SkinState; animate: boolean; fallback?: ReactNode; onError?: () => void; posterOnly?: boolean }
+export function SkinCharacter(props: CharacterProps) {
+  const poster = <PNGCharacter {...props} animate={props.skin.manifest.live2d ? false : props.animate} />;
+  if (props.skin.manifest.layered && !props.posterOnly) return <LayeredCharacter {...props} fallback={poster} />;
+  return props.skin.manifest.live2d && !props.posterOnly
+    ? <Suspense fallback={<span className="mux-live2d-loading" role="status" aria-label="Live2D loading">···</span>}><Live2DCharacter {...props} fallback={poster} /></Suspense>
+    : poster;
+}
+function PNGCharacter({ skin, state, animate, fallback, onError }: CharacterProps) {
   const animation = skin.manifest.states[state] ?? skin.manifest.states.idle;
   const [url, setURL] = useState<{ src: string; url: string; skin: Skin }>();
   const [failed, setFailed] = useState(false);
