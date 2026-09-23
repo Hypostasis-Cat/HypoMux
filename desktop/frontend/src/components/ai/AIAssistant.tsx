@@ -6,6 +6,7 @@ import { isDesktopRuntime } from "../../platform/runtime";
 import { useI18n } from "../../i18n/i18n";
 import "./assistant.css";
 import { AssistantMessage, summarizeReply } from "./AssistantMessage";
+import { SkinWardrobe } from "./skins/SkinWardrobe";
 import { AssistantCompanion } from "./AssistantCompanion";
 import { assistantPageContext } from "./pageContext";
 import type { AppPage } from "../shell/CompactNavigation";
@@ -127,12 +128,12 @@ export function AIAssistant({ open, onOpenChange, workspace = true, onOpenWorksp
 
   const content = <>
       <header className="ai-header"><div><strong><Chat20Regular /> {workspace ? text("AI 助手", "AI assistant") : text("快捷助手", "Quick assistant")}</strong>{workspace && <p>{text("用自然语言管理你的网络", "Manage your network in your own words")}</p>}</div><div className="ai-actions">{!workspace && <><Button appearance="subtle" icon={<ArrowExpand20Regular />} onClick={onOpenWorkspace}>{text("进入工作区", "Open workspace")}</Button><Button appearance="subtle" icon={<Dismiss20Regular />} aria-label={text("关闭快捷助手", "Close quick assistant")} onClick={() => onOpenChange(false)} /></>}</div></header>
-      {workspace && <TabList selectedValue={view} onTabSelect={(_, data) => setView(String(data.value))}><Tab value="chat">{text("对话", "Chat")}</Tab><Tab value="model">{text("模型配置", "Model")}</Tab><Tab value="external">{text("外部 AI", "External AI")}</Tab></TabList>}
+      {workspace && <TabList selectedValue={view} onTabSelect={(_, data) => setView(String(data.value))}><Tab value="chat">{text("对话", "Chat")}</Tab><Tab value="model">{text("模型配置", "Model")}</Tab><Tab value="appearance">{text("外观", "Appearance")}</Tab><Tab value="external">{text("外部 AI", "External AI")}</Tab></TabList>}
       {!native && <p className="ai-banner">{text("浏览器预览：请在桌面程序中连接模型和执行操作。", "Browser preview: model connections and actions require the desktop app.")}</p>}
       {error && <div className="ai-banner ai-error" role="alert">{error}</div>}
       {snapshot.error && <div className="ai-banner" role="status">{snapshot.error}</div>}
       {notice && <div className="ai-banner" role="status">{notice}</div>}
-      {view === "chat" ? <>
+      {view === "appearance" ? <SkinWardrobe /> : view === "chat" ? <>
         <div className="ai-conversation" ref={list}>
           {!snapshot.entries.length && !previewReply && <div className="ai-welcome"><h2>{text("说说你想做什么", "What would you like to do?")}</h2><p>{text("配置聚合、管理分流，或一起查找网络问题。", "Set up aggregation, manage routes, or investigate network problems.")}</p>{["开启聚合，并把 CS2 设置为直连", "检查为什么只有一张网卡在跑流量", "查看当前分流规则"].map((zh, i) => <Button key={zh} appearance="secondary" onClick={() => { setDraft(locale === "en" ? ["Start aggregation and route CS2 directly", "Check why only one adapter carries traffic", "Show my routing rules"][i] : zh); input.current?.focus(); }}>{locale === "en" ? ["Start aggregation; route CS2 directly", "Diagnose adapter traffic", "Show routing rules"][i] : zh}</Button>)}{!config.model && <Button appearance="primary" onClick={() => { setView("model"); if (!workspace) onOpenWorkspace?.(); }}>{text("先连接一个模型", "Connect a model")}</Button>}</div>}
           {snapshot.entries.map(showEntry)}
