@@ -15,6 +15,7 @@
 .tray-menu__status[data-phase="failed"]::before { background: var(--colorPaletteRedForeground1); }
 .tray-menu__status:is([data-phase="degraded"], [data-phase="waiting_network"], [data-phase="starting"], [data-phase="stopping"])::before { background: var(--colorPaletteMarigoldForeground1); }
 .tray-menu__action { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 30px; padding: 6px 8px; border: 0; border-radius: 3px; background: transparent; color: inherit; font-size: 13px; line-height: 18px; text-align: left; cursor: default; }
+@media (any-pointer: coarse) { .tray-menu__action { min-height: 44px; padding-block: 10px; } }
 .tray-menu__action:hover, .tray-menu__card[data-keyboard-navigation="true"] .tray-menu__action:focus { background: var(--colorNeutralBackground1Hover); }
 .tray-menu__card[data-keyboard-navigation="false"] .tray-menu__action:focus { outline: none; }
 .tray-menu__card[data-keyboard-navigation="true"] .tray-menu__action:focus { outline: 1px solid var(--colorNeutralStrokeAccessible); outline-offset: -1px; }
