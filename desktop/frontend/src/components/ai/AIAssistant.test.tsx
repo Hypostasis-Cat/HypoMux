@@ -172,3 +172,26 @@ describe("AI assistant", () => {
     expect((screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement).value).toBe("check network");
   });
 });
+
+it("keeps the companion and its position across ordinary pages and the assistant workspace", async () => {
+  const onOpenChange = vi.fn();
+  const view = render(<AIAssistant open={false} workspace={false} page="home" onOpenChange={onOpenChange} />);
+  const pet = screen.getByRole("button", { name: "Network companion" });
+  const companion = pet.closest(".ai-companion") as HTMLElement;
+  const character = pet.querySelector("svg");
+  fireEvent.keyDown(pet, { key: "ArrowLeft", altKey: true });
+  fireEvent.keyDown(pet, { key: "ArrowUp", altKey: true });
+  const position = { right: companion.style.right, bottom: companion.style.bottom };
+  expect(position).toEqual({ right: "48px", bottom: "52px" });
+  view.rerender(<AIAssistant open={false} workspace={false} page="settings" onOpenChange={onOpenChange} />);
+  expect(screen.getByRole("button", { name: "Network companion" })).toBe(pet);
+  view.rerender(<AIAssistant open workspace page="assistant" onOpenChange={onOpenChange} />);
+  expect(companion.isConnected).toBe(true);
+  expect(companion.style.display).toBe("none");
+  expect(screen.queryByRole("button", { name: "Network companion" })).toBeNull();
+  view.rerender(<AIAssistant open={false} workspace={false} page="home" onOpenChange={onOpenChange} />);
+  expect(screen.getByRole("button", { name: "Network companion" })).toBe(pet);
+  expect(pet.querySelector("svg")).toBe(character);
+  expect({ right: companion.style.right, bottom: companion.style.bottom }).toEqual(position);
+  await act(async () => {});
+});

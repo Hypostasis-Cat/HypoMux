@@ -20,7 +20,7 @@ it("persists installation and settings, reloads, and restores default when activ
   await act(() => installSkin({ ...skin, manifest: { ...skin.manifest, name: "Updated" } }));
   expect(result.current.skins).toHaveLength(1);
   expect(result.current.skins[0].manifest.name).toBe("Updated");
-  expect(() => installSkin({ ...skin, manifest: { ...skin.manifest, schemaVersion: 2 as 1 } })).toThrow();
+  await expect(installSkin({ ...skin, manifest: { ...skin.manifest, schemaVersion: 2 as 1 } })).rejects.toThrow();
   expect(result.current.preferences.selected).toBe(skin.manifest.id);
   await act(() => removeSkin(skin.manifest.id));
   await act(() => loadSkins());

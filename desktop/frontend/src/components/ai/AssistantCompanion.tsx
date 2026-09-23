@@ -4,8 +4,8 @@ import { SkinCharacter } from "./skins/SkinCharacter";
 import { getSkinSize, useSkins } from "./skins/store";
 import { useI18n } from "../../i18n/i18n";
 
-export function AssistantCompanion({ open, onOpenChange, running, pending, pageLabel, speech, speechId, sample = false, onViewDetails, onSpeechDismiss, children }: {
-  open: boolean; onOpenChange: (open: boolean) => void; running: boolean; pending: number; pageLabel: string; speech?: string; speechId?: string; sample?: boolean; onViewDetails?: () => void; onSpeechDismiss?: () => void; children: ReactNode;
+export function AssistantCompanion({ open, onOpenChange, running, pending, pageLabel, speech, speechId, sample = false, hidden = false, onViewDetails, onSpeechDismiss, children }: {
+  hidden?: boolean; open: boolean; onOpenChange: (open: boolean) => void; running: boolean; pending: number; pageLabel: string; speech?: string; speechId?: string; sample?: boolean; onViewDetails?: () => void; onSpeechDismiss?: () => void; children: ReactNode;
 }) {
   const { locale } = useI18n();
   const { skins, preferences } = useSkins();
@@ -19,8 +19,8 @@ export function AssistantCompanion({ open, onOpenChange, running, pending, pageL
   const [focused, setFocused] = useState(false);
   const [speechVisible, setSpeechVisible] = useState(true);
   useEffect(() => {
-    if (!open) { setHovered(false); setFocused(false); }
-  }, [open]);
+    if (!open || hidden) { clearTimeout(hoverTimer.current); setHovered(false); setFocused(false); drag.current = undefined; setDragging(false); }
+  }, [open, hidden]);
   const dismissRef = useRef(onSpeechDismiss);
   dismissRef.current = onSpeechDismiss;
   useEffect(() => { setSpeechVisible(true); }, [speech, speechId]);
@@ -57,7 +57,7 @@ export function AssistantCompanion({ open, onOpenChange, running, pending, pageL
   const anchorY = bottom + 24 + petHeight * (1 - (skin?.manifest.anchor.y ?? 1));
   const close = () => { onOpenChange(false); trigger.current?.focus(); };
   const status = pending ? (locale === "en" ? "Your approval needed" : "等你确认一下") : running ? (locale === "en" ? "Working on it…" : "正在帮你处理…") : (locale === "en" ? "Ask me anything" : "有问题，叫我就好");
-  return <div className={`ai-companion${open ? " is-open" : ""}${dragging ? " is-dragging" : ""}${leftSide ? " dock-left" : ""}${below ? " bubble-below" : ""}`} style={{ right, bottom, width: petWidth }} data-skin-animate={preferences.animate} data-state={pending ? "waiting" : running ? "thinking" : "idle"} onMouseEnter={() => { clearTimeout(hoverTimer.current); setHovered(true); }} onMouseLeave={() => { hoverTimer.current = setTimeout(() => setHovered(false), 250); }} onFocus={() => setFocused(true)} onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFocused(false); }}>
+  return <div className={`ai-companion${open ? " is-open" : ""}${dragging ? " is-dragging" : ""}${leftSide ? " dock-left" : ""}${below ? " bubble-below" : ""}`} hidden={hidden} style={{ display: hidden ? "none" : undefined, right, bottom, width: petWidth }} data-skin-animate={preferences.animate && !hidden} data-state={pending ? "waiting" : running ? "thinking" : "idle"} onMouseEnter={() => { clearTimeout(hoverTimer.current); setHovered(true); }} onMouseLeave={() => { hoverTimer.current = setTimeout(() => setHovered(false), 250); }} onFocus={() => setFocused(true)} onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFocused(false); }}>
     {open && <section className="ai-pet-bubble" style={{ position: "fixed", width: bubbleWidth, left: bubbleLeft, right: "auto", top: below ? viewport.height - bottom + 10 : "auto", bottom: below ? "auto" : bottom + petHeight + 24, maxHeight: Math.max(80, room) }} aria-label={locale === "en" ? "Companion chat" : "小精灵对话"} onKeyDown={event => { if (event.key === "Escape") { event.stopPropagation(); close(); } }}>{children}</section>}
     {!open && (speech && !running && !pending ? (speechVisible || hovered || focused) && <div className="ai-pet-speech" role="status" tabIndex={0} style={{ ...sidePosition, width: speechWidth, bottom: below ? "auto" : anchorY + 22, top: below ? viewport.height - bottom + 10 : "auto", maxHeight: Math.max(120, below ? bottom - 28 : viewport.height - anchorY - 48) }}><div className="ai-pet-speech-text">{speech}</div>{onViewDetails && <button className="ai-speech-details" onClick={onViewDetails}>{locale === "en" ? "View details" : "查看详情"} ↗</button>}{sample && <small>{locale === "en" ? "Sample reply" : "示例回复"}</small>}</div> : (hovered || focused) && <span className="ai-pet-hint" role="status" style={{ position: "fixed", ...sidePosition, bottom: below ? "auto" : anchorY + 22, top: below ? viewport.height - bottom + 10 : "auto", maxWidth: speechWidth, whiteSpace: "normal" }}>{status}</span>)}
     <button ref={trigger} className="ai-pet" style={{ width: petWidth, height: petHeight }} aria-label={locale === "en" ? "Network companion" : "网络小精灵"} aria-expanded={open} title={locale === "en" ? `Viewing ${pageLabel} · Drag or Alt + arrow keys to move` : `正在查看：${pageLabel} · 拖动或 Alt + 方向键移动`} onClick={() => { if (!drag.current?.moved) onOpenChange(!open); }}
@@ -74,7 +74,7 @@ export function AssistantCompanion({ open, onOpenChange, running, pending, pageL
       }}>
       {!skin && <span className="ai-pet-aura" />}
       {running && !pending && <span className="ai-pet-thinking" aria-label={locale === "en" ? "Thinking" : "正在思考"}><i /><i /><i /></span>}
-      {skin ? <SkinCharacter skin={skin} state={characterState} animate={preferences.animate} fallback={<DefaultCharacter />} /> : <DefaultCharacter />}
+      {skin ? <SkinCharacter skin={skin} state={characterState} animate={preferences.animate && !hidden} fallback={<DefaultCharacter />} /> : <DefaultCharacter />}
       {pending > 0 && <span className="ai-pet-count">{pending}</span>}
     </button>
     <span className="ai-pet-name">{skin ? `${skin.manifest.name} · AI` : locale === "en" ? "Mux · AI" : "小 Mux · AI"}</span>

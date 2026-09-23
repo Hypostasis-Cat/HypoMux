@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { Button, Checkbox, Field, Input } from "@fluentui/react-components";
 import { Add20Regular, ArrowDownload20Regular, ArrowUpload20Regular, Checkmark16Regular, Delete20Regular, Image20Regular } from "@fluentui/react-icons";
+import { parseSkinAsync, exportSkinAsync } from "./packageAsync";
 import { saveCompanionFile } from "../../../platform/companionExport";
 import { useI18n } from "../../../i18n/i18n";
 import { DefaultCharacter } from "./DefaultCharacter";
 import { SkinCharacter } from "./SkinCharacter";
-import { exportSkin, limits, parseSkin, pngSize, skinStates, validateManifest, verifyImages, type Skin, type SkinState } from "./package";
+import { limits, pngSize, skinStates, validateManifest, verifyImages, type Skin, type SkinState } from "./package";
 import { getSkinSize, installSkin, loadSkins, removeSkin, savePreferences, saveSkinSize, useSkins } from "./store";
 import "./skins.css";
 
@@ -65,7 +66,7 @@ export function SkinWardrobe() {
     const result = await saveCompanionFile(name, bytes);
     setNotice(result === "saved" ? text("文件已保存。", "File saved.") : result === "cancelled" ? text("已取消导出。", "Export cancelled.") : text("已请求下载，请检查浏览器下载列表。", "Download requested. Check your browser downloads."));
   };
-  const download = (skin: Skin) => saveFile(`${skin.manifest.id}.muxskin`, exportSkin(skin));
+  const download = async (skin: Skin) => saveFile(`${skin.manifest.id}.muxskin`, await exportSkinAsync(skin));
   const resource = async (name: string) => {
     const response = await fetch(`/skins/${name}`);
     if (!response.ok) throw new Error(text("无法读取示例资源", "Cannot read starter resource"));
@@ -78,7 +79,7 @@ export function SkinWardrobe() {
     if (image) {
       const canvas = pngSize(bytes);
       skin = { manifest: validateManifest({ schemaVersion: 1, id: `local.${crypto.randomUUID()}`, name: file.name.replace(/\.png$/i, "").slice(0, 80) || "My Mux", author: text("本机创作者", "Local creator"), version: "1.0.0", preview: "assets/idle.png", canvas, anchor: { x: 0.5, y: 1 }, states: { idle: { type: "image", src: "assets/idle.png" } } }), files: { "assets/idle.png": bytes } };
-    } else skin = parseSkin(bytes);
+    } else skin = await parseSkinAsync(bytes);
     await verifyImages(skin);
     setCandidate(skin); setCreating(image); setState("idle"); setDeleting(false);
   });

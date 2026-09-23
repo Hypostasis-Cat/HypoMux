@@ -1,5 +1,6 @@
 import { useEffect, useSyncExternalStore } from "react";
-import { exportSkin, parseSkin, type Skin } from "./package";
+import type { Skin } from "./package";
+import { exportSkinAsync, parseSkinAsync } from "./packageAsync";
 
 export interface SkinPreferences { selected: string; sizes: Record<string, number>; animate: boolean }
 interface Snapshot { skins: Skin[]; preferences: SkinPreferences; loaded: boolean; error: string }
@@ -35,7 +36,7 @@ export async function loadSkins() {
         } else if (typeof value.size === "number" && Number.isFinite(value.size)) legacySize = Math.max(72, Math.min(200, value.size));
         preferences = { selected: typeof value.selected === "string" ? value.selected : defaults.selected, sizes, animate: typeof value.animate === "boolean" ? value.animate : true };
       } else {
-        try { skins.push(parseSkin(value)); } catch { error = "A damaged skin was skipped. Reimport it to repair. / 已跳过损坏皮肤，可重新导入修复。"; }
+        try { skins.push(await parseSkinAsync(value)); } catch { error = "A damaged skin was skipped. Reimport it to repair. / 已跳过损坏皮肤，可重新导入修复。"; }
       }
     }
     if (legacySize !== undefined) preferences = { ...preferences, sizes: Object.fromEntries([defaults.selected, ...skins.map(s => s.manifest.id)].map(id => [id, legacySize!])) };
@@ -79,9 +80,8 @@ export function saveSkinSize(id: string, size: number) {
     return { ...snapshot, preferences };
   });
 }
-export function installSkin(skin: Skin) {
-  const archive = exportSkin(skin);
-  parseSkin(archive);
+export async function installSkin(skin: Skin) {
+  const archive = await exportSkinAsync(skin);
   return mutate(store => {
     if (snapshot.skins.length >= 20 && !snapshot.skins.some(s => s.manifest.id === skin.manifest.id)) throw new Error("Keep at most 20 skins / 最多保存 20 个皮肤，请先删除不需要的皮肤");
     store.put(archive, skin.manifest.id);

@@ -1,3 +1,4 @@
+import "./skins.css";
 import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import LayeredCharacter from "./LayeredCharacter";
 import { type Skin, type SkinState } from "./package";

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { Button, Checkbox, Combobox, Option, Field, Input, Select, Spinner, Tab, TabList, Textarea } from "@fluentui/react-components";
 import { Dismiss20Regular, ArrowExpand20Regular, Send20Regular, Chat20Regular, Settings20Regular, ArrowUp20Regular } from "@fluentui/react-icons";
 import { aiService, type AIConfig, type AIEntry, type AISnapshot, type MCPConnection, type MCPStatus } from "../../platform/ai";
@@ -6,7 +6,7 @@ import { isDesktopRuntime } from "../../platform/runtime";
 import { useI18n } from "../../i18n/i18n";
 import "./assistant.css";
 import { AssistantMessage, summarizeReply } from "./AssistantMessage";
-import { SkinWardrobe } from "./skins/SkinWardrobe";
+const SkinWardrobe = lazy(() => import("./skins/SkinWardrobe").then(module => ({ default: module.SkinWardrobe })));
 import { AssistantCompanion } from "./AssistantCompanion";
 import { assistantPageContext } from "./pageContext";
 import type { AppPage } from "../shell/CompactNavigation";
@@ -133,7 +133,7 @@ export function AIAssistant({ open, onOpenChange, workspace = true, onOpenWorksp
       {error && <div className="ai-banner ai-error" role="alert">{error}</div>}
       {snapshot.error && <div className="ai-banner" role="status">{snapshot.error}</div>}
       {notice && <div className="ai-banner" role="status">{notice}</div>}
-      {view === "appearance" ? <SkinWardrobe /> : view === "chat" ? <>
+      {view === "appearance" ? <Suspense fallback={<Spinner size="small" />}><SkinWardrobe /></Suspense> : view === "chat" ? <>
         <div className="ai-conversation" ref={list}>
           {!snapshot.entries.length && !previewReply && <div className="ai-welcome"><h2>{text("说说你想做什么", "What would you like to do?")}</h2><p>{text("配置聚合、管理分流，或一起查找网络问题。", "Set up aggregation, manage routes, or investigate network problems.")}</p>{["开启聚合，并把 CS2 设置为直连", "检查为什么只有一张网卡在跑流量", "查看当前分流规则"].map((zh, i) => <Button key={zh} appearance="secondary" onClick={() => { setDraft(locale === "en" ? ["Start aggregation and route CS2 directly", "Check why only one adapter carries traffic", "Show my routing rules"][i] : zh); input.current?.focus(); }}>{locale === "en" ? ["Start aggregation; route CS2 directly", "Diagnose adapter traffic", "Show routing rules"][i] : zh}</Button>)}{!config.model && <Button appearance="primary" onClick={() => { setView("model"); if (!workspace) onOpenWorkspace?.(); }}>{text("先连接一个模型", "Connect a model")}</Button>}</div>}
           {snapshot.entries.map(showEntry)}
@@ -201,7 +201,7 @@ export function AIAssistant({ open, onOpenChange, workspace = true, onOpenWorksp
     previousPage.current = page;
   }, [workspace, page, speechId]);
   const speech = speechId === dismissedSpeechId ? undefined : native ? (latestReply && latestReply.role !== "user" && !startupEntries.current?.has(latestReply.id) ? summarizeReply(latestReply.text) : undefined) : summarizeReply(previewReply);
-  return workspace ? <section id="ai-workspace" tabIndex={-1} className="ai-assistant ai-workspace" hidden={!open} aria-label={text("AI 助手工作区", "AI assistant workspace")}>{content}</section> : <AssistantCompanion open={open} onOpenChange={onOpenChange} running={snapshot.running || previewThinking} pending={snapshot.pending} speech={speech} speechId={speechId} onSpeechDismiss={() => setDismissedSpeechId(speechId)} onViewDetails={() => { setView("chat"); onOpenWorkspace?.(); }} sample={!native && !!previewReply} pageLabel={pageContext.label}>{quickContent}</AssistantCompanion>;
+  return <>{workspace && <section id="ai-workspace" tabIndex={-1} className="ai-assistant ai-workspace" hidden={!open} aria-label={text("AI 助手工作区", "AI assistant workspace")}>{content}</section>}<AssistantCompanion hidden={workspace} open={open && !workspace} onOpenChange={onOpenChange} running={snapshot.running || previewThinking} pending={snapshot.pending} speech={speech} speechId={speechId} onSpeechDismiss={() => setDismissedSpeechId(speechId)} onViewDetails={() => { setView("chat"); onOpenWorkspace?.(); }} sample={!native && !!previewReply} pageLabel={pageContext.label}>{quickContent}</AssistantCompanion></>;
 
 }
 function pretty(value: string) { try { return JSON.stringify(JSON.parse(value), null, 2); } catch { return value; } }

@@ -18,7 +18,13 @@
     </script>
   </head>
   <body>
-    <div id="root"></div>
+    <style>
+      html, body { margin: 0; background: #f3f3f3; }
+      html[data-appearance="dark"], html[data-appearance="dark"] body { background: #202020; }
+      .boot-placeholder { height: 100vh; display: grid; place-content: center; gap: 8px; text-align: center; font: 14px system-ui, sans-serif; color: #656565; }
+      html[data-appearance="dark"] .boot-placeholder { color: #b8b8b8; }
+    </style>
+    <div id="root"><div class="boot-placeholder" role="status"><strong>HypoMux</strong><span>正在启动…</span></div></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
