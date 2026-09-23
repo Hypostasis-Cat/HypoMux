@@ -141,7 +141,7 @@
 .ai-pet-name { font-size: 10px; font-weight: 600; letter-spacing: .3px; color: var(--hm-text-secondary); padding: 2px 9px; border-radius: 8px; background: var(--colorNeutralBackground1); box-shadow: 0 2px 8px #33234f12; pointer-events: none; }
 .ai-pet-name { opacity: 0; transition: opacity 150ms ease; }
 .ai-companion:hover .ai-pet-name, .ai-companion:focus-visible .ai-pet-name, .ai-companion:has(:focus-visible) .ai-pet-name { opacity: 1; }
-.ai-pet-hint { position: absolute; right: 78px; bottom: 46px; white-space: nowrap; padding: 9px 13px; border-radius: 13px 13px 3px 13px; font-size: 12px; color: var(--hm-text-secondary); background: var(--colorNeutralBackground1); border: 1px solid var(--colorNeutralStroke2); box-shadow: 0 4px 18px #30244012; pointer-events: none; }
+.ai-pet-hint { box-sizing: border-box; position: absolute; right: 78px; bottom: 46px; white-space: nowrap; padding: 9px 13px; border-radius: 13px 13px 3px 13px; font-size: 12px; color: var(--hm-text-secondary); background: var(--colorNeutralBackground1); border: 1px solid var(--colorNeutralStroke2); box-shadow: 0 4px 18px #30244012; pointer-events: none; }
 .dock-left .ai-pet-hint { right: auto; left: 78px; border-radius: 13px 13px 13px 3px; }
 .ai-pet-count { position: absolute; right: 3px; top: 6px; min-width: 19px; height: 19px; line-height: 19px; border-radius: 50%; background: var(--colorBrandBackground); color: var(--colorNeutralForegroundOnBrand); font-size: 11px; box-shadow: 0 0 0 3px var(--colorNeutralBackground1); }
 .ai-companion[data-state="thinking"] .ai-pet-node { animation: ai-status-pulse 1.3s ease-in-out infinite; }
@@ -175,7 +175,7 @@
 .ai-pet-bubble .ai-command-input { box-sizing: border-box; transform: none; box-shadow: none; transition: border-color 150ms ease; }
 .ai-pet-bubble .ai-command-input:focus-within { box-shadow: none; }
 .ai-pet-bubble textarea.ai-pet-textarea { display: block; box-sizing: border-box; border: 0; outline: none; border-radius: 0; resize: none; height: 66px; min-height: 66px; max-height: 66px; width: 100%; padding: 6px 5px; margin: 0; background: transparent; color: inherit; font: inherit; font-size: 13px; line-height: 1.6; transform: none; box-shadow: none; }
-.ai-pet-thinking { position: absolute; z-index: 2; top: -6px; left: 22px; display: flex; align-items: center; gap: 4px; padding: 7px 9px; border-radius: 12px; background: var(--colorNeutralBackground1); box-shadow: 0 3px 12px #36254b20; }
+.ai-pet-thinking { position: absolute; z-index: 2; bottom: calc(100% + 4px); left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 4px; padding: 7px 9px; border-radius: 12px; background: var(--colorNeutralBackground1); box-shadow: 0 3px 12px #36254b20; }
 .ai-pet-thinking i { width: 4px; height: 4px; border-radius: 50%; background: var(--colorBrandForeground1); animation: ai-thought-dot 1.1s ease-in-out infinite; }
 .ai-pet-thinking i:nth-child(2) { animation-delay: .15s; }
 .ai-pet-thinking i:nth-child(3) { animation-delay: .3s; }
