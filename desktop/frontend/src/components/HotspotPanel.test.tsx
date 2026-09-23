@@ -1,18 +1,73 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HotspotPanel } from "./HotspotPanel";
 import { hotspotDraft } from "./hotspotDraft";
 
-const mocks = vi.hoisted(() => ({ save: vi.fn(), preferences: vi.fn(), status: vi.fn(), start: vi.fn(), stop: vi.fn() }));
-vi.mock("../platform/services", () => ({ appServices: { engine: { saveHotspotPreferences: mocks.save, hotspotPreferences: mocks.preferences, hotspotStatus: mocks.status, startHotspot: mocks.start, stopHotspot: mocks.stop } } }));
+const mocks = vi.hoisted(() => ({ save: vi.fn(), preferences: vi.fn(), sessionConfig: vi.fn(), status: vi.fn(), start: vi.fn(), stop: vi.fn() }));
+vi.mock("../platform/services", () => ({ appServices: { engine: { saveHotspotPreferences: mocks.save, hotspotPreferences: mocks.preferences, hotspotSessionConfig: mocks.sessionConfig, hotspotStatus: mocks.status, startHotspot: mocks.start, stopHotspot: mocks.stop } } }));
 vi.mock("../i18n/i18n", () => ({ useI18n: () => ({ locale: "en" }) }));
 const stopped = { state: "stopped", ssid: "", band: "auto", ready: true, sharing_verified: false, clients: 0 };
-const running = { ...stopped, state: "running", ssid: "My hotspot", sharing_verified: true, shared_adapter: "HypoMux-Tun", clients: 2 };
-beforeEach(() => { vi.resetAllMocks(); mocks.save.mockResolvedValue(undefined); hotspotDraft.current = undefined; mocks.preferences.mockResolvedValue({ ssid: "HypoMux", password: "", band: "auto" }); mocks.status.mockResolvedValue(stopped); mocks.start.mockResolvedValue(running); mocks.stop.mockResolvedValue(stopped); });
+const running = { ...stopped, state: "running", session_id: "session-one", ssid: "My hotspot", sharing_verified: true, shared_adapter: "HypoMux-Tun", clients: 2 };
+beforeEach(() => { vi.resetAllMocks(); mocks.save.mockResolvedValue(undefined); hotspotDraft.current = undefined; mocks.preferences.mockResolvedValue({ ssid: "HypoMux", password: "", band: "auto" }); mocks.sessionConfig.mockResolvedValue({ ssid: "My hotspot", password: "saved-pass", band: "auto" }); mocks.status.mockResolvedValue(stopped); mocks.start.mockResolvedValue(running); mocks.stop.mockResolvedValue(stopped); });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 describe("HotspotPanel", () => {
+  it.each(["My hotspot", "Unsaved name"])("uses session credentials after external startup and preserves draft %s", async (ssid) => {
+    const draft = { ssid, password: "unsaved-pass", band: "5" as const };
+    hotspotDraft.current = draft;
+    mocks.status.mockResolvedValue(running);
+    const view = render(<HotspotPanel />);
+    await waitFor(() => expect((screen.getByLabelText("Network password") as HTMLInputElement).value).toBe("saved-pass"));
+    expect(mocks.sessionConfig).toHaveBeenCalledWith("session-one");
+    fireEvent.click(screen.getByRole("button", { name: "Scan to connect" }));
+    const actualQR = screen.getByTitle("Wi-Fi connection QR code").outerHTML;
+    expect(hotspotDraft.current).toEqual(draft);
+    view.unmount();
+    // Compare the real SVG with the same session and no stale draft.
+    hotspotDraft.current = { ssid: "My hotspot", password: "saved-pass", band: "auto" };
+    const clean = render(<HotspotPanel />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Scan to connect" }).hasAttribute("disabled")).toBe(false));
+    fireEvent.click(screen.getByRole("button", { name: "Scan to connect" }));
+    expect(screen.getByTitle("Wi-Fi connection QR code").outerHTML).toBe(actualQR);
+    clean.unmount();
+    hotspotDraft.current = draft;
+    render(<HotspotPanel />);
+    await screen.findByText("Hotspot is on");
+    fireEvent.click(screen.getByRole("switch", { name: "Aggregation hotspot" }));
+    await screen.findByText("Hotspot is off");
+    expect((screen.getByLabelText("Network password") as HTMLInputElement).value).toBe("unsaved-pass");
+    expect((screen.getByLabelText("Network name") as HTMLInputElement).value).toBe(ssid);
+  });
+  it("ignores delayed credentials from a previous hotspot session", async () => {
+    vi.useFakeTimers();
+    try {
+      hotspotDraft.current = { ssid: "My hotspot", password: "unsaved-pass", band: "auto" };
+      let resolveOld!: (config: { ssid: string; password: string; band: "auto" }) => void;
+      mocks.sessionConfig.mockImplementationOnce(() => new Promise(resolve => { resolveOld = resolve; }));
+      mocks.status.mockResolvedValue(running);
+      await act(async () => { render(<HotspotPanel />); });
+      expect(mocks.sessionConfig).toHaveBeenCalledWith("session-one");
+      mocks.status.mockResolvedValue({ ...running, session_id: "session-two" });
+      await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+      expect(mocks.sessionConfig).toHaveBeenCalledWith("session-two");
+      expect((screen.getByLabelText("Network password") as HTMLInputElement).value).toBe("saved-pass");
+      await act(async () => { resolveOld({ ssid: "My hotspot", password: "old-session-pass", band: "auto" }); });
+      expect((screen.getByLabelText("Network password") as HTMLInputElement).value).toBe("saved-pass");
+    } finally { cleanup(); vi.useRealTimers(); }
+  });
+  it("does not expose a draft password when session credential loading fails", async () => {
+    hotspotDraft.current = { ssid: "My hotspot", password: "unsaved-pass", band: "auto" };
+    mocks.status.mockResolvedValue(running);
+    mocks.sessionConfig.mockRejectedValueOnce(new Error("session changed"));
+    render(<HotspotPanel />);
+    await screen.findByText("Cannot read this hotspot's connection details.");
+    expect((screen.getByLabelText("Network password") as HTMLInputElement).value).toBe("");
+    expect(screen.getByRole("button", { name: "Copy password" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "Scan to connect" }).hasAttribute("disabled")).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect((screen.getByLabelText("Network password") as HTMLInputElement).value).toBe("saved-pass"));
+  });
   it.each([true, false])("reports cleanup failure accurately when off confirmation is %s", async (off) => {
     mocks.status.mockResolvedValue({ ...stopped, state: "failed", cleanup_complete: false, hotspot_off_confirmed: off, configuration_restored: false });
     render(<HotspotPanel />);

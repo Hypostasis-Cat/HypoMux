@@ -36,6 +36,20 @@ export function HotspotPanel() {
     updateConfig(next);
   };
   const [status, setStatus] = useState<HotspotStatus>();
+  const [sessionConfig, setSessionConfig] = useState<{ id: string; config: HotspotConfig }>();
+  const [credentialsError, setCredentialsError] = useState("");
+  const [credentialsRevision, setCredentialsRevision] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    setSessionConfig(undefined); setCredentialsError("");
+    const id = status?.session_id;
+    if (status?.state === "running" && id) {
+      void appServices.engine.hotspotSessionConfig(id).then(config => {
+        if (!cancelled) setSessionConfig({ id, config });
+      }).catch(reason => { if (!cancelled) setCredentialsError(String(reason)); });
+    }
+    return () => { cancelled = true; };
+  }, [status?.session_id, status?.state, credentialsRevision]);
   const [localPending, setPending] = useState(false);
   const sharedOperation = useHotspotOperation();
   const pending = localPending || !!sharedOperation;
@@ -84,7 +98,9 @@ export function HotspotPanel() {
     return () => { cancelled = true; mounted.current = false; clearTimeout(timer); };
   }, []);
   const active = status?.state === "running" || status?.state === "starting" || status?.state === "stopping";
-  const canShowQR = status?.state === "running" && !pollError && !changingHotspot && !!config.password && config.ssid === status.ssid;
+  const liveConfig = sessionConfig?.id === status?.session_id ? sessionConfig?.config : undefined;
+  const displayedConfig = active ? liveConfig : config;
+  const canShowQR = status?.state === "running" && !pollError && !changingHotspot && !!liveConfig?.password && liveConfig.ssid === status.ssid;
   const qrVisible = showQR && canShowQR;
   const settingsRef = useContentTransition(loadingConfig ? "loading" : active ? "active" : "editable");
   const connectionState = qrVisible ? "qr" : pollError ? "unavailable" : !status ? "loading" : `${status.state}-${status.ready}-${!!status.devices_available}-${!!status.devices?.length}`;
@@ -97,7 +113,8 @@ export function HotspotPanel() {
     if (busy.current) return;
     busy.current = true; revision.current++; setPending(true); setAction("save"); setError(""); setNotice("");
     try {
-      await runHotspotOperation("save", () => appServices.engine.saveHotspotPreferences(config));
+      if (!displayedConfig) return;
+      await runHotspotOperation("save", () => appServices.engine.saveHotspotPreferences(displayedConfig));
       if (mounted.current) setNotice(text("设置已加密保存，下次打开软件自动恢复。", "Settings saved encrypted and restored next time you open the app."));
     } catch (reason) { if (mounted.current) setError(String(reason)); }
     finally { busy.current = false; if (mounted.current) { setPending(false); setAction(undefined); } }
@@ -168,15 +185,16 @@ export function HotspotPanel() {
         </Dropdown>
       </Field>
       <Field label={text("热点密码", "Network password")} hint={text("8–63 位英文、数字或符号", "8–63 printable ASCII characters")}>
-        <Input type={showPassword ? "text" : "password"} autoComplete="new-password" value={config.password} disabled={loadingConfig || pending || active}
+        <Input type={showPassword ? "text" : "password"} autoComplete="new-password" value={displayedConfig?.password ?? ""} disabled={loadingConfig || pending || active}
           onChange={(_, data) => setConfig(value => ({ ...value, password: data.value }))}
           contentAfter={<Button size="small" appearance="transparent" aria-pressed={showPassword} onClick={() => setShowPassword(value => !value)}>{showPassword ? text("隐藏", "Hide") : text("显示", "Show")}</Button>} />
       </Field>
     </div>
     <div className="hotspot-actions">
-      <Button appearance="primary" disabled={loadingConfig || pending || status?.state === "starting" || status?.state === "stopping" || !validName || !validPassword} onClick={() => void save()}>{text("保存设置", "Save settings")}</Button><Button disabled={loadingConfig || pending || active} onClick={generatePassword}>{text("生成密码", "Generate password")}</Button>
-      <Button disabled={loadingConfig || !validPassword} onClick={() => void copy(config.password)}>{text("复制密码", "Copy password")}</Button>
+      <Button appearance="primary" disabled={loadingConfig || pending || status?.state === "starting" || status?.state === "stopping" || (active ? !liveConfig : !validName || !validPassword)} onClick={() => void save()}>{text("保存设置", "Save settings")}</Button><Button disabled={loadingConfig || pending || active} onClick={generatePassword}>{text("生成密码", "Generate password")}</Button>
+      <Button disabled={loadingConfig || pollError !== "" || !displayedConfig?.password} onClick={() => { if (displayedConfig) void copy(displayedConfig.password); }}>{text("复制密码", "Copy password")}</Button>
     </div>
+    {active && credentialsError && <p role="alert">{text("无法读取当前热点的连接信息。", "Cannot read this hotspot's connection details.")}<Button size="small" onClick={() => setCredentialsRevision(value => value + 1)}>{text("重试", "Retry")}</Button></p>}
     <p className="hotspot-save-hint">{active ? text("热点运行中仍可保存设置；修改名称、密码或频段前，请先关闭热点。", "Settings can be saved while the hotspot is on. Turn it off before editing its name, password or band.") : text("可提前保存设置；开启时也会自动加密保存。", "You can save settings in advance. Enabling also saves them encrypted.")}</p>
     </div>
     <div className="hotspot-feedback" tabIndex={0} aria-label={text("操作与状态提示", "Operation and status messages")}>
@@ -190,7 +208,7 @@ export function HotspotPanel() {
     <div className="hotspot-connect-body" ref={connectionRef} id="hotspot-connection-content">
     {qrVisible ? <div className="hotspot-qr-content" key="qr">
       <strong>{status?.ssid}</strong>
-      <QRCodeSVG value={hotspotQRPayload(config)} size={224} level="M" marginSize={4} title={text("Wi-Fi 连接二维码", "Wi-Fi connection QR code")} />
+      <QRCodeSVG value={hotspotQRPayload(liveConfig!)} size={224} level="M" marginSize={4} title={text("Wi-Fi 连接二维码", "Wi-Fi connection QR code")} />
       <p>{text("用手机相机或 WLAN 扫一扫连接。二维码包含热点密码，请只向需要连接的人展示。", "Scan with your phone camera or Wi-Fi scanner. This code contains the network password; show it only to people you want to connect.")}</p>
     </div> : <div className="hotspot-device-view" key="devices">
     <div className="hotspot-connect-intro"><span className="hotspot-phone-icon" aria-hidden="true"><Wifi124Regular /></span><strong>{status?.state === "running" && !pollError ? status.ssid : text("准备好，随时连接", "Ready when you are")}</strong><p>{status?.state === "running" && !pollError ? text("打开手机 Wi-Fi，选择此网络", "Choose this network in your phone’s Wi-Fi settings") : text("开启热点后，手机、平板都可以加入", "Once enabled, phones and tablets can join")}</p></div>

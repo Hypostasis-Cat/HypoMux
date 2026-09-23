@@ -3,6 +3,7 @@ package services
 import (
 	"bufio"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -24,6 +25,7 @@ type HotspotConfig struct {
 }
 
 type HotspotStatus struct {
+	SessionID             string          `json:"session_id,omitempty"`
 	ConfiguredBand        string          `json:"configured_band,omitempty"`
 	BandFallback          string          `json:"band_fallback,omitempty"`
 	TransmitLinkMbps      float64         `json:"transmit_link_mbps,omitempty"`
@@ -74,6 +76,8 @@ func validateHotspotConfig(config HotspotConfig) error {
 // configuration. Closing stdin asks it to stop and restore that configuration;
 // desktop crashes also close the pipe, without a persisted session lease.
 type hotspotSession struct {
+	id            string
+	config        HotspotConfig
 	onStatus      func(HotspotStatus)
 	mu            sync.Mutex
 	status        HotspotStatus
@@ -86,7 +90,21 @@ type hotspotSession struct {
 func (h *hotspotSession) snapshot() HotspotStatus {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return h.status
+	status := h.status
+	status.SessionID = h.id
+	return status
+}
+
+// Keep credentials out of telemetry and AI tools. The desktop must name the
+// observed session so a delayed request cannot read a different hotspot's key.
+func (s *EngineService) HotspotSessionConfig(sessionID string) (HotspotConfig, error) {
+	s.mu.Lock()
+	h := s.hotspot
+	s.mu.Unlock()
+	if h == nil || sessionID == "" || h.id != sessionID || h.snapshot().State != "running" {
+		return HotspotConfig{}, errors.New("热点会话已变化，请刷新后重试")
+	}
+	return h.config, nil
 }
 
 func (h *hotspotSession) stop(ctx context.Context) error {
@@ -145,7 +163,7 @@ func launchHotspotObserved(ctx context.Context, command *exec.Cmd, config Hotspo
 		_ = output.Close()
 		return nil, err
 	}
-	h := &hotspotSession{input: input, done: make(chan struct{}), status: HotspotStatus{State: "starting", SSID: config.SSID, Band: config.Band}}
+	h := &hotspotSession{id: rand.Text(), config: config, input: input, done: make(chan struct{}), status: HotspotStatus{State: "starting", SSID: config.SSID, Band: config.Band}}
 	if onCreated != nil {
 		onCreated(h)
 	}

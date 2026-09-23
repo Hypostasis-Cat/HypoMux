@@ -72,6 +72,7 @@ export type SteamCDNStatus = {
 
 export type HotspotConfig = { ssid: string; password: string; band: "auto" | "2.4" | "5" };
 export type HotspotStatus = {
+  session_id?: string;
   configured_band?: string; band_fallback?: string;
   transmit_link_mbps?: number; receive_link_mbps?: number;
   devices?: Array<{ mac: string; hosts: string[] }>;
@@ -250,6 +251,7 @@ export const appServices = {
     trayStatus: () => Call.ByName(engineMethod("TrayStatus")) as Promise<{ phase: string; mode: string }>,
     saveHotspotPreferences: (config: HotspotConfig) => Call.ByName(engineMethod("SaveHotspotPreferences"), config) as Promise<void>,
     hotspotPreferences: () => Call.ByName(engineMethod("HotspotPreferences")) as Promise<HotspotConfig>,
+    hotspotSessionConfig: (sessionID: string) => Call.ByName(engineMethod("HotspotSessionConfig"), sessionID) as Promise<HotspotConfig>,
     hotspotStatus: () => Call.ByName(engineMethod("HotspotStatus")) as Promise<HotspotStatus>,
     startHotspot: (config: HotspotConfig) => Call.ByName(engineMethod("StartHotspot"), config) as Promise<HotspotStatus>,
     stopHotspot: () => Call.ByName(engineMethod("StopHotspot")) as Promise<HotspotStatus>,

@@ -704,9 +704,9 @@ func TestFrontendFreshInstallAppearanceDefaults(t *testing.T) {
 		!strings.Contains(tokens, `--hm-panel-blur: 20px`) {
 		t.Fatal("pre-hydration material tokens do not match the appearance defaults")
 	}
-	if !strings.Contains(tokens, `[data-background-source="local"][data-panel-material="blur"] .glass-surface`) ||
-		!strings.Contains(tokens, `[data-background-source="local"][data-panel-material="blur"] .network-adapter`) {
-		t.Fatal("card frosting is not scoped to custom backgrounds")
+	if !strings.Contains(tokens, `:is([data-background-source="local"], [data-background-source="builtin"])[data-panel-material="blur"] .glass-surface`) ||
+		!strings.Contains(tokens, `:is([data-background-source="local"], [data-background-source="builtin"])[data-panel-material="blur"] .network-adapter`) {
+		t.Fatal("card frosting is not scoped to local and built-in backgrounds")
 	}
 
 	settingsPageData, err := os.ReadFile("frontend/src/pages/SettingsPage.tsx")
@@ -718,11 +718,11 @@ func TestFrontendFreshInstallAppearanceDefaults(t *testing.T) {
 	}
 	settingsPage := string(settingsPageData)
 	for _, required := range []string{
-		`backgroundSource: "system",`,
-		`material: "mica",`,
-		`presetId: "windows-mica",`,
-		`disabled={appearance.backgroundSource !== "local"}`,
-		`disabled={appearance.backgroundSource !== "local" || appearance.panelMaterial !== "blur"}`,
+		`updateAppearance({ backgroundSource: "system" })`,
+		`value={appearance.material}`,
+		`{ value: "mica", label: "Mica" }`,
+		`disabled={appearance.backgroundSource !== "local" && appearance.backgroundSource !== "builtin"}`,
+		`disabled={(appearance.backgroundSource !== "local" && appearance.backgroundSource !== "builtin") || appearance.panelMaterial !== "blur"}`,
 	} {
 		if !strings.Contains(settingsPage, required) {
 			t.Fatalf("appearance controls are missing %q", required)
@@ -837,20 +837,20 @@ func TestNotificationIslandKeepsWebViewBackdropSampling(t *testing.T) {
 	}
 }
 
-func TestFrontendUsesWindowsNeutralPaletteAndDistinctWindowMaterials(t *testing.T) {
+func TestFrontendUsesThemePaletteAndDistinctWindowMaterials(t *testing.T) {
 	tokenData, err := os.ReadFile("frontend/src/theme/material.tokens.css")
 	if err != nil {
 		t.Fatal(err)
 	}
 	tokens := string(tokenData)
 	for _, required := range []string{
-		`--hm-window-base: #f3f3f3`,
-		`--hm-window-base: #202020`,
-		`--hm-solid-chrome: #f9f9f9`,
-		`--hm-solid-chrome: #1c1c1c`,
+		`--hm-window-base: #f5f7fa`,
+		`--hm-window-base: #171a21`,
+		`--hm-solid-chrome: #edf1f6`,
+		`--hm-solid-chrome: #1c2029`,
 	} {
 		if !strings.Contains(tokens, required) {
-			t.Fatalf("Windows neutral appearance token is missing %q", required)
+			t.Fatalf("theme appearance token is missing %q", required)
 		}
 	}
 

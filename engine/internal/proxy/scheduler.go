@@ -125,6 +125,6 @@ func (s *scheduler) acquireTCP(excluded map[string]struct{}, domain string, targ
 	if len(candidates) == 0 {
 		return Adapter{}, nil, false
 	}
-	adapter, lease := s.performance.acquire(candidates, s.strategy == StrategyAdaptive, fallback)
+	adapter, lease := s.performance.acquire(candidates, s.strategy == StrategyAdaptive, fallback, s.adapters)
 	return adapter, lease, true
 }

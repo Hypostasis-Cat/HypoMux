@@ -169,6 +169,44 @@ func TestHotspotWorkerStopsOnPipeClose(t *testing.T) {
 	}
 }
 
+func TestHotspotSessionConfigIsBoundToActiveSession(t *testing.T) {
+	config := HotspotConfig{SSID: "live", Password: "session-secret", Band: "auto"}
+	h := &hotspotSession{id: "session-a", config: config, status: HotspotStatus{State: "running", SSID: config.SSID}}
+	s := &EngineService{hotspot: h}
+	if status := s.HotspotStatus(); status.SessionID != "session-a" {
+		t.Fatal("missing session identity", status)
+	}
+	got, err := s.HotspotSessionConfig("session-a")
+	if err != nil || got != config {
+		t.Fatal("wrong active credentials", got, err)
+	}
+	for _, value := range []any{s.HotspotStatus(), aiHotspotSummary(s.HotspotStatus())} {
+		data, err := json.Marshal(value)
+		if err != nil || strings.Contains(string(data), config.Password) || strings.Contains(string(data), "password") {
+			t.Fatal("session credentials leaked into status")
+		}
+	}
+	for _, id := range []string{"", "session-b"} {
+		if got, err := s.HotspotSessionConfig(id); err == nil || got.Password != "" {
+			t.Fatal("exposed credentials for a different session")
+		}
+	}
+	for _, state := range []string{"starting", "stopping", "stopped", "failed"} {
+		h.status.State = state
+		if got, err := s.HotspotSessionConfig("session-a"); err == nil || got.Password != "" {
+			t.Fatal("exposed inactive credentials", state)
+		}
+	}
+	s.hotspot = &hotspotSession{id: "session-b", config: config, status: HotspotStatus{State: "running"}}
+	if _, err := s.HotspotSessionConfig("session-a"); err == nil {
+		t.Fatal("old session accepted after replacement")
+	}
+	s.hotspot = nil
+	if _, err := s.HotspotSessionConfig("session-b"); err == nil {
+		t.Fatal("missing session accepted")
+	}
+}
+
 func TestHotspotExpectedShutdownDoesNotHideCleanupFailure(t *testing.T) {
 	for _, mode := range []string{"stop-error", "cleanup-failure", "restore-failure"} {
 		t.Run(mode, func(t *testing.T) {

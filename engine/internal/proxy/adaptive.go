@@ -105,14 +105,28 @@ func (p *performanceTable) retain(adapters []Adapter) {
 }
 
 // Selection and reservation share a lock. Legacy selection is never overridden.
-func (p *performanceTable) acquire(candidates []Adapter, adaptive bool, fallback Adapter) (Adapter, *performanceLease) {
+func (p *performanceTable) acquire(candidates []Adapter, adaptive bool, fallback Adapter, pools ...[]Adapter) (Adapter, *performanceLease) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	chosen, reason := fallback, "legacy-or-single"
 	if adaptive && len(candidates) > 1 {
 		p.decisions++
-		chosen = p.allocation.choose(candidates, fallback, p.now())
-		reason = p.allocation.state
+		pool := candidates
+		if len(pools) > 0 {
+			pool = pools[0]
+		}
+		if !p.allocation.matches(pool) {
+			p.allocation.reset(pool, p.now())
+		}
+		// Address-family, health and retry filters constrain only this dial.
+		// Use its legacy rotation without erasing the full pool's learning or
+		// counting a constrained arrival as evidence for allocation changes.
+		if p.allocation.matches(candidates) {
+			chosen = p.allocation.choose(candidates, fallback, p.now())
+			reason = p.allocation.state
+		} else {
+			reason = "constrained-pool"
+		}
 	}
 	l := p.link(chosen)
 	p.reasons[reason]++

@@ -3,9 +3,66 @@ package proxy
 import (
 	"fmt"
 	"math"
+	"reflect"
 	"testing"
 	"time"
 )
+
+func TestAdaptiveConstrainedDialsPreservePoolLearning(t *testing.T) {
+	now := time.Now()
+	pool := []Adapter{
+		{Name: "dual-a", SourceIP: "127.0.0.1", SourceIPv6: "2001:db8::1", Weight: 1},
+		{Name: "dual-b", SourceIP: "127.0.0.2", SourceIPv6: "2001:db8::2", Weight: 1},
+		{Name: "ipv4-only", SourceIP: "127.0.0.3", Weight: 1},
+	}
+	p := newPerformanceTable()
+	p.now = func() time.Time { return now }
+	s := newScheduler(pool, false)
+	s.strategy, s.performance = StrategyAdaptive, p
+	// The first dial may itself be IPv6-constrained. Learning still belongs
+	// to the configured pool, not whichever address family arrived first.
+	_, lease, ok := s.acquireTCP(map[string]struct{}{"ipv4-only": {}}, "")
+	if !ok {
+		t.Fatal("missing constrained candidate")
+	}
+	lease.finish()
+	if !p.allocation.matches(pool) {
+		t.Fatal("initialized learning from a filtered subset")
+	}
+	p.allocation.state = "adapting"
+	p.allocation.shares = []float64{0.5, 0.3, 0.2}
+	p.allocation.started = now.Add(-time.Minute)
+	started := p.allocation.started
+	counts := map[string]int{}
+	for range 100 {
+		for _, excluded := range []map[string]struct{}{{"ipv4-only": {}}, {"dual-a": {}}, nil} {
+			a, lease, ok := s.acquireTCP(excluded, "")
+			if !ok {
+				t.Fatal("missing candidate")
+			}
+			lease.finish()
+			if _, blocked := excluded[a.Name]; blocked {
+				t.Fatal("selected excluded adapter", a.Name)
+			}
+			if excluded == nil {
+				counts[a.Name]++
+			}
+			now = now.Add(time.Millisecond)
+		}
+	}
+	if p.allocation.state != "adapting" || p.allocation.started != started || !reflect.DeepEqual(p.allocation.shares, []float64{0.5, 0.3, 0.2}) {
+		t.Fatal("constrained dial erased pool learning", p.allocation)
+	}
+	if !reflect.DeepEqual(counts, map[string]int{"dual-a": 50, "dual-b": 30, "ipv4-only": 20}) || p.allocation.allocations != 100 {
+		t.Fatal("constrained dials distorted full-pool allocation", counts, p.allocation.allocations)
+	}
+	s.update(SchedulingConfig{Strategy: StrategyAdaptive, Adapters: pool[:2]})
+	_, lease, _ = s.acquireTCP(nil, "")
+	lease.finish()
+	if !p.allocation.matches(pool[:2]) || p.allocation.state != "warming-up" {
+		t.Fatal("real pool change did not reset learning", p.allocation)
+	}
+}
 
 func TestAdaptiveMultiLinkFloorAndLegacyIsolation(t *testing.T) {
 	p, _, now := adaptiveFixture()
