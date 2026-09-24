@@ -76,6 +76,12 @@ func TestSteamStagedProbeRequiresContentAndDoesNotScoreDownloads(t *testing.T) {
 				if size != 4096 && size != steamSpeedProbeSize {
 					t.Error("unexpected range", size)
 				}
+				if scenario == "valid" && size > 4096 {
+					// A loopback response can complete within one Windows
+					// clock tick. Give the successful speed fixture a real
+					// duration; production correctly ignores zero-time samples.
+					time.Sleep(25 * time.Millisecond)
+				}
 				if size > 4096 && scenario == "redirect" {
 					w.Header().Set("Location", "http://other.invalid/token")
 					w.WriteHeader(302)
@@ -131,7 +137,7 @@ func TestSteamStagedProbeRequiresContentAndDoesNotScoreDownloads(t *testing.T) {
 				t.Fatal("probe promoted candidate")
 			}
 			if (e.ProbeBPS > 0) != (scenario == "valid") {
-				t.Fatal("invalid speed result", scenario, e.ProbeBPS)
+				t.Fatal("invalid speed result", scenario, e.ProbeBPS, "requests", calls.Load(), "stages", snap.StageCounts)
 			}
 			if (scenario == "extended_mismatch" || scenario == "revalidation_mismatch") && e.Validated {
 				t.Fatal("changed content retained eligibility")
