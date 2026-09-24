@@ -12,21 +12,29 @@ import (
 
 type AIConfig struct {
 	Protocol string `json:"protocol"`
+	AuthMode string `json:"auth_mode,omitempty"`
 	BaseURL  string `json:"base_url"`
 	Model    string `json:"model"`
 	HasKey   bool   `json:"has_key"`
 }
 
 type aiStoredConfig struct {
-	Config AIConfig `json:"config"`
-	Key    string   `json:"key"`
+	Config    AIConfig `json:"config"`
+	Key       string   `json:"key"`
+	ContextID string   `json:"context_id,omitempty"`
 }
 
 func validateAIConfig(c AIConfig) (AIConfig, error) {
 	c.BaseURL = strings.TrimRight(strings.TrimSpace(c.BaseURL), "/")
 	c.Model = strings.TrimSpace(c.Model)
-	if c.Protocol != "openai" && c.Protocol != "anthropic" {
-		return c, errors.New("请选择 OpenAI 兼容或 Anthropic 协议")
+	if c.Protocol != "openai" && c.Protocol != "anthropic" && c.Protocol != "responses" {
+		return c, errors.New("请选择 Chat Completions、Responses 或 Anthropic Messages 协议")
+	}
+	if c.AuthMode == "auto" {
+		c.AuthMode = ""
+	}
+	if c.AuthMode != "" && c.AuthMode != "bearer" && c.AuthMode != "x-api-key" {
+		return c, errors.New("请选择有效的认证方式")
 	}
 	u, err := url.Parse(c.BaseURL)
 	if err != nil || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
@@ -41,6 +49,34 @@ func validateAIConfig(c AIConfig) (AIConfig, error) {
 		return c, errors.New("请输入有效的模型名称")
 	}
 	return c, nil
+}
+
+// Accept host roots, versioned/custom prefixes and complete endpoint URLs.
+// An explicit operation URL preserves even a non-versioned gateway route.
+func aiEndpoint(c AIConfig, operation string) string {
+	u, err := url.Parse(strings.TrimRight(strings.TrimSpace(c.BaseURL), "/"))
+	if err != nil {
+		return c.BaseURL
+	}
+	path := strings.TrimRight(u.EscapedPath(), "/")
+	explicit := false
+	for _, suffix := range []string{"/chat/completions", "/messages", "/responses", "/models"} {
+		if strings.HasSuffix(path, suffix) {
+			path = strings.TrimSuffix(path, suffix)
+			explicit = true
+			break
+		}
+	}
+	if path == "" && !explicit {
+		path = "/v1"
+	}
+	u.RawPath = path + "/" + operation
+	u.Path, _ = url.PathUnescape(u.RawPath)
+	return u.String()
+}
+
+func sameAIEndpoint(a, b AIConfig) bool {
+	return a.Protocol == b.Protocol && aiEndpoint(a, "models") == aiEndpoint(b, "models")
 }
 
 func (s *AIService) Config() AIConfig {
@@ -69,8 +105,12 @@ func (s *AIService) SaveConfig(c AIConfig, key string, clearKey bool) (AIConfig,
 	if clearKey {
 		next.Key = ""
 	}
-	if key == "" && !clearKey && c.BaseURL == s.config.Config.BaseURL && c.Protocol == s.config.Config.Protocol {
+	if strings.TrimSpace(key) == "" && !clearKey && sameAIEndpoint(c, s.config.Config) {
 		next.Key = s.config.Key
+	}
+	next.ContextID = s.config.ContextID
+	if next.ContextID == "" || !sameAIEndpoint(c, s.config.Config) || c.Model != s.config.Config.Model || c.AuthMode != s.config.Config.AuthMode || next.Key != s.config.Key {
+		next.ContextID = aiID()
 	}
 	next.Config.HasKey = next.Key != ""
 	data, err := json.Marshal(next)
@@ -85,11 +125,12 @@ func (s *AIService) SaveConfig(c AIConfig, key string, clearKey bool) (AIConfig,
 		return c, err
 	}
 	s.config = next
+	s.state.Error = ""
 	return next.Config, nil
 }
 
 func (s *AIService) loadConfig() {
-	s.config.Config = AIConfig{Protocol: "openai", BaseURL: "https://api.openai.com/v1"}
+	s.config = aiStoredConfig{Config: AIConfig{Protocol: "openai", BaseURL: "https://api.openai.com/v1"}}
 	data, err := os.ReadFile(filepath.Join(s.directory, "provider.bin"))
 	if os.IsNotExist(err) {
 		return
@@ -97,10 +138,23 @@ func (s *AIService) loadConfig() {
 	if err == nil {
 		data, err = protectAIData(data, false)
 	}
+	var loaded aiStoredConfig
 	if err == nil {
-		err = json.Unmarshal(data, &s.config)
+		err = json.Unmarshal(data, &loaded)
+	}
+	if err == nil {
+		loaded.Config, err = validateAIConfig(loaded.Config)
 	}
 	if err != nil {
 		s.state.Error = "AI 配置无法读取，请重新配置模型。"
+		return
+	}
+	// Legacy records remain visible, but cannot be attributed to this provider.
+	s.config = loaded
+	if loaded.ContextID == "" {
+		if _, err := s.SaveConfig(loaded.Config, loaded.Key, false); err != nil {
+			s.config.ContextID = aiID()
+			s.state.Error = "旧版 AI 配置迁移失败，请重新保存模型配置。"
+		}
 	}
 }

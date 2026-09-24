@@ -2,10 +2,13 @@ package proxy
 
 import (
 	"bufio"
+	"context"
 	"encoding/binary"
+	"errors"
 	"io"
 	"net"
 	"strconv"
+	"syscall"
 )
 
 func (s *Server) handleSOCKS(reader *bufio.Reader, client net.Conn, session *connection) *Adapter {
@@ -64,7 +67,9 @@ func (s *Server) handleSOCKS(reader *bufio.Reader, client net.Conn, session *con
 	target := net.JoinHostPort(host, strconv.Itoa(port))
 	upstream, adapter, err := s.connect(session, target)
 	if err != nil {
-		writeSOCKSReply(client, 5)
+		reply := socksConnectFailureReply(err)
+		writeSOCKSReply(client, reply)
+		s.reportConnectFailure(session.channel, target, err, reply)
 		return nil
 	}
 	if !writeSOCKSReply(client, 0) {
@@ -84,6 +89,41 @@ func (s *Server) handleSOCKS(reader *bufio.Reader, client net.Conn, session *con
 	upstream = s.prepareSteamCDN(session, upstream, adapter, cdnHost, strconv.Itoa(port), peekSteamChunkPath(reader))
 	s.relay(reader, client, upstream, session)
 	return &adapter
+}
+
+func socksConnectFailureReply(err error) byte {
+	// Multiple adapters can fail for different reasons. Do not claim the
+	// destination refused the connection when only one attempt did.
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		code := byte(0)
+		for _, cause := range joined.Unwrap() {
+			next := socksConnectFailureReply(cause)
+			if code != 0 && code != next {
+				return 1
+			}
+			code = next
+		}
+		if code != 0 {
+			return code
+		}
+	}
+	if wrapped, ok := err.(interface{ Unwrap() error }); ok && wrapped.Unwrap() != nil {
+		return socksConnectFailureReply(wrapped.Unwrap())
+	}
+	var networkError net.Error
+	if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &networkError) && networkError.Timeout()) {
+		return 6
+	}
+	if errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.Errno(10061)) {
+		return 5
+	}
+	if errors.Is(err, syscall.ENETUNREACH) || errors.Is(err, syscall.Errno(10051)) {
+		return 3
+	}
+	if errors.Is(err, syscall.EHOSTUNREACH) || errors.Is(err, syscall.Errno(10065)) {
+		return 4
+	}
+	return 1
 }
 
 func readSOCKSHost(reader *bufio.Reader, addressType byte) (string, bool) {

@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -21,10 +20,13 @@ type aiToolCall struct {
 	} `json:"function"`
 }
 type aiMessage struct {
-	Role    string       `json:"role"`
-	Content string       `json:"content"`
-	Calls   []aiToolCall `json:"tool_calls,omitempty"`
-	ToolID  string       `json:"tool_call_id,omitempty"`
+	Role      string       `json:"role"`
+	Content   string       `json:"content"`
+	Calls     []aiToolCall `json:"tool_calls,omitempty"`
+	ToolID    string       `json:"tool_call_id,omitempty"`
+	Reasoning string       `json:"reasoning_content,omitempty"`
+	// Protocol-specific continuation data stays in memory for this run only.
+	Blocks []json.RawMessage `json:"-"`
 }
 type aiTool struct {
 	Name        string         `json:"name"`
@@ -42,6 +44,9 @@ var aiHTTPClient = &http.Client{Timeout: 90 * time.Second, CheckRedirect: func(*
 const aiReplyGuidance = ` Start every final reply with one short, plain-language sentence giving the result or next step (prefer at most 60 Chinese characters or 25 English words). Put explanations after that sentence in Markdown. Keep diagnostic details concise and omit raw telemetry unless requested. NAT detection is supported via run_nat_detection, separately from link diagnostics. First check get_status and get_nat_status. Aggregation must be stopped with the user's approval before NAT detection; never claim unsupported merely because prerequisites are unmet. Scheduling strategy and adapter weights can be changed with set_scheduling, including while running. Read get_status first; do not stop or restart aggregation for scheduling changes. Use get_capabilities if unsure about tool coverage. Its manual_features lists existing product functions not yet exposed as tools; explain that distinction and guide the user to the named page. Never call these functions unsupported by the product. Hotspot credentials must be configured in the Tools page, never request passwords in chat.`
 
 func aiComplete(ctx context.Context, c aiStoredConfig, messages []aiMessage, tools []aiTool, forceTool bool) (aiMessage, error) {
+	if forceTool && len(tools) == 0 {
+		return aiMessage{}, errors.New("缺少工具定义")
+	}
 	path := "/chat/completions"
 	body := map[string]any{"model": c.Config.Model, "messages": append([]aiMessage{{Role: "system", Content: aiSystemPrompt + aiReplyGuidance}}, messages...)}
 	definitions := []any{}
@@ -60,6 +65,10 @@ func aiComplete(ctx context.Context, c aiStoredConfig, messages []aiMessage, too
 		}
 		converted := []map[string]any{}
 		for _, m := range messages {
+			if m.Role == "assistant" && len(m.Blocks) > 0 {
+				converted = append(converted, map[string]any{"role": "assistant", "content": m.Blocks})
+				continue
+			}
 			blocks := []any{}
 			role := m.Role
 			if m.Role == "tool" {
@@ -90,6 +99,10 @@ func aiComplete(ctx context.Context, c aiStoredConfig, messages []aiMessage, too
 			body["tool_choice"] = map[string]any{"type": "tool", "name": tools[0].Name}
 		}
 	}
+	if c.Config.Protocol == "responses" {
+		path = "/responses"
+		body = aiResponsesBody(c.Config.Model, messages, tools, forceTool)
+	}
 	data, err := json.Marshal(body)
 	if err != nil {
 		return aiMessage{}, err
@@ -97,19 +110,12 @@ func aiComplete(ctx context.Context, c aiStoredConfig, messages []aiMessage, too
 	if len(data) > 768*1024 {
 		return aiMessage{}, errors.New("本轮上下文过大，请清除历史后缩小问题范围")
 	}
-	req, err := http.NewRequestWithContext(ctx, "POST", c.Config.BaseURL+path, bytes.NewReader(data))
+	req, err := http.NewRequestWithContext(ctx, "POST", aiEndpoint(c.Config, strings.TrimPrefix(path, "/")), bytes.NewReader(data))
 	if err != nil {
 		return aiMessage{}, errors.New("API 地址无效")
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if c.Config.Protocol == "anthropic" {
-		req.Header.Set("anthropic-version", "2023-06-01")
-		if c.Key != "" {
-			req.Header.Set("x-api-key", c.Key)
-		}
-	} else if c.Key != "" {
-		req.Header.Set("Authorization", "Bearer "+c.Key)
-	}
+	aiSetAuth(req, c.Config, c.Key)
 	resp, err := aiHTTPClient.Do(req)
 	if err != nil {
 		if ctx.Err() != nil {
@@ -119,7 +125,7 @@ func aiComplete(ctx context.Context, c aiStoredConfig, messages []aiMessage, too
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return aiMessage{}, fmt.Errorf("模型服务返回 HTTP %d；请检查协议、模型、密钥和额度", resp.StatusCode)
+		return aiMessage{}, aiHTTPError(resp.StatusCode)
 	}
 	data, err = io.ReadAll(io.LimitReader(resp.Body, 2*1024*1024+1))
 	if err != nil {
@@ -152,6 +158,17 @@ func aiComplete(ctx context.Context, c aiStoredConfig, messages []aiMessage, too
 				call.Function.Arguments = string(b.Input)
 				result.Calls = append(result.Calls, call)
 			}
+		}
+		var raw struct {
+			Content []json.RawMessage `json:"content"`
+		}
+		if json.Unmarshal(data, &raw) == nil {
+			result.Blocks = raw.Content
+		}
+	} else if c.Config.Protocol == "responses" {
+		result, err = aiParseResponses(data)
+		if err != nil {
+			return result, err
 		}
 	} else {
 		var wire struct {

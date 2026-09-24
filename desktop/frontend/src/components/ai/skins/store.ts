@@ -2,9 +2,9 @@ import { useEffect, useSyncExternalStore } from "react";
 import type { Skin } from "./package";
 import { exportSkinAsync, parseSkinAsync } from "./packageAsync";
 
-export interface SkinPreferences { selected: string; sizes: Record<string, number>; animate: boolean }
+export interface SkinPreferences { selected: string; sizes: Record<string, number>; animate: boolean; visible: boolean }
 interface Snapshot { skins: Skin[]; preferences: SkinPreferences; loaded: boolean; error: string }
-const defaults: SkinPreferences = { selected: "builtin.default", sizes: {}, animate: true };
+const defaults: SkinPreferences = { selected: "builtin.default", sizes: {}, animate: true, visible: true };
 export const getSkinSize = (preferences: SkinPreferences, id = preferences.selected) => typeof preferences.sizes[id] === "number" ? preferences.sizes[id] : 112;
 let snapshot: Snapshot = { skins: [], preferences: defaults, loaded: false, error: "" };
 const listeners = new Set<() => void>();
@@ -34,7 +34,7 @@ export async function loadSkins() {
         if (value.sizes && typeof value.sizes === "object" && !Array.isArray(value.sizes)) {
           for (const [id, size] of Object.entries(value.sizes)) if (typeof size === "number" && Number.isFinite(size)) sizes[id] = Math.max(72, Math.min(200, size));
         } else if (typeof value.size === "number" && Number.isFinite(value.size)) legacySize = Math.max(72, Math.min(200, value.size));
-        preferences = { selected: typeof value.selected === "string" ? value.selected : defaults.selected, sizes, animate: typeof value.animate === "boolean" ? value.animate : true };
+        preferences = { selected: typeof value.selected === "string" ? value.selected : defaults.selected, sizes, animate: typeof value.animate === "boolean" ? value.animate : true, visible: typeof value.visible === "boolean" ? value.visible : true };
       } else {
         try { skins.push(await parseSkinAsync(value)); } catch { error = "A damaged skin was skipped. Reimport it to repair. / 已跳过损坏皮肤，可重新导入修复。"; }
       }

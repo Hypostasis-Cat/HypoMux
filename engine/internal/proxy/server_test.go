@@ -317,14 +317,14 @@ func TestTUNTCPPoolRejectsDomainAndIPv6WithoutBoundSource(t *testing.T) {
 			command:     1,
 			addressType: 3,
 			address:     append([]byte{byte(len("example.com"))}, []byte("example.com")...),
-			wantReply:   5,
+			wantReply:   1,
 		},
 		{
 			name:        "IPv6",
 			command:     1,
 			addressType: 4,
 			address:     net.ParseIP("2001:db8::1").To16(),
-			wantReply:   5,
+			wantReply:   1,
 		},
 	}
 	for _, test := range tests {

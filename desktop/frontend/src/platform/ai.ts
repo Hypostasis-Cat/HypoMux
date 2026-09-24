@@ -1,7 +1,7 @@
 import { Call } from "@wailsio/runtime";
 import { isDesktopRuntime } from "./runtime";
 
-export interface AIConfig { protocol: string; base_url: string; model: string; has_key: boolean }
+export interface AIConfig { protocol: string; auth_mode?: string; base_url: string; model: string; has_key: boolean }
 export interface AIEntry { id: string; role: string; text: string; tool?: string; arguments?: string; state?: string; source?: string; at: string }
 export interface AISnapshot { running: boolean; entries: AIEntry[]; error?: string; revision: number; pending: number }
 export interface MCPStatus { enabled: boolean; url: string; read_only: boolean }

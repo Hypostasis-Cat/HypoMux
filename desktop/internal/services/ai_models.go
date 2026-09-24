@@ -29,7 +29,7 @@ func (s *AIService) ListModels(c AIConfig, key string, clearKey bool) ([]AIModel
 		return nil, errors.New("密钥过长")
 	}
 	s.mu.Lock()
-	if key == "" && !clearKey && c.BaseURL == s.config.Config.BaseURL && c.Protocol == s.config.Config.Protocol {
+	if strings.TrimSpace(key) == "" && !clearKey && sameAIEndpoint(c, s.config.Config) {
 		key = s.config.Key
 	}
 	s.mu.Unlock()
@@ -42,7 +42,7 @@ func (s *AIService) ListModels(c AIConfig, key string, clearKey bool) ([]AIModel
 	seen := map[string]bool{}
 	cursor := ""
 	for page := 0; page < 20; page++ {
-		endpoint := c.BaseURL + "/models"
+		endpoint := aiEndpoint(c, "models")
 		if cursor != "" {
 			endpoint += "?after_id=" + url.QueryEscape(cursor)
 		}
@@ -50,14 +50,7 @@ func (s *AIService) ListModels(c AIConfig, key string, clearKey bool) ([]AIModel
 		if err != nil {
 			return nil, errors.New("API 地址无效")
 		}
-		if c.Protocol == "anthropic" {
-			req.Header.Set("anthropic-version", "2023-06-01")
-			if key != "" {
-				req.Header.Set("x-api-key", strings.TrimSpace(key))
-			}
-		} else if key != "" {
-			req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(key))
-		}
+		aiSetAuth(req, c, key)
 		resp, err := aiHTTPClient.Do(req)
 		if err != nil {
 			return nil, errors.New("无法读取模型列表，请检查 API 地址、网络和证书；也可以手动填写模型名称")

@@ -22,13 +22,14 @@ type clashAPIConfig struct {
 }
 
 type dnsResolveResult struct {
-	Domain     string `json:"domain"`
-	Adapter    string `json:"adapter"`
-	RecordType string `json:"record_type"`
-	Address    string `json:"address"`
-	Transport  string `json:"transport"`
-	Server     string `json:"server"`
-	Cached     bool   `json:"cached"`
+	Addresses  []string `json:"addresses,omitempty"`
+	Domain     string   `json:"domain"`
+	Adapter    string   `json:"adapter"`
+	RecordType string   `json:"record_type"`
+	Address    string   `json:"address"`
+	Transport  string   `json:"transport"`
+	Server     string   `json:"server"`
+	Cached     bool     `json:"cached"`
 }
 
 type tunConfigOptions struct {

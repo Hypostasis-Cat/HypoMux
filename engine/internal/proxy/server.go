@@ -32,14 +32,44 @@ type Server struct {
 	udpIdleTimeout   time.Duration
 	udpSweepInterval time.Duration
 
-	mu                 sync.RWMutex
-	ctx                context.Context
-	cancel             context.CancelFunc
-	listeners          []net.Listener
-	endpoints          Endpoints
-	running            bool
-	wg                 sync.WaitGroup
-	dnsFallbackHandler func(dns.FallbackEvent)
+	mu                        sync.RWMutex
+	ctx                       context.Context
+	cancel                    context.CancelFunc
+	listeners                 []net.Listener
+	endpoints                 Endpoints
+	running                   bool
+	wg                        sync.WaitGroup
+	dnsFallbackHandler        func(dns.FallbackEvent)
+	connectFailureHandler     func(string)
+	lastConnectFailureLog     time.Time
+	suppressedConnectFailures uint64
+}
+
+func (s *Server) SetConnectFailureHandler(handler func(string)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.connectFailureHandler = handler
+}
+
+// Keep raw adapter/dial errors available to support logs without flooding the
+// event transport when many applications retry together.
+func (s *Server) reportConnectFailure(channel, target string, err error, reply byte) {
+	s.mu.Lock()
+	handler := s.connectFailureHandler
+	if handler == nil {
+		s.mu.Unlock()
+		return
+	}
+	if time.Since(s.lastConnectFailureLog) < time.Second {
+		s.suppressedConnectFailures++
+		s.mu.Unlock()
+		return
+	}
+	suppressed := s.suppressedConnectFailures
+	s.suppressedConnectFailures = 0
+	s.lastConnectFailureLog = time.Now()
+	s.mu.Unlock()
+	handler(fmt.Sprintf("connect_failed channel=%q target=%q socks_reply=%d suppressed=%d error=%v", channel, target, reply, suppressed, err))
 }
 
 func New(config Config) (*Server, error) {

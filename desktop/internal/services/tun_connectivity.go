@@ -132,11 +132,20 @@ func probeTUNConnectivityThroughChannels(
 	parent context.Context,
 	aggregationEndpoint string,
 	dnsResult dnsResolveResult,
+	resolvers ...connectivityDNSResolver,
 ) (tunConnectivityReport, error) {
 	probes := make([]func() tunConnectivityCheck, 0, len(tunConnectivityURLs)+2)
 	probes = append(probes, func() tunConnectivityCheck { return probeDNSBootstrap(parent, dnsResult) })
 	aggregationTargets := 0
 	for _, endpoint := range tunConnectivityURLs {
+		if len(resolvers) > 0 && resolvers[0] != nil {
+			endpoint := endpoint
+			aggregationTargets++
+			probes = append(probes, func() tunConnectivityCheck {
+				return probeAggregationAlternatives(parent, endpoint, aggregationEndpoint, dnsResult, resolvers[0])
+			})
+			continue
+		}
 		requestEndpoint, originalHost, supported, err := resolveAggregationTarget(endpoint, dnsResult)
 		if !supported {
 			continue
@@ -176,6 +185,110 @@ func probeTUNConnectivityThroughChannels(
 	}
 	wait.Wait()
 	return report, report.failure()
+}
+
+type connectivityDNSResolver func(context.Context, string, string) (dnsResolveResult, error)
+
+func resolveConnectivityBootstrap(ctx context.Context, adapter string, resolve connectivityDNSResolver) (dnsResolveResult, error) {
+	var failures []error
+	for _, endpoint := range tunConnectivityURLs {
+		parsed, err := url.Parse(endpoint)
+		if err != nil {
+			failures = append(failures, err)
+			continue
+		}
+		lookupCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
+		result, err := resolve(lookupCtx, parsed.Hostname(), adapter)
+		cancel()
+		if err == nil {
+			return result, nil
+		}
+		failures = append(failures, fmt.Errorf("%s: %w", parsed.Hostname(), err))
+	}
+	if len(failures) == 0 {
+		return dnsResolveResult{}, errors.New("no DNS connectivity targets configured")
+	}
+	return dnsResolveResult{}, errors.Join(failures...)
+}
+
+// Resolve through Core's adapter-bound DNS, never the system resolver (which
+// may return FakeIP after TUN takeover). Refresh each round so expired CDN
+// addresses are not pinned for the entire session.
+func probeAggregationAlternatives(parent context.Context, endpoint, socks string, bootstrap dnsResolveResult, resolve connectivityDNSResolver) tunConnectivityCheck {
+	failure := tunConnectivityCheck{Stage: "aggregation_data", Endpoint: endpoint, Outbound: "aggregation"}
+	parsed, err := url.Parse(endpoint)
+	if err != nil || parsed.Hostname() == "" {
+		failure.Error = "invalid connectivity endpoint"
+		return failure
+	}
+	result := dnsResolveResult{Domain: parsed.Hostname(), Address: parsed.Hostname()}
+	if net.ParseIP(parsed.Hostname()) == nil {
+		ctx, cancel := context.WithTimeout(parent, 4*time.Second)
+		result, err = resolve(ctx, parsed.Hostname(), bootstrap.Adapter)
+		cancel()
+		if err != nil {
+			failure.Error = "resolve connectivity target: " + err.Error()
+			return failure
+		}
+	}
+	addresses := append([]string{result.Address}, result.Addresses...)
+	seen := map[string]bool{}
+	targets := make([]string, 0, 3)
+	for _, address := range addresses {
+		ip := net.ParseIP(address)
+		if ip == nil || seen[ip.String()] || isConnectivityFakeIP(ip) {
+			continue
+		}
+		seen[ip.String()] = true
+		candidate := result
+		candidate.Domain, candidate.Address = parsed.Hostname(), ip.String()
+		target, _, supported, targetErr := resolveAggregationTarget(endpoint, candidate)
+		if targetErr != nil || !supported {
+			continue
+		}
+		targets = append(targets, target)
+		if len(targets) == 3 {
+			break
+		}
+	}
+	if len(targets) == 0 {
+		failure.Error = "DNS returned no usable literal connectivity address"
+		return failure
+	}
+	checks := make([]tunConnectivityCheck, len(targets))
+	var wg sync.WaitGroup
+	for index, target := range targets {
+		wg.Add(1)
+		go func(index int, target string) {
+			defer wg.Done()
+			checks[index] = probeHTTPURLTarget(parent, endpoint, target, parsed.Host, &socks, "aggregation")
+			checks[index].Detail += " target=" + target
+		}(index, target)
+	}
+	wg.Wait()
+	details := make([]string, 0, len(checks))
+	for _, check := range checks {
+		failure.OK = failure.OK || check.OK
+		details = append(details, fmt.Sprintf("%s ok=%t error=%s", check.Detail, check.OK, check.Error))
+	}
+	failure.Detail = strings.Join(details, "; ")
+	if !failure.OK {
+		failure.Error = failure.Detail
+	}
+	return failure
+}
+
+func isConnectivityFakeIP(ip net.IP) bool {
+	v4 := ip.To4()
+	return v4 != nil && v4[0] == 198 && (v4[1] == 18 || v4[1] == 19)
+}
+
+func (s *EngineService) resolveConnectivityDNS(ctx context.Context, domain, adapter string) (dnsResolveResult, error) {
+	var result dnsResolveResult
+	err := s.client.Request(ctx, "dns.resolve", map[string]any{
+		"domain": domain, "adapter": adapter, "record_type": "A", "timeout_ms": 1500,
+	}, &result)
+	return result, err
 }
 
 func probeDNSBootstrap(parent context.Context, result dnsResolveResult) tunConnectivityCheck {

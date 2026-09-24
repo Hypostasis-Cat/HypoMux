@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/binary"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -12,6 +13,68 @@ import (
 	"strings"
 	"testing"
 )
+
+func TestAggregationAlternativesResolveAllDomainsAndTryBackupIP(t *testing.T) {
+	stubTUNDataPathProbe(t, true)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasPrefix(r.Host, "backup.example:") {
+			t.Errorf("lost Host: %s", r.Host)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	original := tunConnectivityURLs
+	tunConnectivityURLs = []string{"http://failed.example/", strings.Replace(server.URL, "127.0.0.1", "backup.example", 1)}
+	t.Cleanup(func() { tunConnectivityURLs = original })
+	resolver := func(ctx context.Context, domain, adapter string) (dnsResolveResult, error) {
+		if adapter != "Ethernet" {
+			t.Errorf("unexpected adapter %q", adapter)
+		}
+		if domain == "failed.example" {
+			return dnsResolveResult{}, errors.New("DNS unavailable")
+		}
+		return dnsResolveResult{Domain: domain, Address: "127.0.0.2", Addresses: []string{"127.0.0.2", "127.0.0.1"}}, nil
+	}
+	report, err := probeTUNConnectivityThroughChannels(context.Background(), startTestSOCKS5(t),
+		dnsResolveResult{Adapter: "Ethernet", Transport: "udp", Server: startTestDNSUDP(t)}, resolver)
+	if err != nil || report.Checks[1].OK || !report.Checks[2].OK {
+		t.Fatalf("backup should pass: %#v %v", report, err)
+	}
+	if !strings.Contains(report.Checks[2].Detail, "127.0.0.2") || !strings.Contains(report.Checks[2].Detail, "127.0.0.1") {
+		t.Fatalf("missing per-IP evidence: %s", report.Checks[2].Detail)
+	}
+}
+
+func TestAggregationAlternativesRejectFakeIPAndRefreshResolution(t *testing.T) {
+	calls := 0
+	resolver := func(context.Context, string, string) (dnsResolveResult, error) {
+		calls++
+		return dnsResolveResult{Address: "198.18.0.1", Addresses: []string{"198.19.1.1", "invalid"}}, nil
+	}
+	for i := 0; i < 2; i++ {
+		check := probeAggregationAlternatives(context.Background(), "https://backup.example/", "invalid", dnsResolveResult{}, resolver)
+		if check.OK || !strings.Contains(check.Error, "no usable literal") {
+			t.Fatalf("unsafe DNS answer accepted: %#v", check)
+		}
+	}
+	if calls != 2 {
+		t.Fatalf("DNS was pinned instead of refreshed: %d", calls)
+	}
+}
+
+func TestConnectivityBootstrapFallsBackToSecondDomain(t *testing.T) {
+	calls := 0
+	result, err := resolveConnectivityBootstrap(context.Background(), "Ethernet", func(_ context.Context, domain, adapter string) (dnsResolveResult, error) {
+		calls++
+		if calls == 1 {
+			return dnsResolveResult{}, errors.New("first DNS target failed")
+		}
+		return dnsResolveResult{Domain: domain, Adapter: adapter, Address: "192.0.2.1"}, nil
+	})
+	if err != nil || calls != 2 || result.Domain != "www.baidu.com" {
+		t.Fatalf("fallback result=%#v calls=%d err=%v", result, calls, err)
+	}
+}
 
 func TestProbeTUNConnectivityAcceptsRealHTTPResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {

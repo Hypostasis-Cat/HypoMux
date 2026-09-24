@@ -8,7 +8,8 @@ export function AssistantCompanion({ open, onOpenChange, running, pending, pageL
   hidden?: boolean; open: boolean; onOpenChange: (open: boolean) => void; running: boolean; pending: number; pageLabel: string; speech?: string; speechId?: string; sample?: boolean; onViewDetails?: () => void; onSpeechDismiss?: () => void; children: ReactNode;
 }) {
   const { locale } = useI18n();
-  const { skins, preferences } = useSkins();
+  const { skins, preferences, loaded } = useSkins();
+  hidden = hidden || preferences.visible === false;
   const skin = skins.find(s => s.manifest.id === preferences.selected);
   const [position, setPosition] = useState({ right: 24, bottom: 28 });
   const [viewport, setViewport] = useState({ width: window.innerWidth, height: window.innerHeight });
@@ -72,11 +73,11 @@ export function AssistantCompanion({ open, onOpenChange, running, pending, pageL
           setPosition({ right: Math.max(16, Math.min(right + (event.key === "ArrowLeft" ? 24 : event.key === "ArrowRight" ? -24 : 0), viewport.width - petWidth - 16)), bottom: Math.max(16, Math.min(bottom + (event.key === "ArrowUp" ? 24 : event.key === "ArrowDown" ? -24 : 0), viewport.height - petHeight - 40)) });
         }
       }}>
-      {!skin && <span className="ai-pet-aura" />}
+      {loaded && !skin && <span className="ai-pet-aura" />}
       {running && !pending && <span className="ai-pet-thinking" aria-label={locale === "en" ? "Thinking" : "正在思考"}><i /><i /><i /></span>}
-      {skin ? <SkinCharacter skin={skin} state={characterState} animate={preferences.animate && !hidden} fallback={<DefaultCharacter />} /> : <DefaultCharacter />}
+      {!loaded ? <span className="mux-live2d-loading" role="status" aria-label={locale === "en" ? "Loading companion" : "正在加载形象"}>···</span> : skin ? <SkinCharacter skin={skin} state={characterState} animate={preferences.animate && !hidden} fallback={<DefaultCharacter />} /> : <DefaultCharacter />}
       {pending > 0 && <span className="ai-pet-count">{pending}</span>}
     </button>
-    <span className="ai-pet-name">{skin ? `${skin.manifest.name} · AI` : locale === "en" ? "Mux · AI" : "小 Mux · AI"}</span>
+    <span className="ai-pet-name">{!loaded ? (locale === "en" ? "Loading companion…" : "正在加载形象…") : skin ? `${skin.manifest.name} · AI` : locale === "en" ? "Mux · AI" : "小 Mux · AI"}</span>
   </div>;
 }

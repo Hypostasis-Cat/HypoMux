@@ -25,6 +25,7 @@ import {
 } from "@fluentui/react-icons";
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { GlassSurface } from "../components/material/GlassSurface";
+import { savePreferences, useSkins } from "../components/ai/skins/store";
 import { useAppNotifications } from "../components/notifications/AppNotifications";
 import { desktopPlatform } from "../platform/desktop";
 import { appServices, type AdapterView, type CompleteAppSettings, type ConfigMigrationStatus } from "../platform/services";
@@ -235,6 +236,8 @@ export function SettingsPage({
   onOpenBlockedDomains: () => void;
 }) {
   const [settings, setSettings] = useState<CompleteAppSettings>(emptySettings);
+  const { preferences: companionPreferences, loaded: companionLoaded } = useSkins();
+  const [savingCompanion, setSavingCompanion] = useState(false);
   const [adapters, setAdapters] = useState<AdapterView[]>([]);
   const [configPath, setConfigPath] = useState("");
   const [loading, setLoading] = useState(true);
@@ -585,6 +588,16 @@ export function SettingsPage({
       <div className="settings-layout">
         <GlassSurface className="settings-section" id="settings-personalization">
           <h2>{t("settings_personalization")}</h2>
+          <SettingRow title={text("显示 AI 小精灵", "Show AI companion")}
+            description={text("在页面角落显示小精灵。隐藏后仍可从侧栏打开 AI 助手。", "Show the companion in the corner. You can still open AI Assistant from the sidebar when hidden.")}>
+            <SettingSwitch checked={companionPreferences.visible !== false} disabled={!companionLoaded || savingCompanion}
+              onChange={(visible) => {
+                setSavingCompanion(true);
+                void savePreferences({ visible }).catch((error) => {
+                  notify(text("无法保存小精灵设置", "Unable to save companion preference"), String(error), "error");
+                }).finally(() => setSavingCompanion(false));
+              }} />
+          </SettingRow>
           <SettingRow title={t("settings_theme")} description={t("settings_theme_hint")}>
             <SettingTabs
               selectedValue={appearance.mode}

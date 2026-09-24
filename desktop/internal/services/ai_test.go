@@ -26,7 +26,7 @@ func TestAIModelDiscoveryCredentialsAndPagination(t *testing.T) {
 			calls := 0
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				calls++
-				if r.Method != "GET" || r.URL.Path != "/models" {
+				if r.Method != "GET" || r.URL.Path != "/v1/models" {
 					t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
 				}
 				if protocol == "openai" && r.Header.Get("Authorization") != "Bearer saved-secret" {

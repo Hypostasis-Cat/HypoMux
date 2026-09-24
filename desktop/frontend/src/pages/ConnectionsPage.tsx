@@ -23,6 +23,7 @@ import {
 } from "@fluentui/react-components";
 import {
   AppsListDetail24Regular,
+  ChevronRight16Regular,
   Add20Regular,
   ArrowDownload20Regular,
   ArrowSync20Regular,
@@ -46,8 +47,9 @@ import {
   withServiceTimeout,
 } from "../platform/services";
 import { startSerialPoll } from "../platform/serialPoll";
+import { isDesktopRuntime } from "../platform/runtime";
 import type { HomeAdapter } from "../state/useEngineState";
-import { groupConnectionsByAdapter } from "./connectionGroups";
+import { groupConnectionsByAdapter, groupConnectionsByProcess } from "./connectionGroups";
 import {
   selectConnections,
   type ConnectionOutboundFilter,
@@ -149,6 +151,8 @@ export function ConnectionsPage({
   const [refreshing, setRefreshing] = useState(false);
   const [live, setLive] = useState(true);
   const [query, setQuery] = useState("");
+  const [groupProcesses, setGroupProcesses] = useState(true);
+  const [expandedProcesses, setExpandedProcesses] = useState<Set<string>>(() => new Set());
   const [outboundFilter, setOutboundFilter] = useState<ConnectionOutboundFilter>("all");
   const [adapterFilter, setAdapterFilter] = useState(initialAdapter.trim());
   const [sort, setSort] = useState<ConnectionSort>({ key: "duration", direction: "descending" });
@@ -173,6 +177,8 @@ export function ConnectionsPage({
   const pendingScrollTop = useRef<number | null>(null);
   const { notify } = useAppNotifications();
   const groupedByAdapter = adapterFilter.length > 0;
+  const preview = import.meta.env.DEV && !isDesktopRuntime()
+    && new URLSearchParams(window.location.search).get("fixture") === "connections";
 
   useEffect(() => {
     setAdapterFilter(initialAdapter.trim());
@@ -188,7 +194,9 @@ export function ConnectionsPage({
     requestActive.current = true;
     if (manual) setRefreshing(true);
     try {
-      const next = await withServiceTimeout(
+      const next = preview
+        ? (await import("./connectionPreview")).createConnectionPreview()
+        : await withServiceTimeout(
         appServices.engine.connections(),
         8_000,
         textRef.current("读取活动连接", "Loading active connections"),
@@ -207,7 +215,7 @@ export function ConnectionsPage({
       setLoading(false);
       setRefreshing(false);
     }
-  }, [notify]);
+  }, [notify, preview]);
 
   useEffect(() => {
     void load();
@@ -259,6 +267,14 @@ export function ConnectionsPage({
     () => groupedByAdapter ? groupConnectionsByAdapter(filtered, adapterRuntime) : [],
     [adapterRuntime, filtered, groupedByAdapter],
   );
+
+  const processGroups = useMemo(() => groupConnectionsByProcess(filtered, sort), [filtered, sort]);
+  const toggleProcess = (key: string) => setExpandedProcesses((previous) => {
+    const next = new Set(previous);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    return next;
+  });
 
   const policy = (connection: ConnectionView) => {
     if (connection.outbound === "direct") {
@@ -510,6 +526,35 @@ export function ConnectionsPage({
     );
   };
 
+  const renderProcessGroups = (items: ReturnType<typeof groupConnectionsByProcess>, scope = "") => items.map((group) => {
+    if (group.connections.length === 1) return renderConnection(group.connections[0]);
+    const key = `${scope}/${group.key}`;
+    const expanded = expandedProcesses.has(key);
+    const targets = new Set(group.connections.map((connection) => connection.domain || connection.remote_ip || connection.target));
+    const policies = new Set(group.connections.map((connection) => policy(connection).label));
+    const adapters = [...new Set(group.connections.map((connection) => connection.adapter).filter(Boolean))];
+    const outbound = policy(group.summary);
+    return (
+      <section className={`connection-process-group${expanded ? " is-expanded" : ""}`} key={group.key}>
+        <button type="button" className="connection-row connection-group-toggle"
+          aria-expanded={expanded}
+          aria-label={text(`${expanded ? "收起" : "展开"} ${group.summary.process} 的 ${group.connections.length} 条连接`, `${expanded ? "Collapse" : "Expand"} ${group.summary.process}, ${group.connections.length} connections`)}
+          onClick={() => toggleProcess(key)}>
+          <span className="connection-process">
+            <ChevronRight16Regular className="connection-group-chevron" />
+            <span className="connection-process-icon"><AppsListDetail24Regular /></span>
+            <span><strong title={group.summary.process}>{group.summary.process}</strong><small>{text(`${group.connections.length} 条连接 · ${expanded ? "点击收起" : "点击展开"}`, `${group.connections.length} connections · ${expanded ? "Collapse" : "Expand"}`)}</small></span>
+          </span>
+          <span className="connection-destination"><strong>{text(`${targets.size} 个目标`, `${targets.size} destinations`)}</strong><small>{[...new Set(group.connections.map((connection) => connection.protocol.toUpperCase()))].join(" / ")}</small></span>
+          <span className="connection-policy"><Badge appearance="tint" color={policies.size === 1 ? outbound.color : "informative"}>{policies.size === 1 ? outbound.label : text(`${policies.size} 种出口策略`, `${policies.size} egress policies`)}</Badge><small title={adapters.join(" / ")}>{adapters.join(" / ") || text("出口待建立", "Egress pending")}</small></span>
+          <span className="connection-traffic"><span><ArrowUpload20Regular /> {formatBytes(group.summary.bytes_up)}</span><span><ArrowDownload20Regular /> {formatBytes(group.summary.bytes_down)}</span></span>
+          <span className="connection-duration"><strong>{formatDuration(group.summary.started_at, now)}</strong><small>{text("最长连接", "Longest")}</small></span>
+        </button>
+        {expanded && <div className="connection-group-children">{group.connections.map(renderConnection)}</div>}
+      </section>
+    );
+  });
+
   return (
     <main className="connections-page">
       <header className="connections-heading">
@@ -544,6 +589,7 @@ export function ConnectionsPage({
       </header>
 
       <GlassSurface className="connection-summary" tone="secondary">
+        {preview && <Badge appearance="tint" color="warning">{text("预览 · 示例数据", "Preview · Sample data")}</Badge>}
         <span>
           <Badge key={engineRunning ? "running" : "stopped"} className="motion-status-swap" appearance="tint" color={engineRunning ? "success" : "informative"}>
             {engineRunning ? text("聚合运行中", "Engine running") : text("聚合未运行", "Engine stopped")}
@@ -568,6 +614,10 @@ export function ConnectionsPage({
             </span>
           </span>
           <div className="connection-view-controls">
+            <Switch checked={groupProcesses} label={text("合并同名进程", "Group by process")}
+              onChange={(_, data) => setGroupProcesses(data.checked)} />
+            {groupProcesses && filtered.length > 0 && <Button size="small" appearance="subtle"
+              onClick={() => setExpandedProcesses(new Set())}>{text("全部收起", "Collapse all")}</Button>}
             {groupedByAdapter && (
               <div
                 className="connection-adapter-filter"
@@ -674,9 +724,9 @@ export function ConnectionsPage({
                   <span><ArrowUpload20Regular /> {formatBytes(Math.round(group.uploadBPS))}/s</span>
                 </span>
               </div>
-              {group.connections.map(renderConnection)}
+              {groupProcesses ? renderProcessGroups(groupConnectionsByProcess(group.connections, sort), group.adapter) : group.connections.map(renderConnection)}
             </section>
-          )) : filtered.map(renderConnection)}
+          )) : groupProcesses ? renderProcessGroups(processGroups) : filtered.map(renderConnection)}
         </div>
       </GlassSurface>
 

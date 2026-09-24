@@ -179,6 +179,35 @@ describe("ConnectionsPage interactions", () => {
     vi.clearAllMocks();
   });
 
+  it("collapses same-name processes, keeps expansion on refresh, and filters individual flows", async () => {
+    mocks.connections.mockResolvedValue({ ...snapshot, connections: [
+      connection({}), connection({ id: 3, domain: "second.example", bytes_down: 700 }),
+    ] });
+    renderPage(<ConnectionsPage />);
+    const toggle = await screen.findByRole("button", { name: "Expand Zulu.exe, 2 connections" });
+    expect(screen.queryByText("second.example")).toBeNull();
+    fireEvent.click(toggle);
+    expect(await screen.findByText("second.example")).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() => expect(mocks.connections).toHaveBeenCalledTimes(2));
+    expect(screen.getByRole("button", { name: "Collapse Zulu.exe, 2 connections" }).getAttribute("aria-expanded")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "Collapse all" }));
+    expect(screen.queryByText("second.example")).toBeNull();
+    fireEvent.change(screen.getByPlaceholderText("Search process, domain, IP, or adapter"), { target: { value: "second.example" } });
+    expect(await screen.findByText("second.example")).not.toBeNull();
+    expect(screen.queryByText("ethernet.example")).toBeNull();
+  });
+
+  it("can show a flat list and group inside adapter filters", async () => {
+    mocks.connections.mockResolvedValue({ ...snapshot, connections: [connection({}), connection({ id: 3 })] });
+    renderPage(<ConnectionsPage initialAdapter="Ethernet" adapterRuntime={adapterRuntime} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Expand Zulu.exe, 2 connections" }));
+    expect(screen.getAllByRole("article")).toHaveLength(2);
+    fireEvent.click(screen.getByRole("switch", { name: "Group by process" }));
+    expect(screen.queryByRole("button", { name: "Collapse Zulu.exe, 2 connections" })).toBeNull();
+    expect(screen.getAllByRole("article")).toHaveLength(2);
+  });
+
   it("shows only the selected adapter with its shared live throughput", async () => {
     renderPage(<ConnectionsPage initialAdapter="Ethernet" adapterRuntime={adapterRuntime} />);
 

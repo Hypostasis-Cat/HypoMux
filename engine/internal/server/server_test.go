@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"runtime"
 	"strings"
 	"sync"
@@ -18,6 +19,31 @@ import (
 	engineRuntime "github.com/Hypostasis-Cat/HypoMux/engine/internal/runtime"
 	"github.com/Hypostasis-Cat/HypoMux/engine/internal/tun"
 )
+
+func TestDNSDiagnosticTimeoutDoesNotBlockFollowingRPC(t *testing.T) {
+	blackhole, err := net.ListenPacket("udp4", "127.0.0.254:53")
+	if err != nil {
+		t.Skipf("local DNS test port unavailable: %v", err)
+	}
+	defer blackhole.Close()
+	input := strings.Join([]string{
+		`{"protocol":1,"id":"start","method":"engine.start","params":{"mode":"proxy","socks_port":0,"http_port":0,"dns":{"policy":"off","legacy_servers":["127.0.0.254"]},"adapters":[{"name":"loopback","source_ip":"127.0.0.1"}]}}`,
+		`{"protocol":1,"id":"lookup","method":"dns.resolve","params":{"domain":"example.com","adapter":"loopback","record_type":"A","timeout_ms":20}}`,
+		`{"protocol":1,"id":"after","method":"dns.status"}`,
+		`{"protocol":1,"id":"stop","method":"engine.stop"}`,
+	}, "\n")
+	var output bytes.Buffer
+	started := time.Now()
+	if err := New(strings.NewReader(input), &output, Metadata{}).Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if time.Since(started) > 2*time.Second {
+		t.Fatal("diagnostic DNS blocked subsequent RPC")
+	}
+	if !strings.Contains(output.String(), "context deadline exceeded") || !strings.Contains(output.String(), `"id":"after"`) {
+		t.Fatalf("missing timeout or following response: %s", output.String())
+	}
+}
 
 func TestServerHandshakeStatusAndShutdown(t *testing.T) {
 	input := strings.Join([]string{

@@ -20,6 +20,22 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 
 describe("AI assistant", () => {
+  it("saves relay authentication and Responses protocol without stale model options", async () => {
+    mocks.models.mockResolvedValue([{ id: "stale-model", name: "Stale model" }]);
+    mocks.saveConfig.mockImplementation(async config => config);
+    render(<AIAssistant open onOpenChange={vi.fn()} />);
+    await screen.findByText("test-model");
+    fireEvent.click(screen.getByRole("tab", { name: "Model" }));
+    fireEvent.click(screen.getByRole("button", { name: "Fetch models" }));
+    await screen.findByText("Loaded 1 models. Search and select above.");
+    fireEvent.change(screen.getByRole("combobox", { name: "API protocol" }), { target: { value: "responses" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Authentication" }), { target: { value: "bearer" } });
+    fireEvent.click(screen.getByRole("combobox", { name: "Model ID" }));
+    expect(screen.queryByRole("option", { name: /Stale model/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(mocks.saveConfig).toHaveBeenCalledWith(expect.objectContaining({ protocol: "responses", auth_mode: "bearer" }), "", false));
+    await screen.findByText(/Changing service, model or key starts a fresh context/);
+  });
   it("fetches models from the form without saving and allows selection", async () => {
     mocks.models.mockResolvedValue([{ id: "test-model", name: "Test model" }, { id: "another-model", name: "Another model" }]);
     render(<AIAssistant open onOpenChange={vi.fn()} />);

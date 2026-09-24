@@ -7,6 +7,17 @@ import { installSkin, loadSkins, removeSkin, savePreferences, saveSkinSize, getS
 import { parseSkin } from "./package";
 
 afterEach(cleanup);
+it("persists companion visibility across reloads", async () => {
+  const { result } = renderHook(useSkins);
+  await waitFor(() => expect(result.current.loaded).toBe(true));
+  await act(() => savePreferences({ visible: false }));
+  await act(() => loadSkins());
+  expect(result.current.preferences.visible).toBe(false);
+  await act(() => savePreferences({ visible: true }));
+  await act(() => loadSkins());
+  expect(result.current.preferences.visible).toBe(true);
+});
+
 it("persists installation and settings, reloads, and restores default when active skin is removed", async () => {
   const skin = parseSkin(new Uint8Array(readFileSync("public/skins/mux-starter.muxskin")));
   const { result } = renderHook(useSkins);
@@ -16,7 +27,7 @@ it("persists installation and settings, reloads, and restores default when activ
   await act(() => Promise.all([saveSkinSize(skin.manifest.id, 192), savePreferences({ animate: false })]));
   await act(() => loadSkins());
   expect(result.current.skins).toHaveLength(1);
-  expect(result.current.preferences).toEqual({ sizes: { [skin.manifest.id]: 192 }, animate: false, selected: skin.manifest.id });
+  expect(result.current.preferences).toEqual({ sizes: { [skin.manifest.id]: 192 }, animate: false, visible: true, selected: skin.manifest.id });
   await act(() => installSkin({ ...skin, manifest: { ...skin.manifest, name: "Updated" } }));
   expect(result.current.skins).toHaveLength(1);
   expect(result.current.skins[0].manifest.name).toBe("Updated");
@@ -61,6 +72,7 @@ it("migrates the legacy shared size without coupling later adjustments", async (
   });
   await act(() => loadSkins());
   expect(getSkinSize(result.current.preferences)).toBe(176);
+  expect(result.current.preferences.visible).toBe(true);
   expect(getSkinSize(result.current.preferences, "builtin.default")).toBe(176);
   await act(() => saveSkinSize("builtin.default", 88));
   await act(() => loadSkins());

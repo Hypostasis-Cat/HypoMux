@@ -283,6 +283,7 @@ type LogRecordData struct {
 }
 
 type DNSResolveParams struct {
+	TimeoutMS  int            `json:"timeout_ms,omitempty"`
 	Domain     string         `json:"domain"`
 	Adapter    string         `json:"adapter"`
 	RecordType dns.RecordType `json:"record_type"`

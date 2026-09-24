@@ -522,7 +522,7 @@ func (s *EngineService) Snapshot() (EngineSnapshot, error) {
 		var tunReport tunConnectivityReport
 		var tunErr error
 		if aggregationEndpoint != "" {
-			tunReport, tunErr = probeTUNConnectivityThroughChannels(probeContext, aggregationEndpoint, dnsBootstrap)
+			tunReport, tunErr = probeTUNConnectivityThroughChannels(probeContext, aggregationEndpoint, dnsBootstrap, s.resolveConnectivityDNS)
 		} else {
 			tunErr = errors.New("aggregation channel endpoint is unavailable")
 			tunReport = tunConnectivityReport{Checks: []tunConnectivityCheck{{
@@ -952,9 +952,9 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 	} else {
 		var dnsResult dnsResolveResult
 		s.recordStartStage("dns_validating", nil)
-		if err := s.client.Request(ctx, "dns.resolve", map[string]any{
-			"domain": "www.msftconnecttest.com", "adapter": dnsEgress.Adapter.Name, "record_type": "A",
-		}, &dnsResult); err != nil {
+		var dnsErr error
+		dnsResult, dnsErr = resolveConnectivityBootstrap(ctx, dnsEgress.Adapter.Name, s.resolveConnectivityDNS)
+		if err := dnsErr; err != nil {
 			return rollback(fmt.Errorf("TUN 启动前 DNS 验证失败：%w", err))
 		}
 		s.recordStartStage("dns_validated", map[string]any{
@@ -1063,7 +1063,7 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 		if !settings.ForceTUNBypass {
 			s.recordStartStage("connectivity_validating", nil)
 			validationReport, validationErr := probeTUNConnectivityThroughChannels(
-				ctx, started.Endpoints.Channels["aggregation"], dnsResult,
+				ctx, started.Endpoints.Channels["aggregation"], dnsResult, s.resolveConnectivityDNS,
 			)
 			if validationErr != nil {
 				if s.logs != nil {

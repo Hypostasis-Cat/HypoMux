@@ -4310,6 +4310,48 @@ svg {
   border-bottom: 0;
 }
 
+.connection-process-group {
+  border-bottom: 1px solid var(--hm-outer-border);
+}
+
+.connection-group-toggle {
+  width: 100%;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.connection-group-toggle .connection-process { gap: 7px; }
+.connection-group-chevron {
+  flex: 0 0 auto;
+  color: var(--hm-text-tertiary);
+  transition: transform var(--hm-motion-fast) var(--hm-motion-ease-out);
+}
+.connection-process-group.is-expanded > .connection-group-toggle {
+  background: color-mix(in srgb, var(--hm-accent-soft) 48%, transparent);
+}
+.connection-process-group.is-expanded .connection-group-chevron { transform: rotate(90deg); }
+.connection-group-children {
+  position: relative;
+  background: color-mix(in srgb, var(--hm-surface-secondary-fill) 45%, transparent);
+}
+.connection-group-children::before {
+  position: absolute;
+  top: 12px;
+  bottom: 12px;
+  left: 22px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--hm-accent-soft);
+  content: "";
+}
+.connection-group-children .connection-process { padding-left: 23px; }
+.connection-group-children .connection-process-icon { display: none; }
+.connection-group-children .connection-row { min-height: 62px; }
+
 .connection-process,
 .connection-process > span:last-child,
 .connection-destination,

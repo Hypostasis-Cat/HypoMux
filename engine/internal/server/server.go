@@ -369,6 +369,9 @@ func (s *Server) startProxy(request protocol.Request) protocol.Response {
 	proxyServer, err := proxy.New(params.ProxyConfig())
 	if err == nil {
 		proxyServer.SetDNSFallbackHandler(s.handleDNSFallback)
+		proxyServer.SetConnectFailureHandler(func(message string) {
+			_ = s.emitEvent(api.EventLogRecord, api.LogRecordData{Component: "proxy", Message: message})
+		})
 		var endpoints proxy.Endpoints
 		endpoints, err = proxyServer.Start()
 		if err == nil {
@@ -515,6 +518,14 @@ func (s *Server) resolveDNS(ctx context.Context, request protocol.Request) proto
 	var params api.DNSResolveParams
 	if err := json.Unmarshal(request.Params, &params); err != nil {
 		return protocol.Failure(request.ID, "invalid_params", "DNS params are not valid JSON", nil)
+	}
+	// Bound diagnostic lookups on the Core side as well: the RPC loop is
+	// serial, so a client-only timeout would still stall the next DNS target.
+	if params.TimeoutMS > 0 {
+		timeout := min(params.TimeoutMS, 30000)
+		lookupCtx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Millisecond)
+		defer cancel()
+		ctx = lookupCtx
 	}
 	result, err := s.proxy.ResolveDNS(ctx, params.Domain, params.Adapter, params.RecordType)
 	if err != nil {

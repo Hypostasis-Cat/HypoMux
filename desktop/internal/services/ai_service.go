@@ -23,6 +23,7 @@ type AIEntry struct {
 	Arguments string    `json:"arguments,omitempty"`
 	State     string    `json:"state,omitempty"`
 	Source    string    `json:"source,omitempty"`
+	ContextID string    `json:"context_id,omitempty"`
 	At        time.Time `json:"at"`
 }
 type AISnapshot struct {
@@ -118,6 +119,7 @@ func (s *AIService) addEntry(e AIEntry) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	e.ID = aiID()
+	e.ContextID = s.config.ContextID
 	e.Text = limitAIText(e.Text)
 	e.At = time.Now()
 	s.state.Entries = append(s.state.Entries, e)
@@ -177,14 +179,16 @@ func (s *AIService) SendWithContext(text, pageContext string) error {
 		return errors.New("助手正在执行任务，请稍后或停止后续操作")
 	}
 	config := s.config
-	if _, err := validateAIConfig(config.Config); err != nil {
+	validated, err := validateAIConfig(config.Config)
+	if err != nil {
 		s.mu.Unlock()
 		return err
 	}
+	config.Config = validated
 	// Re-read live state via tools each turn; historical tool payloads are never replayed as instructions.
 	history := []aiMessage{}
 	for _, e := range s.state.Entries {
-		if e.Source != "mcp" && (e.Role == "user" || e.Role == "assistant") {
+		if e.ContextID == config.ContextID && e.Source != "mcp" && (e.Role == "user" || e.Role == "assistant") {
 			history = append(history, aiMessage{Role: e.Role, Content: aiContextMessage(e.Text, e.Context)})
 		}
 	}
@@ -305,7 +309,9 @@ func (s *AIService) TestConnection() (string, error) {
 	defer cancel()
 	tool := aiTool{Name: "connection_test", Description: "Return the nonce unchanged. Does not access the computer.", Schema: map[string]any{"type": "object", "properties": map[string]any{"nonce": map[string]any{"type": "string"}}, "required": []string{"nonce"}, "additionalProperties": false}}
 	nonce := aiID()
-	m, err := s.complete(ctx, c, []aiMessage{{Role: "user", Content: "Call connection_test with nonce " + nonce}}, []aiTool{tool}, true)
+	// Test the same automatic tool mode used by real conversations. Some reasoning
+	// providers support tools but reject forced tool_choice while thinking is on.
+	m, err := s.complete(ctx, c, []aiMessage{{Role: "user", Content: "Call connection_test with nonce " + nonce}}, []aiTool{tool}, false)
 	if err != nil {
 		return "", err
 	}
