@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AIAssistant } from "./AIAssistant";
 
@@ -20,11 +20,34 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 
 describe("AI assistant", () => {
+  it("keeps panel scroll positions and drafts when switching tabs", async () => {
+    render(<AIAssistant open onOpenChange={vi.fn()} />);
+    await within(screen.getByRole("tabpanel", { name: "Chat" })).findByText("test-model");
+    const message = screen.getByRole("textbox", { name: "Message" });
+    fireEvent.change(message, { target: { value: "Keep this draft" } });
+    const chat = screen.getByRole("tabpanel", { name: "Chat" });
+    const conversation = chat.querySelector(".ai-conversation") as HTMLElement;
+    conversation.scrollTop = 125;
+    fireEvent.click(screen.getByRole("tab", { name: "Model" }));
+    const model = screen.getByRole("tabpanel", { name: "Model" });
+    const settings = model.querySelector(".ai-settings") as HTMLElement;
+    settings.scrollTop = 240;
+    fireEvent.click(screen.getByRole("tab", { name: "External AI" }));
+    expect(screen.getAllByRole("tabpanel")).toHaveLength(1);
+    fireEvent.click(screen.getByRole("tab", { name: "Chat" }));
+    expect(screen.getByRole("tabpanel", { name: "Chat" })).toBe(chat);
+    expect(screen.getByRole("textbox", { name: "Message" })).toBe(message);
+    expect((message as HTMLTextAreaElement).value).toBe("Keep this draft");
+    expect(conversation.scrollTop).toBe(125);
+    fireEvent.click(screen.getByRole("tab", { name: "Model" }));
+    expect(screen.getByRole("tabpanel", { name: "Model" })).toBe(model);
+    expect(settings.scrollTop).toBe(240);
+  });
   it("saves relay authentication and Responses protocol without stale model options", async () => {
     mocks.models.mockResolvedValue([{ id: "stale-model", name: "Stale model" }]);
     mocks.saveConfig.mockImplementation(async config => config);
     render(<AIAssistant open onOpenChange={vi.fn()} />);
-    await screen.findByText("test-model");
+    await within(screen.getByRole("tabpanel", { name: "Chat" })).findByText("test-model");
     fireEvent.click(screen.getByRole("tab", { name: "Model" }));
     fireEvent.click(screen.getByRole("button", { name: "Fetch models" }));
     await screen.findByText("Loaded 1 models. Search and select above.");
@@ -39,7 +62,7 @@ describe("AI assistant", () => {
   it("fetches models from the form without saving and allows selection", async () => {
     mocks.models.mockResolvedValue([{ id: "test-model", name: "Test model" }, { id: "another-model", name: "Another model" }]);
     render(<AIAssistant open onOpenChange={vi.fn()} />);
-    await screen.findByText("test-model");
+    await within(screen.getByRole("tabpanel", { name: "Chat" })).findByText("test-model");
     fireEvent.click(screen.getByRole("tab", { name: "Model" }));
     fireEvent.click(screen.getByRole("button", { name: "Fetch models" }));
     await screen.findByText("Loaded 2 models. Search and select above.");
@@ -130,7 +153,7 @@ describe("AI assistant", () => {
   });
   it("sends user intent to the backend without executing guessed frontend operations", async () => {
     render(<AIAssistant open onOpenChange={vi.fn()} />);
-    await screen.findByText("test-model");
+    await within(screen.getByRole("tabpanel", { name: "Chat" })).findByText("test-model");
     fireEvent.change(screen.getByRole("textbox", { name: "Message" }), { target: { value: "Start aggregation; route CS2 directly" } });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() => expect(mocks.send).toHaveBeenCalledWith("Start aggregation; route CS2 directly", expect.stringContaining('"page":"home"')));
@@ -169,7 +192,7 @@ describe("AI assistant", () => {
     mocks.saveConfig.mockResolvedValue({ protocol: "openai", base_url: "https://example.com/v1", model: "test-model", has_key: true });
     mocks.test.mockResolvedValue("Tool calling verified");
     render(<AIAssistant open onOpenChange={vi.fn()} />);
-    await screen.findByText("test-model");
+    await within(screen.getByRole("tabpanel", { name: "Chat" })).findByText("test-model");
     fireEvent.click(screen.getByRole("tab", { name: "Model" }));
     fireEvent.change(screen.getByLabelText("API Key"), { target: { value: "private-key" } });
     fireEvent.click(screen.getByRole("button", { name: "Save and test tool calling" }));
@@ -181,7 +204,7 @@ describe("AI assistant", () => {
   it("preserves user input and exposes backend failures", async () => {
     mocks.send.mockRejectedValue(new Error("Model is not configured"));
     render(<AIAssistant open onOpenChange={vi.fn()} />);
-    await screen.findByText("test-model");
+    await within(screen.getByRole("tabpanel", { name: "Chat" })).findByText("test-model");
     fireEvent.change(screen.getByRole("textbox", { name: "Message" }), { target: { value: "check network" } });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     await screen.findByRole("alert");

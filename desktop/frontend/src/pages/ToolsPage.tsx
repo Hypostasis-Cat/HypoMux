@@ -1,3 +1,4 @@
+import { usePageActiveRef } from "../components/shell/PageActivity";
 import { Badge, Button, Switch, Tooltip } from "@fluentui/react-components";
 import { ArrowLeft20Regular, ArrowRight20Regular, Games24Regular, Wifi124Regular } from "@fluentui/react-icons";
 import { useEffect, useRef, useState } from "react";
@@ -10,6 +11,7 @@ import { useI18n } from "../i18n/i18n";
 import { appServices, type SteamCDNStatus } from "../platform/services";
 
 export function ToolsPage() {
+  const pageActive = usePageActiveRef();
   const { locale } = useI18n();
   const text = (zh: string, en: string) => locale === "en" ? en : zh;
   const { notify } = useAppNotifications();
@@ -37,6 +39,7 @@ export function ToolsPage() {
     let timer: ReturnType<typeof setTimeout>;
     const poll = async () => {
       try {
+        if (!pageActive.current || document.hidden) return;
         const next = await appServices.engine.steamCDNStatus();
         if (!cancelled) { setStatus(next); setStatusError(false); }
       } catch { if (!cancelled) setStatusError(true); }

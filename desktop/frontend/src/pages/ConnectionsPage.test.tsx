@@ -1,6 +1,7 @@
+import { PageActivity } from "../components/shell/PageActivity";
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { FluentProvider, webLightTheme } from "@fluentui/react-components";
 import type { PropsWithChildren, ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -177,6 +178,22 @@ describe("ConnectionsPage interactions", () => {
     cleanup();
     vi.restoreAllMocks();
     vi.clearAllMocks();
+  });
+
+  it("pauses telemetry while cached and resumes on return", async () => {
+    vi.useFakeTimers();
+    try {
+      const view = renderPage(<PageActivity.Provider value={true}><ConnectionsPage /></PageActivity.Provider>);
+      await act(async () => {});
+      expect(mocks.connections).toHaveBeenCalledTimes(1);
+      view.rerender(<PageActivity.Provider value={false}><ConnectionsPage /></PageActivity.Provider>);
+      await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+      expect(mocks.connections).toHaveBeenCalledTimes(1);
+      view.rerender(<PageActivity.Provider value={true}><ConnectionsPage /></PageActivity.Provider>);
+      await act(async () => {});
+      expect(mocks.connections).toHaveBeenCalledTimes(2);
+      view.unmount();
+    } finally { vi.useRealTimers(); }
   });
 
   it("collapses same-name processes, keeps expansion on refresh, and filters individual flows", async () => {

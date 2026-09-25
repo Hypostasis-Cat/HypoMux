@@ -100,8 +100,8 @@ body {
   min-height: 680px;
   color: var(--hm-text-primary);
   background: transparent;
-  user-select: none;
-  -webkit-user-select: none;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 button,
@@ -4306,7 +4306,7 @@ svg {
   outline-offset: -3px;
 }
 
-.connection-row:last-child {
+.connection-list > div > div:last-child > .connection-row {
   border-bottom: 0;
 }
 
@@ -5774,3 +5774,6 @@ svg {
   .connection-view-toolbar { flex-wrap: wrap; gap: 10px; }
   .connection-view-controls { flex-wrap: wrap; gap: 8px; }
 }
+
+/* Window chrome and controls remain draggable/clickable; content can be copied. */
+button, [role="button"], [role="tab"], .compact-navigation, .titlebar { user-select: none; -webkit-user-select: none; }

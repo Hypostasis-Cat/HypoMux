@@ -22,6 +22,7 @@ export default function Live2DCharacter({ skin, state, animate, fallback }: { sk
   current.current = { state, animate };
   const sync = useRef<() => void>(() => {});
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
+  const [contextVersion, setContextVersion] = useState(0);
   useEffect(() => { sync.current(); }, [state, animate]);
   useEffect(() => {
     const element = host.current!;
@@ -49,20 +50,25 @@ export default function Live2DCharacter({ skin, state, animate, fallback }: { sk
       raf = requestAnimationFrame(frame);
     };
     const update = () => {
-      if (!model || disposed) return;
+      if (!model || disposed || failed) return;
+      // A hidden workspace can discard the canvas contents. Restore a frame
+      // even when animation is disabled or reduced motion is enabled.
+      if (visible && !document.hidden) resize();
       playState();
       if (allowed()) { if (!raf) { last = 0; raf = requestAnimationFrame(frame); } }
       else { cancelAnimationFrame(raf); raf = 0; lastState = undefined; }
     };
     sync.current = update;
     const resize = () => {
-      if (!app || !model || disposed) return;
+      if (!app || !model || disposed || failed) return;
       const width = element.clientWidth, height = element.clientHeight;
       if (!width || !height) return;
-      app.renderer.resize(width, height);
-      model.scale.set(Math.min(width / model.internalModel.width, height / model.internalModel.height) * .94);
-      model.position.set(width / 2, height / 2);
-      app.render();
+      try {
+        app.renderer.resize(width, height);
+        model.scale.set(Math.min(width / model.internalModel.width, height / model.internalModel.height) * .94);
+        model.position.set(width / 2, height / 2);
+        app.render();
+      } catch { fail(); }
     };
     const pointer = (event: PointerEvent) => {
       if (!model || !allowed()) return;
@@ -75,6 +81,7 @@ export default function Live2DCharacter({ skin, state, animate, fallback }: { sk
     const resetFocus = () => model?.internalModel.focusController.focus(0, 0);
     const fail = () => { if (!disposed) { failed = true; cancelAnimationFrame(raf); raf = 0; setStatus("error"); } };
     const contextLost = (event: Event) => { event.preventDefault(); fail(); };
+    const contextRestored = () => { if (!disposed) setContextVersion(version => version + 1); };
     const intersection = new IntersectionObserver(entries => { visible = entries[0]?.isIntersecting ?? true; update(); });
     const observer = new MutationObserver(update);
     const dimensions = new ResizeObserver(resize);
@@ -101,8 +108,9 @@ export default function Live2DCharacter({ skin, state, animate, fallback }: { sk
         }
         return mapped.get(path)!;
       };
-      app = new PIXI.Application({ width: 200, height: 200, backgroundAlpha: 0, antialias: true, autoStart: false, resolution: Math.min(window.devicePixelRatio || 1, 2), autoDensity: true });
+      app = new PIXI.Application({ width: 200, height: 200, backgroundAlpha: 0, antialias: true, autoStart: false, preserveDrawingBuffer: true, resolution: Math.min(window.devicePixelRatio || 1, 2), autoDensity: true });
       app.view.addEventListener("webglcontextlost", contextLost);
+      app.view.addEventListener("webglcontextrestored", contextRestored);
       element.appendChild(app.view);
       const loaded = await live2d.Live2DModel.from(settings, { autoUpdate: false, autoInteract: false, motionPreload: live2d.MotionPreloadStrategy.ALL }) as Live2DModel<Cubism4InternalModel>;
       if (disposed) { loaded.destroy({ children: true, texture: true, baseTexture: true }); return; }
@@ -117,7 +125,7 @@ export default function Live2DCharacter({ skin, state, animate, fallback }: { sk
         core.addParameterValueById("ParamBodyAngleZ", Math.sin(t * 1.3) * 2);
         if (current.current.state === "dragging") core.addParameterValueById("ParamAngleZ", -12);
       });
-      model.update(1); resize(); setStatus("ready"); update();
+      model.update(1); resize(); if (!failed) { setStatus("ready"); update(); }
     })().catch(fail);
     return () => {
       disposed = true; sync.current = () => {}; cancelAnimationFrame(raf);
@@ -126,10 +134,11 @@ export default function Live2DCharacter({ skin, state, animate, fallback }: { sk
       window.removeEventListener("pointermove", pointer); window.removeEventListener("blur", resetFocus);
       reduced.removeEventListener("change", update);
       app?.view.removeEventListener("webglcontextlost", contextLost);
+      app?.view.removeEventListener("webglcontextrestored", contextRestored);
       app?.destroy(true, { children: true, texture: true, baseTexture: true });
       urls.forEach(url => URL.revokeObjectURL(url));
     };
-  }, [skin]);
+  }, [skin, contextVersion]);
   return <span className="mux-live2d" data-live2d-status={status} data-skin-state={state} style={{ aspectRatio: `${skin.manifest.canvas.width} / ${skin.manifest.canvas.height}` }}>
     <span className="mux-live2d-stage" ref={host} style={{ visibility: status === "ready" ? "visible" : "hidden" }} aria-hidden="true" />
     {status === "loading" && <span className="mux-live2d-loading" role="status" aria-label="Live2D loading">···</span>}

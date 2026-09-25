@@ -10,7 +10,7 @@ import { limits, pngSize, skinStates, validateManifest, verifyImages, type Skin,
 import { getSkinSize, installSkin, loadSkins, removeSkin, savePreferences, saveSkinSize, useSkins } from "./store";
 import "./skins.css";
 
-export function SkinWardrobe() {
+export function SkinWardrobe({ visible = true }: { visible?: boolean }) {
   const { locale } = useI18n();
   const { skins, preferences, loaded, error: storageError } = useSkins();
   const text = (zh: string, en: string) => locale === "en" ? en : zh;
@@ -110,21 +110,21 @@ export function SkinWardrobe() {
     });
   };
   const renderCharacter = (skin: Skin | undefined, animated = false) => skin
-    ? <SkinCharacter skin={skin} state={animated ? state : "idle"} animate={animated && preferences.animate} posterOnly={!animated} fallback={<DefaultCharacter />} />
+    ? <SkinCharacter skin={skin} state={animated ? state : "idle"} animate={animated && visible && preferences.animate} posterOnly={!animated} fallback={<DefaultCharacter />} />
     : <DefaultCharacter />;
 
   return <div className="ai-settings mux-wardrobe">
     <input hidden ref={fileInput} type="file" accept=".muxskin,.zip" onChange={event => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void importFile(file, false); }} />
     <input hidden ref={imageInput} type="file" accept=".png,image/png" onChange={event => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void importFile(file, true); }} />
-    <header className="mux-wardrobe-heading">
+    <header className="mux-wardrobe-heading ai-page-intro">
       <div><span className="mux-eyebrow">COMPANION / WARDROBE</span><h2>{text("小 Mux 衣柜", "Mux wardrobe")}</h2><p>{text("换个喜欢的形象，让陪伴更有趣。", "A familiar companion. A little more you.")}</p></div>
       <div className="mux-header-actions"><Button icon={<Image20Regular />} disabled={busy || !loaded} onClick={() => imageInput.current?.click()}>{text("从图片创建", "Create from image")}</Button><Button appearance="primary" icon={<ArrowUpload20Regular />} disabled={busy || !loaded} onClick={() => fileInput.current?.click()}>{text("导入皮肤包", "Import skin pack")}</Button></div>
     </header>
     {(error || storageError) && <div role="alert" className="mux-notice mux-notice-error">{error || storageError}{storageError && <Button size="small" onClick={() => void loadSkins()}>{text("重新读取", "Retry")}</Button>}</div>}
     {notice && <div className="mux-notice" role="status"><Checkmark16Regular />{notice}</div>}
     <div className="mux-wardrobe-layout">
-      <section className="mux-preview-panel" aria-label={text("角色预览", "Character preview")}>
-        <div className="mux-preview-stage" data-live2d={!!preview?.manifest.live2d} data-state={state} data-skin-animate={preferences.animate}>
+      <section className="mux-preview-panel glass-surface" aria-label={text("角色预览", "Character preview")}>
+        <div className="mux-preview-stage" data-live2d={!!preview?.manifest.live2d} data-state={state} data-skin-animate={visible && preferences.animate}>
           <div className="mux-stage-top"><span className="mux-preview-caption">{candidate ? text("安装前预览", "Import preview") : text("形象预览", "Character preview")}</span><span className="mux-stage-state"><i />{labels[skinStates.indexOf(state)]}</span></div>
           <span className="mux-preview-dialogue">{captions[state]}</span>
           <div className="mux-preview-character" style={{ width: size * Math.min(1, ratio), height: size * Math.min(1, 1 / ratio) }}>
@@ -144,11 +144,11 @@ export function SkinWardrobe() {
         </div>
       </section>
       <div className="mux-wardrobe-content">
-        {candidate && <section className="mux-candidate"><div className="mux-section-heading"><h3>{creating ? text("制作你的皮肤", "Make it yours") : text("皮肤包已就绪", "Your skin is ready")}</h3><span className="mux-count">{(candidate.manifest.layered ? 6 : Object.keys({ ...candidate.manifest.states, ...candidate.manifest.live2d?.motions }).length)} {text("种状态", "states")}</span></div><p>{text("在左侧预览效果，满意后点击「安装并应用」。", "Preview on the left, then install when you are happy with it.")}</p>
+        {candidate && <section className="mux-candidate glass-surface"><div className="mux-section-heading"><h3>{creating ? text("制作你的皮肤", "Make it yours") : text("皮肤包已就绪", "Your skin is ready")}</h3><span className="mux-count">{(candidate.manifest.layered ? 6 : Object.keys({ ...candidate.manifest.states, ...candidate.manifest.live2d?.motions }).length)} {text("种状态", "states")}</span></div><p>{text("在左侧预览效果，满意后点击「安装并应用」。", "Preview on the left, then install when you are happy with it.")}</p>
           {creating && <><div className="mux-creator-fields"><Field label={text("皮肤名称", "Skin name")}><Input value={candidate.manifest.name} maxLength={80} onChange={(_, data) => updateCreator({ name: data.value })} /></Field><Field label={text("作者", "Author")}><Input value={candidate.manifest.author} maxLength={80} onChange={(_, data) => updateCreator({ author: data.value })} /></Field></div><details className="mux-anchor-options"><summary>{text("调整气泡位置", "Adjust the speech bubble")}</summary><p>{text("预览中的圆点是气泡参考位置。", "The preview dot marks the bubble anchor.")}</p><Field label={text("水平位置", "Horizontal position")}><input aria-label={text("水平锚点", "Horizontal anchor")} type="range" min="0" max="1" step="0.05" value={candidate.manifest.anchor.x} onChange={event => updateCreator({ anchor: { ...candidate.manifest.anchor, x: Number(event.target.value) } })} /></Field><Field label={text("垂直位置", "Vertical position")}><input aria-label={text("垂直锚点", "Vertical anchor")} type="range" min="0" max="1" step="0.05" value={candidate.manifest.anchor.y} onChange={event => updateCreator({ anchor: { ...candidate.manifest.anchor, y: Number(event.target.value) } })} /></Field></details></>}
           {skins.some(skin => skin.manifest.id === candidate.manifest.id) && <p className="mux-replacement-note">{text("已安装同 ID 皮肤，应用后将替换原版本。", "This will replace the installed skin with the same ID.")}</p>}
         </section>}
-        <section className="mux-library" data-drag-over={dragOver} onDragOver={event => { if (event.dataTransfer.types.includes("Files")) { event.preventDefault(); setDragOver(true); } }} onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragOver(false); }} onDrop={event => { event.preventDefault(); setDragOver(false); if (busy) return; const files = event.dataTransfer.files; if (files.length !== 1) { setError(text("请每次导入一个文件。", "Import one file at a time.")); return; } void importFile(files[0], /\.png$/i.test(files[0].name)); }}>
+        <section className="mux-library glass-surface" data-drag-over={dragOver} onDragOver={event => { if (event.dataTransfer.types.includes("Files")) { event.preventDefault(); setDragOver(true); } }} onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragOver(false); }} onDrop={event => { event.preventDefault(); setDragOver(false); if (busy) return; const files = event.dataTransfer.files; if (files.length !== 1) { setError(text("请每次导入一个文件。", "Import one file at a time.")); return; } void importFile(files[0], /\.png$/i.test(files[0].name)); }}>
           <div className="mux-section-heading"><h3>{text("我的皮肤", "Your collection")} <span className="mux-count">{skins.length + 1}</span></h3><span className="mux-local-label"><i />{text("本机收藏", "On this device")}</span></div>
           <p className="mux-library-hint">{text("选择一款皮肤预览，也可以把皮肤包拖到这里。", "Select a character to preview, or drop a skin pack here.")}</p>
           {!loaded && <p role="status">{text("正在读取皮肤…", "Loading skins…")}</p>}
@@ -165,7 +165,7 @@ export function SkinWardrobe() {
             <button type="button" className="mux-add-card" disabled={busy || !loaded} onClick={() => fileInput.current?.click()}><span><Add20Regular /></span><strong>{text("添加新伙伴", "Add a companion")}</strong><small>.muxskin / ZIP</small></button>
           </div>
         </section>
-        <section className="mux-creator-guide"><span className="mux-guide-icon"><Image20Regular /></span><div><h3>{text("一张图片，也能成为你的伙伴", "One image. Your own companion.")}</h3><p>{text("透明 PNG 即可开始；更多表情与动画，交给你的创意。", "Start with a transparent PNG. Add expressions and animation when inspiration strikes.")}</p><div className="mux-resource-links"><a href="/skins/mux-layered.muxskin" download onClick={event => { event.preventDefault(); if (!busy) void action(() => resource("mux-layered.muxskin")); }}>{text("下载分层动态示例 ↗", "Layered example ↗")}</a><a href="/skins/mux-starter.muxskin" download onClick={event => { event.preventDefault(); if (!busy) void action(() => resource("mux-starter.muxskin")); }}>{text("下载示例包", "Starter pack")} ↗</a><a href="/skins/SKIN_SPEC.md" download onClick={event => { event.preventDefault(); if (!busy) void action(() => resource("SKIN_SPEC.md")); }}>{text("查看创作规范", "Creator guide")} ↗</a></div></div></section>
+        <section className="mux-creator-guide glass-surface"><span className="mux-guide-icon"><Image20Regular /></span><div><h3>{text("一张图片，也能成为你的伙伴", "One image. Your own companion.")}</h3><p>{text("透明 PNG 即可开始；更多表情与动画，交给你的创意。", "Start with a transparent PNG. Add expressions and animation when inspiration strikes.")}</p><div className="mux-resource-links"><a href="/skins/mux-layered.muxskin" download onClick={event => { event.preventDefault(); if (!busy) void action(() => resource("mux-layered.muxskin")); }}>{text("下载分层动态示例 ↗", "Layered example ↗")}</a><a href="/skins/mux-starter.muxskin" download onClick={event => { event.preventDefault(); if (!busy) void action(() => resource("mux-starter.muxskin")); }}>{text("下载示例包", "Starter pack")} ↗</a><a href="/skins/SKIN_SPEC.md" download onClick={event => { event.preventDefault(); if (!busy) void action(() => resource("SKIN_SPEC.md")); }}>{text("查看创作规范", "Creator guide")} ↗</a></div></div></section>
         <p className="mux-storage-note">{text("皮肤与设置仅保存在本机。导出皮肤包，就能备份或分享。", "Skins and settings stay on this device. Export a pack to back it up or share it.")}</p>
       </div>
     </div>

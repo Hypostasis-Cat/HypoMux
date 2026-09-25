@@ -1,4 +1,5 @@
-import { useCallback, useState, type PropsWithChildren, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type PropsWithChildren, type ReactNode } from "react";
+import { PageActivity } from "./PageActivity";
 import { AIAssistant } from "../ai/AIAssistant";
 import { useCardGlowField } from "../material/useCardGlowField";
 import { CompactNavigation, type AppPage } from "./CompactNavigation";
@@ -12,6 +13,7 @@ export function AppShell({
   animatePage,
   persistentPage,
   persistentChildren,
+  renderPage,
   children,
 }: PropsWithChildren<{
   page: AppPage;
@@ -20,10 +22,14 @@ export function AppShell({
   animatePage: boolean;
   persistentPage?: AppPage;
   persistentChildren?: ReactNode;
+  renderPage?: (page: AppPage) => ReactNode;
 }>) {
   useCardGlowField();
   const { locale } = useI18n();
   const [assistantOpen, setAssistantOpen] = useState(false);
+  const [visited, setVisited] = useState<AppPage[]>([page]);
+  const pages = visited.includes(page) ? visited : [...visited, page];
+  useEffect(() => { setVisited(current => current.includes(page) ? current : [...current, page]); }, [page]);
   const openWorkspace = useCallback(() => { setAssistantOpen(false); onPageChange("assistant"); }, [onPageChange]);
 
   return (
@@ -41,10 +47,14 @@ export function AppShell({
             data-direction={pageDirection}
             hidden={page !== persistentPage}
           >
-            {persistentChildren}
+            <PageActivity.Provider value={page === persistentPage}>{persistentChildren}</PageActivity.Provider>
           </div>
         ) : null}
-        {page !== persistentPage && page !== "assistant" ? (
+        {renderPage ? pages.filter(item => item !== persistentPage && item !== "assistant").map(item => (
+          <div key={item} className={`page-transition-layer${page === item && animatePage ? " is-entering" : ""}`} data-direction={pageDirection} hidden={page !== item}>
+            <PageActivity.Provider value={page === item}>{renderPage(item)}</PageActivity.Provider>
+          </div>
+        )) : page !== persistentPage && page !== "assistant" ? (
           <div
             key={page}
             className={`page-transition-layer${animatePage ? " is-entering" : ""}`}

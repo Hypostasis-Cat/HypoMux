@@ -1,3 +1,4 @@
+import { PageActivity } from "../components/shell/PageActivity";
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { FluentProvider, webLightTheme } from "@fluentui/react-components";
@@ -176,4 +177,22 @@ it("keeps a disabled conflict disabled when a batch replaces its egress", async 
   fireEvent.click(addRules);
   await waitFor(() => expect(mocks.save).toHaveBeenCalledWith([expect.objectContaining({ value: "app.exe", outbound: "aggregation", disabled: true, priority: 2 })], expect.any(Array)));
   await waitFor(() => expect(screen.getByRole("switch", { name: "Enable rule app.exe" })).toHaveProperty("checked", false));
+});
+
+
+it("refreshes cached rules on return without clearing filters, selection, or the add draft", async () => {
+  const page = (active: boolean) => <FluentProvider theme={webLightTheme}><PageActivity.Provider value={active}><RoutingPage /></PageActivity.Provider></FluentProvider>;
+  const view = render(page(true));
+  const rule = await screen.findByDisplayValue("browser.exe");
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select browser.exe" }));
+  fireEvent.change(screen.getByRole("searchbox", { name: "Filter current rules" }), { target: { value: "browser" } });
+  fireEvent.change(screen.getByRole("textbox", { name: "New rule match value" }), { target: { value: "draft.exe" } });
+  view.rerender(page(false));
+  mocks.snapshot.mockResolvedValueOnce({ rules: [{ match_type: "process", value: "browser.exe", outbound: "aggregation" }], outbounds, restart_required: false });
+  view.rerender(page(true));
+  await waitFor(() => expect(screen.getByRole("combobox", { name: "Egress: browser.exe" }).textContent).toBe("routing_outbound_aggregation"));
+  expect(screen.getByDisplayValue("browser.exe")).toBe(rule);
+  expect(screen.getByRole("checkbox", { name: "Select browser.exe" })).toHaveProperty("checked", true);
+  expect(screen.getByRole("searchbox", { name: "Filter current rules" })).toHaveProperty("value", "browser");
+  expect(screen.getByRole("textbox", { name: "New rule match value" })).toHaveProperty("value", "draft.exe");
 });

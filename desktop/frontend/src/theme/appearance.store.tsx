@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState, type PropsWithChildren } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type PropsWithChildren } from "react";
 import { desktopPlatform } from "../platform/desktop";
 import { appearancePersistence, loadLegacyBrowserAppearance } from "./background.service";
 import { appearancePresets, defaultAppearance, getAppearancePreset, resolveAccent } from "./appearance.presets";
@@ -146,29 +146,50 @@ export function AppearanceProvider({ children }: PropsWithChildren) {
     return () => query.removeEventListener("change", onChange);
   }, []);
 
+  const fluentTheme = useMemo(() => createHypoMuxTheme(resolvedMode, accent), [resolvedMode, accent]);
+  const pendingSave = useRef<AppearanceSettings>();
+  const saveRevision = useRef(0);
+  const flushAppearance = useRef(() => {});
+  flushAppearance.current = () => {
+    const next = pendingSave.current;
+    if (!next) return;
+    pendingSave.current = undefined;
+    const revision = ++saveRevision.current;
+    void appearancePersistence.save(next).then(() => {
+      if (revision === saveRevision.current) setPersistenceError(undefined);
+    }).catch(error => {
+      if (revision === saveRevision.current) setPersistenceError(error instanceof Error ? error.message : String(error));
+    });
+  };
+  useEffect(() => { applyDocumentTokens(settings, resolvedMode, accent); }, [settings, resolvedMode, accent]);
   useEffect(() => {
-    applyDocumentTokens(settings, resolvedMode, accent);
     if (!hydrated) return;
-    void appearancePersistence.save(settings)
-      .then(() => {
-        setPersistenceError(undefined);
-      })
-      .catch((error) => {
-        const message = error instanceof Error ? error.message : String(error);
-        setPersistenceError(message);
-        console.error("Unable to save appearance settings", error);
-      });
-    desktopPlatform
-      .setWindowAppearance({ material: settings.material, mode: resolvedMode, accent })
-      .then(setNativeResult);
-  }, [settings, resolvedMode, accent, hydrated]);
+    pendingSave.current = settings;
+    const timer = window.setTimeout(() => flushAppearance.current(), 300);
+    return () => window.clearTimeout(timer);
+  }, [settings, hydrated]);
+  useEffect(() => {
+    const flush = () => flushAppearance.current();
+    const hide = () => { if (document.hidden) flush(); };
+    window.addEventListener("pagehide", flush);
+    document.addEventListener("visibilitychange", hide);
+    return () => { window.removeEventListener("pagehide", flush); document.removeEventListener("visibilitychange", hide); flush(); };
+  }, []);
+  useEffect(() => {
+    if (!hydrated) return;
+    let active = true;
+    void desktopPlatform.setWindowAppearance({ material: settings.material, mode: resolvedMode, accent })
+      .then(result => { if (active) setNativeResult(result); })
+      .catch(() => { if (active) setNativeResult({ applied: false, fallback: true }); });
+    return () => { active = false; };
+  }, [settings.material, resolvedMode, accent, hydrated]);
 
   const value = useMemo<AppearanceContextValue>(
     () => ({
       settings,
       resolvedMode,
       accent,
-      fluentTheme: createHypoMuxTheme(resolvedMode, accent),
+      fluentTheme,
       nativeResult,
       persistenceError,
       update: (patch) => {
@@ -184,7 +205,7 @@ export function AppearanceProvider({ children }: PropsWithChildren) {
         setSettings({ ...appearancePresets[0].settings });
       },
     }),
-    [accent, nativeResult, persistenceError, resolvedMode, settings],
+    [accent, fluentTheme, nativeResult, persistenceError, resolvedMode, settings],
   );
 
   return <AppearanceContext.Provider value={value}>{children}</AppearanceContext.Provider>;

@@ -191,3 +191,48 @@ it("disables Wi-Fi startup control when automatic acceleration is off", async ()
   expect(toggle.hasAttribute("disabled")).toBe(true);
   expect(mocks.update).not.toHaveBeenCalled();
 });
+
+
+describe("manual network drafts", () => {
+  it("does not include unfinished ports or DNS in an unrelated automatic save", async () => {
+    render(<SettingsPage adapterRuntime={[]} onOpenBlockedDomains={() => {}} />);
+    await screen.findByText("Settings synced");
+    fireEvent.change(screen.getByRole("spinbutton", { name: "HTTP" }), { target: { value: "12345" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "settings_dns_server" }), { target: { value: "1.1.1.1" } });
+    expect(screen.getByText("Unsaved port and DNS changes")).toBeTruthy();
+    fireEvent.click(screen.getByRole("switch", { name: "Hide virtual adapters on Home" }));
+    await waitFor(() => expect(mocks.update).toHaveBeenCalledWith(expect.objectContaining({ http_port: 10801, dns_server: "223.5.5.5", hide_virtual_adapters: false })));
+    const save = screen.getByRole("button", { name: "Save ports and DNS" });
+    await waitFor(() => expect(save.hasAttribute("disabled")).toBe(false));
+    expect((screen.getByRole("spinbutton", { name: "HTTP" }) as HTMLInputElement).value).toBe("12345");
+    fireEvent.click(save);
+    await waitFor(() => expect(mocks.update).toHaveBeenLastCalledWith(expect.objectContaining({ http_port: 12345, dns_server: "1.1.1.1" })));
+    await screen.findByText("Settings synced");
+  });
+  it("keeps the draft editable and retryable when saving and recovery both fail", async () => {
+    render(<SettingsPage adapterRuntime={[]} onOpenBlockedDomains={() => {}} />);
+    await screen.findByText("Settings synced");
+    mocks.update.mockRejectedValueOnce(new Error("offline"));
+    mocks.get.mockRejectedValueOnce(new Error("offline"));
+    fireEvent.change(screen.getByRole("spinbutton", { name: "HTTP" }), { target: { value: "12345" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save ports and DNS" }));
+    await waitFor(() => expect(mocks.notify).toHaveBeenCalledWith(expect.objectContaining({ title: "Save failed" })));
+    await screen.findByText("Unsaved port and DNS changes");
+    expect(screen.getByRole("button", { name: "Save ports and DNS" }).hasAttribute("disabled")).toBe(false);
+    expect((screen.getByRole("spinbutton", { name: "HTTP" }) as HTMLInputElement).value).toBe("12345");
+  });
+  it("preserves edits typed while an earlier manual save is in flight", async () => {
+    render(<SettingsPage adapterRuntime={[]} onOpenBlockedDomains={() => {}} />);
+    await screen.findByText("Settings synced");
+    let finish!: (value: unknown) => void;
+    mocks.update.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    const input = screen.getByRole("spinbutton", { name: "HTTP" });
+    fireEvent.change(input, { target: { value: "12345" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save ports and DNS" }));
+    await waitFor(() => expect(mocks.update).toHaveBeenCalledTimes(1));
+    fireEvent.change(input, { target: { value: "23456" } });
+    finish({ ...initial, http_port: 12345 });
+    await screen.findByText("Unsaved port and DNS changes");
+    expect((input as HTMLInputElement).value).toBe("23456");
+  });
+});

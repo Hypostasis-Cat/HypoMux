@@ -1,3 +1,4 @@
+import { usePageActive } from "../components/shell/PageActivity";
 import {
   Button,
   Dialog,
@@ -187,10 +188,12 @@ function SettingSlider({
 function SettingInput({
   value,
   placeholder,
+  disabled,
   onChange,
 }: {
   value: string;
   placeholder?: string;
+  disabled?: boolean;
   onChange: (value: string) => void;
 }) {
   const accessible = useSettingRowA11y();
@@ -198,6 +201,7 @@ function SettingInput({
     <Input
       value={value}
       placeholder={placeholder}
+      disabled={disabled}
       aria-labelledby={accessible?.labelId}
       aria-describedby={accessible?.descriptionId}
       onChange={(_, data) => onChange(data.value)}
@@ -236,6 +240,18 @@ export function SettingsPage({
   onOpenBlockedDomains: () => void;
 }) {
   const [settings, setSettings] = useState<CompleteAppSettings>(emptySettings);
+  // Manual network edits must never leak into auto-saved preference updates.
+  const pageActive = usePageActive();
+  const settingsRevision = useRef(0);
+  const [networkDraft, setNetworkDraft] = useState<Partial<Pick<CompleteAppSettings, "socks_port" | "http_port" | "dns_server" | "dns_policy" | "dns_egress_mode" | "dns_adapter_id">>>({});
+  const networkSettings = { ...settings, ...networkDraft };
+  const networkDirty = Object.entries(networkDraft).some(([key, value]) => settings[key as keyof CompleteAppSettings] !== value);
+  useEffect(() => {
+    if (!networkDirty) return;
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [networkDirty]);
   const { preferences: companionPreferences, loaded: companionLoaded } = useSkins();
   const [savingCompanion, setSavingCompanion] = useState(false);
   const [adapters, setAdapters] = useState<AdapterView[]>([]);
@@ -315,7 +331,7 @@ export function SettingsPage({
   }, [settings.hide_virtual_adapters]);
 
   const enqueueSave = <T,>(operation: () => Promise<SaveOutcome<T, CompleteAppSettings>>, fields: string[] | null): Promise<T> =>
-    saveQueue.enqueue(operation, fields).catch((error) => {
+    (settingsRevision.current++, saveQueue.enqueue(operation, fields)).catch((error) => {
       // Errors are already surfaced via notify inside the operation; the
       // queue's rejection is only a control-flow signal. Swallow it here so
       // callers (React event handlers) never see an unhandled rejection.
@@ -344,6 +360,8 @@ export function SettingsPage({
   }, [adapterRuntime]);
 
   useEffect(() => {
+    if (!pageActive) return;
+    const revision = settingsRevision.current;
     let cancelled = false;
     setLoading(true);
     setLoadFailed(false);
@@ -357,7 +375,7 @@ export function SettingsPage({
     ])
       .then(([loaded, path, migrationStatus, loadedAdapters]) => {
         if (cancelled) return;
-        setSettings({ ...emptySettings, ...loaded });
+        if (revision === settingsRevision.current) setSettings(current => saveQueue.mergeAuthoritative({ ...emptySettings, ...loaded }, current));
         setConfigPath(path);
         setMigration(migrationStatus);
         setAdapters(adapterRuntimeRef.current !== undefined ? [...adapterRuntimeRef.current] : loadedAdapters ?? []);
@@ -369,9 +387,9 @@ export function SettingsPage({
       })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [loadRevision]);
+  }, [loadRevision, pageActive, saveQueue]);
 
-  const save = (next: CompleteAppSettings, success?: string, fields: string[] | null = null): Promise<void> => {
+  const save = (next: CompleteAppSettings, success?: string, fields: string[] | null = null): Promise<boolean> => {
     setSettings(next);
     return enqueueSave(async () => {
       setSaving(true);
@@ -379,9 +397,9 @@ export function SettingsPage({
         const persisted = await appServices.settings.update(next);
         setLocale(persisted.language);
         notify(t("infobar_success"), success ?? text("设置已保存", "Settings saved"));
-        return { ok: true as const, value: undefined, authoritative: persisted };
+        return { ok: true as const, value: true, authoritative: persisted };
       } catch (error) {
-        const restored = await appServices.settings.get().catch(() => next);
+        const restored = await appServices.settings.get().catch(() => settings);
         setLocale(restored.language);
         notify(text("保存失败", "Save failed"), String(error), "error");
         return {
@@ -392,11 +410,18 @@ export function SettingsPage({
       } finally {
         setSaving(false);
       }
-    }, fields);
+    }, fields).then(Boolean);
   };
 
   const patchAndSave = (patch: Partial<CompleteAppSettings>, success?: string) =>
     save({ ...settings, ...patch }, success, Object.keys(patch));
+
+  const saveNetwork = async () => {
+    const submitted = networkDraft;
+    if (await save({ ...settings, ...submitted }, text("端口与 DNS 设置已保存", "Proxy ports and DNS settings saved"))) {
+      setNetworkDraft(current => Object.fromEntries(Object.entries(current).filter(([key, value]) => value !== submitted[key as keyof typeof submitted])));
+    }
+  };
 
   const setAutostart = (enabled: boolean): Promise<void> => {
     // Optimistically mirror the backend semantics: disabling autostart also
@@ -554,13 +579,13 @@ export function SettingsPage({
         </div>
         <div className="settings-save-feedback">
           <Button onClick={() => window.dispatchEvent(new Event("hypomux:ai-settings"))}>{text("AI 助手设置", "AI assistant settings")}</Button>
-          <span key={loading ? "loading" : loadFailed ? "error" : saving ? "saving" : "synced"} className="save-state motion-inline-swap" data-error={loadFailed || undefined} role="status" aria-live="polite">{loading
+          <span key={loading ? "loading" : loadFailed ? "error" : saving ? "saving" : networkDirty ? "dirty" : "synced"} className="save-state motion-inline-swap" data-error={loadFailed || undefined} role="status" aria-live="polite">{loading
             ? text("正在读取…", "Loading…")
             : loadFailed
               ? text("配置未读取", "Settings unavailable")
               : saving
                 ? text("正在保存…", "Saving…")
-                : text("配置已同步", "Settings synced")}</span>
+                : networkDirty ? text("端口与 DNS 有未保存的更改", "Unsaved port and DNS changes") : text("配置已同步", "Settings synced")}</span>
           {loadFailed && <Button size="small" appearance="subtle" icon={<ArrowSync20Regular />} onClick={() => setLoadRevision(value => value + 1)}>{text("重试", "Retry")}</Button>}
         </div>
       </header>
@@ -820,8 +845,8 @@ export function SettingsPage({
             "SOCKS5 and HTTP/HTTPS listening ports, range 1–65534.",
           )}>
             <div className="port-controls">
-              <label>SOCKS5 <Input type="number" min={1} max={65534} value={String(settings.socks_port)} onChange={(_, data) => setSettings((current) => ({ ...current, socks_port: Number(data.value) }))} /></label>
-              <label>HTTP <Input type="number" min={1} max={65534} value={String(settings.http_port)} onChange={(_, data) => setSettings((current) => ({ ...current, http_port: Number(data.value) }))} /></label>
+              <label>SOCKS5 <Input disabled={loading || loadFailed} type="number" min={1} max={65534} value={String(networkSettings.socks_port)} onChange={(_, data) => setNetworkDraft((current) => ({ ...current, socks_port: Number(data.value) }))} /></label>
+              <label>HTTP <Input disabled={loading || loadFailed} type="number" min={1} max={65534} value={String(networkSettings.http_port)} onChange={(_, data) => setNetworkDraft((current) => ({ ...current, http_port: Number(data.value) }))} /></label>
             </div>
           </SettingRow>
           <SettingRow title={t("settings_system_proxy_takeover")} description={t("settings_system_proxy_takeover_hint")}>
@@ -842,14 +867,16 @@ export function SettingsPage({
           <h2>{t("settings_network_dns")}</h2>
           <SettingRow title={t("settings_dns_server")} description={t("settings_dns_fallback_hint")}>
             <SettingInput
-              value={settings.dns_server}
+              disabled={loading || loadFailed}
+              value={networkSettings.dns_server}
               placeholder={t("settings_dns_placeholder")}
-              onChange={(value) => setSettings((current) => ({ ...current, dns_server: value }))}
+              onChange={(value) => setNetworkDraft((current) => ({ ...current, dns_server: value }))}
             />
           </SettingRow>
           <SettingRow title={t("settings_doh_policy")} description={t("settings_doh_hint")}>
             <SettingDropdown
-              value={settings.dns_policy}
+              disabled={loading || loadFailed}
+              value={networkSettings.dns_policy}
               options={[
                 { value: "auto", label: t("settings_doh_auto") },
                 { value: "off", label: t("settings_doh_off") },
@@ -857,12 +884,12 @@ export function SettingsPage({
                 { value: "dnspod", label: t("settings_doh_dnspod") },
                 { value: "google", label: "Google DNS" },
               ]}
-              onChange={(value) => setSettings((current) => ({ ...current, dns_policy: value }))}
+              onChange={(value) => setNetworkDraft((current) => ({ ...current, dns_policy: value }))}
             />
           </SettingRow>
           <SettingRow title={t("settings_dns_egress")} description={t("settings_dns_egress_hint")}>
             <SettingDropdown
-              value={settings.dns_egress_mode === "adapter" ? `adapter:${settings.dns_adapter_id ?? ""}` : settings.dns_egress_mode}
+              value={networkSettings.dns_egress_mode === "adapter" ? `adapter:${networkSettings.dns_adapter_id ?? ""}` : networkSettings.dns_egress_mode}
               disabled={loading || saving}
               options={[
                 { value: "auto", label: t("settings_dns_egress_auto") },
@@ -874,13 +901,13 @@ export function SettingsPage({
                     label: `${t("settings_dns_egress_adapter_prefix")} · ${adapter.name}`,
                   })),
               ]}
-              onChange={(value) => setSettings((current) => value.startsWith("adapter:")
+              onChange={(value) => setNetworkDraft((current) => value.startsWith("adapter:")
                 ? { ...current, dns_egress_mode: "adapter", dns_adapter_id: value.slice("adapter:".length) }
                 : { ...current, dns_egress_mode: value, dns_adapter_id: "" })}
             />
           </SettingRow>
           <div className="settings-actions">
-            <Button appearance="primary" icon={<Save20Regular />} disabled={loading || saving} onClick={() => save(settings, text("端口与 DNS 设置已保存", "Proxy ports and DNS settings saved"))}>
+            <Button appearance="primary" icon={<Save20Regular />} disabled={loading || loadFailed || saving || !networkDirty} onClick={() => void saveNetwork()}>
               {text("保存端口与 DNS", "Save ports and DNS")}
             </Button>
           </div>

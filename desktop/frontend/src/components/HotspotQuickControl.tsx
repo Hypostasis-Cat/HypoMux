@@ -1,3 +1,4 @@
+import { usePageActiveRef } from "./shell/PageActivity";
 import { Switch, Tooltip } from "@fluentui/react-components";
 import { useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n/i18n";
@@ -6,6 +7,7 @@ import { hotspotDraft } from "./hotspotDraft";
 import { runHotspotOperation, useHotspotOperation } from "./hotspotOperation";
 
 export function HotspotQuickControl({ onConfigure }: { onConfigure: () => void }) {
+  const pageActive = usePageActiveRef();
   const { locale } = useI18n();
   const text = (zh: string, en: string) => locale === "en" ? en : zh;
   const [status, setStatus] = useState<HotspotStatus>();
@@ -22,7 +24,7 @@ export function HotspotQuickControl({ onConfigure }: { onConfigure: () => void }
     let timer: ReturnType<typeof setTimeout>;
     const refresh = async () => {
       const version = revision.current;
-      if (!busy.current) {
+      if (!busy.current && pageActive.current && !document.hidden) {
         try {
           const next = await appServices.engine.hotspotStatus();
           if (!cancelled && !busy.current && version === revision.current) { setStatus(next); setError(""); }

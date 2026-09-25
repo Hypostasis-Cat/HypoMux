@@ -1,3 +1,4 @@
+import { usePageActiveRef } from "./shell/PageActivity";
 import { Badge, Button, Dropdown, Field, Input, Option, Spinner, Switch } from "@fluentui/react-components";
 import { Wifi124Regular, Phone24Regular } from "@fluentui/react-icons";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -26,6 +27,7 @@ function useContentTransition(state: string) {
 }
 
 export function HotspotPanel() {
+  const pageActive = usePageActiveRef();
   const { locale } = useI18n();
   const text = (zh: string, en: string) => locale === "en" ? en : zh;
   const [config, updateConfig] = useState<HotspotConfig>(() => hotspotDraft.current ?? { ssid: "HypoMux", password: "", band: "auto" });
@@ -80,7 +82,7 @@ export function HotspotPanel() {
     }
     let timer: ReturnType<typeof setTimeout>;
     const refresh = async () => {
-      if (!busy.current) {
+      if (!busy.current && pageActive.current && !document.hidden) {
         const requestRevision = revision.current;
         try {
           const next = await appServices.engine.hotspotStatus();

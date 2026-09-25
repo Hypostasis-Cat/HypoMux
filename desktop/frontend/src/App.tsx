@@ -141,34 +141,35 @@ function HypoMuxWindow() {
               onEnginePhaseChange={setEnginePhase}
             />
           )}
-        >
+          renderPage={target => (
           <Suspense fallback={<div className="page-loading"><Spinner size="small" label={locale === "en" ? "Loading page…" : "正在加载页面…"} /></div>}>
-          {page === "appearance" && import.meta.env.DEV
+          {target === "appearance" && import.meta.env.DEV
             ? <AppearanceLab />
-            : page === "about"
+            : target === "about"
               ? <AboutPage />
-              : page === "tools"
+              : target === "tools"
                 ? <ToolsPage />
-              : page === "settings"
+              : target === "settings"
                 ? <SettingsPage
                   adapterRuntime={connectionAdapters}
                   onOpenBlockedDomains={() => navigate("blocked-domains")}
                 />
-                : page === "blocked-domains"
+                : target === "blocked-domains"
                   ? <BlockedDomainsPage onBack={() => navigate("settings")} />
-            : page === "health"
+            : target === "health"
               ? <HealthPage adapterRuntime={connectionAdapters} enginePhase={enginePhase} />
-              : page === "connections"
+              : target === "connections"
                 ? <ConnectionsPage
                   initialAdapter={connectionsNavigation.adapter}
                   adapterRevision={connectionsNavigation.revision}
                   adapterRuntime={connectionAdapters ?? []}
                 />
-            : page === "routing"
+            : target === "routing"
               ? <RoutingPage />
               : null}
           </Suspense>
-        </AppShell>
+          )}
+        />
       </AppNotificationProvider>
     </FluentProvider>
   );

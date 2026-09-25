@@ -7,8 +7,12 @@ describe("advanceConnectionsNavigation", () => {
       .toEqual({ adapter: "Ethernet 3", revision: 3 });
   });
 
-  it("clears an adapter filter for a generic connections-page request", () => {
+  it("preserves filters when returning through the sidebar", () => {
     expect(advanceConnectionsNavigation({ adapter: "Wi-Fi", revision: 6 }))
+      .toEqual({ adapter: "Wi-Fi", revision: 6 });
+  });
+  it("can explicitly clear an adapter filter", () => {
+    expect(advanceConnectionsNavigation({ adapter: "Wi-Fi", revision: 6 }, ""))
       .toEqual({ adapter: "", revision: 7 });
   });
 });

@@ -1,3 +1,4 @@
+import { usePageActiveRef } from "./shell/PageActivity";
 import { Badge, Button, Input, Select } from "@fluentui/react-components";
 import { useEffect, useRef, useState } from "react";
 import { appServices, type SteamCDNStatus } from "../platform/services";
@@ -6,6 +7,7 @@ import { useI18n } from "../i18n/i18n";
 import { formatSteamBytes, steamGuidance, steamNodeState } from "./steamCDNView";
 
 export function SteamCDNPanel({ enabled, saving }: { enabled: boolean; saving: boolean }) {
+  const pageActive = usePageActiveRef();
   const { locale } = useI18n();
   const en = locale === "en";
   const [status, setStatus] = useState<SteamCDNStatus>();
@@ -26,6 +28,7 @@ export function SteamCDNPanel({ enabled, saving }: { enabled: boolean; saving: b
     const poll = async () => {
       const id = ++requestID.current;
       try {
+        if (!pageActive.current || document.hidden) return;
         const next = await appServices.engine.steamCDNStatus();
         if (!cancelled && id === requestID.current) { setStatus(next); setUpdatedAt(new Date()); setError(""); }
       } catch (reason) { if (!cancelled && id === requestID.current) setError(String(reason)); }

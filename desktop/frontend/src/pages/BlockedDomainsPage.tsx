@@ -21,10 +21,12 @@ import { useAppNotifications } from "../components/notifications/AppNotification
 import { appServices, type BlockedDomainSnapshot } from "../platform/services";
 import { useI18n } from "../i18n/i18n";
 import { startSerialPoll } from "../platform/serialPoll";
+import { usePageActive } from "../components/shell/PageActivity";
 
 const emptySnapshot: BlockedDomainSnapshot = { enabled: false, use_expiry: true, entries: [] };
 
 export function BlockedDomainsPage({ onBack }: { onBack: () => void }) {
+  const pageActive = usePageActive();
   const { locale, t } = useI18n();
   const text = (zh: string, en: string) => locale === "en" ? en : zh;
   const remainingText = (seconds: number, permanent: boolean) => {
@@ -53,6 +55,7 @@ export function BlockedDomainsPage({ onBack }: { onBack: () => void }) {
   }, [locale, notify]);
 
   useEffect(() => {
+    if (!pageActive) return;
     mounted.current = true;
     void refresh();
     const stop = startSerialPoll(refresh, 3000);
@@ -61,7 +64,7 @@ export function BlockedDomainsPage({ onBack }: { onBack: () => void }) {
       requestSequence.current += 1;
       stop();
     };
-  }, [refresh]);
+  }, [refresh, pageActive]);
 
   const remove = async (adapter: string, domain: string) => {
     try {

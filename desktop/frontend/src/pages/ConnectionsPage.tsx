@@ -35,6 +35,8 @@ import {
 } from "@fluentui/react-icons";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { GlassSurface } from "../components/material/GlassSurface";
+import { VirtualRows, type VirtualRow } from "../components/VirtualRows";
+import { usePageActive } from "../components/shell/PageActivity";
 import { useAppNotifications } from "../components/notifications/AppNotifications";
 import { useI18n } from "../i18n/i18n";
 import {
@@ -135,6 +137,27 @@ const formatDuration = (startedAt: string, now: number) => {
     : `${minutes}:${String(remaining).padStart(2, "0")}`;
 };
 
+// Only this small cell ticks; scrolling and telemetry do not rebuild the page each second.
+function ConnectionDuration({ startedAt }: { startedAt: string }) {
+  const active = usePageActive();
+  const ref = useRef<HTMLElement>(null);
+  const visible = useRef(true);
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    if (!active) return;
+    const tick = () => { if (visible.current && !document.hidden) setNow(Date.now()); };
+    tick();
+    const observer = typeof IntersectionObserver === "undefined" ? null : new IntersectionObserver(entries => {
+      visible.current = entries.some(entry => entry.isIntersecting);
+      tick();
+    });
+    if (ref.current) observer?.observe(ref.current);
+    const timer = window.setInterval(tick, 1000);
+    return () => { window.clearInterval(timer); observer?.disconnect(); };
+  }, [active]);
+  return <strong ref={ref}>{formatDuration(startedAt, now)}</strong>;
+}
+
 export function ConnectionsPage({
   initialAdapter = "",
   adapterRevision = 0,
@@ -144,6 +167,7 @@ export function ConnectionsPage({
   adapterRevision?: number;
   adapterRuntime?: readonly HomeAdapter[];
 }) {
+  const pageActive = usePageActive();
   const { locale } = useI18n();
   const text = useCallback((zh: string, en: string) => locale === "en" ? en : zh, [locale]);
   const [snapshot, setSnapshot] = useState<ConnectionListSnapshot>(emptySnapshot);
@@ -156,7 +180,6 @@ export function ConnectionsPage({
   const [outboundFilter, setOutboundFilter] = useState<ConnectionOutboundFilter>("all");
   const [adapterFilter, setAdapterFilter] = useState(initialAdapter.trim());
   const [sort, setSort] = useState<ConnectionSort>({ key: "duration", direction: "descending" });
-  const [now, setNow] = useState(Date.now());
   const [contextMenu, setContextMenu] = useState<ConnectionContextMenu | null>(null);
   const [quickRule, setQuickRule] = useState<QuickRuleSelection | null>(null);
   // Retain the content during Fluent's exit animation to avoid a collapsing dialog.
@@ -218,18 +241,13 @@ export function ConnectionsPage({
   }, [notify, preview]);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    if (pageActive) void load();
+  }, [load, pageActive]);
 
   useEffect(() => {
-    if (!live) return;
-    return startSerialPoll(() => load(), 1500);
-  }, [live, load]);
-
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, []);
+    if (!live || !pageActive) return;
+    return startSerialPoll(() => document.hidden ? Promise.resolve() : load(), 1500);
+  }, [live, load, pageActive]);
 
   useLayoutEffect(() => {
     const list = connectionListRef.current;
@@ -519,22 +537,27 @@ export function ConnectionsPage({
           <span><ArrowDownload20Regular /> {formatBytes(connection.bytes_down)}</span>
         </div>
         <div className="connection-duration">
-          <strong>{formatDuration(connection.started_at, now)}</strong>
+          <ConnectionDuration startedAt={connection.started_at} />
           <small>{new Date(connection.started_at).toLocaleTimeString(locale === "en" ? "en-US" : "zh-CN", { hour12: false })}</small>
         </div>
       </article>
     );
   };
 
-  const renderProcessGroups = (items: ReturnType<typeof groupConnectionsByProcess>, scope = "") => items.map((group) => {
-    if (group.connections.length === 1) return renderConnection(group.connections[0]);
+  const connectionRows = (items: readonly ConnectionView[], scope = "", child = false): VirtualRow[] => items.map(connection => ({
+    key: `connection:${scope}/${connection.id}`,
+    estimate: child ? 62 : 72,
+    render: () => child ? <div className="connection-group-children">{renderConnection(connection)}</div> : renderConnection(connection),
+  }));
+  const processRows = (items: ReturnType<typeof groupConnectionsByProcess>, scope = ""): VirtualRow[] => items.flatMap((group) => {
+    if (group.connections.length === 1) return connectionRows(group.connections, scope);
     const key = `${scope}/${group.key}`;
     const expanded = expandedProcesses.has(key);
     const targets = new Set(group.connections.map((connection) => connection.domain || connection.remote_ip || connection.target));
     const policies = new Set(group.connections.map((connection) => policy(connection).label));
     const adapters = [...new Set(group.connections.map((connection) => connection.adapter).filter(Boolean))];
     const outbound = policy(group.summary);
-    return (
+    return [{ key: `process:${key}`, estimate: 73, render: () => (
       <section className={`connection-process-group${expanded ? " is-expanded" : ""}`} key={group.key}>
         <button type="button" className="connection-row connection-group-toggle"
           aria-expanded={expanded}
@@ -548,12 +571,20 @@ export function ConnectionsPage({
           <span className="connection-destination"><strong>{text(`${targets.size} 个目标`, `${targets.size} destinations`)}</strong><small>{[...new Set(group.connections.map((connection) => connection.protocol.toUpperCase()))].join(" / ")}</small></span>
           <span className="connection-policy"><Badge appearance="tint" color={policies.size === 1 ? outbound.color : "informative"}>{policies.size === 1 ? outbound.label : text(`${policies.size} 种出口策略`, `${policies.size} egress policies`)}</Badge><small title={adapters.join(" / ")}>{adapters.join(" / ") || text("出口待建立", "Egress pending")}</small></span>
           <span className="connection-traffic"><span><ArrowUpload20Regular /> {formatBytes(group.summary.bytes_up)}</span><span><ArrowDownload20Regular /> {formatBytes(group.summary.bytes_down)}</span></span>
-          <span className="connection-duration"><strong>{formatDuration(group.summary.started_at, now)}</strong><small>{text("最长连接", "Longest")}</small></span>
+          <span className="connection-duration"><ConnectionDuration startedAt={group.summary.started_at} /><small>{text("最长连接", "Longest")}</small></span>
         </button>
-        {expanded && <div className="connection-group-children">{group.connections.map(renderConnection)}</div>}
       </section>
-    );
+    ) }, ...expanded ? connectionRows(group.connections, key, true) : []];
   });
+
+  const rows: VirtualRow[] = groupedByAdapter ? groups.flatMap(group => [{
+    key: `adapter:${group.adapter}`, estimate: 38,
+    render: () => <div className="connection-adapter-heading">
+      <span><PlugConnected20Regular /><strong>{group.adapter || text("出口待分配", "Egress pending")}</strong><small>{text(`${group.connections.length} 条连接`, `${group.connections.length} connection(s)`)}</small></span>
+      <span className="connection-adapter-speed"><span><ArrowDownload20Regular /> {formatBytes(Math.round(group.downloadBPS))}/s</span><span><ArrowUpload20Regular /> {formatBytes(Math.round(group.uploadBPS))}/s</span></span>
+    </div>,
+  }, ...groupProcesses ? processRows(groupConnectionsByProcess(group.connections, sort), group.adapter) : connectionRows(group.connections, group.adapter)])
+    : groupProcesses ? processRows(processGroups) : connectionRows(filtered);
 
   return (
     <main className="connections-page">
@@ -694,7 +725,7 @@ export function ConnectionsPage({
             );
           })}
         </div>
-        <div ref={connectionListRef} className="connection-list">
+        <div ref={connectionListRef} className="connection-list" role="region" aria-label={text("活动连接列表", "Active connections list")} tabIndex={0}>
           {loading ? (
             <div key="connections-loading" className="connections-empty motion-state-content"><Spinner label={text("正在读取实时连接", "Loading live connections")} /></div>
           ) : !engineRunning ? (
@@ -711,22 +742,7 @@ export function ConnectionsPage({
                 ? text("可以更换出口策略或清空搜索内容。", "Choose another egress policy or clear the search query.")
                 : text("短连接可能只会短暂出现；实时刷新会保留最新状态。", "Short-lived flows may appear briefly; live refresh keeps the view current.")}</span>
             </div>
-          ) : groupedByAdapter ? groups.map((group) => (
-            <section className="connection-adapter-group" key={group.adapter || "pending-adapter"}>
-              <div className="connection-adapter-heading">
-                <span>
-                  <PlugConnected20Regular />
-                  <strong>{group.adapter || text("出口待分配", "Egress pending")}</strong>
-                  <small>{text(`${group.connections.length} 条连接`, `${group.connections.length} connection(s)`)}</small>
-                </span>
-                <span className="connection-adapter-speed">
-                  <span><ArrowDownload20Regular /> {formatBytes(Math.round(group.downloadBPS))}/s</span>
-                  <span><ArrowUpload20Regular /> {formatBytes(Math.round(group.uploadBPS))}/s</span>
-                </span>
-              </div>
-              {groupProcesses ? renderProcessGroups(groupConnectionsByProcess(group.connections, sort), group.adapter) : group.connections.map(renderConnection)}
-            </section>
-          )) : groupProcesses ? renderProcessGroups(processGroups) : filtered.map(renderConnection)}
+          ) : <VirtualRows rows={rows} scrollRef={connectionListRef} />}
         </div>
       </GlassSurface>
 

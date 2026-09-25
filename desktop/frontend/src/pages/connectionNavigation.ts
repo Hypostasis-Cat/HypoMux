@@ -6,7 +6,7 @@ export type ConnectionsNavigation = {
 export const advanceConnectionsNavigation = (
   current: ConnectionsNavigation,
   adapterName?: string,
-): ConnectionsNavigation => ({
-  adapter: adapterName ?? "",
+): ConnectionsNavigation => adapterName === undefined ? current : ({
+  adapter: adapterName,
   revision: current.revision + 1,
 });

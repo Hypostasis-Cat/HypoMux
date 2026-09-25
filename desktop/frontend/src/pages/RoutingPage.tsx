@@ -1,3 +1,4 @@
+import { usePageActive } from "../components/shell/PageActivity";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Badge,
@@ -136,6 +137,7 @@ const browserProcessFixture = (): RunningProcess[] | null => {
 };
 
 export function RoutingPage() {
+  const pageActive = usePageActive();
   const { locale, t } = useI18n();
   const text = useCallback((zh: string, en: string) => locale === "en" ? en : zh, [locale]);
   const matchLabels = useMemo<Record<MatchType, string>>(() => ({
@@ -156,10 +158,11 @@ export function RoutingPage() {
   const [filter, setFilter] = useState("");
   const [selected, setSelected] = useState<Set<TableRowId>>(new Set());
   useEffect(() => {
+    if (!pageActive) return;
     const selection = rules.filter(rule => selected.has(rule.id)).slice(0, 10).map(rule => ({ type: rule.match_type, value: rule.value, outbound: rule.outbound }));
     window.dispatchEvent(new CustomEvent("hypomux:ai-selection", { detail: { page: "routing", selection: selection.length ? JSON.stringify(selection) : "" } }));
     return () => { window.dispatchEvent(new CustomEvent("hypomux:ai-selection", { detail: { page: "routing", selection: "" } })); };
-  }, [rules, selected]);
+  }, [rules, selected, pageActive]);
   const [newValue, setNewValue] = useState("");
   const [newOutbound, setNewOutbound] = useState("aggregation");
   const [loading, setLoading] = useState(true);
@@ -186,6 +189,7 @@ export function RoutingPage() {
   const [replaceBatchConflicts, setReplaceBatchConflicts] = useState(false);
   const batchValueCount = useMemo(() => parseRoutingBatchValues(batchText, batchType).length, [batchText, batchType]);
   const loaded = useRef(false);
+  const loadRequest = useRef(0);
   const backendRevision = useRef<string>();
   const rulesRef = useRef<DraftRule[]>([]);
   const editRevision = useRef(0);
@@ -242,20 +246,23 @@ export function RoutingPage() {
     };
   }, [engineRuntime.mode, engineRuntime.phase, text]);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (quiet = false) => {
+    const request = ++loadRequest.current;
+    const revision = editRevision.current;
+    if (!quiet) setLoading(true);
     const engineTask = appServices.engine.snapshot()
       .then((engine) => {
-        setEngineRuntime({ phase: engine.phase, mode: engine.mode });
+        if (request === loadRequest.current) setEngineRuntime({ phase: engine.phase, mode: engine.mode });
       })
       .catch(() => undefined);
     try {
       const snapshot = await appServices.routing.snapshot();
+      if (request !== loadRequest.current || (quiet && revision !== editRevision.current)) return;
       backendRevision.current = snapshot.revision;
       orderRef.current = normalizeOrder(snapshot.match_order);
       setMatchOrder(orderRef.current);
       const available = new Set((snapshot.outbounds ?? []).map((outbound) => outbound.id));
-      const nextRules = makeDrafts(snapshot.rules ?? []).map((rule) => rule.disabled || available.has(rule.outbound)
+      const nextRules = reconcileSavedDrafts(snapshot.rules ?? [], rulesRef.current).map((rule) => rule.disabled || available.has(rule.outbound)
         ? rule
         : {
             ...rule,
@@ -272,6 +279,7 @@ export function RoutingPage() {
       setSavedAt(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
       loaded.current = true;
     } catch (error) {
+      if (quiet || request !== loadRequest.current) return;
       const fixture = browserRoutingFixture();
       if (fixture) {
         const nextRules = makeDrafts(fixture.rules ?? []);
@@ -284,14 +292,16 @@ export function RoutingPage() {
         notify(text("无法读取分流规则", "Unable to load routing rules"), error instanceof Error ? error.message : String(error), "error");
       }
     } finally {
-      setLoading(false);
+      if (!quiet && request === loadRequest.current) setLoading(false);
     }
     void engineTask;
   }, [notify, text]);
 
+  const localEdits = useRef(false);
+  localEdits.current = pendingSave || saving;
   useEffect(() => {
-    void load();
-  }, [load]);
+    if (pageActive && !localEdits.current) void load(loaded.current);
+  }, [load, pageActive]);
 
   useEffect(() => {
     const changed = () => {
@@ -682,7 +692,7 @@ export function RoutingPage() {
       renderHeaderCell: () => text("匹配值", "Match value"),
       renderCell: (item) => (
         <Input
-          className="routing-cell-input"
+          aria-label={text(`匹配值：${item.value}`, `Match value: ${item.value}`)} spellCheck={false} autoComplete="off" className="routing-cell-input"
           value={item.value}
           appearance="filled-darker"
           aria-invalid={Boolean(item.error)}
@@ -695,7 +705,7 @@ export function RoutingPage() {
       renderHeaderCell: () => t("routing_col_nic"),
       renderCell: (item) => (
         <Dropdown
-          className="routing-cell-dropdown"
+          aria-label={text(`出口：${item.value}`, `Egress: ${item.value}`)} className="routing-cell-dropdown"
           appearance="filled-darker"
           value={outboundLabel(item.outbound)}
           selectedOptions={[item.outbound]}
@@ -817,7 +827,7 @@ export function RoutingPage() {
         </div>
         <div className="routing-add-row">
           <Input
-            ref={addRuleInputRef}
+            aria-label={text("新规则匹配值", "New rule match value")} spellCheck={false} autoComplete="off" ref={addRuleInputRef}
             value={newValue}
             placeholder={placeholders[activeType]}
             onChange={(_, data) => setNewValue(data.value)}
@@ -826,7 +836,7 @@ export function RoutingPage() {
             }}
           />
           <Dropdown
-            value={outboundLabel(newOutbound)}
+            aria-label={text("新规则出口", "New rule egress")} value={outboundLabel(newOutbound)}
             selectedOptions={[newOutbound]}
             onOptionSelect={(_, data) => data.optionValue && setNewOutbound(data.optionValue)}
           >
@@ -845,7 +855,7 @@ export function RoutingPage() {
           )}
         </div>
         <Toolbar className="routing-actions" aria-label={text("规则操作", "Rule actions")}>
-          <SearchBox value={filter} placeholder={text("筛选当前类型", "Filter current type")} onChange={(_, data) => setFilter(data.value)} />
+          <SearchBox aria-label={text("筛选当前类型规则", "Filter current rules")} value={filter} placeholder={text("筛选当前类型", "Filter current type")} onChange={(_, data) => setFilter(data.value)} />
           <span>{text(`${activeRules.length} 条显示 · ${rules.length} 条总计`, `${activeRules.length} shown · ${rules.length} total`)}</span>
           <div className="routing-action-buttons">
           <ToolbarButton disabled={loading || checkingOutbounds} onClick={() => void disableUnavailableRules()}>{text(checkingOutbounds ? "正在检查出口…" : "一键禁用无效规则", checkingOutbounds ? "Checking egress…" : "Disable unavailable rules")}</ToolbarButton>
@@ -946,7 +956,7 @@ export function RoutingPage() {
           <DialogBody>
             <DialogTitle>{t("routing_process_dialog_title")}</DialogTitle>
             <DialogContent>
-              <SearchBox autoFocus value={processSearch} placeholder={t("routing_process_search_placeholder")} onChange={(_, data) => setProcessSearch(data.value)} />
+              <SearchBox aria-label={text("搜索运行中进程", "Search running processes")} autoFocus value={processSearch} placeholder={t("routing_process_search_placeholder")} onChange={(_, data) => setProcessSearch(data.value)} />
               <div className="process-list">
                 {processLoading ? <Spinner label={t("routing_process_loading")} /> : filteredProcesses.length === 0
                   ? <span>{t("routing_process_empty")}</span>
