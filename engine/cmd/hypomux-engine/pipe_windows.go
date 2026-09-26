@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"time"
 
 	"golang.org/x/sys/windows"
@@ -78,10 +77,9 @@ func connectAuthenticatedPipe(
 		case <-time.After(40 * time.Millisecond):
 		}
 	}
-	connection := os.NewFile(uintptr(handle), name)
-	if connection == nil {
-		_ = windows.CloseHandle(handle)
-		return nil, errors.New("create pipe file handle")
+	connection, err := newPipeFile(handle)
+	if err != nil {
+		return nil, err
 	}
 	var serverPID uint32
 	if err := windows.GetNamedPipeServerProcessId(handle, &serverPID); err != nil {

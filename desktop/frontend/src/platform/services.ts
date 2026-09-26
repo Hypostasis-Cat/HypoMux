@@ -246,6 +246,7 @@ export const appServices = {
     refresh: () => AdapterService.Refresh(),
     save: (mode: string, weighted: boolean, adapters: AdapterView[], strategy?: string) =>
       strategy ? EngineService.SaveScheduling(mode, strategy, adapters) : AdapterService.SaveSelection(mode, weighted, adapters),
+    saveSelected: (ids: string[]) => Call.ByName(engineMethod("SaveDiagnosticSelection"), ids) as Promise<AdapterView[]>,
   },
   engine: {
     trayStatus: () => Call.ByName(engineMethod("TrayStatus")) as Promise<{ phase: string; mode: string }>,
@@ -317,8 +318,8 @@ export const appServices = {
   },
   settings: {
     get: async () => (await SettingsService.Get()) as CompleteAppSettings,
-    update: (settings: CompleteAppSettings) =>
-      Call.ByName(settingsMethod("Update"), settings) as Promise<CompleteAppSettings>,
+    update: (settings: CompleteAppSettings, fields: string[]) =>
+      Call.ByName(settingsMethod("UpdateFields"), settings, fields) as Promise<CompleteAppSettings>,
     setAutostart: (enabled: boolean) =>
       Call.ByName(settingsMethod("SetAutostart"), enabled) as Promise<CompleteAppSettings>,
     setAutoStartEngine: (enabled: boolean) =>

@@ -172,7 +172,7 @@ func createAuthenticatedPipe() (*namedPipeServer, error) {
 	return &namedPipeServer{handle: handle, name: name, token: token}, nil
 }
 
-func (p *namedPipeServer) accept(ctx context.Context, expectedPID int) (*os.File, error) {
+func (p *namedPipeServer) accept(ctx context.Context, expectedPID int) (pipeFile, error) {
 	if err := connectAuthenticatedPipeServer(ctx, p.handle); err != nil {
 		return nil, err
 	}
@@ -185,10 +185,10 @@ func (p *namedPipeServer) accept(ctx context.Context, expectedPID int) (*os.File
 		return nil, fmt.Errorf("拒绝非预期核心进程（PID %d）", clientPID)
 	}
 
-	connection := os.NewFile(uintptr(p.handle), p.name)
+	connection, err := newPipeFile(p.handle)
 	p.handle = windows.InvalidHandle
-	if connection == nil {
-		return nil, errors.New("创建命名管道文件句柄失败")
+	if err != nil {
+		return nil, fmt.Errorf("创建命名管道连接失败：%w", err)
 	}
 	if err := authenticateCore(ctx, connection, p.token); err != nil {
 		_ = connection.Close()
@@ -240,7 +240,7 @@ func connectAuthenticatedPipeServer(ctx context.Context, handle windows.Handle) 
 	}
 }
 
-func authenticateCore(ctx context.Context, connection *os.File, token string) error {
+func authenticateCore(ctx context.Context, connection pipeFile, token string) error {
 	// The pipe handle is overlapped, so the deadline is honoured by the
 	// netpoller and ReadBytes below cannot block past it. Without this the
 	// goroutine's only escape is the Close in the ctx.Done() branch, and a Close

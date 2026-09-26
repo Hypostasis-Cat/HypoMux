@@ -30,7 +30,7 @@ import {
 } from "../platform/services";
 import { useI18n } from "../i18n/i18n";
 import { isDesktopRuntime } from "../platform/runtime";
-import { adapterSaveInput, adapterSaveQueue } from "../platform/adapterSaveQueue";
+import { adapterSaveQueue } from "../platform/adapterSaveQueue";
 import { startSerialPoll } from "../platform/serialPoll";
 import type { EnginePhase } from "../state/useEngineState";
 import { adapterListKey } from "../state/adapterRuntime";
@@ -130,7 +130,6 @@ export function HealthPage({
   const adapterRuntimeRef = useRef(adapterRuntime);
   const adapterRuntimeKeyRef = useRef<string>();
   const enginePhaseRef = useRef(enginePhase);
-  const homeSettingsRef = useRef({ mode: "proxy", weighted: false });
   const stopPoller = useRef<(() => void)>();
   const diagnosticEpoch = useRef(0);
   const mounted = useRef(true);
@@ -166,12 +165,11 @@ export function HealthPage({
       })
       : Promise.resolve();
     try {
-      const [nextAdapters, latest, settings] = await withServiceTimeout(Promise.all([
+      const [nextAdapters, latest] = await withServiceTimeout(Promise.all([
         adapterRuntimeRef.current !== undefined
           ? Promise.resolve([...adapterRuntimeRef.current])
           : appServices.adapters.list(),
         appServices.diagnostics.latest(),
-        appServices.settings.get(),
       ]), 10_000, text("读取网络体检数据", "Loading network diagnostics"));
       const authoritativeAdapters = adapterRuntimeRef.current !== undefined
         ? [...adapterRuntimeRef.current]
@@ -179,7 +177,6 @@ export function HealthPage({
       setAdapters(authoritativeAdapters);
       adaptersRef.current = authoritativeAdapters;
       setSnapshot(latest);
-      homeSettingsRef.current = { mode: settings.mode, weighted: settings.weighted };
       setPreview(false);
     } catch (error) {
       if (isBrowserPreview()) {
@@ -241,8 +238,7 @@ export function HealthPage({
     adaptersRef.current = next;
     setAdapters(next);
     if (preview) return Promise.resolve(next);
-    const settings = homeSettingsRef.current;
-    const handle = adapterSaveQueue.enqueue(adapterSaveInput(settings.mode, settings.weighted, next));
+    const handle = adapterSaveQueue.enqueue({ selectedIDs: next.filter(adapter => adapter.selected).map(adapter => adapter.id) });
     void handle.done.then((saved) => {
       if (!mounted.current || !adapterSaveQueue.isCurrent(handle.revision)) return;
       const authoritative = saved ?? next;

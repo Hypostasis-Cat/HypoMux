@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { defaultAppearance } from "../theme/appearance.presets";
 import { ToolsPage } from "./ToolsPage";
 import { SettingsPage } from "./SettingsPage";
+import { PageActivity } from "../components/shell/PageActivity";
 
 const mocks = vi.hoisted(() => ({
   get: vi.fn(),
@@ -51,7 +52,11 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.locale = "en";
   mocks.get.mockResolvedValue(initial);
-  mocks.setSteamCDNEnabled.mockImplementation(async (enabled) => ({ ...initial, steam_cdn_enabled: enabled }));
+  mocks.setSteamCDNEnabled.mockImplementation(async (enabled) => {
+    const saved = { ...initial, steam_cdn_enabled: enabled };
+    mocks.get.mockResolvedValue(saved);
+    return saved;
+  });
   mocks.steamCDNStatus.mockResolvedValue({available: true, enabled: false, probing: 0, replacements: 0, fallbacks: 0, entries: []});
   mocks.hotspotPreferences.mockResolvedValue({ ssid: "HypoMux", password: "", band: "auto" });
   mocks.hotspotStatus.mockResolvedValue({state: "stopped", ready: false, ssid: "", clients: 0, band: "auto", sharing_verified: false});
@@ -142,7 +147,7 @@ describe("TUN settings", () => {
     await waitFor(() => expect(toggle.hasAttribute("disabled")).toBe(false));
     expect((toggle as HTMLInputElement).checked).toBe(true);
     fireEvent.click(toggle);
-    await waitFor(() => expect(mocks.update).toHaveBeenCalledWith(expect.objectContaining({ hide_virtual_adapters: false })));
+    await waitFor(() => expect(mocks.update).toHaveBeenCalledWith(expect.objectContaining({ hide_virtual_adapters: false }), ["hide_virtual_adapters"]));
   });
   it.each([
     ["Mixed (hybrid)", "mixed"],
@@ -156,7 +161,7 @@ describe("TUN settings", () => {
     fireEvent.click(await screen.findByRole("option", { name: label }));
     await waitFor(() => expect(mocks.update).toHaveBeenCalledWith(expect.objectContaining({
       tun_stack: stack, dns_policy: "auto", strict_route: true,
-    })));
+    }), ["tun_stack"]));
     await waitFor(() => expect(mocks.notify).toHaveBeenCalledWith(expect.objectContaining({
       message: "TUN stack saved; applies the next time TUN starts",
     })));
@@ -180,7 +185,7 @@ it("adds Wi-Fi startup control below auto acceleration and persists opt-in", asy
   await waitFor(() => expect(toggle.hasAttribute("disabled")).toBe(false));
   expect((toggle as HTMLInputElement).checked).toBe(false);
   fireEvent.click(toggle);
-  await waitFor(() => expect(mocks.update).toHaveBeenCalledWith(expect.objectContaining({ auto_connect_wifi: true })));
+  await waitFor(() => expect(mocks.update).toHaveBeenCalledWith(expect.objectContaining({ auto_connect_wifi: true }), ["auto_connect_wifi"]));
 });
 
 it("disables Wi-Fi startup control when automatic acceleration is off", async () => {
@@ -201,12 +206,12 @@ describe("manual network drafts", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "settings_dns_server" }), { target: { value: "1.1.1.1" } });
     expect(screen.getByText("Unsaved port and DNS changes")).toBeTruthy();
     fireEvent.click(screen.getByRole("switch", { name: "Hide virtual adapters on Home" }));
-    await waitFor(() => expect(mocks.update).toHaveBeenCalledWith(expect.objectContaining({ http_port: 10801, dns_server: "223.5.5.5", hide_virtual_adapters: false })));
+    await waitFor(() => expect(mocks.update).toHaveBeenCalledWith(expect.objectContaining({ http_port: 10801, dns_server: "223.5.5.5", hide_virtual_adapters: false }), ["hide_virtual_adapters"]));
     const save = screen.getByRole("button", { name: "Save ports and DNS" });
     await waitFor(() => expect(save.hasAttribute("disabled")).toBe(false));
     expect((screen.getByRole("spinbutton", { name: "HTTP" }) as HTMLInputElement).value).toBe("12345");
     fireEvent.click(save);
-    await waitFor(() => expect(mocks.update).toHaveBeenLastCalledWith(expect.objectContaining({ http_port: 12345, dns_server: "1.1.1.1" })));
+    await waitFor(() => expect(mocks.update).toHaveBeenLastCalledWith(expect.objectContaining({ http_port: 12345, dns_server: "1.1.1.1" }), ["http_port", "dns_server"]));
     await screen.findByText("Settings synced");
   });
   it("keeps the draft editable and retryable when saving and recovery both fail", async () => {
@@ -235,4 +240,62 @@ describe("manual network drafts", () => {
     await screen.findByText("Unsaved port and DNS changes");
     expect((input as HTMLInputElement).value).toBe("23456");
   });
+});
+
+it("preserves an AI rule saved after loading the settings page", async () => {
+  let persisted: any = { ...initial, routing_rules: [] };
+  mocks.get.mockImplementation(async () => persisted);
+  mocks.update.mockImplementation(async (next, fields: string[]) => {
+    persisted = { ...persisted, ...Object.fromEntries(fields.map(field => [field, next[field]])) };
+    return persisted;
+  });
+  render(<SettingsPage adapterRuntime={[]} onOpenBlockedDomains={() => {}} />);
+  await screen.findByText("Settings synced");
+  const rule = { match_type: "process", value: "cs2.exe", outbound: "direct", priority: 1 };
+  persisted = { ...persisted, routing_rules: [rule] };
+  // The save must be safe even before the next AI notification arrives.
+  fireEvent.click(screen.getByRole("switch", { name: "Hide virtual adapters on Home" }));
+  await waitFor(() => expect(mocks.update).toHaveBeenCalledOnce());
+  expect(mocks.update.mock.calls[0][1]).toEqual(["hide_virtual_adapters"]);
+  expect(persisted.routing_rules).toEqual([rule]);
+});
+
+it("refreshes AI changes without discarding the manual network draft", async () => {
+  render(<SettingsPage adapterRuntime={[]} onOpenBlockedDomains={() => {}} />);
+  await screen.findByText("Settings synced");
+  fireEvent.change(screen.getByRole("spinbutton", { name: "HTTP" }), { target: { value: "12345" } });
+  mocks.get.mockResolvedValue({ ...initial, hide_virtual_adapters: false });
+  act(() => { window.dispatchEvent(new CustomEvent("hypomux:ai-changed")); });
+  await waitFor(() => expect((screen.getByRole("switch", { name: "Hide virtual adapters on Home" }) as HTMLInputElement).checked).toBe(false));
+  expect((screen.getByRole("spinbutton", { name: "HTTP" }) as HTMLInputElement).value).toBe("12345");
+  expect(screen.getByText("Unsaved port and DNS changes")).toBeTruthy();
+});
+
+it("refreshes Steam preferences when returning from AI and while already visible", async () => {
+  const show = (active: boolean) => <PageActivity.Provider value={active}><ToolsPage /></PageActivity.Provider>;
+  const view = render(show(true));
+  const toggle = await screen.findByRole("switch", { name: "Steam download optimization" });
+  await waitFor(() => expect(toggle.hasAttribute("disabled")).toBe(false));
+  view.rerender(show(false));
+  mocks.get.mockResolvedValue({ ...initial, steam_cdn_enabled: true });
+  view.rerender(show(true));
+  await waitFor(() => expect((toggle as HTMLInputElement).checked).toBe(true));
+  mocks.get.mockResolvedValue({ ...initial, steam_cdn_enabled: false });
+  act(() => { window.dispatchEvent(new CustomEvent("hypomux:ai-changed")); });
+  await waitFor(() => expect((toggle as HTMLInputElement).checked).toBe(false));
+});
+
+it("ignores an old Steam preference response after a newer AI change", async () => {
+  render(<ToolsPage />);
+  const toggle = await screen.findByRole("switch", { name: "Steam download optimization" });
+  await waitFor(() => expect(toggle.hasAttribute("disabled")).toBe(false));
+  let finish!: (value: unknown) => void;
+  mocks.get.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  act(() => { window.dispatchEvent(new CustomEvent("hypomux:ai-changed")); });
+  await waitFor(() => expect(finish).toBeTypeOf("function"));
+  mocks.get.mockResolvedValue({ ...initial, steam_cdn_enabled: true });
+  act(() => { window.dispatchEvent(new CustomEvent("hypomux:ai-changed")); });
+  await waitFor(() => expect((toggle as HTMLInputElement).checked).toBe(true));
+  await act(async () => { finish({ ...initial, steam_cdn_enabled: false }); });
+  expect((toggle as HTMLInputElement).checked).toBe(true);
 });

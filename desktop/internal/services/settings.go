@@ -248,12 +248,62 @@ func (s *SettingsService) RollbackLegacyMigration() (AppSettings, error) {
 	return cloneSettings(s.settings), nil
 }
 
-// Update persists every ordinary setting exposed by the Settings page. Home
-// selection and routing data are submitted with the latest snapshot so a
-// settings-only save cannot silently discard them.
+// Update is the legacy full-replacement interface. Interactive preference
+// edits use UpdateFields so a stale page cannot overwrite unrelated state.
 func (s *SettingsService) Update(next AppSettings) (AppSettings, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.updateLocked(next)
+}
+
+// UpdateFields merges only Settings-page preferences under the persistence
+// lock. Routing, scheduling and startup registration have dedicated services.
+func (s *SettingsService) UpdateFields(values AppSettings, fields []string) (AppSettings, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	next := cloneSettings(s.settings)
+	for _, field := range fields {
+		switch field {
+		case "language":
+			next.Language = values.Language
+		case "socks_port":
+			next.SOCKSPort = values.SOCKSPort
+		case "http_port":
+			next.HTTPPort = values.HTTPPort
+		case "system_proxy_takeover":
+			next.SystemProxyTakeover = values.SystemProxyTakeover
+		case "strict_route":
+			next.StrictRoute = values.StrictRoute
+		case "tun_stack":
+			next.TUNStack = values.TUNStack
+		case "force_tun_connectivity_bypass":
+			next.ForceTUNBypass = values.ForceTUNBypass
+		case "blocked_domain_bypass":
+			next.BlockedDomainBypass = values.BlockedDomainBypass
+		case "blocked_domain_expiry":
+			next.BlockedDomainExpiry = values.BlockedDomainExpiry
+		case "close_to_tray":
+			next.CloseToTray = values.CloseToTray
+		case "hide_virtual_adapters":
+			next.HideVirtualAdapters = values.HideVirtualAdapters
+		case "auto_connect_wifi":
+			next.AutoConnectWiFi = values.AutoConnectWiFi
+		case "dns_server":
+			next.DNSServer = values.DNSServer
+		case "dns_policy":
+			next.DNSPolicy = values.DNSPolicy
+		case "dns_egress_mode":
+			next.DNSEgressMode = values.DNSEgressMode
+		case "dns_adapter_id":
+			next.DNSAdapterID = values.DNSAdapterID
+		default:
+			return AppSettings{}, fmt.Errorf("不支持通过设置页修改字段：%s", field)
+		}
+	}
+	return s.updateLocked(next)
+}
+
+func (s *SettingsService) updateLocked(next AppSettings) (AppSettings, error) {
 
 	// Keep full-replace writes from older UI bindings backward-compatible.
 	if next.DNSEgressMode == "" {
@@ -282,6 +332,14 @@ func (s *SettingsService) Update(next AppSettings) (AppSettings, error) {
 		return AppSettings{}, err
 	}
 	return cloneSettings(s.settings), nil
+}
+
+func (s *SettingsService) updateSelectedAdapters(ids []string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	next := cloneSettings(s.settings)
+	next.SelectedAdapterIDs = uniqueNonEmpty(ids)
+	return s.commitLocked(next)
 }
 
 func (s *SettingsService) SetAutostart(enabled bool) (AppSettings, error) {

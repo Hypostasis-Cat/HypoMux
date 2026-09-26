@@ -1,4 +1,4 @@
-import { usePageActiveRef } from "../components/shell/PageActivity";
+import { usePageActive } from "../components/shell/PageActivity";
 import { Badge, Button, Switch, Tooltip } from "@fluentui/react-components";
 import { ArrowLeft20Regular, ArrowRight20Regular, Games24Regular, Wifi124Regular } from "@fluentui/react-icons";
 import { useEffect, useRef, useState } from "react";
@@ -11,7 +11,7 @@ import { useI18n } from "../i18n/i18n";
 import { appServices, type SteamCDNStatus } from "../platform/services";
 
 export function ToolsPage() {
-  const pageActive = usePageActiveRef();
+  const pageActive = usePageActive();
   const { locale } = useI18n();
   const text = (zh: string, en: string) => locale === "en" ? en : zh;
   const { notify } = useAppNotifications();
@@ -34,30 +34,36 @@ export function ToolsPage() {
     if (detail) titleRef.current?.focus(); else (lastDetail.current === "hotspot" ? hotspotEntryRef : entryRef).current?.focus();
   }, [detail]);
   useEffect(() => {
-    if (detail || loading || saving) return;
+    if (detail || loading || saving || !pageActive) return;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout>;
     const poll = async () => {
       try {
-        if (!pageActive.current || document.hidden) return;
+        if (document.hidden) return;
         const next = await appServices.engine.steamCDNStatus();
-        if (!cancelled) { setStatus(next); setStatusError(false); }
+        if (!cancelled && !busy.current) { setStatus(next); setStatusError(false); }
       } catch { if (!cancelled) setStatusError(true); }
       finally { if (!cancelled) timer = setTimeout(poll, 5000); }
     };
     void poll();
     return () => { cancelled = true; clearTimeout(timer); };
-  }, [detail, loading, saving, enabled, revision]);
+  }, [detail, loading, saving, enabled, revision, pageActive]);
   const navigate = (next: false | "steam" | "hotspot") => { navigated.current = true; if (next) lastDetail.current = next; setDetail(next); };
   useEffect(() => {
+    const changed = () => setRevision(value => value + 1);
+    window.addEventListener("hypomux:ai-changed", changed);
+    return () => window.removeEventListener("hypomux:ai-changed", changed);
+  }, []);
+  useEffect(() => {
+    if (!pageActive || saving) return;
     let cancelled = false;
     setLoading(true);
     void appServices.settings.get().then(settings => {
-      if (!cancelled) { setEnabled(settings.steam_cdn_enabled ?? false); setError(""); }
+      if (!cancelled && !busy.current) { setEnabled(settings.steam_cdn_enabled ?? false); setError(""); }
     }).catch(reason => { if (!cancelled) setError(String(reason)); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [revision]);
+  }, [revision, pageActive, saving]);
 
   const toggle = async (checked: boolean) => {
     if (busy.current) return;

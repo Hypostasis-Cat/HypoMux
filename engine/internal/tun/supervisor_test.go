@@ -241,6 +241,9 @@ func testSupervisor(
 		command := exec.CommandContext(ctx, os.Args[0], helperArguments...)
 		command.Env = append(
 			os.Environ(),
+			// Race's default one-second exit sleep belongs to diagnostics,
+			// not the simulated sing-box config check's startup latency.
+			"GORACE="+os.Getenv("GORACE")+" atexit_sleep_ms=0",
 			"HYPOMUX_TUN_HELPER=1",
 			"HYPOMUX_TUN_HELPER_MODE="+mode,
 		)

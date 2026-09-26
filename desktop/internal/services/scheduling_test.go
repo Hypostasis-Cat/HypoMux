@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/Hypostasis-Cat/HypoMux/desktop/internal/engineclient"
@@ -54,6 +55,39 @@ func TestSchedulingCommitRollsBackOnlyFailedPersistence(t *testing.T) {
 			}
 			if stage == "success" && calls != 1 {
 				t.Fatal("rolled back successful update")
+			}
+		})
+	}
+}
+
+func TestDiagnosticSelectionPreservesModeStrategyWeightsAndRules(t *testing.T) {
+	for _, strategy := range []string{"round-robin", "weighted", "adaptive-throughput", "latency-first"} {
+		t.Run(strategy, func(t *testing.T) {
+			t.Setenv("HYPOMUX_DATA_DIR", t.TempDir())
+			settings := NewSettingsService()
+			next := settings.Get()
+			next.Mode = "proxy"
+			next.Strategy = strategy
+			next.Weighted = strategy == "weighted"
+			next.SelectedAdapterIDs = []string{"previous"}
+			next.AdapterWeights = map[string]int{"previous": 9}
+			next.RoutingRules = []RoutingRule{{MatchType: "process", Value: "cs2.exe", Outbound: "direct"}}
+			if _, err := settings.Update(next); err != nil {
+				t.Fatal(err)
+			}
+			s := &EngineService{settings: settings, adapters: NewAdapterService(settings), client: engineclient.New(), lifecycleGate: make(chan struct{}, 1)}
+			if _, err := s.SaveDiagnosticSelection(nil); err != nil {
+				t.Fatal(err)
+			}
+			next.SelectedAdapterIDs = nil
+			if got := settings.Get(); len(got.SelectedAdapterIDs) != 0 || got.Mode != next.Mode || got.Strategy != strategy || got.Weighted != next.Weighted || !reflect.DeepEqual(got.AdapterWeights, next.AdapterWeights) || !reflect.DeepEqual(got.RoutingRules, next.RoutingRules) {
+				t.Fatalf("selection changed unrelated configuration: %+v", got)
+			}
+			if _, err := s.SaveDiagnosticSelection([]string{"not-a-real-adapter-for-test"}); err == nil {
+				t.Fatal("accepted missing adapter")
+			}
+			if len(settings.Get().SelectedAdapterIDs) != 0 || s.client.Hello().ProtocolVersion != 0 {
+				t.Fatal("rejected selection changed configuration or launched Core")
 			}
 		})
 	}

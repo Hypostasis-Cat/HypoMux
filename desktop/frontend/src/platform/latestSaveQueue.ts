@@ -26,11 +26,14 @@ export class LatestSaveQueue<TInput, TOutput> {
   private waiters: Waiter<TOutput>[] = [];
   private tail: Promise<TailOutcome> = Promise.resolve({ ok: true });
 
-  constructor(private readonly persist: (input: TInput) => Promise<TOutput>) {}
+  constructor(
+    private readonly persist: (input: TInput) => Promise<TOutput>,
+    private readonly mergePending: (previous: TInput, next: TInput) => TInput = (_, next) => next,
+  ) {}
 
   enqueue(input: TInput): SaveHandle<TOutput> {
     const revision = ++this.revision;
-    this.pending = { revision, input };
+    this.pending = { revision, input: this.pending ? this.mergePending(this.pending.input, input) : input };
     const done = new Promise<TOutput>((resolve, reject) => {
       this.waiters.push({ revision, resolve, reject });
     });

@@ -9,8 +9,14 @@ export type AdapterSaveInput = {
   adapters: AdapterView[];
 };
 
-export const adapterSaveQueue = new LatestSaveQueue<AdapterSaveInput, AdapterView[] | null>(
-  ({ mode, weighted, adapters, strategy }) => appServices.adapters.save(mode, weighted, adapters, strategy),
+type AdapterMutation = AdapterSaveInput | { selectedIDs: string[] };
+
+export const adapterSaveQueue = new LatestSaveQueue<AdapterMutation, AdapterView[] | null>(
+  input => "selectedIDs" in input ? appServices.adapters.saveSelected(input.selectedIDs)
+    : appServices.adapters.save(input.mode, input.weighted, input.adapters, input.strategy),
+  (previous, next) => "selectedIDs" in next && !("selectedIDs" in previous)
+    ? { ...previous, adapters: previous.adapters.map(adapter => ({ ...adapter, selected: next.selectedIDs.includes(adapter.id) })) }
+    : next,
 );
 
 export const adapterSaveInput = (

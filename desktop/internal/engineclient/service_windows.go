@@ -145,7 +145,7 @@ func queryCoreService() (pid int, installed bool, err error) {
 	return int(status.ProcessId), true, nil
 }
 
-func connectCoreServicePipe(ctx context.Context, expectedPID int) (*os.File, error) {
+func connectCoreServicePipe(ctx context.Context, expectedPID int) (pipeFile, error) {
 	name, err := windows.UTF16PtrFromString(CoreServicePipeName)
 	if err != nil {
 		return nil, err
@@ -186,12 +186,7 @@ func connectCoreServicePipe(ctx context.Context, expectedPID int) (*os.File, err
 		_ = windows.CloseHandle(handle)
 		return nil, fmt.Errorf("拒绝非预期 Core Service 管道（PID %d）", serverPID)
 	}
-	connection := os.NewFile(uintptr(handle), CoreServicePipeName)
-	if connection == nil {
-		_ = windows.CloseHandle(handle)
-		return nil, errors.New("创建 Core Service 管道句柄失败")
-	}
-	return connection, nil
+	return newPipeFile(handle)
 }
 
 func (p *serviceCoreProcess) Wait() error {

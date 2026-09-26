@@ -15,6 +15,39 @@ func (s *EngineService) saveRuntimeSelection(mode string, weighted bool, adapter
 	return s.SaveScheduling(mode, strategy, adapters)
 }
 
+// Diagnostics owns only the selected IDs. Resolve the current adapters and
+// preserve mode, strategy and weights at commit time, including queued edits.
+func (s *EngineService) SaveDiagnosticSelection(ids []string) ([]AdapterView, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := s.acquireLifecycle(ctx); err != nil {
+		return nil, err
+	}
+	defer s.releaseLifecycle()
+	if s.client.Hello().ProtocolVersion != 0 {
+		var status engineStatusResult
+		if err := s.client.Request(ctx, "engine.status", nil, &status); err != nil {
+			return nil, err
+		}
+		if status.Engine.State != "stopped" && status.Engine.State != "failed" {
+			return nil, fmt.Errorf("请先停止聚合，再修改体检网卡选择")
+		}
+	}
+	available, err := s.adapters.List()
+	if err != nil {
+		return nil, err
+	}
+	for _, id := range ids {
+		if !slices.ContainsFunc(available, func(a AdapterView) bool { return a.ID == id && a.Operational }) {
+			return nil, fmt.Errorf("网卡 %s 当前不可用，请刷新网卡列表", id)
+		}
+	}
+	if err := s.settings.updateSelectedAdapters(ids); err != nil {
+		return nil, err
+	}
+	return s.adapters.List()
+}
+
 func (s *EngineService) SaveScheduling(mode, strategy string, adapters []AdapterView) ([]AdapterView, error) {
 	strategy, err := normalizeSchedulingStrategy(strategy, false)
 	if err != nil {

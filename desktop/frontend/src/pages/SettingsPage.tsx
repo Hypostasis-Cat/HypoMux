@@ -389,12 +389,18 @@ export function SettingsPage({
     return () => { cancelled = true; };
   }, [loadRevision, pageActive, saveQueue]);
 
-  const save = (next: CompleteAppSettings, success?: string, fields: string[] | null = null): Promise<boolean> => {
+  useEffect(() => {
+    const changed = () => setLoadRevision(value => value + 1);
+    window.addEventListener("hypomux:ai-changed", changed);
+    return () => window.removeEventListener("hypomux:ai-changed", changed);
+  }, []);
+
+  const save = (next: CompleteAppSettings, success: string | undefined, fields: string[]): Promise<boolean> => {
     setSettings(next);
     return enqueueSave(async () => {
       setSaving(true);
       try {
-        const persisted = await appServices.settings.update(next);
+        const persisted = await appServices.settings.update(next, fields);
         setLocale(persisted.language);
         notify(t("infobar_success"), success ?? text("设置已保存", "Settings saved"));
         return { ok: true as const, value: true, authoritative: persisted };
@@ -418,7 +424,7 @@ export function SettingsPage({
 
   const saveNetwork = async () => {
     const submitted = networkDraft;
-    if (await save({ ...settings, ...submitted }, text("端口与 DNS 设置已保存", "Proxy ports and DNS settings saved"))) {
+    if (await save({ ...settings, ...submitted }, text("端口与 DNS 设置已保存", "Proxy ports and DNS settings saved"), Object.keys(submitted))) {
       setNetworkDraft(current => Object.fromEntries(Object.entries(current).filter(([key, value]) => value !== submitted[key as keyof typeof submitted])));
     }
   };

@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Microsoft/go-winio"
 	"golang.org/x/sys/windows"
 )
 
@@ -24,13 +25,13 @@ func TestAuthenticatedPipeAcceptsExpectedProcessAndToken(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	accepted := make(chan struct {
-		file *os.File
+		file pipeFile
 		err  error
 	}, 1)
 	go func() {
 		file, acceptErr := pipe.accept(ctx, os.Getpid())
 		accepted <- struct {
-			file *os.File
+			file pipeFile
 			err  error
 		}{file: file, err: acceptErr}
 	}()
@@ -71,13 +72,13 @@ func TestAuthenticatedPipeSupportsConcurrentProtocolTrafficAfterAuthDeadline(t *
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	accepted := make(chan struct {
-		file *os.File
+		file pipeFile
 		err  error
 	}, 1)
 	go func() {
 		file, acceptErr := pipe.accept(ctx, os.Getpid())
 		accepted <- struct {
-			file *os.File
+			file pipeFile
 			err  error
 		}{file: file, err: acceptErr}
 	}()
@@ -228,9 +229,9 @@ func TestAuthenticatedPipeConnectionHonoursReadDeadline(t *testing.T) {
 		t.Fatalf("accepting pipe connection: %v", err)
 	}
 
-	connection := os.NewFile(uintptr(pipe.handle), pipe.name)
-	if connection == nil {
-		t.Fatal("os.NewFile returned no connection")
+	connection, err := newPipeFile(pipe.handle)
+	if err != nil {
+		t.Fatal(err)
 	}
 	pipe.handle = windows.InvalidHandle
 	defer connection.Close()
@@ -241,15 +242,15 @@ func TestAuthenticatedPipeConnectionHonoursReadDeadline(t *testing.T) {
 		t.Fatalf("pipe connection does not support read deadlines: %v", err)
 	}
 	started := time.Now()
-	if _, err := connection.Read(make([]byte, 16)); !errors.Is(err, os.ErrDeadlineExceeded) {
-		t.Fatalf("read returned %v, want %v", err, os.ErrDeadlineExceeded)
+	if _, err := connection.Read(make([]byte, 16)); !errors.Is(err, winio.ErrTimeout) {
+		t.Fatalf("read returned %v, want %v", err, winio.ErrTimeout)
 	}
 	if elapsed := time.Since(started); elapsed > 2*time.Second {
 		t.Fatalf("deadline took %v to abort the blocked read", elapsed)
 	}
 }
 
-func openTestPipe(t *testing.T, name string) *os.File {
+func openTestPipe(t *testing.T, name string) pipeFile {
 	t.Helper()
 	namePointer, err := windows.UTF16PtrFromString(name)
 	if err != nil {
@@ -267,15 +268,14 @@ func openTestPipe(t *testing.T, name string) *os.File {
 	if err != nil {
 		t.Fatal(err)
 	}
-	file := os.NewFile(uintptr(handle), name)
-	if file == nil {
-		_ = windows.CloseHandle(handle)
-		t.Fatal("create client pipe file")
+	file, err := newPipeFile(handle)
+	if err != nil {
+		t.Fatal(err)
 	}
 	return file
 }
 
-func readTestPipeMessage(reader *os.File, target any) error {
+func readTestPipeMessage(reader pipeFile, target any) error {
 	line, err := bufio.NewReaderSize(reader, maxSessionMessageBytes).ReadBytes('\n')
 	if err != nil {
 		return err

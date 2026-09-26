@@ -315,7 +315,7 @@ func serveCoreServicePipe(ctx context.Context, metadata server.Metadata) error {
 	}
 }
 
-func interruptServicePipeConnection(connection *os.File) {
+func interruptServicePipeConnection(connection pipeFile) {
 	if connection == nil {
 		return
 	}
@@ -325,7 +325,7 @@ func interruptServicePipeConnection(connection *os.File) {
 	_ = connection.Close()
 }
 
-func acceptServicePipe(ctx context.Context, policy coreServicePolicy) (*os.File, error) {
+func acceptServicePipe(ctx context.Context, policy coreServicePolicy) (pipeFile, error) {
 	handle, err := createServicePipe()
 	if err != nil {
 		return nil, err
@@ -339,12 +339,7 @@ func acceptServicePipe(ctx context.Context, policy coreServicePolicy) (*os.File,
 		_ = windows.CloseHandle(handle)
 		return nil, fmt.Errorf("%w: %v", errServiceClientRejected, err)
 	}
-	connection := os.NewFile(uintptr(handle), coreServicePipeName)
-	if connection == nil {
-		_ = windows.CloseHandle(handle)
-		return nil, errors.New("create Core Service pipe file")
-	}
-	return connection, nil
+	return newPipeFile(handle)
 }
 
 func connectServicePipe(ctx context.Context, handle windows.Handle) error {
