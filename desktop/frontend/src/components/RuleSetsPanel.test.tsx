@@ -110,3 +110,20 @@ describe("RuleSetsPanel", () => {
     confirm.mockRestore();
   });
 });
+
+describe("RuleSetsPanel null tolerance", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+  afterEach(() => cleanup());
+
+  it("renders the empty state when the backend returns null", async () => {
+    vi.mocked(appServices.ruleSets.list).mockResolvedValue(null as unknown as RuleSet[]);
+    render(
+      <LanguageProvider>
+        <RuleSetsPanel outbounds={outbounds} />
+      </LanguageProvider>,
+    );
+    await waitFor(() => expect(screen.getByText("还没有规则集；在下方添加订阅地址即可按类别分流。")).toBeTruthy());
+  });
+});

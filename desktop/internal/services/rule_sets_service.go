@@ -30,7 +30,12 @@ func NewRuleSetService(settings *SettingsService, adapters *AdapterService) *Rul
 }
 
 func (s *RuleSetService) List() []RuleSet {
-	return append([]RuleSet(nil), s.settings.Get().RuleSets...)
+	// Always a non-nil slice: an empty list must serialize as `[]` for the
+	// panel, not as `null`.
+	sets := s.settings.Get().RuleSets
+	result := make([]RuleSet, len(sets))
+	copy(result, sets)
+	return result
 }
 
 // Save replaces the whole list. Because entries never expand into routing

@@ -42,7 +42,7 @@ export function RuleSetsPanel({
 
   const load = useCallback(async () => {
     try {
-      setSets(await appServices.ruleSets.list());
+      setSets((await appServices.ruleSets.list()) ?? []);
     } catch (reason) {
       setNotice({ intent: "error", message: String(reason) });
     } finally {
@@ -53,7 +53,7 @@ export function RuleSetsPanel({
   useEffect(() => { void load(); }, [load]);
 
   const save = useCallback(async (next: RuleSet[]) => {
-    const saved = await appServices.ruleSets.save(next);
+    const saved = (await appServices.ruleSets.save(next)) ?? [];
     setSets(saved);
   }, []);
 
@@ -85,7 +85,7 @@ export function RuleSetsPanel({
     setBusyId(set.id);
     setNotice(null);
     try {
-      const saved = await appServices.ruleSets.update(set.id);
+      const saved = (await appServices.ruleSets.update(set.id)) ?? [];
       setSets(saved);
       setNotice({ intent: "success", message: t("rulesets_update_success") });
     } catch (reason) {

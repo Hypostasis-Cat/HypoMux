@@ -238,7 +238,7 @@ func writeSingBoxRuleSetPlanLocked(
 		files = append(files, ruleSetFile{
 			Path: filepath.Join(directory, singBoxRuleSetManifestName), Data: manifest, Mode: 0o600,
 		})
-		cleanupOrphanExternalRuleSets(directory, external)
+		cleanupOrphanExternalRuleSets(directory, sets)
 	}
 	rollback, err := publishRuleSetFiles(files, replace)
 	if err != nil {
@@ -346,16 +346,22 @@ func sortedExternalRuleSets(sets []RuleSet) []RuleSet {
 }
 
 // cleanupOrphanExternalRuleSets removes ingested payloads and watched files of
-// sets the configuration no longer lists. It only runs while writing a fresh
-// manifest, i.e. before an engine start republishes the configuration, so a
-// running sing-box never loses a file it is still watching.
+// sets the configuration no longer lists. Retention is based on the complete
+// configured list — disabled sets keep their cached payload so re-enabling and
+// a conditional not-modified refetch still work. It only runs while writing a
+// fresh manifest, i.e. before an engine start republishes the configuration,
+// so a running sing-box never loses a file it is still watching.
 func cleanupOrphanExternalRuleSets(directory string, sets []RuleSet) {
 	keep := make(map[string]struct{}, len(sets)*2)
+	seen := make(map[string]struct{}, len(sets))
 	for _, set := range sets {
-		tag, path := externalRuleSetBinding(set)
+		if _, exists := seen[set.ID]; exists {
+			continue
+		}
+		seen[set.ID] = struct{}{}
+		_, path := externalRuleSetBinding(set)
 		keep[path] = struct{}{}
 		keep[externalRuleSetSourcePathIn(directory, set)] = struct{}{}
-		_ = tag
 	}
 	entries, err := os.ReadDir(directory)
 	if err != nil {

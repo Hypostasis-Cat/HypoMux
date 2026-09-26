@@ -662,3 +662,37 @@ func ruleSetPathFor(t *testing.T, plan singBoxRuleSetPlan, scope, outbound strin
 	t.Fatalf("missing %s/%s rule-set", scope, outbound)
 	return ""
 }
+
+func TestCleanupKeepsDisabledSubscriptionPayloads(t *testing.T) {
+	t.Setenv("HYPOMUX_DATA_DIR", t.TempDir())
+	disabled := RuleSet{
+		ID: "off-id", Name: "Off", URL: "https://a.example.test/off.json",
+		Outbound: "direct", Disabled: true,
+	}
+	enabled := RuleSet{
+		ID: "on-id", Name: "On", URL: "https://a.example.test/on.json", Outbound: "direct",
+	}
+	publishExternalRuleSetFixture(t, disabled, []string{"off.example"})
+	publishExternalRuleSetFixture(t, enabled, []string{"on.example"})
+
+	if _, err := writeSingBoxRuleSetPlan(nil, []RuleSet{disabled, enabled}, []string{"aggregation", "direct"}, true); err != nil {
+		t.Fatal(err)
+	}
+	// A disabled subscription is configured, not deleted: its cached payload
+	// must survive so re-enabling and a conditional not-modified refetch work.
+	if _, err := os.Stat(externalRuleSetSourcePathIn(ruleSetDirectory(), disabled)); err != nil {
+		t.Fatalf("disabled subscription lost its cached payload: %v", err)
+	}
+
+	// A subscription that is actually removed from the configuration is cleaned.
+	removed := RuleSet{
+		ID: "gone-id", Name: "Gone", URL: "https://a.example.test/gone.json", Outbound: "direct",
+	}
+	publishExternalRuleSetFixture(t, removed, []string{"gone.example"})
+	if _, err := writeSingBoxRuleSetPlan(nil, []RuleSet{disabled, enabled}, []string{"aggregation", "direct"}, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(externalRuleSetSourcePathIn(ruleSetDirectory(), removed)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("removed subscription kept its files: %v", err)
+	}
+}

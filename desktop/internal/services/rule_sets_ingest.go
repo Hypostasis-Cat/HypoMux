@@ -189,6 +189,18 @@ func parseSingBoxSourceSubscription(body []byte) (ruleSetParseResult, error) {
 // the list's meaning or reference another rule-set, which sing-box rejects
 // inside rule-set files.
 func externalEntryFromRule(rule map[string]any) (map[string]any, int, bool) {
+	// A rule may only carry match kinds the plan compiler can emit verbatim.
+	// Anything else — `invert`, `port`, logical nesting — would either silently
+	// reverse the rule's meaning or change which traffic it catches, so the
+	// whole rule is rejected (counted as ignored) instead of being stripped
+	// down to its supported fields.
+	for key := range rule {
+		switch key {
+		case "domain", "domain_suffix", "domain_keyword", "domain_regex", "ip_cidr":
+		default:
+			return nil, 0, false
+		}
+	}
 	entry := map[string]any{}
 	values := 0
 	for _, kind := range externalRuleSetKinds {
@@ -209,6 +221,8 @@ func externalEntryFromRule(rule map[string]any) (map[string]any, int, bool) {
 			cleaned = append(cleaned, strings.TrimSpace(value))
 		}
 		if len(cleaned) == 0 {
+			// An empty array contributes nothing; the kind is simply omitted
+			// rather than asserted on later.
 			continue
 		}
 		entry[kind] = cleaned
@@ -217,7 +231,7 @@ func externalEntryFromRule(rule map[string]any) (map[string]any, int, bool) {
 	if len(entry) == 0 {
 		return nil, 0, false
 	}
-	if _, ok := rule["ip_cidr"]; ok && !validIPCIDRValues(entry["ip_cidr"].([]string)) {
+	if cleaned, ok := entry["ip_cidr"].([]string); ok && !validIPCIDRValues(cleaned) {
 		return nil, 0, false
 	}
 	return entry, values, true

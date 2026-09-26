@@ -358,3 +358,49 @@ func TestRuleSetSourcePathStaysBesideWatchedFile(t *testing.T) {
 		t.Fatalf("unexpected source path %q", source)
 	}
 }
+
+func TestParseSingBoxSourceSubscriptionRejectsUnsupportedConditions(t *testing.T) {
+	// An `invert` flag reverses the rule's meaning; stripping it would turn a
+	// negation into a positive match. The whole rule must be rejected.
+	result, err := parseRuleSetSubscription([]byte(
+		`{"version":3,"rules":[{"domain":["example.com"],"invert":true}]}`))
+	if err == nil {
+		t.Fatalf("inverted rule accepted: %#v", result)
+	}
+	result, err = parseRuleSetSubscription([]byte(
+		`{"version":3,"rules":[{"domain":["example.com"]},{"domain":["safe.example"],"port":[443]}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Entries != 1 || result.Ignored != 1 {
+		t.Fatalf("entries = %d ignored = %d, want 1/1", result.Entries, result.Ignored)
+	}
+}
+
+func TestParseSingBoxSourceSubscriptionToleratesEmptyIPCIDRArray(t *testing.T) {
+	result, err := parseRuleSetSubscription([]byte(
+		`{"version":3,"rules":[{"domain":["example.com"],"ip_cidr":[]}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Entries != 1 || result.Ignored != 0 {
+		t.Fatalf("entries = %d ignored = %d, want 1/0", result.Entries, result.Ignored)
+	}
+}
+
+func TestRuleSetServiceListSerializesEmptyListAsArray(t *testing.T) {
+	t.Setenv("HYPOMUX_DATA_DIR", t.TempDir())
+	settings := NewSettingsService()
+	service := NewRuleSetService(settings, NewAdapterService(settings))
+	list := service.List()
+	if list == nil {
+		t.Fatal("List returned a nil slice")
+	}
+	data, err := json.Marshal(list)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "[]" {
+		t.Fatalf("empty list serialized as %s, want []", data)
+	}
+}
