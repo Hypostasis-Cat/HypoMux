@@ -47,6 +47,7 @@ import {
 } from "@fluentui/react-icons";
 import { appServices, type RoutingBatchPreview, type RoutingRule, type RoutingSnapshot, type RunningProcess } from "../platform/services";
 import { GlassSurface } from "../components/material/GlassSurface";
+import { RuleSetsPanel } from "../components/RuleSetsPanel";
 import { useI18n } from "../i18n/i18n";
 import { isDesktopRuntime } from "../platform/runtime";
 import { LatestSaveQueue } from "../platform/latestSaveQueue";
@@ -925,6 +926,8 @@ export function RoutingPage() {
           </DataGrid>
         )}
       </GlassSurface>
+
+      <RuleSetsPanel outbounds={(outbounds ?? []).map((outbound) => ({ id: outbound.id, label: outboundLabel(outbound.id) }))} />
 
       <Dialog open={deleteOpen} onOpenChange={(_, data) => setDeleteOpen(data.open)}>
         <DialogSurface>

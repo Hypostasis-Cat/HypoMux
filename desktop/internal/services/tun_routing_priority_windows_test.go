@@ -47,7 +47,15 @@ func priorityRuleMatches(t *testing.T, rule map[string]any, sets map[string][]an
 			case "outbound", "action", "timeout", "server", "strategy", "invert":
 				continue
 			case "domain_suffix":
-				continue // Evaluated as an OR with domain below.
+				if _, hasDomain := rule["domain"]; hasDomain {
+					continue // Evaluated as an OR with domain below.
+				}
+				// Subscribed lists legitimately ship standalone suffix rules.
+				found := false
+				for _, value := range raw.([]any) {
+					found = found || strings.HasSuffix(flow.domain, value.(string))
+				}
+				matched = matched && found
 			case "domain":
 				found := false
 				for _, value := range raw.([]any) {
@@ -189,7 +197,7 @@ func TestTUNRoutingPriorityAndHotReload(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if err := refreshSingBoxRuleSets(rules); err != nil {
+				if err := refreshSingBoxRuleSets(rules, nil); err != nil {
 					t.Fatal(err)
 				}
 				checkSingBoxConfig(t, executable, path)
@@ -251,7 +259,7 @@ func TestTUNRoutingPriorityAndHotReload(t *testing.T) {
 						rules[i].Value = "109.244.0.0/16"
 					}
 				}
-				if err := refreshSingBoxRuleSets(rules); err != nil {
+				if err := refreshSingBoxRuleSets(rules, nil); err != nil {
 					t.Fatal(err)
 				}
 				if got := priorityRouteFor(t, path, priorityFlow{process: "DeltaForceClient-Win64-Shipping.exe", ip: "109.244.227.99"}); got != "nic_ethernet" {
@@ -259,14 +267,14 @@ func TestTUNRoutingPriorityAndHotReload(t *testing.T) {
 				}
 				// Add a user rule for a compatibility process without rewriting the main config.
 				rules = append(rules, RoutingRule{MatchType: MatchProcess, Value: "mihomo.exe", Outbound: "nic_ethernet"})
-				if err := refreshSingBoxRuleSets(rules); err != nil {
+				if err := refreshSingBoxRuleSets(rules, nil); err != nil {
 					t.Fatal(err)
 				}
 				if got := priorityRouteFor(t, path, priorityFlow{process: "mihomo.exe", domain: "example.com", ip: "109.244.227.99"}); got != "nic_ethernet" {
 					t.Fatalf("hot process override = %s", got)
 				}
 				// Removing user rules restores the compatibility bypass or normal final route.
-				if err := refreshSingBoxRuleSets(nil); err != nil {
+				if err := refreshSingBoxRuleSets(nil, nil); err != nil {
 					t.Fatal(err)
 				}
 				want := "aggregation"
@@ -310,14 +318,14 @@ func TestCustomRoutingPriorityAndDisabledRulesHotReload(t *testing.T) {
 		t.Fatalf("IP priority got %s", got)
 	}
 	rules[2].Disabled = true
-	if err := refreshSingBoxRuleSets(rules); err != nil {
+	if err := refreshSingBoxRuleSets(rules, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := priorityRouteFor(t, path, flow); got != "direct" {
 		t.Fatalf("disabled IP still matches: %s", got)
 	}
 	rules[0].Priority = 50
-	if err := refreshSingBoxRuleSets(rules); err != nil {
+	if err := refreshSingBoxRuleSets(rules, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := priorityRouteFor(t, path, flow); got != "nic_wifi" {
@@ -325,13 +333,13 @@ func TestCustomRoutingPriorityAndDisabledRulesHotReload(t *testing.T) {
 	}
 	rules[0].Disabled = true
 	rules[1].Disabled = true
-	if err := refreshSingBoxRuleSets(rules); err != nil {
+	if err := refreshSingBoxRuleSets(rules, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := priorityRouteFor(t, path, flow); got != "system-direct" {
 		t.Fatalf("disabled rules block compatibility fallback: %s", got)
 	}
-	if tunDNSNeedsFakeIP("off", rules) {
+	if tunDNSNeedsFakeIP("off", rules, nil) {
 		t.Fatal("disabled domains still require FakeIP")
 	}
 	checkSingBoxConfig(t, executable, path)
@@ -347,7 +355,7 @@ func TestAllTypeOrdersHotReload(t *testing.T) {
 	orders := [][]string{{MatchProcess, MatchDomain, MatchIP}, {MatchProcess, MatchIP, MatchDomain}, {MatchDomain, MatchProcess, MatchIP}, {MatchDomain, MatchIP, MatchProcess}, {MatchIP, MatchProcess, MatchDomain}, {MatchIP, MatchDomain, MatchProcess}}
 	outbounds := map[string]string{MatchProcess: "nic_wifi", MatchDomain: "direct", MatchIP: "aggregation"}
 	for _, order := range orders {
-		if err := refreshSingBoxRuleSets(rulesWithMatchOrder(rules, order)); err != nil {
+		if err := refreshSingBoxRuleSets(rulesWithMatchOrder(rules, order), nil); err != nil {
 			t.Fatal(err)
 		}
 		flow := priorityFlow{process: "app.exe", domain: "example.com", ip: "203.0.113.7", port: 443}
