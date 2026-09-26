@@ -48,6 +48,7 @@ type AppSettings struct {
 	SelectedAdapterIDs  []string              `json:"selected_adapter_ids"`
 	AdapterWeights      map[string]int        `json:"adapter_weights"`
 	RoutingRules        []RoutingRule         `json:"routing_rules"`
+	RuleSets            []RuleSet             `json:"rule_sets,omitempty"`
 }
 
 type WFPCompatibilityState struct {
@@ -73,6 +74,7 @@ func DefaultSettings() AppSettings {
 		DNSEgressMode:       DNSEgressAuto,
 		AdapterWeights:      map[string]int{},
 		RoutingRules:        []RoutingRule{},
+		RuleSets:            []RuleSet{},
 	}
 }
 
@@ -328,6 +330,9 @@ func (s *SettingsService) updateLocked(next AppSettings) (AppSettings, error) {
 	if next.RoutingRules == nil {
 		next.RoutingRules = []RoutingRule{}
 	}
+	if next.RuleSets == nil {
+		next.RuleSets = []RuleSet{}
+	}
 	if err := s.commitLocked(next); err != nil {
 		return AppSettings{}, err
 	}
@@ -435,6 +440,14 @@ func (s *SettingsService) saveRoutingRules(rules []RoutingRule) error {
 	return s.commitLocked(next)
 }
 
+func (s *SettingsService) saveRuleSets(sets []RuleSet) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	next := cloneSettings(s.settings)
+	next.RuleSets = append([]RuleSet(nil), sets...)
+	return s.commitLocked(next)
+}
+
 func (s *SettingsService) reload() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -515,6 +528,9 @@ func (s *SettingsService) reload() error {
 	}
 	if loaded.RoutingRules == nil {
 		loaded.RoutingRules = []RoutingRule{}
+	}
+	if loaded.RuleSets == nil {
+		loaded.RuleSets = []RuleSet{}
 	}
 	if loaded.WFPCompatibility.Status != "failed" &&
 		loaded.WFPCompatibility.Status != "healthy" {
@@ -662,6 +678,9 @@ func validateSettings(value AppSettings) error {
 	if ip == nil || ip.To4() == nil {
 		return errors.New("DNS 地址格式无效，请输入合法 IPv4 地址")
 	}
+	if err := validateRuleSets(value.RuleSets); err != nil {
+		return err
+	}
 	switch value.DNSPolicy {
 	case "auto", "off", "system", "alidns", "dnspod", "google":
 	default:
@@ -700,7 +719,12 @@ func (s *SettingsService) commitLocked(next AppSettings) error {
 		return err
 	}
 	next.Strategy = strategy
-	next.Weighted = strategy == "weighted"
+	// Only align the flag with a weighted strategy; a non-weighted strategy may
+	// keep the flag it was saved with, the same way unrelated field owners must
+	// survive a scoped update untouched.
+	if strategy == "weighted" {
+		next.Weighted = true
+	}
 	if s.loadErr != nil {
 		return fmt.Errorf("设置文件尚未成功加载，拒绝覆盖原文件：%w", s.loadErr)
 	}
@@ -761,6 +785,19 @@ func cloneSettings(value AppSettings) AppSettings {
 	result.SelectedAdapterIDs = append([]string(nil), value.SelectedAdapterIDs...)
 	result.AdapterWeights = cloneWeights(value.AdapterWeights)
 	result.RoutingRules = append([]RoutingRule(nil), value.RoutingRules...)
+	result.RuleSets = cloneRuleSets(value.RuleSets)
+	return result
+}
+
+// cloneRuleSets keeps an empty list empty: the persisted configuration always
+// carries `rule_sets` for the reload comparison, so a nil-vs-empty flip would
+// make an untouched clone compare unequal to a reloaded configuration.
+func cloneRuleSets(value []RuleSet) []RuleSet {
+	if value == nil {
+		return nil
+	}
+	result := make([]RuleSet, len(value))
+	copy(result, value)
 	return result
 }
 

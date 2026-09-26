@@ -711,6 +711,9 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 		if err = validateRoutingOutbounds(routingRules, selected); err != nil {
 			return EngineSnapshot{}, err
 		}
+		if err = validateRuleSetOutbounds(settings.RuleSets, selected); err != nil {
+			return EngineSnapshot{}, err
+		}
 		systemDefaultID, systemDefaultErr := systemDefaultDNSAdapterID()
 		dnsEgress, err = resolveTUNDNSEgress(
 			settings, selected, routingRules, systemDefaultID, systemDefaultErr,
@@ -974,6 +977,7 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 			DNSPolicy:     effectiveDNSPolicy,
 			IPv6Available: selectedAdaptersHaveIPv6(selected),
 			ConfigName:    "sing-box.json",
+			RuleSets:      settings.RuleSets,
 		}
 		configDigest := ""
 		configOptions.ConfigSHA256 = &configDigest

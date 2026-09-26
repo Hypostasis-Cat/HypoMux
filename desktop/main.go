@@ -176,6 +176,7 @@ func main() {
 		},
 	)
 	routingService := services.NewRoutingRuleService(settingsService, adapterService, desktop)
+	ruleSetService := services.NewRuleSetService(settingsService, adapterService)
 	aiService = services.NewAIService(settingsService, adapterService, engineService, routingService, diagnosticsService, tunService, supportLogs)
 	app.RegisterService(application.NewService(aiService))
 	app.RegisterService(application.NewService(desktop))
@@ -183,6 +184,7 @@ func main() {
 	app.RegisterService(application.NewService(adapterService))
 	app.RegisterService(application.NewService(engineService))
 	app.RegisterService(application.NewService(routingService))
+	app.RegisterService(application.NewService(ruleSetService))
 	app.RegisterService(application.NewService(diagnosticsService))
 	app.RegisterService(application.NewService(services.NewMTUService(engineService, settingsService)))
 	app.RegisterService(application.NewService(tunService))
