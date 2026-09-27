@@ -5879,7 +5879,7 @@ button, [role="button"], [role="tab"], .compact-navigation, .titlebar { user-sel
 /* Rule subscriptions have their own view; manual edits keep their page state. */
 .routing-page { grid-template-rows: auto auto auto auto minmax(0, 1fr); }
 .routing-page-sets { grid-template-rows: auto auto auto minmax(0, 1fr); }
-.routing-page-sets > .routing-rulesets-surface { align-self: stretch; overflow: auto; min-height: 0; align-content: start; padding: 18px; gap: 16px; }
+.routing-page-sets > .routing-rulesets-surface { align-self: stretch; overflow-y: auto; overflow-x: hidden; min-width: 0; min-height: 0; align-content: start; padding: 18px; gap: 16px; }
 .ruleset-source { color: var(--hm-text-secondary); font-size: 12px; overflow-wrap: anywhere; user-select: text; }
 .routing-page-sets .routing-rulesets-row { padding: 12px; flex-wrap: wrap; }
 .routing-page-sets .routing-rulesets-main { flex: 1 1 220px; gap: 6px; }
@@ -5911,3 +5911,34 @@ button, [role="button"], [role="tab"], .compact-navigation, .titlebar { user-sel
 .routing-page-sets .routing-rulesets-add .fui-Dropdown { min-width: 0; width: 100%; box-sizing: border-box; }
 .ruleset-entry-table { table-layout: fixed; }
 .ruleset-entry-table th:first-child { width: 140px; }
+.routing-page-sets .routing-rulesets-list { gap: 12px; }
+.routing-page-sets .routing-rulesets-row { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; padding: 16px; border-radius: 12px; }
+.routing-page-sets .routing-rulesets-name { font-size: 14px; font-weight: 600; }
+.routing-page-sets .ruleset-source { white-space: normal; overflow-wrap: anywhere; font-size: 12px; color: var(--hm-text-secondary); }
+.routing-page-sets .routing-rulesets-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; min-width: 0; }
+.routing-page-sets .routing-rulesets-actions > button:first-child { margin-right: auto; }
+.routing-page-sets .ruleset-content { border: 0; border-top: 1px solid var(--hm-outer-border); border-radius: 0; padding: 14px 0 0; }
+.routing-page-sets .ruleset-add-section { display: grid; gap: 14px; min-width: 0; padding-bottom: 20px; border-bottom: 1px solid var(--hm-outer-border); }
+.routing-page-sets .routing-rulesets-add { margin: 0; }
+.routing-page-sets .ruleset-content-tools > .fui-SearchBox { flex: 1 1 200px; max-width: 360px; min-width: 0; }
+.routing-page-sets .ruleset-entry-table th:first-child { width: 100px; }
+
+/* Match the settings page's hierarchy and shared material tokens. */
+.routing-page-sets > .routing-rulesets-surface { padding: 0 2px 20px; }
+.routing-page-sets .routing-rulesets-heading h2 { font-size: 16px; }
+.routing-page-sets .routing-rulesets-heading p { margin-top: 6px; font-size: 12px; line-height: 1.7; }
+.routing-page-sets .ruleset-add-section { padding: 18px 20px; gap: 16px; }
+.routing-page-sets .ruleset-add-title { font-size: 16px; }
+.ruleset-list-heading, .ruleset-title-line { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.ruleset-list-heading { justify-content: space-between; padding: 2px 0; }
+.ruleset-list-heading h3 { margin: 0; font-size: 14px; color: var(--hm-text-primary); }
+.ruleset-list-heading > span { font-size: 12px; color: var(--hm-text-tertiary); }
+.ruleset-title-line .routing-rulesets-name { overflow-wrap: anywhere; }
+.routing-page-sets .routing-rulesets-row { grid-template-columns: minmax(0, 1fr) auto; gap: 16px; padding: 18px 20px; border-radius: var(--hm-radius); background: var(--hm-row-fill); }
+.routing-page-sets .routing-rulesets-actions { align-self: center; }
+.routing-page-sets .routing-rulesets-meta { font-size: 12px; color: var(--hm-text-tertiary); }
+.routing-page-sets .ruleset-content { grid-column: 1 / -1; }
+.routing-page-sets .routing-rulesets-note { line-height: 1.7; }
+@media (max-width: 1100px) {
+  .routing-page-sets .routing-rulesets-row { grid-template-columns: minmax(0, 1fr); }
+}

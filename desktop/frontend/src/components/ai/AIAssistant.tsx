@@ -99,6 +99,10 @@ export function AIAssistant({ open, onOpenChange, workspace = true, onOpenWorksp
   }, [open, view, workspace]);
   useEffect(() => {
     const el = list.current;
+    if (el && open && workspace && view === "chat") el.scrollTop = el.scrollHeight;
+  }, [open, workspace, view]);
+  useEffect(() => {
+    const el = list.current;
     if (!el || !open || !workspace || view !== "chat") return;
     if (!initialChatScroll.current && snapshot.entries.length) {
       el.scrollTop = el.scrollHeight;
@@ -211,7 +215,7 @@ export function AIAssistant({ open, onOpenChange, workspace = true, onOpenWorksp
       </div>
     </header>
     <div className="ai-pet-context"><span className="ai-context-dot" />{text("正在查看：", "Viewing: ")}{pageContext.label}{selection && <span className="ai-pet-selection" title={selection}>{text("已选中规则", "Rules selected")}</span>}</div>
-    <div className="ai-conversation ai-pet-messages" ref={list}>
+    <div className="ai-conversation ai-pet-messages">
       {snapshot.entries.filter(entry => entry.state === "waiting").map(showEntry)}
       {(snapshot.running || snapshot.pending > 0) && <div className="ai-command-status" role="status" data-waiting={snapshot.pending > 0}><span className="ai-status-dot" />{snapshot.pending > 0 ? text("等你确认后，我再继续", "Waiting for your approval") : text("正在处理你的请求…", "Working on your request…")}</div>}
       {(error || snapshot.error) && <div className="ai-banner ai-error" role="alert">{error || snapshot.error}</div>}

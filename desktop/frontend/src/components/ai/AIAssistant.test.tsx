@@ -17,9 +17,26 @@ beforeEach(() => {
   mocks.mcpStatus.mockResolvedValue({ enabled: false, url: "", read_only: true });
   mocks.send.mockResolvedValue(undefined); mocks.decide.mockResolvedValue(undefined);
 });
-afterEach(() => { cleanup(); vi.useRealTimers(); });
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.useRealTimers(); });
 
 describe("AI assistant", () => {
+  it.each([0, 425])("opens at the latest message after leaving reading position %s", async position => {
+    mocks.snapshot.mockResolvedValue({ running: false, entries: [{ id: "history", role: "user", text: "Previous conversation" }], revision: 1, pending: 0 });
+    vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(1600);
+    const props = { onOpenChange: vi.fn() };
+    const { rerender } = render(<AIAssistant {...props} open workspace page="assistant" />);
+    await screen.findByText("Previous conversation");
+    const conversation = screen.getByRole("tabpanel", { name: "Chat" }).querySelector(".ai-conversation") as HTMLElement;
+    conversation.scrollTop = position;
+    rerender(<AIAssistant {...props} open workspace={false} page="home" />);
+    expect(conversation.isConnected).toBe(false);
+    rerender(<AIAssistant {...props} open workspace page="assistant" />);
+    const restored = screen.getByRole("tabpanel", { name: "Chat" }).querySelector(".ai-conversation") as HTMLElement;
+    expect(restored.scrollTop).toBe(1600);
+    rerender(<AIAssistant {...props} open={false} workspace={false} page="settings" />);
+    rerender(<AIAssistant {...props} open workspace page="assistant" />);
+    expect((screen.getByRole("tabpanel", { name: "Chat" }).querySelector(".ai-conversation") as HTMLElement).scrollTop).toBe(1600);
+  });
   it("keeps panel scroll positions and drafts when switching tabs", async () => {
     render(<AIAssistant open onOpenChange={vi.fn()} />);
     await within(screen.getByRole("tabpanel", { name: "Chat" })).findByText("test-model");
@@ -38,7 +55,7 @@ describe("AI assistant", () => {
     expect(screen.getByRole("tabpanel", { name: "Chat" })).toBe(chat);
     expect(screen.getByRole("textbox", { name: "Message" })).toBe(message);
     expect((message as HTMLTextAreaElement).value).toBe("Keep this draft");
-    expect(conversation.scrollTop).toBe(125);
+    expect(conversation.scrollTop).toBe(conversation.scrollHeight);
     fireEvent.click(screen.getByRole("tab", { name: "Model" }));
     expect(screen.getByRole("tabpanel", { name: "Model" })).toBe(model);
     expect(settings.scrollTop).toBe(240);

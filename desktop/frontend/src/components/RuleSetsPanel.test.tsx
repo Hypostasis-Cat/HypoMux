@@ -181,10 +181,29 @@ describe("RuleSetsPanel null tolerance", () => {
 
 describe("RuleSetsPanel contents", () => {
   afterEach(() => cleanup());
+  it("opens, switches and collapses rule set contents explicitly", async () => {
+    vi.clearAllMocks();
+    vi.mocked(appServices.ruleSets.list).mockResolvedValue([sample, { ...sample, id: "other-id", name: "Other" }]);
+    vi.mocked(appServices.ruleSets.entries).mockResolvedValue({ entries: [], total: 0, downloaded: false });
+    renderPanel();
+    const buttons = await screen.findAllByRole("button", { name: "查看内容" });
+    expect(screen.queryByRole("region", { name: "规则集内容" })).toBeNull();
+    expect(appServices.ruleSets.entries).not.toHaveBeenCalled();
+    fireEvent.click(buttons[0]);
+    expect(screen.getByRole("button", { name: "收起内容" }).getAttribute("aria-expanded")).toBe("true");
+    await waitFor(() => expect(appServices.ruleSets.entries).toHaveBeenLastCalledWith(sample.id, "", 0, 100));
+    fireEvent.click(screen.getByRole("button", { name: "查看内容" }));
+    expect(screen.getByRole("region", { name: "规则集内容" }).closest("li")?.textContent).toContain("Other");
+    await waitFor(() => expect(appServices.ruleSets.entries).toHaveBeenLastCalledWith("other-id", "", 0, 100));
+    fireEvent.click(screen.getByRole("button", { name: "收起内容" }));
+    expect(screen.queryByRole("region", { name: "规则集内容" })).toBeNull();
+    expect(screen.getAllByRole("button", { name: "查看内容" })).toHaveLength(2);
+  });
   it("shows downloaded entries and filters through the service", async () => {
     vi.mocked(appServices.ruleSets.list).mockResolvedValue([sample]);
     vi.mocked(appServices.ruleSets.entries).mockResolvedValue({ entries: [{ kind: "domain_suffix", value: "steamcommunity.com" }], total: 1, downloaded: true });
     renderPanel();
+    fireEvent.click(await screen.findByRole("button", { name: "查看内容" }));
     await waitFor(() => expect(screen.getByText("steamcommunity.com")).toBeTruthy());
     expect(screen.getByText(sample.url)).toBeTruthy();
     fireEvent.change(screen.getByRole("searchbox", { name: "搜索规则集内容" }), { target: { value: "community" } });

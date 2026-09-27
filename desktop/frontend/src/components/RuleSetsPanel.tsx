@@ -1,6 +1,6 @@
 import { Field, Dialog, DialogSurface, DialogBody, DialogTitle, DialogContent, DialogActions, SearchBox, Badge, Button, Dropdown, Input, MessageBar, MessageBarBody, Option, Spinner } from "@fluentui/react-components";
-import { ArrowClockwise20Regular, Add20Regular, Delete16Regular } from "@fluentui/react-icons";
-import { useCallback, useEffect, useState } from "react";
+import { ArrowClockwise20Regular, Add20Regular, Delete16Regular, ChevronDown16Regular, ChevronRight16Regular } from "@fluentui/react-icons";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { appServices, type RuleSet, type RuleSetEntries } from "../platform/services";
 import { useI18n } from "../i18n/i18n";
 import { GlassSurface } from "./material/GlassSurface";
@@ -40,6 +40,8 @@ export function RuleSetsPanel({
   const { t, locale } = useI18n();
   const text = (zh: string, en: string) => locale === "en" ? en : zh;
   const [selectedID, setSelectedID] = useState("");
+  const contentID = useId();
+  const contentPanel = useRef<HTMLElement>(null);
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(0);
   const [content, setContent] = useState<RuleSetEntries | null>(null);
@@ -71,7 +73,10 @@ export function RuleSetsPanel({
 
   useEffect(() => { void load(); }, [load]);
 
-  const selected = sets.find((set) => set.id === selectedID) ?? sets[0];
+  const selected = sets.find((set) => set.id === selectedID);
+  useEffect(() => {
+    if (selectedID) contentPanel.current?.scrollIntoView?.({ block: "nearest" });
+  }, [selectedID]);
   useEffect(() => {
     if (!selected) { setContent(null); return; }
     let cancelled = false;
@@ -89,7 +94,7 @@ export function RuleSetsPanel({
     }, 180);
     return () => { cancelled = true; window.clearTimeout(timer); };
   }, [selected, query, page, preview]);
-  const chooseSet = (id: string) => { setSelectedID(id); setQuery(""); setPage(0); };
+  const chooseSet = (id: string) => { setSelectedID(current => current === id ? "" : id); setQuery(""); setPage(0); };
   const kindLabel = (kind: string) => ({ domain: text("完整域名", "Domain"), domain_suffix: text("域名后缀", "Domain suffix"), domain_keyword: text("域名关键词", "Domain keyword"), domain_regex: text("域名正则", "Domain regex"), ip_cidr: "IP / CIDR" }[kind] ?? kind);
 
   const save = useCallback(async (next: RuleSet[]) => {
@@ -171,9 +176,9 @@ export function RuleSetsPanel({
   }, [save, sets, t]);
 
   return (
-    <GlassSurface className="routing-rulesets-surface" tone="secondary">
+    <div className="routing-rulesets-surface">
       <div className="routing-rulesets-heading">
-        <h2>{text("规则集订阅", "Rule set subscriptions")}</h2>
+        <h2>{text("订阅管理", "Subscription management")}</h2>
         <p>{t("rulesets_hint")}</p>
       </div>
       {preview && <MessageBar intent="info"><MessageBarBody>{text("浏览器预览 · 以下为示例规则，未连接桌面服务。", "Browser preview · Sample rules only; desktop service is disconnected.")}</MessageBarBody></MessageBar>}
@@ -182,73 +187,7 @@ export function RuleSetsPanel({
           <MessageBarBody>{notice.message}</MessageBarBody>
         </MessageBar>
       )}
-      {loading ? (
-        <Spinner label={t("rulesets_loading")} />
-      ) : loadFailed ? (
-        <MessageBar intent="error"><MessageBarBody>{loadError} <Button onClick={() => void load()}>{text("重新读取规则集", "Retry loading rule sets")}</Button></MessageBarBody></MessageBar>
-      ) : sets.length === 0 ? (
-        <p className="routing-rulesets-empty">{t("rulesets_empty")}</p>
-      ) : (
-        <ul className="routing-rulesets-list">
-          {sets.map((set) => (
-            <li key={set.id} className={`routing-rulesets-row${set.disabled ? " is-disabled" : ""}`}>
-              <div className="routing-rulesets-main">
-                <span className="routing-rulesets-name">{set.name}</span>
-                <span className="ruleset-source">{set.url}</span>
-                <span className="routing-rulesets-meta">
-                  {(outbounds.find((option) => option.id === set.outbound)?.label) ?? set.outbound.replace(/^nic_/, "")}
-                  {" · "}
-                  {t("rulesets_priority").replace("{priority}", String(set.priority ?? 0))}
-                  {set.entry_count !== undefined
-                    ? ` · ${t("rulesets_entries").replace("{count}", String(set.entry_count)).replace("{format}", set.format ?? "")}${set.ignored_count ? ` · ${t("rulesets_ignored").replace("{count}", String(set.ignored_count))}` : ""}`
-                    : ` · ${t("rulesets_never_fetched")}`}
-                  {set.updated_at ? ` · ${formatTime(set.updated_at, locale)}` : ""}
-                </span>
-                {set.last_error && (
-                  <span className="routing-rulesets-error" title={set.last_error}>{set.last_error}</span>
-                )}
-              </div>
-              <div className="routing-rulesets-actions">
-                <Button size="small" appearance={selected?.id === set.id ? "primary" : "secondary"} onClick={() => chooseSet(set.id)}>{text("查看内容", "View contents")}</Button>
-                {set.disabled && <Badge appearance="outline">{t("rulesets_disabled")}</Badge>}
-                <Button
-                  size="small"
-                  icon={busyId === set.id ? <Spinner size="tiny" /> : <ArrowClockwise20Regular />}
-                  disabled={preview || busyId !== ""}
-                  onClick={() => void updateSet(set)}
-                >{t("rulesets_update_now")}</Button>
-                <Button
-                  size="small"
-                  disabled={preview || busyId !== ""}
-                  onClick={() => void toggleSet(set)}
-                >{set.disabled ? t("rulesets_enable") : t("rulesets_disable")}</Button>
-                <Button
-                  size="small"
-                  appearance="subtle"
-                  icon={busyId === set.id ? <Spinner size="tiny" /> : <Delete16Regular />}
-                  disabled={busyId !== ""}
-                  onClick={() => { setDeleteError(""); setDeleteTarget(set); }}
-                >{t("rulesets_delete")}</Button>
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
-      {selected && <section className="ruleset-content" aria-label={text("规则集内容", "Rule set contents")}>
-        <div className="ruleset-content-heading"><div><h3>{selected.name}</h3><p>{text("已下载并解析的条目；实际出口还受手动规则和优先级影响。", "Downloaded entries; manual rules and priorities also affect routing.")}</p></div>
-          <Badge appearance="outline">{selected.disabled ? t("rulesets_disabled") : text("已启用", "Enabled")}</Badge>
-        </div>
-        <div className="ruleset-content-tools">
-          <SearchBox aria-label={text("搜索规则集内容", "Search rule set contents")} placeholder={text("搜索域名或 IP", "Search domains or IPs")} value={query} onChange={(_, data) => { setQuery(data.value); setPage(0); }} />
-          <span>{content ? text(`${content.total} 条匹配`, `${content.total} matches`) : ""}</span>
-        </div>
-        {contentLoading ? <Spinner label={text("正在读取规则内容", "Loading rule contents")} />
-          : contentError ? <MessageBar intent="error"><MessageBarBody>{contentError}</MessageBarBody></MessageBar>
-          : !content?.downloaded ? <p className="ruleset-content-empty">{text("订阅地址已保存，尚无本地规则内容。点击「立即更新」下载后即可查看。", "Subscription saved, but no local rules are available. Choose Update now to download them.")}</p>
-          : content.entries.length === 0 ? <p className="ruleset-content-empty">{text("没有匹配的规则。", "No matching rules.")}</p>
-          : <div className="ruleset-entry-scroll" tabIndex={0} role="region" aria-label={text("已下载规则", "Downloaded rules")}><table className="ruleset-entry-table"><thead><tr><th>{text("匹配类型", "Match type")}</th><th>{text("匹配内容", "Match value")}</th></tr></thead><tbody>{content.entries.map((entry) => <tr key={`${entry.kind}:${entry.value}`}><td>{kindLabel(entry.kind)}</td><td><code>{entry.value}</code></td></tr>)}</tbody></table></div>}
-        {content && content.total > 100 && <div className="ruleset-pagination"><Button disabled={page === 0 || contentLoading} onClick={() => setPage(page - 1)}>{text("上一页", "Previous")}</Button><span>{page + 1} / {Math.ceil(content.total / 100)}</span><Button disabled={(page + 1) * 100 >= content.total || contentLoading} onClick={() => setPage(page + 1)}>{text("下一页", "Next")}</Button></div>}
-      </section>}
+      <GlassSurface className="ruleset-add-section" tone="secondary">
       <h3 className="ruleset-add-title">{text("添加订阅", "Add subscription")}</h3>
       <div className="routing-rulesets-add">
         <Field label={t("rulesets_col_name")}><Input
@@ -289,6 +228,74 @@ export function RuleSetsPanel({
         >{t("rulesets_add")}</Button>
       </div>
       <p className="routing-rulesets-note">{t("rulesets_restart_hint")}</p>
+      </GlassSurface>
+      <div className="ruleset-list-heading"><h3>{text("已添加的订阅", "Your subscriptions")}</h3><span>{text(`${sets.length} 个订阅`, `${sets.length} subscriptions`)}</span></div>
+      {loading ? (
+        <Spinner label={t("rulesets_loading")} />
+      ) : loadFailed ? (
+        <MessageBar intent="error"><MessageBarBody>{loadError} <Button onClick={() => void load()}>{text("重新读取规则集", "Retry loading rule sets")}</Button></MessageBarBody></MessageBar>
+      ) : sets.length === 0 ? (
+        <p className="routing-rulesets-empty">{t("rulesets_empty")}</p>
+      ) : (
+        <ul className="routing-rulesets-list">
+          {sets.map((set) => (
+            <li key={set.id} className={`routing-rulesets-row${set.disabled ? " is-disabled" : ""}`}>
+              <div className="routing-rulesets-main">
+                <div className="ruleset-title-line"><span className="routing-rulesets-name">{set.name}</span><Badge appearance="tint" color={set.disabled ? "subtle" : "success"}>{set.disabled ? t("rulesets_disabled") : text("已启用", "Enabled")}</Badge></div>
+                <span className="ruleset-source">{set.url}</span>
+                <span className="routing-rulesets-meta">
+                  {(outbounds.find((option) => option.id === set.outbound)?.label) ?? set.outbound.replace(/^nic_/, "")}
+                  {" · "}
+                  {t("rulesets_priority").replace("{priority}", String(set.priority ?? 0))}
+                  {set.entry_count !== undefined
+                    ? ` · ${t("rulesets_entries").replace("{count}", String(set.entry_count)).replace("{format}", set.format ?? "")}${set.ignored_count ? ` · ${t("rulesets_ignored").replace("{count}", String(set.ignored_count))}` : ""}`
+                    : ` · ${t("rulesets_never_fetched")}`}
+                  {set.updated_at ? ` · ${formatTime(set.updated_at, locale)}` : ""}
+                </span>
+                {set.last_error && (
+                  <span className="routing-rulesets-error" title={set.last_error}>{set.last_error}</span>
+                )}
+              </div>
+              <div className="routing-rulesets-actions">
+                <Button size="small" icon={selected?.id === set.id ? <ChevronDown16Regular /> : <ChevronRight16Regular />} appearance="subtle" aria-expanded={selected?.id === set.id} aria-controls={selected?.id === set.id ? contentID : undefined} onClick={() => chooseSet(set.id)}>{selected?.id === set.id ? text("收起内容", "Hide contents") : text("查看内容", "View contents")}</Button>
+                <Button
+                  size="small"
+                  icon={busyId === set.id ? <Spinner size="tiny" /> : <ArrowClockwise20Regular />}
+                  disabled={preview || busyId !== ""}
+                  onClick={() => void updateSet(set)}
+                >{t("rulesets_update_now")}</Button>
+                <Button
+                  size="small"
+                  disabled={preview || busyId !== ""}
+                  onClick={() => void toggleSet(set)}
+                >{set.disabled ? t("rulesets_enable") : t("rulesets_disable")}</Button>
+                <Button
+                  size="small"
+                  appearance="subtle"
+                  icon={busyId === set.id ? <Spinner size="tiny" /> : <Delete16Regular />}
+                  disabled={busyId !== ""}
+                  onClick={() => { setDeleteError(""); setDeleteTarget(set); }}
+                >{t("rulesets_delete")}</Button>
+              </div>
+      {selected?.id === set.id && <section id={contentID} ref={contentPanel} className="ruleset-content" aria-label={text("规则集内容", "Rule set contents")}>
+        <div className="ruleset-content-heading"><div><p>{text("已下载并解析的条目；实际出口还受手动规则和优先级影响。", "Downloaded entries; manual rules and priorities also affect routing.")}</p></div>
+          <Badge appearance="outline">{selected.disabled ? t("rulesets_disabled") : text("已启用", "Enabled")}</Badge>
+        </div>
+        <div className="ruleset-content-tools">
+          <SearchBox aria-label={text("搜索规则集内容", "Search rule set contents")} placeholder={text("搜索域名或 IP", "Search domains or IPs")} value={query} onChange={(_, data) => { setQuery(data.value); setPage(0); }} />
+          <span>{content ? text(`${content.total} 条匹配`, `${content.total} matches`) : ""}</span>
+        </div>
+        {contentLoading ? <Spinner label={text("正在读取规则内容", "Loading rule contents")} />
+          : contentError ? <MessageBar intent="error"><MessageBarBody>{contentError}</MessageBarBody></MessageBar>
+          : !content?.downloaded ? <p className="ruleset-content-empty">{text("订阅地址已保存，尚无本地规则内容。点击「立即更新」下载后即可查看。", "Subscription saved, but no local rules are available. Choose Update now to download them.")}</p>
+          : content.entries.length === 0 ? <p className="ruleset-content-empty">{text("没有匹配的规则。", "No matching rules.")}</p>
+          : <div className="ruleset-entry-scroll" tabIndex={0} role="region" aria-label={text("已下载规则", "Downloaded rules")}><table className="ruleset-entry-table"><thead><tr><th>{text("匹配类型", "Match type")}</th><th>{text("匹配内容", "Match value")}</th></tr></thead><tbody>{content.entries.map((entry) => <tr key={`${entry.kind}:${entry.value}`}><td>{kindLabel(entry.kind)}</td><td><code>{entry.value}</code></td></tr>)}</tbody></table></div>}
+        {content && content.total > 100 && <div className="ruleset-pagination"><Button disabled={page === 0 || contentLoading} onClick={() => setPage(page - 1)}>{text("上一页", "Previous")}</Button><span>{page + 1} / {Math.ceil(content.total / 100)}</span><Button disabled={(page + 1) * 100 >= content.total || contentLoading} onClick={() => setPage(page + 1)}>{text("下一页", "Next")}</Button></div>}
+      </section>}
+            </li>
+          ))}
+        </ul>
+      )}
       <Dialog open={deleteTarget !== null} onOpenChange={(_, data) => { if (!data.open && !busyId) setDeleteTarget(null); }}>
         <DialogSurface className="glass-surface" data-tone="primary"><DialogBody>
           <DialogTitle>{text("删除规则集？", "Delete rule set?")}</DialogTitle>
@@ -296,6 +303,6 @@ export function RuleSetsPanel({
           <DialogActions><Button disabled={busyId !== ""} onClick={() => setDeleteTarget(null)}>{text("取消", "Cancel")}</Button><Button appearance="primary" disabled={preview || busyId !== ""} onClick={() => deleteTarget && void removeSet(deleteTarget)}>{text("确认删除", "Delete subscription")}</Button></DialogActions>
         </DialogBody></DialogSurface>
       </Dialog>
-    </GlassSurface>
+    </div>
   );
 }
