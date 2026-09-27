@@ -48,14 +48,14 @@ func TestRejectRoutingSaveAndBackup(t *testing.T) {
 
 func TestRejectRoutingOldManifestRequiresRestart(t *testing.T) {
 	t.Setenv("HYPOMUX_DATA_DIR", t.TempDir())
-	if _, err := writeSingBoxRuleSetPlan(nil, []string{"aggregation", "direct"}, true); err != nil {
+	if _, err := writeSingBoxRuleSetPlan(nil, nil, []string{"aggregation", "direct"}, true); err != nil {
 		t.Fatal(err)
 	}
 	rules := []RoutingRule{{MatchType: MatchProcess, Value: "app.exe", Outbound: OutboundReject}}
-	if err := refreshSingBoxRuleSets(rules); err != nil {
+	if err := refreshSingBoxRuleSets(rules, nil); err != nil {
 		t.Fatal(err)
 	}
-	if restart, reason := singBoxRuleSetRestartRequirement(rules); !restart || reason != "outbound_changed" {
+	if restart, reason := singBoxRuleSetRestartRequirement(rules, nil); !restart || reason != "outbound_changed" {
 		t.Fatalf("old configuration must require restart: %v %s", restart, reason)
 	}
 }
@@ -85,13 +85,13 @@ func TestRejectRoutingPriorityAndHotReload(t *testing.T) {
 				{MatchType: MatchIP, Value: "2001:db8::/32", Outbound: OutboundReject, Priority: 10},
 				{MatchType: MatchIP, Value: "203.0.113.7/32", Outbound: "direct", Priority: 20},
 			}
-			if err := refreshSingBoxRuleSets(rules); err != nil {
+			if err := refreshSingBoxRuleSets(rules, nil); err != nil {
 				t.Fatal(err)
 			}
 			checkSingBoxConfig(t, exe, path)
 			// Domain additions can still require enabling FakeIP under DNS off;
 			// adding the reserved reject action itself never requires a restart.
-			if restart, reason := singBoxRuleSetRestartRequirement(rules); restart && reason != "enable_fakeip" {
+			if restart, reason := singBoxRuleSetRestartRequirement(rules, nil); restart && reason != "enable_fakeip" {
 				t.Fatalf("unexpected restart: %s", reason)
 			}
 			cases := []struct {
@@ -114,13 +114,13 @@ func TestRejectRoutingPriorityAndHotReload(t *testing.T) {
 				}
 			}
 			rules[0].Disabled = true
-			if err := refreshSingBoxRuleSets(rules); err != nil {
+			if err := refreshSingBoxRuleSets(rules, nil); err != nil {
 				t.Fatal(err)
 			}
 			if got := priorityRouteFor(t, path, cases[0].flow); got != "aggregation" {
 				t.Fatalf("disabled reject: %s", got)
 			}
-			if err := refreshSingBoxRuleSets(nil); err != nil {
+			if err := refreshSingBoxRuleSets(nil, nil); err != nil {
 				t.Fatal(err)
 			}
 			if got := priorityRouteFor(t, path, cases[4].flow); got != "system-direct" {

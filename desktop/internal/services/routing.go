@@ -201,7 +201,7 @@ func (s *RoutingRuleService) Snapshot() (RoutingSnapshot, error) {
 	if err != nil {
 		return RoutingSnapshot{}, err
 	}
-	restartRequired, restartReason := singBoxRuleSetRestartRequirement(rules)
+	restartRequired, restartReason := singBoxRuleSetRestartRequirement(rules, settings.RuleSets)
 	return RoutingSnapshot{
 		Revision: routingRevision(settings),
 		Rules:    rules, Outbounds: outbounds, MatchOrder: routingMatchOrder(settings),
@@ -403,7 +403,7 @@ func (s *RoutingRuleService) saveOrderedUnlocked(rules []RoutingRule, order []st
 	if err := s.validateSelectedOutbounds(normalized); err != nil {
 		return RoutingSnapshot{}, err
 	}
-	if err := refreshSingBoxRuleSetsAndCommit(normalized, func() error {
+	if err := refreshSingBoxRuleSetsAndCommit(normalized, s.settings.Get().RuleSets, func() error {
 		s.settings.mu.Lock()
 		defer s.settings.mu.Unlock()
 		next := cloneSettings(s.settings.settings)
@@ -433,7 +433,7 @@ func (s *RoutingRuleService) saveUnlocked(rules []RoutingRule) (RoutingSnapshot,
 	if err := s.validateSelectedOutbounds(normalized); err != nil {
 		return RoutingSnapshot{}, err
 	}
-	if err := refreshSingBoxRuleSetsAndCommit(normalized, func() error {
+	if err := refreshSingBoxRuleSetsAndCommit(normalized, s.settings.Get().RuleSets, func() error {
 		return s.settings.saveRoutingRules(normalized)
 	}); err != nil {
 		return RoutingSnapshot{}, fmt.Errorf("保存分流规则失败；系统已尝试恢复原规则：%w", err)
@@ -623,13 +623,18 @@ func (s *RoutingRuleService) validateSelectedOutbounds(rules []RoutingRule) erro
 	return validateRoutingOutbounds(rules, adapters)
 }
 
-func validateRoutingOutbounds(rules []RoutingRule, adapters []AdapterView) error {
+func availableRoutingOutbounds(adapters []AdapterView) map[string]struct{} {
 	available := map[string]struct{}{"aggregation": {}, "direct": {}, OutboundReject: {}}
 	for _, adapter := range adapters {
 		if adapter.Selected && adapter.Operational {
 			available["nic_"+adapter.ID] = struct{}{}
 		}
 	}
+	return available
+}
+
+func validateRoutingOutbounds(rules []RoutingRule, adapters []AdapterView) error {
+	available := availableRoutingOutbounds(adapters)
 	for index, rule := range rules {
 		if rule.Disabled {
 			continue
@@ -724,33 +729,9 @@ func ruleIdentity(rule RoutingRule) string {
 }
 
 func sortRules(rules []RoutingRule) {
-	rank := map[string]int{MatchProcess: 0, MatchDomain: 1, MatchIP: 2}
-	sort.SliceStable(rules, func(i, j int) bool {
-		if rules[i].Priority != rules[j].Priority {
-			return rules[i].Priority > rules[j].Priority
-		}
-		if rank[rules[i].MatchType] != rank[rules[j].MatchType] {
-			return rank[rules[i].MatchType] < rank[rules[j].MatchType]
-		}
-		if rules[i].MatchType == MatchDomain {
-			// A child domain is an exception to its parent, just as a narrower
-			// CIDR is an exception to a broader IP rule. Sort it first before
-			// rule-set generation computes exclusions between outbounds.
-			leftDepth := strings.Count(strings.TrimPrefix(rules[i].Value, "."), ".")
-			rightDepth := strings.Count(strings.TrimPrefix(rules[j].Value, "."), ".")
-			if leftDepth != rightDepth {
-				return leftDepth > rightDepth
-			}
-		}
-		if rules[i].MatchType == MatchIP {
-			_, ni, _ := net.ParseCIDR(rules[i].Value)
-			_, nj, _ := net.ParseCIDR(rules[j].Value)
-			oi, _ := ni.Mask.Size()
-			oj, _ := nj.Mask.Size()
-			if oi != oj {
-				return oi > oj
-			}
-		}
-		return strings.ToLower(rules[i].Value) < strings.ToLower(rules[j].Value)
-	})
+	candidates := manualRoutingCandidates(rules)
+	sortCandidates(candidates)
+	for index, candidate := range candidates {
+		rules[index] = candidate.rule
+	}
 }

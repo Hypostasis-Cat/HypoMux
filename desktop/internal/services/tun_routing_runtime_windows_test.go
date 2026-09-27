@@ -171,11 +171,11 @@ func TestBundledSingBoxRoutingAndHotReload(t *testing.T) {
 			if tc.name == "subdomain-specific" {
 				childDisabled := append([]RoutingRule(nil), tc.rules...)
 				childDisabled[1].Disabled = true
-				if err := refreshSingBoxRuleSets(childDisabled); err != nil {
+				if err := refreshSingBoxRuleSets(childDisabled, nil); err != nil {
 					t.Fatal(err)
 				}
 				assertRoute("nic_wifi", true)
-				if err := refreshSingBoxRuleSets(tc.rules); err != nil {
+				if err := refreshSingBoxRuleSets(tc.rules, nil); err != nil {
 					t.Fatal(err)
 				}
 				assertRoute("nic_ethernet", true)
@@ -184,7 +184,7 @@ func TestBundledSingBoxRoutingAndHotReload(t *testing.T) {
 			for i := range disabled {
 				disabled[i].Disabled = true
 			}
-			if err := refreshSingBoxRuleSets(disabled); err != nil {
+			if err := refreshSingBoxRuleSets(disabled, nil); err != nil {
 				t.Fatal(err)
 			}
 			wantDisabled := "aggregation"

@@ -40,6 +40,10 @@ type tunConfigOptions struct {
 	ConfigName    string
 	ClashAPI      *clashAPIConfig
 	ConfigSHA256  *string
+	// RuleSets are the subscribed external lists. They travel in the options
+	// struct rather than the parameter list so the pinned-config call sites keep
+	// their shape; only the sets that already have a published file matter here.
+	RuleSets []RuleSet
 	// Executable is used by compatibility tests; production resolves the
 	// bundled runtime asset through the trusted installation layout.
 	Executable string
@@ -133,8 +137,8 @@ func writeSingBoxConfigWithOptions(
 			ruleSetOutbounds = append(ruleSetOutbounds, name)
 		}
 	}
-	usesFakeIP := tunDNSNeedsFakeIP(dnsPolicy, rules)
-	ruleSetPlan, err := writeSingBoxRuleSetPlan(rules, ruleSetOutbounds, usesFakeIP)
+	usesFakeIP := tunDNSNeedsFakeIP(dnsPolicy, rules, options.RuleSets)
+	ruleSetPlan, err := writeSingBoxRuleSetPlan(rules, options.RuleSets, ruleSetOutbounds, usesFakeIP)
 	if err != nil {
 		return "", "", clashAPIConfig{}, err
 	}
@@ -161,6 +165,11 @@ func writeSingBoxConfigWithOptions(
 		)
 	}
 	routeRules = append(routeRules, singBoxCompatibilityRouteRules(compatibility, ruleSetPlan)...)
+	// Subscribed lists come before the per-outbound manual files so a
+	// higher-priority category can outrank a low-priority manual rule; the
+	// carve-outs that let an explicit rule win back its destinations live inside
+	// the recomposed rule-set files, which hot reload applies.
+	routeRules = append(routeRules, ruleSetPlan.ExternalRouteRules...)
 	routeRules = append(routeRules, ruleSetPlan.UserRouteRules...)
 	directOutbound := map[string]any{"type": "direct", "tag": "direct"}
 	if directPort, directErr := loopbackPort(endpoints, "direct"); directErr == nil {
@@ -439,7 +448,7 @@ func buildDNSUpstream(adapter AdapterView, result dnsResolveResult) (map[string]
 	return upstream, nil
 }
 
-func tunDNSNeedsFakeIP(policy string, rules []RoutingRule) bool {
+func tunDNSNeedsFakeIP(policy string, rules []RoutingRule, sets []RuleSet) bool {
 	if policy != "off" && policy != "system" {
 		return true
 	}
@@ -448,7 +457,9 @@ func tunDNSNeedsFakeIP(policy string, rules []RoutingRule) bool {
 			return true
 		}
 	}
-	return false
+	// A subscribed list only matches domains, and only once it has actually been
+	// fetched; an un-fetched set is not referenced and must not force FakeIP.
+	return len(liveExternalRuleSets(ruleSetDirectory(), sets)) > 0
 }
 
 func dnsBootstrapRouteExclusions(result dnsResolveResult) []string {

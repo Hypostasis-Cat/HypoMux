@@ -38,6 +38,25 @@ export type {
 export type MTUInfo = { adapter_id: string; guid: string; if_index: number; address: string; current: number; original?: number };
 export type MTUResult = MTUInfo & { target: string; recommended: number; at_limit: boolean; tested_at: string };
 
+// One subscribed domain-category list (issue #62): a whole category routed to a
+// single outbound instead of typing its domains one by one.
+export type RuleSet = {
+  id: string;
+  name: string;
+  url: string;
+  outbound: string;
+  priority?: number;
+  disabled?: boolean;
+  updated_at?: number;
+  etag?: string;
+  last_modified?: string;
+  content_sha256?: string;
+  format?: string;
+  entry_count?: number;
+  ignored_count?: number;
+  last_error?: string;
+};
+
 export type EngineSnapshot = GeneratedEngineSnapshot & { strategy?: string };
 
 export type RoutingSnapshot = Omit<GeneratedRoutingSnapshot, "match_order" | "revision"> & { match_order?: string[] | null; revision?: string };
@@ -218,6 +237,8 @@ const appearanceMethod = (method: string) =>
   `github.com/Hypostasis-Cat/HypoMux/desktop/internal/services.AppearanceService.${method}`;
 const diagnosticsMethod = (method: string) =>
   `github.com/Hypostasis-Cat/HypoMux/desktop/internal/services.DiagnosticsService.${method}`;
+const ruleSetMethod = (method: string) =>
+  `github.com/Hypostasis-Cat/HypoMux/desktop/internal/services.RuleSetService.${method}`;
 
 export async function withServiceTimeout<T>(
   request: Promise<T>,
@@ -349,5 +370,10 @@ export const appServices = {
     installAndQuit: (path: string) =>
       Call.ByName(updaterMethod("InstallAndQuit"), path) as Promise<void>,
     progress: () => Call.ByName(updaterMethod("Progress")) as Promise<UpdateProgress>,
+  },
+  ruleSets: {
+    list: () => Call.ByName(ruleSetMethod("List")) as Promise<RuleSet[]>,
+    save: (sets: RuleSet[]) => Call.ByName(ruleSetMethod("Save"), sets) as Promise<RuleSet[]>,
+    update: (id: string) => Call.ByName(ruleSetMethod("Update"), id) as Promise<RuleSet[]>,
   },
 };
