@@ -66,6 +66,7 @@ export type RoutingSnapshot = Omit<GeneratedRoutingSnapshot, "match_order" | "re
 export type AdapterView = GeneratedAdapterView & { is_virtual?: boolean };
 
 export type CompleteAppSettings = AppSettings & {
+  update_channel?: "stable" | "preview";
   strategy?: string;
   steam_cdn_enabled?: boolean;
   hide_virtual_adapters?: boolean;

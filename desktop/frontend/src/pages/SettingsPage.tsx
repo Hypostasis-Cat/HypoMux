@@ -45,6 +45,7 @@ const emptySettings: CompleteAppSettings = {
   steam_cdn_enabled: false,
   mode: "tun",
   language: "zh",
+  update_channel: "stable",
   socks_port: 10800,
   http_port: 10801,
   system_proxy_takeover: true,
@@ -810,6 +811,20 @@ export function SettingsPage({
 
         <GlassSurface className="settings-section" id="settings-global">
           <h2>{t("settings_global")}</h2>
+          <SettingRow title={text("更新渠道", "Update channel")} description={text(
+            "正式版适合日常使用；预览版包含 Beta / RC，可能不稳定。切回正式版不会自动降级。保存后可在「关于」中检查更新。",
+            "Stable is recommended for everyday use. Preview includes Beta / RC and may be unstable. Switching to Stable does not downgrade. Check for updates in About after saving.",
+          )}>
+            <SettingDropdown
+              value={settings.update_channel ?? "stable"}
+              disabled={loading || saving || loadFailed}
+              options={[
+                { value: "stable", label: text("正式版", "Stable") },
+                { value: "preview", label: text("预览版（Beta / RC）", "Preview (Beta / RC)") },
+              ]}
+              onChange={(value) => patchAndSave({ update_channel: value as "stable" | "preview" })}
+            />
+          </SettingRow>
           <SettingRow title={t("settings_language")} description={text("保存界面语言偏好", "Save the interface language preference")}>
             <SettingDropdown
               value={settings.language}

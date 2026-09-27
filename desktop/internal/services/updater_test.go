@@ -175,6 +175,7 @@ func TestManifestRequiresSchemaDigestAndExactInstallerMetadata(t *testing.T) {
 }
 
 func TestUpdaterChoosesNewestMetadataSource(t *testing.T) {
+	stableVersion := strings.SplitN(CurrentVersion, "-", 2)[0]
 	major, err := strconv.Atoi(strings.Split(CurrentVersion, ".")[0])
 	if err != nil {
 		t.Fatal(err)
@@ -184,7 +185,7 @@ func TestUpdaterChoosesNewestMetadataSource(t *testing.T) {
 		available bool
 	}{
 		{fmt.Sprintf("%d.0.0", major+1), true},
-		{CurrentVersion, false},
+		{stableVersion, isNewerVersion(stableVersion, CurrentVersion)},
 		{fmt.Sprintf("%d.0.0", major-1), false},
 	} {
 		t.Run(candidate.version, func(t *testing.T) {

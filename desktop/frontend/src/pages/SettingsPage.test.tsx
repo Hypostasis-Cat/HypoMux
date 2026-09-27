@@ -76,6 +76,21 @@ afterEach(() => {
 });
 
 describe("TUN settings", () => {
+  it("defaults to stable and persists the chosen update channel separately", async () => {
+    const view = render(<SettingsPage adapterRuntime={[]} onOpenBlockedDomains={() => {}} />);
+    await screen.findByText("Settings synced");
+    const channel = screen.getByRole("combobox", { name: "Update channel" });
+    expect(channel.textContent).toContain("Stable");
+    fireEvent.click(channel);
+    fireEvent.click(await screen.findByRole("option", { name: "Preview (Beta / RC)" }));
+    await waitFor(() => expect(mocks.update).toHaveBeenCalledWith(
+      expect.objectContaining({ update_channel: "preview" }), ["update_channel"],
+    ));
+    mocks.get.mockResolvedValue({ ...initial, update_channel: "preview" });
+    view.unmount();
+    render(<SettingsPage adapterRuntime={[]} onOpenBlockedDomains={() => {}} />);
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "Update channel" }).textContent).toContain("Preview"));
+  });
   it("shows a recoverable read failure instead of claiming settings are synced", async () => {
     mocks.get.mockRejectedValueOnce(new Error("Temporarily unavailable"));
     render(<SettingsPage adapterRuntime={[]} onOpenBlockedDomains={() => {}} />);

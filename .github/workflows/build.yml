@@ -66,6 +66,16 @@ jobs:
         with:
           node-version: 22
 
+      - name: Prepare and validate release version
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF -like 'refs/tags/*') {
+            go -C desktop run ./cmd/release-version -tag $env:GITHUB_REF_NAME -write -notes
+          } else {
+            go -C desktop run ./cmd/release-version -check
+          }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Restore pnpm tool cache
         id: pnpm-tool
         uses: actions/cache@v4
@@ -305,6 +315,9 @@ jobs:
     needs: build
     if: github.event_name == 'workflow_dispatch' && inputs.signing_mode == 'publish' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    concurrency:
+      group: hypomux-release-publish
+      cancel-in-progress: false
     permissions:
       actions: read
       contents: write
@@ -326,6 +339,11 @@ jobs:
         with:
           name: HypoMux-Windows-${{ github.sha }}-${{ github.run_attempt }}
           path: artifacts
+
+      - name: Resolve release channel
+        id: version
+        shell: bash
+        run: go -C desktop run ./cmd/release-version -tag "${GITHUB_REF_NAME}" -notes -github-output "${GITHUB_OUTPUT}"
 
       - name: Validate versioned release notes
         id: release_notes
@@ -441,9 +459,13 @@ jobs:
 
           if ! cnb release get -t "${tag}" >/dev/null 2>&1; then
             cnb release create -t "${tag}" -n "HypoMux ${version}" \
-              --body "${release_body}" --make-latest true
+              --body "${release_body}" --make-latest "${{ steps.version.outputs.make_latest }}" \
+              --prerelease=${{ steps.version.outputs.prerelease }}
           fi
           cnb release get -t "${tag}" >/dev/null
+          cnb --json release get -t "${tag}" | jq -e \
+            --argjson expected '${{ steps.version.outputs.prerelease }}' \
+            '(.prerelease // false) == $expected' >/dev/null
           cnb --json release get -t "${tag}" | jq -j '.body' > artifacts/cnb-release-notes.md
           if ! cmp --silent "${release_notes_path}" artifacts/cnb-release-notes.md; then
             echo "CNB Release body differs from ${release_notes_path}."
@@ -506,6 +528,8 @@ jobs:
         with:
           name: HypoMux ${{ github.ref_name }}
           body_path: ${{ steps.release_notes.outputs.path }}
+          prerelease: ${{ steps.version.outputs.prerelease == 'true' }}
+          make_latest: ${{ steps.version.outputs.make_latest }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -515,6 +539,8 @@ jobs:
         with:
           name: HypoMux ${{ github.ref_name }}
           body_path: ${{ steps.release_notes.outputs.path }}
+          prerelease: ${{ steps.version.outputs.prerelease == 'true' }}
+          make_latest: ${{ steps.version.outputs.make_latest }}
           files: artifacts/${{ steps.stage_release.outputs.installer_name }}
           fail_on_unmatched_files: true
         env:
@@ -556,7 +582,7 @@ jobs:
           CNB_TOKEN: ${{ secrets.CNB_TOKEN }}
         run: |
           set -euo pipefail
-          channel_ref="refs/heads/update-channel"
+          channel_ref="refs/heads/${{ steps.version.outputs.channel }}"
           credential_file="$(mktemp)"
           cleanup() {
             git config --local --unset-all credential.helper >/dev/null 2>&1 || true
@@ -577,7 +603,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           parent="$(git ls-remote origin "${channel_ref}" | awk 'NR == 1 {print $1}')"
           if [[ -n "${parent}" ]]; then
-            git fetch --no-tags origin "${channel_ref}:refs/remotes/origin/update-channel"
+            git fetch --no-tags origin "${channel_ref}:refs/remotes/origin/${{ steps.version.outputs.channel }}"
           fi
 
           manifest_blob="$(git hash-object -w artifacts/latest.json)"
@@ -627,16 +653,16 @@ jobs:
             return 1
           }
           fetch_exact "GitHub latest.json" \
-            https://raw.githubusercontent.com/Hypostasis-Cat/HypoMux/update-channel/latest.json \
+            "https://raw.githubusercontent.com/Hypostasis-Cat/HypoMux/${{ steps.version.outputs.channel }}/latest.json" \
             artifacts/latest.json channel-verify/github-latest.json
           fetch_exact "GitHub latest.json.sig" \
-            https://raw.githubusercontent.com/Hypostasis-Cat/HypoMux/update-channel/latest.json.sig \
+            "https://raw.githubusercontent.com/Hypostasis-Cat/HypoMux/${{ steps.version.outputs.channel }}/latest.json.sig" \
             artifacts/latest.json.sig channel-verify/github-latest.json.sig
           fetch_exact "CNB latest.json" \
-            https://cnb.cool/Hypostasis-Cat/HypoMux/-/git/raw/update-channel/latest.json \
+            "https://cnb.cool/Hypostasis-Cat/HypoMux/-/git/raw/${{ steps.version.outputs.channel }}/latest.json" \
             artifacts/latest.json channel-verify/cnb-latest.json
           fetch_exact "CNB latest.json.sig" \
-            https://cnb.cool/Hypostasis-Cat/HypoMux/-/git/raw/update-channel/latest.json.sig \
+            "https://cnb.cool/Hypostasis-Cat/HypoMux/-/git/raw/${{ steps.version.outputs.channel }}/latest.json.sig" \
             artifacts/latest.json.sig channel-verify/cnb-latest.json.sig
           public_key="$(tr -d '\r\n' < desktop/internal/services/update_manifest_ed25519_public_key.txt)"
           go -C desktop run ./cmd/update-manifest-sign \

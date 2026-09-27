@@ -1,5 +1,7 @@
 # HypoMux 文档
 
+- [版本与发布渠道](RELEASE_VERSIONING.md)：正式版、Beta / RC、版本同步命令与更新渠道选择。
+
 - [算法与性能优化方案](algorithm-performance-plan.md)：分阶段路线、第一阶段实现与微基准结果。
 - [Steam 下载节点优选](steam-cdn-optimization.md)：双模式实现方案、开关行为和验证结果。
 

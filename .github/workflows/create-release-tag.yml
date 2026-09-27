@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'New release tag, for example v2.1.2'
+        description: 'Release tag, e.g. v2.7.0, v2.8.0-beta.1 or v2.8.0-rc.1'
         required: true
         type: string
 
@@ -23,6 +23,18 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: desktop/go.mod
+          cache: false
+
+      - name: Validate release version and notes
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: go -C desktop run ./cmd/release-version -tag "${RELEASE_TAG}" -notes
+
       - name: Validate and synchronize release tag
         shell: bash
         env:
@@ -30,11 +42,6 @@ jobs:
           CNB_TOKEN: ${{ secrets.CNB_TOKEN }}
         run: |
           set -euo pipefail
-
-          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-.+][0-9A-Za-z.-]+)?$ ]]; then
-            echo "Tag must use vMAJOR.MINOR.PATCH format, for example v2.1.2."
-            exit 1
-          fi
 
           expected_commit="$(git rev-parse HEAD^{commit})"
           credential_file="$(mktemp)"

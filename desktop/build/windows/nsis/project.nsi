@@ -38,6 +38,7 @@ Unicode true
 ; Keep the uninstall identity stable even when company and product names are
 ; identical. The generated default would otherwise become HypoMuxHypoMux.
 !define UNINST_KEY_NAME "HypoMux"
+!include "version.nsh"
 !include "wails_tools.nsh"
 
 !define HYPOMUX_CORE_SERVICE "HypoMuxCore"
@@ -50,7 +51,7 @@ Unicode true
 !define HYPOMUX_LEGACY_INNO_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\{7637d353-b9c0-4145-bc81-7a474e534d07}_is1"
 
 # The version information for this two must consist of 4 parts
-VIProductVersion "${INFO_PRODUCTVERSION}.0"
+VIProductVersion "${HYPOMUX_WINDOWS_VERSION}"
 VIFileVersion    "${INFO_PRODUCTVERSION}.0"
 
 VIAddVersionKey "CompanyName"     "${INFO_COMPANYNAME}"

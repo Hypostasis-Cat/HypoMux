@@ -27,6 +27,13 @@ jobs:
           go-version-file: desktop/go.mod
           cache: false
 
+      - name: Resolve release channel
+        id: version
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: go -C desktop run ./cmd/release-version -tag "${RELEASE_TAG}" -github-output "${GITHUB_OUTPUT}"
+
       - name: Verify manifest signing secret matches embedded public key
         shell: bash
         env:
@@ -48,10 +55,6 @@ jobs:
           RELEASE_TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
-          if [[ ! "${RELEASE_TAG}" =~ ^v[0-9]+(\.[0-9]+){1,3}$ ]]; then
-            echo "Invalid release tag: ${RELEASE_TAG}"
-            exit 1
-          fi
           resolve_tag_commit() {
             local repository="$1"
             local direct
@@ -104,7 +107,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          channel_ref=refs/heads/update-channel
+          channel_ref="refs/heads/${{ steps.version.outputs.channel }}"
           github_channel="$(git ls-remote https://github.com/Hypostasis-Cat/HypoMux.git "${channel_ref}" | awk 'NR == 1 {print $1}')"
           cnb_channel="$(git ls-remote https://cnb.cool/Hypostasis-Cat/HypoMux "${channel_ref}" | awk 'NR == 1 {print $1}')"
           if [[ -z "${github_channel}" && -z "${cnb_channel}" ]]; then
@@ -119,16 +122,16 @@ jobs:
           mkdir -p smoke/channel
           curl --fail --silent --show-error --location \
             --output smoke/channel/github-latest.json \
-            https://raw.githubusercontent.com/Hypostasis-Cat/HypoMux/update-channel/latest.json
+            "https://raw.githubusercontent.com/Hypostasis-Cat/HypoMux/${{ steps.version.outputs.channel }}/latest.json"
           curl --fail --silent --show-error --location \
             --output smoke/channel/github-latest.json.sig \
-            https://raw.githubusercontent.com/Hypostasis-Cat/HypoMux/update-channel/latest.json.sig
+            "https://raw.githubusercontent.com/Hypostasis-Cat/HypoMux/${{ steps.version.outputs.channel }}/latest.json.sig"
           curl --fail --silent --show-error --location \
             --output smoke/channel/cnb-latest.json \
-            https://cnb.cool/Hypostasis-Cat/HypoMux/-/git/raw/update-channel/latest.json
+            "https://cnb.cool/Hypostasis-Cat/HypoMux/-/git/raw/${{ steps.version.outputs.channel }}/latest.json"
           curl --fail --silent --show-error --location \
             --output smoke/channel/cnb-latest.json.sig \
-            https://cnb.cool/Hypostasis-Cat/HypoMux/-/git/raw/update-channel/latest.json.sig
+            "https://cnb.cool/Hypostasis-Cat/HypoMux/-/git/raw/${{ steps.version.outputs.channel }}/latest.json.sig"
           cmp --silent smoke/channel/github-latest.json smoke/channel/cnb-latest.json
           cmp --silent smoke/channel/github-latest.json.sig smoke/channel/cnb-latest.json.sig
 

@@ -4,6 +4,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/Hypostasis-Cat/HypoMux/desktop/internal/releaseversion"
 )
 
 func TestInstallerMigratesLegacyLayoutsBeforeWritingCorrectedRoot(t *testing.T) {
@@ -337,8 +339,8 @@ func TestReleasePublishesOneSignedInstallerThenUpdatesSignedChannel(t *testing.T
 		`HYPOMUX_SIGNED_INSTALLER_TEST`,
 		`git push origin "${channel_commit}:${channel_ref}"`,
 		`git push cnb "${channel_commit}:${channel_ref}"`,
-		`https://raw.githubusercontent.com/Hypostasis-Cat/HypoMux/update-channel/latest.json`,
-		`https://cnb.cool/Hypostasis-Cat/HypoMux/-/git/raw/update-channel/latest.json`,
+		`https://raw.githubusercontent.com/Hypostasis-Cat/HypoMux/${{ steps.version.outputs.channel }}/latest.json`,
+		`https://cnb.cool/Hypostasis-Cat/HypoMux/-/git/raw/${{ steps.version.outputs.channel }}/latest.json`,
 		`-verify-only`,
 	} {
 		if !strings.Contains(workflow, required) {
@@ -392,7 +394,7 @@ func TestReleaseNotesAreTheSingleSourceForReleaseBodiesAndManifest(t *testing.T)
 		`name: HypoMux ${{ github.ref_name }}`,
 		`body_path: ${{ steps.release_notes.outputs.path }}`,
 		`release_notes_path="${{ steps.release_notes.outputs.path }}"`,
-		`--body "${release_body}" --make-latest true`,
+		`--body "${release_body}" --make-latest "${{ steps.version.outputs.make_latest }}"`,
 		`cnb --json release get -t "${tag}" | jq -j '.body' > artifacts/cnb-release-notes.md`,
 		`cmp --silent "${release_notes_path}" artifacts/cnb-release-notes.md`,
 	} {
@@ -454,9 +456,9 @@ func TestReleaseTrustSmokeWorkflowIsReadOnly(t *testing.T) {
 		`release get -t "${RELEASE_TAG}"`,
 		`secrets.CNB_TOKEN`,
 		`docker.cnb.cool/looc/git-cnb@sha256:c254172bb9d6025733a0e2991b4a99af8c46aeedcadcb468788ef5a0dc00275c`,
-		`refs/heads/update-channel`,
-		`https://raw.githubusercontent.com/Hypostasis-Cat/HypoMux/update-channel/latest.json`,
-		`https://cnb.cool/Hypostasis-Cat/HypoMux/-/git/raw/update-channel/latest.json`,
+		`refs/heads/${{ steps.version.outputs.channel }}`,
+		`https://raw.githubusercontent.com/Hypostasis-Cat/HypoMux/${{ steps.version.outputs.channel }}/latest.json`,
+		`https://cnb.cool/Hypostasis-Cat/HypoMux/-/git/raw/${{ steps.version.outputs.channel }}/latest.json`,
 		`-verify-only`,
 	} {
 		if !strings.Contains(workflow, required) {
@@ -478,27 +480,43 @@ func TestReleaseTrustSmokeWorkflowIsReadOnly(t *testing.T) {
 }
 
 func TestVersionMetadataIsConsistent(t *testing.T) {
-	const version = "2.6.0"
-	files := []string{
-		"Taskfile.yml",
-		"build/config.yml",
-		"build/windows/info.json",
-		"build/windows/wails.exe.manifest",
-		"build/windows/nsis/wails_tools.nsh",
-		"build/windows/msix/template.xml",
-		"build/windows/msix/app_manifest.xml",
-		"frontend/package.json",
-		"frontend/src/product.ts",
-		"internal/services/updater.go",
+	data, err := os.ReadFile("VERSION")
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, path := range files {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatal(err)
+	v, err := releaseversion.Parse(strings.TrimSpace(string(data)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := releaseversion.SyncMetadata(".", v, true); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPreviewPublishingIsIsolatedFromStable(t *testing.T) {
+	data, err := os.ReadFile("../.github/workflows/build.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	workflow := string(data)
+	if strings.Count(workflow, `prerelease: ${{ steps.version.outputs.prerelease == 'true' }}`) != 2 {
+		t.Fatal("both GitHub release paths must explicitly classify prereleases")
+	}
+	for _, required := range []string{
+		`--prerelease=${{ steps.version.outputs.prerelease }}`,
+		`--make-latest "${{ steps.version.outputs.make_latest }}"`,
+		`channel_ref="refs/heads/${{ steps.version.outputs.channel }}"`,
+		`-tag $env:GITHUB_REF_NAME -write -notes`,
+		`group: hypomux-release-publish`,
+	} {
+		if !strings.Contains(workflow, required) {
+			t.Fatalf("missing release isolation guard: %s", required)
 		}
-		if !strings.Contains(string(data), version) {
-			t.Fatalf("%s does not contain release version %s", path, version)
-		}
+	}
+	prepare := strings.Index(workflow, "- name: Prepare and validate release version")
+	build := strings.Index(workflow, "- name: Build and package Wails desktop")
+	if prepare < 0 || prepare > build {
+		t.Fatal("release version must be applied before building/signing")
 	}
 }
 

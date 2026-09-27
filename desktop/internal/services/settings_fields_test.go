@@ -1,10 +1,53 @@
 package services
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"sync"
 	"testing"
 )
+
+func TestUpdateChannelPersistsAndDefaultsSafely(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HYPOMUX_DATA_DIR", dir)
+	s := NewSettingsService()
+	if s.Get().UpdateChannel != "stable" {
+		t.Fatal("fresh installs must use stable")
+	}
+	before := s.Get()
+	if _, err := s.UpdateFields(AppSettings{UpdateChannel: "preview"}, []string{"update_channel"}); err != nil {
+		t.Fatal(err)
+	}
+	if NewSettingsService().Get().UpdateChannel != "preview" {
+		t.Fatal("channel not persisted")
+	}
+	if _, err := s.UpdateFields(AppSettings{UpdateChannel: "beta"}, []string{"update_channel"}); err == nil {
+		t.Fatal("invalid channel accepted")
+	}
+	if s.Get().UpdateChannel != "preview" {
+		t.Fatal("rejected channel changed state")
+	}
+	before.UpdateChannel = "" // Full replacements from older bindings preserve the preference.
+	if got, err := s.Update(before); err != nil || got.UpdateChannel != "preview" {
+		t.Fatalf("legacy update lost channel: %+v %v", got, err)
+	}
+	if _, err := s.UpdateFields(AppSettings{UpdateChannel: "stable"}, []string{"update_channel"}); err != nil {
+		t.Fatal(err)
+	}
+	if NewSettingsService().Get().UpdateChannel != "stable" {
+		t.Fatal("switching back not persisted")
+	}
+	// Old or corrupted channel values must never opt users into prereleases.
+	for _, data := range []string{`{}`, `{"update_channel":"unknown"}`} {
+		if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(data), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if NewSettingsService().Get().UpdateChannel != "stable" {
+			t.Fatal("legacy channel did not default to stable")
+		}
+	}
+}
 
 func TestSettingsFieldUpdatePreservesConcurrentOwners(t *testing.T) {
 	t.Setenv("HYPOMUX_DATA_DIR", t.TempDir())

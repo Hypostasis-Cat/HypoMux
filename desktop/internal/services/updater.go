@@ -17,10 +17,11 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Hypostasis-Cat/HypoMux/desktop/internal/releaseversion"
 )
 
 const (
@@ -31,6 +32,8 @@ const (
 	cnbRepositoryURL         = "https://cnb.cool/Hypostasis-Cat/HypoMux"
 	cnbDownloadURL           = cnbRepositoryURL + "/-/releases/download/"
 	cnbLatestManifestURL     = cnbRepositoryURL + "/-/git/raw/update-channel/latest.json"
+	githubPreviewManifestURL = "https://raw.githubusercontent.com/Hypostasis-Cat/HypoMux/update-channel-preview/latest.json"
+	cnbPreviewManifestURL    = cnbRepositoryURL + "/-/git/raw/update-channel-preview/latest.json"
 	updateManifestName       = "latest.json"
 	maxUpdateManifestSize    = 2 << 20
 	maxManifestSignatureSize = 1024
@@ -41,7 +44,6 @@ const (
 
 var (
 	installerNamePattern = regexp.MustCompile(`(?i)^HypoMux_Setup_[A-Za-z0-9][A-Za-z0-9._+\-]*\.exe$`)
-	versionPattern       = regexp.MustCompile(`(?i)^v?(\d+(?:\.\d+){1,3})$`)
 	sha256Pattern        = regexp.MustCompile(`(?i)^[a-f0-9]{64}$`)
 
 	//go:embed update_manifest_ed25519_public_key.txt
@@ -79,6 +81,7 @@ type UpdateCheckResult struct {
 }
 
 type UpdaterService struct {
+	settings          *SettingsService
 	client            *http.Client
 	manifestPublicKey ed25519.PublicKey
 	launchInstaller   func(string, int) error
@@ -102,6 +105,12 @@ func NewUpdaterService(quit ...func()) *UpdaterService {
 	return service
 }
 
+func NewUpdaterServiceWithSettings(settings *SettingsService, quit func()) *UpdaterService {
+	service := NewUpdaterService(quit)
+	service.settings = settings
+	return service
+}
+
 type UpdateProgress struct {
 	State      string `json:"state"`
 	Downloaded int64  `json:"downloaded"`
@@ -122,6 +131,18 @@ func (s *UpdaterService) setProgress(progress UpdateProgress) {
 }
 
 func (s *UpdaterService) Check() (UpdateCheckResult, error) {
+	channel := "stable"
+	if s.settings != nil {
+		s.settings.mu.RLock()
+		channel = s.settings.settings.UpdateChannel
+		s.settings.mu.RUnlock()
+	}
+	return s.checkVersion(CurrentVersion, channel)
+}
+
+// Preview is an explicit persisted opt-in, independent of the installed version.
+// Both channels only offer newer versions, so switching never forces a downgrade.
+func (s *UpdaterService) checkVersion(current, channel string) (UpdateCheckResult, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), updateMetadataTimeout)
 	defer cancel()
 
@@ -129,13 +150,20 @@ func (s *UpdaterService) Check() (UpdateCheckResult, error) {
 		name  string
 		check func(context.Context) (ReleaseInfo, error)
 	}
-	sources := []metadataSource{
-		{name: "CNB manifest", check: func(ctx context.Context) (ReleaseInfo, error) {
-			return s.checkUpdateManifest(ctx, cnbLatestManifestURL)
-		}},
-		{name: "GitHub manifest", check: func(ctx context.Context) (ReleaseInfo, error) {
-			return s.checkUpdateManifest(ctx, githubLatestManifestURL)
-		}},
+	urls := []string{cnbLatestManifestURL, githubLatestManifestURL}
+	if channel == "preview" {
+		urls = append(urls, cnbPreviewManifestURL, githubPreviewManifestURL)
+	}
+	sources := make([]metadataSource, 0, len(urls))
+	for _, manifestURL := range urls {
+		sources = append(sources, metadataSource{name: manifestURL, check: func(ctx context.Context) (ReleaseInfo, error) {
+			release, err := s.checkUpdateManifest(ctx, manifestURL)
+			if err == nil && releaseversion.IsPrerelease(release.TagName) &&
+				(manifestURL == cnbLatestManifestURL || manifestURL == githubLatestManifestURL) {
+				return ReleaseInfo{}, errors.New("正式更新渠道包含预发布版本")
+			}
+			return release, err
+		}})
 	}
 	type sourceResult struct {
 		index   int
@@ -173,8 +201,8 @@ func (s *UpdaterService) Check() (UpdateCheckResult, error) {
 		return UpdateCheckResult{}, err
 	}
 	return UpdateCheckResult{
-		CurrentVersion: CurrentVersion,
-		Available:      isNewerVersion(release.TagName, CurrentVersion),
+		CurrentVersion: current,
+		Available:      isNewerVersion(release.TagName, current),
 		Release:        release,
 	}, nil
 }
@@ -514,9 +542,10 @@ func (w *updateProgressWriter) Write(data []byte) (int, error) {
 }
 
 func validateUpdateMetadataURL(value string) error {
-	if value == githubLatestManifestURL || value == githubLatestManifestURL+".sig" ||
-		value == cnbLatestManifestURL || value == cnbLatestManifestURL+".sig" {
-		return nil
+	for _, allowed := range []string{githubLatestManifestURL, cnbLatestManifestURL, githubPreviewManifestURL, cnbPreviewManifestURL} {
+		if value == allowed || value == allowed+".sig" {
+			return nil
+		}
 	}
 	return errors.New("必须使用 HypoMux 官方 signed update channel 地址")
 }
@@ -645,20 +674,7 @@ func updateMirrorLabel(value string) string {
 }
 
 func versionKey(value string) []int {
-	match := versionPattern.FindStringSubmatch(strings.TrimSpace(value))
-	if len(match) != 2 {
-		return nil
-	}
-	parts := strings.Split(match[1], ".")
-	result := []int{0, 0, 0, 0}
-	for index, part := range parts {
-		number, err := strconv.Atoi(part)
-		if err != nil {
-			return nil
-		}
-		result[index] = number
-	}
-	return result
+	return releaseversion.Key(value)
 }
 
 func isNewerVersion(candidate string, current string) bool {

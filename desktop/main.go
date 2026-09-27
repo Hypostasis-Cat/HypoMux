@@ -159,7 +159,7 @@ func main() {
 	}, func() bool {
 		return settingsService.Get().CloseToTray
 	})
-	updaterService := services.NewUpdaterService(desktop.Quit)
+	updaterService := services.NewUpdaterServiceWithSettings(settingsService, desktop.Quit)
 	diagnosticsService = services.NewDiagnosticsService(
 		settingsService, adapterService, desktop, supportLogs,
 		func() error {
