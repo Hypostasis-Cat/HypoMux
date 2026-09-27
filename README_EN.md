@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Version-2.6.0-0078d4?style=flat-square" alt="Version 2.6.0">
+  <img src="https://img.shields.io/badge/Version-2.7.0-0078d4?style=flat-square" alt="Version 2.7.0">
   <img src="https://img.shields.io/badge/Core-Go-00ADD8?style=flat-square&logo=go&logoColor=white" alt="Go">
   <img src="https://img.shields.io/badge/Desktop-Wails%20v3-CB3837?style=flat-square" alt="Wails v3">
   <img src="https://img.shields.io/badge/UI-React%20%2B%20Fluent%20UI-61DAFB?style=flat-square&logo=react&logoColor=black" alt="React and Fluent UI">
@@ -17,7 +17,16 @@ HypoMux is an open-source multi-adapter aggregation and split-routing utility fo
 
 HypoMux balances independent connections; it does not split one TCP connection across multiple paths. It works best with highly concurrent workloads such as Steam updates, IDM downloads, game launchers, and large browser downloads. A single-connection transfer remains limited by that connection.
 
-## What's new in 2.5.0
+## What's new in 2.7.0
+
+- **AI assistant and Mux**: An integrated tool-calling assistant, local MCP connections, and image, layered, and Live2D companion skins.
+- **Hotspot and diagnostics**: Experimental Windows aggregation hotspot, Wi-Fi QR codes, device details, and MTU probing/restoration.
+- **Scheduling and routing**: Adaptive speed, latency-first scheduling, reject rules, and Clash/sing-box rule-set subscriptions.
+- **Reliability and updates**: Improved Steam optimization, TUN startup, and FakeIP caching; bundled sing-box 1.14.2; stable/preview update channels.
+
+See the complete [v2.7.0 release notes](.github/release-notes/v2.7.0.en.md) and the [release versioning guide](docs/RELEASE_VERSIONING.md) for publishing stable, Beta, and RC builds.
+
+## Desktop architecture migration (2.5.0)
 
 Version 2.5.0 completes the desktop migration from the former Python/Qt and transitional WPF implementations to **Go + Wails v3 + React + Fluent UI**. The desktop runs as a standard user, while an independent Go Core/Windows service owns privileged TUN, WFP, routing, DNS, and network-recovery operations.
 

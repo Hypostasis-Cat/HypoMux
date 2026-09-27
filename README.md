@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Version-2.6.0-0078d4?style=flat-square" alt="Version 2.6.0">
+  <img src="https://img.shields.io/badge/Version-2.7.0-0078d4?style=flat-square" alt="Version 2.7.0">
   <img src="https://img.shields.io/badge/Core-Go-00ADD8?style=flat-square&logo=go&logoColor=white" alt="Go">
   <img src="https://img.shields.io/badge/Desktop-Wails%20v3-CB3837?style=flat-square" alt="Wails v3">
   <img src="https://img.shields.io/badge/UI-React%20%2B%20Fluent%20UI-61DAFB?style=flat-square&logo=react&logoColor=black" alt="React and Fluent UI">
@@ -19,7 +19,16 @@ HypoMux 是一款面向 Windows 的开源多网卡聚合与分流工具。它把
 
 HypoMux 聚合的是多个独立连接，而不是把单条 TCP 连接拆成多路。因此，它尤其适合 Steam、IDM、游戏平台更新器、浏览器大文件下载等高并发场景；单连接任务的速度仍受该连接本身限制。
 
-## 2.5.0 新版本
+## 2.7.0 新版本
+
+- **AI 助手与小 Mux**：内置工具调用助手、本机 MCP 连接，以及图片、分层和 Live2D 伴侣皮肤。
+- **聚合热点与网络诊断**：新增实验性 Windows 聚合热点、Wi-Fi 二维码、设备详情和 MTU 检测／恢复。
+- **调度与分流**：新增自适应速度、低延迟优先、拒绝连接规则和 Clash／sing-box 规则集订阅。
+- **稳定性与更新**：完善 Steam 优选、TUN 启动和 FakeIP 缓存，升级 sing-box 至 1.14.2，支持正式版／预览版更新渠道。
+
+完整内容见 [v2.7.0 更新日志](.github/release-notes/v2.7.0.md)。开发者发布正式版、Beta 或 RC 的操作见 [版本发布说明](docs/RELEASE_VERSIONING.md)。
+
+## 桌面架构迁移（2.5.0）
 
 2.5.0 完成了桌面端从 Python/Qt 与过渡期 WPF 实现到 **Go + Wails v3 + React + Fluent UI** 的正式迁移。桌面界面以普通用户权限运行，TUN、WFP、路由、DNS 与网络恢复等高权限操作交给独立的 Go Core/Windows 服务处理。
 
