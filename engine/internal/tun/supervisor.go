@@ -24,6 +24,7 @@ const (
 	defaultReadyStableFor = 750 * time.Millisecond
 	configCheckTimeout    = 10 * time.Second
 	cleanupTimeout        = 15 * time.Second
+	gracefulStopTimeout   = 5 * time.Second
 	maxLogLineBytes       = 64 * 1024
 	tunInterfaceName      = "HypoMux-Tun"
 )
@@ -71,6 +72,7 @@ type processContainment interface {
 type sidecarRun struct {
 	command      *exec.Cmd
 	done         chan struct{}
+	exited       chan struct{}
 	intentional  atomic.Bool
 	containment  processContainment
 	removeConfig func()
@@ -95,6 +97,8 @@ type Supervisor struct {
 	cleanup        func(context.Context) error
 	contain        func(*os.Process) (processContainment, error)
 	configure      func(*exec.Cmd)
+	interrupt      func(context.Context, *os.Process) error
+	stopGrace      time.Duration
 	stageConfig    func(Config) (string, func(), error)
 	onLog          func(string)
 	onUnexpected   func(Status)
@@ -110,6 +114,8 @@ func NewSupervisor() *Supervisor {
 		cleanup:        cleanupPlatform,
 		contain:        containProcess,
 		configure:      configureProcess,
+		interrupt:      interruptProcess,
+		stopGrace:      gracefulStopTimeout,
 		stageConfig:    stageTrustedConfig,
 		startupReady:   tunPlatformReady,
 		readyStableFor: defaultReadyStableFor,
@@ -221,6 +227,7 @@ func (s *Supervisor) Activate(ctx context.Context, config Config) (Status, error
 	run := &sidecarRun{
 		command:      command,
 		done:         make(chan struct{}),
+		exited:       make(chan struct{}),
 		containment:  containment,
 		removeConfig: removeStagedConfig,
 		cleanupDone:  make(chan struct{}),
@@ -428,6 +435,7 @@ func (s *Supervisor) validateConfig(ctx context.Context, config Config) error {
 
 func (s *Supervisor) waitProcess(run *sidecarRun) {
 	err := run.command.Wait()
+	close(run.exited)
 	exitedAt := time.Now().UTC()
 	exitCode := -1
 	if run.command.ProcessState != nil {
@@ -490,13 +498,35 @@ func (s *Supervisor) terminateRun(
 	run *sidecarRun,
 	ctx context.Context,
 ) error {
-	if run.containment != nil {
+	// Keep the kill-on-close job alive until sing-box has saved its FakeIP
+	// metadata and exited. Network cleanup is tracked separately by run.done.
+	graceCtx, cancel := context.WithTimeout(ctx, s.stopGrace)
+	exited := false
+	select {
+	case <-run.exited:
+		exited = true
+	default:
+		if graceCtx.Err() == nil && run.command.Process != nil {
+			if err := s.interrupt(graceCtx, run.command.Process); err == nil {
+				select {
+				case <-run.exited:
+					exited = true
+				case <-graceCtx.Done():
+				}
+			}
+		}
+	}
+	cancel()
+	if !exited {
+		s.emitLog("[TUN] graceful stop unavailable or timed out; forcing termination (FakeIP mappings may be lost)")
+	}
+	if !exited && run.containment != nil {
 		// Closing the job handle is what kills the process tree: the job is
 		// created with JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE. cleanupRun closes it
 		// again as an idempotent safety net and is the call that reports errors.
 		_ = run.containment.Close()
 	}
-	if run.command.Process != nil {
+	if !exited && run.command.Process != nil {
 		_ = run.command.Process.Kill()
 	}
 	select {

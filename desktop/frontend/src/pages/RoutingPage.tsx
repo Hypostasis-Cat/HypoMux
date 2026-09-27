@@ -138,6 +138,7 @@ const browserProcessFixture = (): RunningProcess[] | null => {
 };
 
 export function RoutingPage() {
+  const [ruleView, setRuleView] = useState<"manual" | "sets">("manual");
   const pageActive = usePageActive();
   const { locale, t } = useI18n();
   const text = useCallback((zh: string, en: string) => locale === "en" ? en : zh, [locale]);
@@ -209,6 +210,7 @@ export function RoutingPage() {
     });
   }
   const addRuleInputRef = useRef<HTMLInputElement>(null);
+  const addRulePending = useRef(false);
   const { notify: pushNotification } = useAppNotifications();
 
   const notify = useCallback((title: string, message: string, intent: "success" | "error" | "warning" | "info" = "info") => {
@@ -440,28 +442,36 @@ export function RoutingPage() {
   }, [pendingSave, rules, saveRules]);
 
   const addRule = useCallback(async (value = newValue, type: MatchType = activeType) => {
-    const candidate: DraftRule = {
-      id: newID(),
-      match_type: type,
-      value,
-      outbound: newOutbound,
-      validating: true,
-      dirty: true,
-    };
-    const result = await appServices.routing.validate(
-      candidate,
-      rulesRef.current.map(serializeRule),
-    );
-    if (!result.valid) {
-      notify(
-        result.duplicate ? text("规则已存在", "Rule already exists") : text("规则格式无效", "Invalid rule format"),
-        result.message || text("请检查匹配值", "Check the match value"),
-        "error",
+    if (addRulePending.current) return;
+    addRulePending.current = true;
+    try {
+      const candidate: DraftRule = {
+        id: newID(),
+        match_type: type,
+        value,
+        outbound: newOutbound,
+        validating: true,
+        dirty: true,
+      };
+      const result = await appServices.routing.validate(
+        candidate,
+        rulesRef.current.map(serializeRule),
       );
-      return;
+      if (!result.valid) {
+        notify(
+          result.duplicate ? text("规则已存在", "Rule already exists") : text("规则格式无效", "Invalid rule format"),
+          result.message || text("请检查匹配值", "Check the match value"),
+          "error",
+        );
+        return;
+      }
+      applyRules([...rulesRef.current, { ...candidate, ...result.rule, validating: false }], true);
+      setNewValue((current) => current === value ? "" : current);
+    } catch (error) {
+      notify(text("添加规则失败", "Unable to add rule"), String(error), "error");
+    } finally {
+      addRulePending.current = false;
     }
-    applyRules([...rulesRef.current, { ...candidate, ...result.rule, validating: false }], true);
-    setNewValue("");
   }, [activeType, applyRules, newOutbound, newValue, notify, text]);
 
   const openProcesses = useCallback(async () => {
@@ -745,14 +755,14 @@ export function RoutingPage() {
   }, [processSearch, processes]);
 
   return (
-    <main className="routing-page">
+    <main className={`routing-page${ruleView === "sets" ? " routing-page-sets" : ""}`}>
       <header className="routing-page-heading">
         <div>
           <span className="section-kicker">{t("routing_title")}</span>
           <h1>{text("决定每类流量从哪条链路离开", "Choose the exit path for each type of traffic")}</h1>
           <p>{t("routing_hint")}</p>
         </div>
-        <div className="routing-save-state">
+        {ruleView === "manual" && <div className="routing-save-state">
           <Button disabled={saving || loading} onClick={() => {
             if (!pendingSave || window.confirm(text("重新载入会丢弃当前未保存的规则编辑，是否继续？", "Reloading discards unsaved rule edits. Continue?"))) void load();
           }}>{text("重新载入", "Reload")}</Button>
@@ -766,8 +776,12 @@ export function RoutingPage() {
           <Button appearance={pendingSave ? "primary" : "secondary"} icon={saving ? <Spinner size="tiny" /> : <Save20Regular />} disabled={saving || !pendingSave} onClick={() => void saveRules(true)}>
             {text("保存更改", "Save changes")}
           </Button>
-        </div>
+        </div>}
       </header>
+      <TabList aria-label={text("规则管理", "Rule management")} selectedValue={ruleView} onTabSelect={(_, data) => setRuleView(data.value as "manual" | "sets")}>
+        <Tab value="manual">{text("手动规则", "Manual rules")}</Tab>
+        <Tab value="sets">{text("规则集订阅", "Rule set subscriptions")}</Tab>
+      </TabList>
 
       <div className="routing-notice-slot">
         {engineRuntime.mode !== "tun" ? (
@@ -797,6 +811,7 @@ export function RoutingPage() {
         ) : null}
       </div>
 
+      {ruleView === "manual" ? <>
       <GlassSurface className="routing-toolbar-surface" tone="secondary">
         <div className="routing-type-bar">
         <TabList selectedValue={activeType} onTabSelect={(_, data) => {
@@ -927,7 +942,11 @@ export function RoutingPage() {
         )}
       </GlassSurface>
 
-      <RuleSetsPanel outbounds={(outbounds ?? []).map((outbound) => ({ id: outbound.id, label: outboundLabel(outbound.id) }))} />
+      </> : <RuleSetsPanel preview={import.meta.env.DEV && !isDesktopRuntime()} onChanged={() => {
+        void appServices.routing.snapshot().then((snapshot) => {
+          setRestartRequirement({ required: snapshot.restart_required, reason: snapshot.restart_reason ?? "" });
+        }).catch((error) => notify(text("无法刷新生效状态", "Unable to refresh apply status"), String(error), "warning"));
+      }} outbounds={(outbounds ?? []).map((outbound) => ({ id: outbound.id, label: outboundLabel(outbound.id) }))} />}
 
       <Dialog open={deleteOpen} onOpenChange={(_, data) => setDeleteOpen(data.open)}>
         <DialogSurface>

@@ -90,3 +90,70 @@ func TestTunConfigWithoutPublishedRuleSetFileStillPassesCheck(t *testing.T) {
 		t.Fatalf("an un-fetched list changed routing: got %q", got)
 	}
 }
+
+func TestExternalRulesKeepPinnedRoutingCorrectAcrossEdits(t *testing.T) {
+	t.Setenv("HYPOMUX_DATA_DIR", t.TempDir())
+	high := RuleSet{ID: "high", Name: "High", URL: "https://example.com/high", Outbound: "direct", Priority: 80}
+	low := RuleSet{ID: "low", Name: "Low", URL: "https://example.com/low", Outbound: "aggregation", Priority: 20}
+	for _, set := range []RuleSet{high, low} {
+		publishExternalRuleSetFixture(t, set, []string{".example.com"})
+	}
+	rules, err := normalizeRulesStrict([]RoutingRule{{MatchType: MatchDomain, Value: "login.example.com", Outbound: "aggregation", Priority: 90}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	executable, path, _, err := writeSingBoxConfigWithOptions(map[string]string{"nic_ethernet": "127.0.0.1:19101", "nic_wifi": "127.0.0.1:19102", "direct": "127.0.0.1:19104", "aggregation": "127.0.0.1:19103"}, AdapterView{}, dnsResolveResult{Transport: "udp", Server: "1.1.1.1"}, rules, compatibilityPlan{}, true, tunConfigOptions{DNSPolicy: "auto", RuleSets: []RuleSet{high, low}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	check := func(domain, want string) {
+		t.Helper()
+		if got := priorityRouteFor(t, path, priorityFlow{domain: domain}); got != want {
+			t.Fatalf("%s routed to %s, want %s", domain, got, want)
+		}
+	}
+	check("cdn.example.com", "direct")
+	check("login.example.com", "aggregation")
+	// Outbound edits cannot change the pinned route before restart. Its manual
+	// carve-out must still use direct, or login would incorrectly become direct.
+	high.Outbound = "aggregation"
+	if err := refreshSingBoxRuleSets(rules, []RuleSet{high, low}); err != nil {
+		t.Fatal(err)
+	}
+	check("login.example.com", "aggregation")
+	check("cdn.example.com", "direct")
+	high.Outbound = "direct"
+	low.Priority = 85
+	if err := refreshSingBoxRuleSets(rules, []RuleSet{high, low}); err != nil {
+		t.Fatal(err)
+	}
+	check("cdn.example.com", "aggregation")
+	low.Disabled = true
+	if err := refreshSingBoxRuleSets(rules, []RuleSet{high, low}); err != nil {
+		t.Fatal(err)
+	}
+	check("cdn.example.com", "direct")
+	// Removing the earlier pinned set must not leave its old file matching.
+	low.Disabled = false
+	if err := refreshSingBoxRuleSets(rules, []RuleSet{low}); err != nil {
+		t.Fatal(err)
+	}
+	check("cdn.example.com", "aggregation")
+	if output, err := exec.Command(executable, "check", "--disable-color", "-c", path).CombinedOutput(); err != nil {
+		t.Fatalf("empty disabled set rejected: %v %s", err, output)
+	}
+}
+
+func TestExternalRejectUsesRejectAction(t *testing.T) {
+	t.Setenv("HYPOMUX_DATA_DIR", t.TempDir())
+	set := RuleSet{ID: "block", Name: "Block", URL: "https://example.com/block", Outbound: OutboundReject}
+	publishExternalRuleSetFixture(t, set, []string{".example.com"})
+	plan, err := writeSingBoxRuleSetPlan(nil, []RuleSet{set}, []string{"direct", "aggregation"}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	route := plan.ExternalRouteRules[0].(map[string]any)
+	if route["action"] != "reject" || route["outbound"] != nil {
+		t.Fatalf("invalid rejection route: %+v", route)
+	}
+}

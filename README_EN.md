@@ -181,6 +181,8 @@ The following images are real multi-adapter, multi-connection tests captured wit
 
 Recommended environment: Windows 10/11, Go 1.26, Node.js 22, pnpm 10, and Wails v3 CLI `v3.0.0-alpha2.119`. NSIS is also required to package the installer. The repository's `bin/` directory must contain the official runtime files `sing-box.exe`, `wintun.dll`, and `libcronet.dll`.
 
+The bundled sing-box version is **1.14.2**, including gVisor support. See the [runtime notes](bin/README.md) for its source and SHA-256 checksums.
+
 ```powershell
 go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-alpha2.119
 pnpm --dir desktop/frontend install --frozen-lockfile

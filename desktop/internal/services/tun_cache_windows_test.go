@@ -72,8 +72,9 @@ func TestTUNStacksAndPersistentCacheConfig(t *testing.T) {
 }
 
 // Exercise the bundled binary without creating a TUN adapter or changing the
-// host's DNS/routes. Kill mirrors the engine's current sidecar stop behavior.
-func TestBundledSingBoxRestoresFakeIPAfterRestart(t *testing.T) {
+// host's DNS/routes. This covers recovery from forced termination after a
+// checkpoint; engine/internal/tun tests normal graceful and repeated restarts.
+func TestBundledSingBoxRestoresFakeIPCheckpointAfterForcedTermination(t *testing.T) {
 	t.Setenv("HYPOMUX_DATA_DIR", t.TempDir())
 	executable, path, _, err := writeSingBoxConfigWithOptions(
 		map[string]string{"nic_ethernet": "127.0.0.1:19101", "nic_wifi": "127.0.0.1:19102", "aggregation": "127.0.0.1:19103"},
@@ -167,8 +168,10 @@ func TestBundledSingBoxRestoresFakeIPAfterRestart(t *testing.T) {
 	if first == second {
 		t.Fatal("distinct domains must have distinct FakeIPs")
 	}
-	// Allow sing-box's asynchronous cache writes to settle before terminating.
-	time.Sleep(2 * time.Second)
+	// sing-box 1.14.2 debounces FakeIP allocation metadata writes for 10 seconds
+	// (constant.FakeIPMetadataSaveInterval). Killing before that checkpoint
+	// intentionally cannot guarantee recovery, even if address writes completed.
+	time.Sleep(12 * time.Second)
 	stop()
 	start()
 	// Reverse the allocation order so a fresh, empty pool cannot pass by luck.

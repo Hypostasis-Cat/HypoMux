@@ -5,12 +5,14 @@ on:
     branches: [main]
     paths:
       - 'engine/**'
+      - 'bin/sing-box.exe'
       - 'protocol/**'
       - '.github/workflows/go-engine.yml'
   pull_request:
     branches: [main]
     paths:
       - 'engine/**'
+      - 'bin/sing-box.exe'
       - 'protocol/**'
       - '.github/workflows/go-engine.yml'
   workflow_dispatch:

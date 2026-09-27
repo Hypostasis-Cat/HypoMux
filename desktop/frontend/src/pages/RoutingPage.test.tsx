@@ -30,6 +30,33 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
+it("reports a failed add validation and allows retry", async () => {
+  renderPage();
+  await screen.findByDisplayValue("browser.exe");
+  const input = screen.getByRole("textbox", { name: "New rule match value" });
+  fireEvent.change(input, { target: { value: "new.exe" } });
+  mocks.validate.mockRejectedValueOnce(new Error("Service unavailable"));
+  fireEvent.keyDown(input, { key: "Enter" });
+  await waitFor(() => expect(mocks.notify).toHaveBeenCalledWith(expect.objectContaining({ title: "Unable to add rule" })));
+  expect(screen.queryByRole("switch", { name: "Enable rule new.exe" })).toBeNull();
+  fireEvent.keyDown(input, { key: "Enter" });
+  await screen.findByRole("switch", { name: "Enable rule new.exe" });
+});
+
+it("prevents duplicate submissions while add validation is pending", async () => {
+  renderPage();
+  await screen.findByDisplayValue("browser.exe");
+  let resolveValidation!: (result: unknown) => void;
+  mocks.validate.mockImplementationOnce(() => new Promise(resolve => { resolveValidation = resolve; }));
+  const input = screen.getByRole("textbox", { name: "New rule match value" });
+  fireEvent.change(input, { target: { value: "new.exe" } });
+  fireEvent.keyDown(input, { key: "Enter" });
+  fireEvent.keyDown(input, { key: "Enter" });
+  expect(mocks.validate).toHaveBeenCalledTimes(1);
+  await act(async () => resolveValidation({ valid: true, rule: { match_type: "process", value: "new.exe", outbound: "direct" }, duplicate: false }));
+  expect(screen.getAllByRole("switch", { name: "Enable rule new.exe" })).toHaveLength(1);
+});
+
 it("saves reject and restores the rule without marking its egress unavailable", async () => {
   let saved = [{ match_type: "process", value: "app.exe", outbound: "direct" }];
   mocks.snapshot.mockImplementation(async () => ({ rules: saved, outbounds, restart_required: false }));

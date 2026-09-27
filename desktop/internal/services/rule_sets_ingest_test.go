@@ -85,7 +85,7 @@ func TestParseClashProviderSubscription(t *testing.T) {
 	}
 	want := map[string][]string{
 		"domain":         {"example.com", "steamcommunity.com"},
-		"domain_suffix":  {".steamcommunity.com", ".steampowered.com"},
+		"domain_suffix":  {".steamcommunity.com", "steampowered.com"},
 		"domain_keyword": {"steam"},
 		"ip_cidr":        {"203.0.113.0/24"},
 	}

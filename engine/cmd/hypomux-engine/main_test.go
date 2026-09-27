@@ -49,6 +49,15 @@ func TestServePipeRejectsMissingAuthenticatedSessionArguments(t *testing.T) {
 	}
 }
 
+func TestSignalTunRejectsInvalidProcessArguments(t *testing.T) {
+	for _, args := range [][]string{{"signal-tun"}, {"signal-tun", "0"}, {"signal-tun", "-1"}, {"signal-tun", "4294967296"}, {"signal-tun", "1", "extra"}} {
+		var stdout, stderr bytes.Buffer
+		if code := run(args, strings.NewReader(""), &stdout, &stderr); code != 2 {
+			t.Fatalf("%v: exit=%d", args, code)
+		}
+	}
+}
+
 func TestRecoverCommandReportsCleanupFailure(t *testing.T) {
 	originalRecoverTUN := recoverTUN
 	recoverTUN = func(context.Context) error {

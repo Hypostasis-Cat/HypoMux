@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -39,6 +40,19 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	}
 
 	switch command {
+	case "signal-tun":
+		if len(args) != 2 {
+			return 2
+		}
+		pid, err := strconv.ParseUint(args[1], 10, 32)
+		if err != nil || pid == 0 {
+			return 2
+		}
+		if err := tun.InterruptConsoleProcess(uint32(pid)); err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		return 0
 	case "serve":
 		return runServer(stdin, stdout, stderr)
 	case "service":

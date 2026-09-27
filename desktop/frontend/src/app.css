@@ -1983,8 +1983,10 @@ svg {
   display: grid;
   grid-template-columns: minmax(110px, 0.8fr) minmax(200px, 1.6fr) minmax(120px, 0.9fr) minmax(70px, 90px) auto;
   gap: 8px;
-  align-items: center;
+  align-items: start;
 }
+
+.routing-rulesets-add > button { margin-top: 28px; }
 
 .routing-rulesets-note {
   margin: 0;
@@ -5874,3 +5876,38 @@ svg {
 
 /* Window chrome and controls remain draggable/clickable; content can be copied. */
 button, [role="button"], [role="tab"], .compact-navigation, .titlebar { user-select: none; -webkit-user-select: none; }
+/* Rule subscriptions have their own view; manual edits keep their page state. */
+.routing-page { grid-template-rows: auto auto auto auto minmax(0, 1fr); }
+.routing-page-sets { grid-template-rows: auto auto auto minmax(0, 1fr); }
+.routing-page-sets > .routing-rulesets-surface { align-self: stretch; overflow: auto; min-height: 0; align-content: start; padding: 18px; gap: 16px; }
+.ruleset-source { color: var(--hm-text-secondary); font-size: 12px; overflow-wrap: anywhere; user-select: text; }
+.routing-page-sets .routing-rulesets-row { padding: 12px; flex-wrap: wrap; }
+.routing-page-sets .routing-rulesets-main { flex: 1 1 220px; gap: 6px; }
+.routing-page-sets .routing-rulesets-meta { white-space: normal; line-height: 1.6; }
+.ruleset-content { border: 1px solid var(--hm-outer-border); border-radius: 12px; padding: 16px; display: grid; gap: 14px; min-width: 0; }
+.ruleset-content-heading, .ruleset-content-tools { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.ruleset-content-heading h3, .ruleset-add-title { margin: 0; font-size: 14px; }
+.ruleset-content-heading p, .ruleset-content-tools > span, .ruleset-content-empty { margin: 6px 0 0; color: var(--hm-text-secondary); font-size: 12px; line-height: 1.7; }
+.ruleset-entry-scroll { overflow: auto; max-height: 360px; border: 1px solid var(--hm-outer-border); border-radius: 8px; }
+.ruleset-entry-scroll:focus-visible { outline: 2px solid var(--hm-accent); outline-offset: 2px; }
+.ruleset-entry-table { width: 100%; border-collapse: collapse; font-size: 12px; text-align: left; }
+.ruleset-entry-table th, .ruleset-entry-table td { padding: 10px 14px; border-bottom: 1px solid var(--hm-outer-border); }
+.ruleset-entry-table th { color: var(--hm-text-secondary); }
+.ruleset-entry-table td:first-child { width: 140px; white-space: nowrap; }
+.ruleset-entry-table code { overflow-wrap: anywhere; user-select: text; }
+.ruleset-pagination { display: flex; justify-content: flex-end; align-items: center; gap: 12px; }
+@media (max-width: 1050px) {
+  .routing-page-sets .routing-rulesets-add { grid-template-columns: 1fr 1fr; }
+  .routing-page-sets .routing-rulesets-url { grid-column: 1 / -1; }
+  .routing-page-sets .routing-rulesets-actions { flex-wrap: wrap; }
+}
+@media (max-width: 620px) {
+  .routing-page-sets .routing-rulesets-add { grid-template-columns: 1fr; }
+  .ruleset-content { padding: 10px; }
+}
+.routing-page-sets .routing-rulesets-add > * { min-width: 0; width: 100%; }
+.routing-page-sets .routing-rulesets-add input { min-width: 0; }
+.routing-page-sets .routing-rulesets-add .fui-Input,
+.routing-page-sets .routing-rulesets-add .fui-Dropdown { min-width: 0; width: 100%; box-sizing: border-box; }
+.ruleset-entry-table { table-layout: fixed; }
+.ruleset-entry-table th:first-child { width: 140px; }

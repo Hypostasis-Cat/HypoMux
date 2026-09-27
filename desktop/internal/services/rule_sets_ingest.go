@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 	"syscall"
@@ -209,6 +210,9 @@ func externalEntryFromRule(rule map[string]any) (map[string]any, int, bool) {
 			continue
 		}
 		list, ok := raw.([]any)
+		if scalar, scalarOK := raw.(string); scalarOK {
+			list, ok = []any{scalar}, true
+		}
 		if !ok {
 			return nil, 0, false
 		}
@@ -217,6 +221,11 @@ func externalEntryFromRule(rule map[string]any) (map[string]any, int, bool) {
 			value, ok := item.(string)
 			if !ok || strings.TrimSpace(value) == "" {
 				return nil, 0, false
+			}
+			if kind == "domain_regex" {
+				if _, err := regexp.Compile(value); err != nil {
+					return nil, 0, false
+				}
 			}
 			cleaned = append(cleaned, strings.TrimSpace(value))
 		}
@@ -292,7 +301,7 @@ func externalEntryFromClashItem(item string) (map[string]any, bool) {
 	upper := strings.ToUpper(item)
 	switch {
 	case strings.HasPrefix(upper, "DOMAIN-SUFFIX,"):
-		return singleKindEntry("domain_suffix", suffixValue(item[len("DOMAIN-SUFFIX,"):]))
+		return singleKindEntry("domain_suffix", normalizeRuleSetDomain(item[len("DOMAIN-SUFFIX,"):]))
 	case strings.HasPrefix(upper, "DOMAIN,"):
 		return singleKindEntry("domain", normalizeRuleSetDomain(item[len("DOMAIN,"):]))
 	case strings.HasPrefix(upper, "DOMAIN-KEYWORD,"):
@@ -333,6 +342,11 @@ func externalEntryFromClashItem(item string) (map[string]any, bool) {
 func singleKindEntry(kind, value string) (map[string]any, bool) {
 	if value == "" {
 		return nil, false
+	}
+	if kind == "domain_regex" {
+		if _, err := regexp.Compile(value); err != nil {
+			return nil, false
+		}
 	}
 	return map[string]any{kind: []string{value}}, true
 }
@@ -401,8 +415,7 @@ func canonicalExternalRuleSetPayload(entries []map[string]any) ([]byte, int, err
 // rule-set files. The digest of the canonical payload decides whether the file
 // needs rewriting, so an unchanged subscription never makes sing-box reload.
 func publishExternalRuleSetSource(directory string, set RuleSet, payload []byte) (string, error) {
-	digest := sha256.Sum256(payload)
-	contentSHA256 := hex.EncodeToString(digest[:])
+	contentSHA256 := ruleSetPayloadDigest(payload)
 	path := externalRuleSetSourcePathIn(directory, set)
 	if contentSHA256 == set.ContentSHA256 {
 		if _, err := os.Stat(path); err == nil {
@@ -416,4 +429,9 @@ func publishExternalRuleSetSource(directory string, set RuleSet, payload []byte)
 		return "", fmt.Errorf("写入规则集载荷失败：%w", err)
 	}
 	return contentSHA256, nil
+}
+
+func ruleSetPayloadDigest(payload []byte) string {
+	digest := sha256.Sum256(payload)
+	return hex.EncodeToString(digest[:])
 }

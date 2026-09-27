@@ -203,6 +203,54 @@ func TestSupervisorConcurrentStopIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestSupervisorGracefulStopTimeoutStillKillsAndCleans(t *testing.T) {
+	supervisor, cleanupCalls, containment := testSupervisor(t, "stable")
+	supervisor.stopGrace = 40 * time.Millisecond
+	// Simulate a delivered interrupt that the core ignores.
+	supervisor.interrupt = func(context.Context, *os.Process) error {
+		if containment.closed.Load() != 0 {
+			t.Error("containment closed before interrupt")
+		}
+		return nil
+	}
+	if _, err := supervisor.Activate(context.Background(), testConfig(t)); err != nil {
+		t.Fatal(err)
+	}
+	started := time.Now()
+	if _, err := supervisor.Stop(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(started); elapsed < supervisor.stopGrace || elapsed > 2*time.Second {
+		t.Fatalf("unbounded grace/fallback: %v", elapsed)
+	}
+	if containment.closed.Load() == 0 || cleanupCalls.Load() != 2 {
+		t.Fatal("fallback did not release containment and clean network state")
+	}
+}
+
+func TestSupervisorCanceledStopStillTerminates(t *testing.T) {
+	supervisor, _, containment := testSupervisor(t, "stable")
+	supervisor.interrupt = func(context.Context, *os.Process) error {
+		t.Error("interrupt attempted after cancellation")
+		return nil
+	}
+	if _, err := supervisor.Activate(context.Background(), testConfig(t)); err != nil {
+		t.Fatal(err)
+	}
+	run := supervisor.run
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	supervisor.Stop(ctx)
+	select {
+	case <-run.done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("cancellation left core running")
+	}
+	if containment.closed.Load() == 0 {
+		t.Fatal("cancellation leaked containment")
+	}
+}
+
 func testSupervisor(
 	t *testing.T,
 	mode string,
@@ -219,6 +267,7 @@ func testSupervisor(
 		return containment, nil
 	}
 	supervisor.configure = func(*exec.Cmd) {}
+	supervisor.interrupt = func(context.Context, *os.Process) error { return fmt.Errorf("helper has no console") }
 	supervisor.stageConfig = func(config Config) (string, func(), error) {
 		return config.ConfigPath, func() {}, nil
 	}

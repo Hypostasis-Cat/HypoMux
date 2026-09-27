@@ -80,10 +80,13 @@
 .ai-workspace .ai-tabs > [role="tab"] { z-index: 1; justify-content: center; padding: 9px 12px; border-radius: 8px; background: transparent; white-space: nowrap; }
 .ai-workspace .ai-tabs > [role="tab"]::before, .ai-workspace .ai-tabs > [role="tab"]::after { display: none; }
 .ai-workspace > .ai-banner { flex-shrink: 0; padding: 6px 12px; margin: 0 var(--ai-gutter) 4px; border: 1px solid var(--hm-outer-border); border-radius: 10px; background: var(--hm-surface-secondary-fill); }
-.ai-view-panel { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; overflow: hidden; animation: ai-panel-enter var(--hm-motion-fast) var(--hm-motion-ease-out); }
+/* Keep glass descendants outside an opacity/transform animation: WebView2
+ * otherwise loses their backdrop until the panel finishes entering. Match the
+ * main page transition by moving the layout offset instead. */
+.ai-view-panel { position: relative; display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; overflow: hidden; animation: ai-panel-enter var(--hm-motion-fast) var(--hm-motion-ease-out); }
 .ai-view-panel[hidden] { display: none; }
 .ai-panel-loading { display: grid; place-items: center; flex: 1; }
-@keyframes ai-panel-enter { from { opacity: .45; } to { opacity: 1; } }
+@keyframes ai-panel-enter { from { left: var(--hm-motion-rise-distance); } to { left: 0; } }
 .ai-workspace .ai-conversation, .ai-workspace .ai-settings { width: min(100%, var(--ai-content-width)); box-sizing: border-box; align-self: center; padding: 20px var(--ai-gutter); scrollbar-gutter: stable; overscroll-behavior: contain; }
 .ai-workspace .ai-settings { gap: 18px; }
 .ai-workspace .ai-welcome { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 0; padding: 0; gap: 12px; }

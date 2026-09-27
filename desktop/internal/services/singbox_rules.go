@@ -114,14 +114,16 @@ func declaredExternalRuleSets(directory string, sets []RuleSet, declaresItself b
 	if err != nil {
 		return nil
 	}
-	declared := make(map[string]struct{}, len(manifest.ExternalSets))
+	declared := make(map[string]string, len(manifest.ExternalSets))
 	for _, record := range manifest.ExternalSets {
-		declared[record.Tag] = struct{}{}
+		declared[record.Tag] = record.Outbound
 	}
 	kept := make([]RuleSet, 0, len(live))
 	for _, set := range live {
 		tag, _ := externalRuleSetBinding(set)
-		if _, exists := declared[tag]; exists {
+		if outbound, exists := declared[tag]; exists {
+			// The running route still points to this outbound until restart.
+			set.Outbound = outbound
 			kept = append(kept, set)
 		}
 	}
@@ -219,9 +221,14 @@ func writeSingBoxRuleSetPlanLocked(
 		plan.Definitions = append(plan.Definitions, map[string]any{
 			"type": "local", "tag": tag, "format": "source", "path": path,
 		})
-		plan.ExternalRouteRules = append(plan.ExternalRouteRules, map[string]any{
+		reference := map[string]any{
 			"rule_set": []any{tag}, "outbound": set.Outbound,
-		})
+		}
+		if set.Outbound == OutboundReject {
+			delete(reference, "outbound")
+			reference["action"] = "reject"
+		}
+		plan.ExternalRouteRules = append(plan.ExternalRouteRules, reference)
 		// Subscribed lists carry user intent the same way manual rules do, so the
 		// compatibility bypass must yield to them as well.
 		plan.PriorityRuleSets = append(plan.PriorityRuleSets, tag)
@@ -238,11 +245,39 @@ func writeSingBoxRuleSetPlanLocked(
 		files = append(files, ruleSetFile{
 			Path: filepath.Join(directory, singBoxRuleSetManifestName), Data: manifest, Mode: 0o600,
 		})
-		cleanupOrphanExternalRuleSets(directory, sets)
+	} else {
+		// A disabled/deleted set still has a pinned route reference. Empty its
+		// watched file so stale matches cannot steal traffic from remaining sets.
+		manifest, err := readSingBoxRuleSetManifest()
+		if err != nil {
+			return singBoxRuleSetPlan{}, nil, err
+		}
+		active := make(map[string]bool, len(external))
+		for _, set := range external {
+			tag, _ := externalRuleSetBinding(set)
+			active[tag] = true
+		}
+		for _, record := range manifest.ExternalSets {
+			if active[record.Tag] {
+				continue
+			}
+			if !strings.HasPrefix(record.Tag, "hypomux-ext-") {
+				continue
+			}
+			suffix := strings.TrimPrefix(record.Tag, "hypomux-ext-")
+			if len(suffix) != 16 || strings.Trim(suffix, "0123456789abcdef") != "" {
+				continue
+			}
+			payload, _ := json.Marshal(map[string]any{"version": singBoxRuleSetVersion, "rules": []any{}})
+			files = append(files, ruleSetFile{Path: filepath.Join(directory, "ext-"+suffix+".json"), Data: payload, Mode: 0o600})
+		}
 	}
 	rollback, err := publishRuleSetFiles(files, replace)
 	if err != nil {
 		return singBoxRuleSetPlan{}, nil, err
+	}
+	if writeManifest {
+		cleanupOrphanExternalRuleSets(directory, sets)
 	}
 	return plan, rollback, nil
 }
@@ -396,6 +431,10 @@ func refreshSingBoxRuleSets(rules []RoutingRule, sets []RuleSet) error {
 func refreshSingBoxRuleSetsAndCommit(rules []RoutingRule, sets []RuleSet, commit func() error) error {
 	singBoxRuleSetMu.Lock()
 	defer singBoxRuleSetMu.Unlock()
+	return refreshSingBoxRuleSetsAndCommitLocked(rules, sets, commit)
+}
+
+func refreshSingBoxRuleSetsAndCommitLocked(rules []RoutingRule, sets []RuleSet, commit func() error) error {
 	manifest, err := readSingBoxRuleSetManifest()
 	if errors.Is(err, os.ErrNotExist) {
 		return commit()
