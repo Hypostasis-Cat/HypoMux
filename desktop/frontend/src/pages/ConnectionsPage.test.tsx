@@ -455,7 +455,7 @@ describe("ConnectionsPage interactions", () => {
     fireEvent.click(await screen.findByRole("menuitem", { name: /Add by domain/ }));
     const dialog = await screen.findByRole("dialog");
     fireEvent.click(await readyDialogAction(dialog, "Add rule"));
-    await expectNotificationDetail(/Rules changed; refresh and retry/);
+    expect(await within(dialog).findByText(/Rules changed; refresh and retry/)).not.toBeNull();
     expect(screen.getByRole("dialog")).toBe(dialog);
     expect(within(dialog).getByText("ethernet.example")).not.toBeNull();
     expect(mocks.saveRules).toHaveBeenCalledTimes(1);

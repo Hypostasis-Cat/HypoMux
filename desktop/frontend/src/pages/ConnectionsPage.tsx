@@ -193,6 +193,7 @@ export function ConnectionsPage({
   const [quickRulePreview, setQuickRulePreview] = useState<RoutingBatchPreview | null>(null);
   const [quickRuleLoading, setQuickRuleLoading] = useState(false);
   const [quickRuleSaving, setQuickRuleSaving] = useState(false);
+  const [quickRuleSaveError, setQuickRuleSaveError] = useState("");
   const requestActive = useRef(false);
   const connectionListRef = useRef<HTMLDivElement>(null);
   const contextMenuTargetRef = useRef<HTMLSpanElement>(null);
@@ -352,6 +353,7 @@ export function ConnectionsPage({
     const request = quickRuleRequest.current + 1;
     quickRuleRequest.current = request;
     setContextMenu(null);
+    setQuickRuleSaveError("");
     setQuickRule(selection);
     setQuickRuleOpen(true);
     setQuickRuleLoading(true);
@@ -403,6 +405,7 @@ export function ConnectionsPage({
 
   const saveQuickRule = useCallback(async () => {
     if (!quickRule || !quickRuleOutbound || quickRuleSaving) return;
+    setQuickRuleSaveError("");
     setQuickRuleSaving(true);
     try {
       // Preserve the order and compare the revision at commit time: AI/MCP or
@@ -470,6 +473,7 @@ export function ConnectionsPage({
         dedupeKey: `connections:quick-rule-saved:${identity}`,
       });
     } catch (error) {
+      setQuickRuleSaveError(error instanceof Error ? error.message : String(error));
       notify({
         title: text("无法保存分流规则", "Unable to save routing rule"),
         message: error instanceof Error ? error.message : String(error),
@@ -810,6 +814,7 @@ export function ConnectionsPage({
           <DialogBody>
             <DialogTitle className="routing-batch-title">{text("添加分流规则", "Add routing rule")}</DialogTitle>
             <DialogContent>
+              {quickRuleSaveError && <MessageBar intent="error"><MessageBarBody>{quickRuleSaveError}</MessageBarBody></MessageBar>}
               {quickRule && (
                 <>
                   <div className="quick-rule-summary">
