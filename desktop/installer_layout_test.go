@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"strings"
 	"testing"
@@ -777,13 +778,30 @@ func TestWindowsTaskManagerUsesProductName(t *testing.T) {
 			t.Fatalf("%s still exposes the tagline as the Task Manager application name", path)
 		}
 	}
-	for _, language := range []string{`"0000"`, `"0409"`} {
-		if !strings.Contains(string(infoData), language) {
+	versionData, err := os.ReadFile("VERSION")
+	if err != nil {
+		t.Fatal(err)
+	}
+	version, err := releaseversion.Parse(strings.TrimSpace(string(versionData)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var info struct {
+		Info map[string]map[string]string `json:"info"`
+	}
+	if err := json.Unmarshal(infoData, &info); err != nil {
+		t.Fatal(err)
+	}
+	for _, language := range []string{"0000", "0409"} {
+		table, ok := info.Info[language]
+		if !ok {
 			t.Fatalf("Windows version strings are missing language fallback %s", language)
 		}
-	}
-	if strings.Count(string(infoData), `"FileVersion": "2.6.0"`) != 2 {
-		t.Fatal("Windows neutral and en-US version tables must both expose FileVersion")
+		for _, field := range []string{"FileVersion", "ProductVersion"} {
+			if table[field] != version.String() {
+				t.Fatalf("Windows %s %s = %q, want %q", language, field, table[field], version.String())
+			}
+		}
 	}
 }
 
