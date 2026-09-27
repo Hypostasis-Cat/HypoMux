@@ -164,8 +164,7 @@ type EngineService struct {
 	lastPerformanceLog     time.Time
 	lastTUNHealthCheck     time.Time
 	tunNetworkFingerprint  string
-	tunHealthFailures      int
-	watchdogStopping       bool
+	tunConnectivityNotice  string
 	blockedDomains         *BlockedDomainService
 	dnsFallbackApplied     bool
 	wfpFallbackApplied     bool
@@ -418,6 +417,8 @@ func (s *EngineService) Snapshot() (EngineSnapshot, error) {
 	s.mu.Lock()
 	if s.compatibilityNotice != "" {
 		snapshot.Reason = s.compatibilityNotice
+	} else if s.tunConnectivityNotice != "" && status.Engine.State == "running" {
+		snapshot.Reason = s.tunConnectivityNotice
 	} else if s.proxyRecoveryError != "" {
 		snapshot.Reason = "提示：系统代理恢复失败：" + s.proxyRecoveryError
 	} else if s.proxyRecoveryNotice != "" && snapshot.Reason == "" {
@@ -535,55 +536,11 @@ func (s *EngineService) Snapshot() (EngineSnapshot, error) {
 			})
 		}
 		cancel()
-		physicalOK := false
-		if tunErr != nil {
-			available, listErr := s.adapters.List()
-			if listErr == nil {
-				probe := newDiagnosticProbe()
-				physicalContext, physicalCancel := context.WithTimeout(context.Background(), 8*time.Second)
-				for _, adapter := range available {
-					if !adapter.Selected {
-						continue
-					}
-					if ok, _ := probe.BoundTCP(physicalContext, adapter); ok {
-						physicalOK = true
-						break
-					}
-				}
-				physicalCancel()
-			}
-		}
-		shouldStop := false
-		s.mu.Lock()
-		if tunErr == nil {
-			s.tunHealthFailures = 0
-		} else {
-			if physicalOK {
-				s.tunHealthFailures++
-			} else {
-				s.tunHealthFailures = 0
-			}
-			if s.tunHealthFailures >= 3 && !s.watchdogStopping {
-				s.tunHealthFailures = 0
-				s.watchdogStopping = true
-				shouldStop = true
-				snapshot.Phase = "failed"
-				snapshot.Reason = "检测到物理网络正常但虚拟网卡连续无法联网，正在自动停止并恢复网络设置"
-				if s.logs != nil {
-					s.logs.RecordEvent("tun_watchdog", "rollback", map[string]any{
-						"message": tunErr.Error(),
-					})
-				}
-			}
-		}
-		s.mu.Unlock()
-		if shouldStop {
-			go func() {
-				_, _ = s.Stop()
-				s.mu.Lock()
-				s.watchdogStopping = false
-				s.mu.Unlock()
-			}()
+		// Public endpoints and adapter-bound probes can be blocked independently
+		// of user traffic. They are diagnostic evidence, never a stop command.
+		notice := s.recordTUNConnectivityOutcome(tunErr)
+		if notice != "" {
+			snapshot.Reason = notice
 		}
 	}
 	return snapshot, nil
@@ -652,6 +609,7 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 	settings := s.settings.Get()
 	takeOverSystemProxy := shouldTakeOverSystemProxy(mode, settings)
 	s.mu.Lock()
+	s.tunConnectivityNotice = ""
 	if s.closing {
 		s.mu.Unlock()
 		return EngineSnapshot{}, errors.New("HypoMux 正在退出")
@@ -953,18 +911,23 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 			})
 		}
 	} else {
-		var dnsResult dnsResolveResult
-		s.recordStartStage("dns_validating", nil)
-		var dnsErr error
-		dnsResult, dnsErr = resolveConnectivityBootstrap(ctx, dnsEgress.Adapter.Name, s.resolveConnectivityDNS)
-		if err := dnsErr; err != nil {
-			return rollback(fmt.Errorf("TUN 启动前 DNS 验证失败：%w", err))
+		s.recordStartStage("dns_preparing", nil)
+		dnsResult, dnsDiagnosticErr, dnsErr := prepareTUNDNS(ctx, dnsEgress.Adapter, settings.ForceTUNBypass,
+			s.resolveConnectivityDNS, s.tunDNSConfiguration)
+		if dnsErr != nil {
+			return rollback(fmt.Errorf("准备 TUN DNS 配置失败：%w", dnsErr))
 		}
-		s.recordStartStage("dns_validated", map[string]any{
+		if dnsDiagnosticErr != nil && s.logs != nil {
+			s.logs.RecordEvent("tun_connectivity", "dns_unverified", map[string]any{
+				"error": dnsDiagnosticErr.Error(), "message": "使用已配置的 DNS 上游继续启动",
+			})
+		}
+		s.recordStartStage("dns_prepared", map[string]any{
 			"adapter": dnsEgress.Adapter.Name, "policy": effectiveDNSPolicy,
 			"transport": dnsResult.Transport, "server": dnsResult.Server,
+			"force_start": settings.ForceTUNBypass, "diagnostic_error": errorText(dnsDiagnosticErr),
 		})
-		tunAddress, addressErr := availableTunIPv4Address()
+		tunAddress, addressErr := availableTunIPv4Address(settings.ForceTUNBypass)
 		if addressErr != nil {
 			return rollback(addressErr)
 		}
@@ -972,6 +935,7 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 			s.logs.RecordEvent("tun_address", "selected", map[string]any{"ipv4": tunAddress})
 		}
 		configOptions := tunConfigOptions{
+			ForceStart:    settings.ForceTUNBypass,
 			IPv4Address:   tunAddress,
 			Stack:         settings.TUNStack,
 			DNSPolicy:     effectiveDNSPolicy,
@@ -1069,25 +1033,18 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 			validationReport, validationErr := probeTUNConnectivityThroughChannels(
 				ctx, started.Endpoints.Channels["aggregation"], dnsResult, s.resolveConnectivityDNS,
 			)
+			s.recordTUNConnectivityOutcome(validationErr)
+			event := "startup_validated"
 			if validationErr != nil {
-				if s.logs != nil {
-					s.logs.RecordEvent("tun_connectivity", "startup_failed", map[string]any{
-						"checks": validationReport.Checks,
-						"error":  validationErr.Error(),
-					})
-				}
-				return rollback(fmt.Errorf(
-					"虚拟网卡联网验证失败，已自动停止并恢复网络设置：%w",
-					validationErr,
-				))
+				event = "startup_unverified"
 			}
 			if s.logs != nil {
-				s.logs.RecordEvent("tun_connectivity", "startup_validated", map[string]any{
-					"checks": validationReport.Checks,
-					"detail": validationReport.summary(),
+				s.logs.RecordEvent("tun_connectivity", event, map[string]any{
+					"checks": validationReport.Checks, "detail": validationReport.summary(),
+					"error": errorText(validationErr),
 				})
 			}
-			s.recordStartStage("connectivity_validated", nil)
+			s.recordStartStage("connectivity_checked", map[string]any{"verified": validationErr == nil})
 		} else if s.logs != nil {
 			s.logs.RecordEvent("tun_connectivity", "startup_bypassed", nil)
 		}
@@ -1097,7 +1054,7 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 	s.lastCDNLog = time.Time{}
 	s.lastPerformanceLog = time.Time{}
 	s.lastTUNHealthCheck = time.Now()
-	s.tunHealthFailures = 0
+	connectivityNotice := s.tunConnectivityNotice
 	s.mu.Unlock()
 	if s.logs != nil {
 		s.logs.RecordEvent("engine", "started", map[string]any{
@@ -1106,7 +1063,7 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 		})
 	}
 	return EngineSnapshot{
-		Phase: "running", Mode: mode, Weighted: settings.Weighted, Strategy: effectiveSchedulingStrategy(settings), CoreConnected: true,
+		Phase: "running", Reason: connectivityNotice, Mode: mode, Weighted: settings.Weighted, Strategy: effectiveSchedulingStrategy(settings), CoreConnected: true,
 		CoreVersion: hello.EngineVersion, CoreElevated: hello.Elevated, SampledAt: time.Now(),
 	}, nil
 }

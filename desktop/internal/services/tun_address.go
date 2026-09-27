@@ -2,6 +2,7 @@ package services
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"net"
 	"net/netip"
@@ -11,28 +12,44 @@ import (
 
 // Inspect all interfaces, including hidden/disabled virtual interfaces and
 // adapters not selected for aggregation. Never change their configuration.
-func availableTunIPv4Address() (string, error) {
-	occupied, err := occupiedTunNetworks(false)
-	if err != nil {
+func availableTunIPv4Address(force ...bool) (string, error) {
+	forced := len(force) > 0 && force[0]
+	return inspectedTUNAddress(false, forced, func(ipv6 bool) ([]netip.Prefix, error) {
+		return occupiedTunNetworksForStart(ipv6, forced)
+	})
+}
+
+func availableTunIPv6Address(force ...bool) (string, error) {
+	forced := len(force) > 0 && force[0]
+	return inspectedTUNAddress(true, forced, func(ipv6 bool) ([]netip.Prefix, error) {
+		return occupiedTunNetworksForStart(ipv6, forced)
+	})
+}
+
+func inspectedTUNAddress(ipv6, force bool, inspect func(bool) ([]netip.Prefix, error)) (string, error) {
+	occupied, err := inspect(ipv6)
+	if err != nil && !force {
 		return "", err
+	}
+	// Even a forced start respects known address allocations. Only incomplete
+	// inspection is bypassed; actual inability to allocate an address is not.
+	if ipv6 {
+		return selectTunIPv6Address(occupied)
 	}
 	return selectTunIPv4Address(occupied)
 }
 
-func availableTunIPv6Address() (string, error) {
-	occupied, err := occupiedTunNetworks(true)
-	if err != nil {
-		return "", err
-	}
-	return selectTunIPv6Address(occupied)
+func occupiedTunNetworks(ipv6 bool) ([]netip.Prefix, error) {
+	return occupiedTunNetworksForStart(ipv6, false)
 }
 
-func occupiedTunNetworks(ipv6 bool) ([]netip.Prefix, error) {
+func occupiedTunNetworksForStart(ipv6, force bool) ([]netip.Prefix, error) {
 	interfaces, err := net.Interfaces()
 	if err != nil {
 		return nil, fmt.Errorf("检查 TUN 地址冲突失败：%w", err)
 	}
 	var occupied []netip.Prefix
+	var inspectionErrors []error
 	var ownIndices = map[uint32]bool{}
 	for _, device := range interfaces {
 		if strings.EqualFold(device.Name, "HypoMux-Tun") {
@@ -41,21 +58,29 @@ func occupiedTunNetworks(ipv6 bool) ([]netip.Prefix, error) {
 		}
 		addresses, err := device.Addrs()
 		if err != nil {
-			return nil, fmt.Errorf("检查网卡 %s 的地址失败：%w", device.Name, err)
+			inspectionErrors = append(inspectionErrors, fmt.Errorf("检查网卡 %s 的地址失败：%w", device.Name, err))
+			continue
 		}
 		for _, address := range addresses {
 			prefix, err := netip.ParsePrefix(address.String())
 			if err != nil {
-				return nil, fmt.Errorf("读取网卡 %s 的地址 %q 失败：%w", device.Name, address, err)
+				inspectionErrors = append(inspectionErrors, fmt.Errorf("读取网卡 %s 的地址 %q 失败：%w", device.Name, address, err))
+				continue
 			}
 			if prefix.Addr().Is6() == ipv6 {
 				occupied = append(occupied, prefix.Masked())
 			}
 		}
 	}
+	if force {
+		// Broad VPN routes are reachability policy, not local address ownership.
+		// A forced start deliberately skips that heuristic, while avoiding all
+		// known interface addresses, including disabled and virtual devices.
+		return occupied, errors.Join(inspectionErrors...)
+	}
 	routes, err := readAddressNetworkRoutes(ipv6)
 	if err != nil {
-		return nil, fmt.Errorf("检查 TUN 路由地址冲突失败：%w", err)
+		inspectionErrors = append(inspectionErrors, fmt.Errorf("检查 TUN 路由地址冲突失败：%w", err))
 	}
 	// The optional descriptive metadata may be unreadable. Interface indices
 	// from net.Interfaces still identify our stale device without guessing.
@@ -64,7 +89,7 @@ func occupiedTunNetworks(ipv6 bool) ([]netip.Prefix, error) {
 			routes[i].Alias = "HypoMux-Tun"
 		}
 	}
-	return append(occupied, occupiedRoutePrefixes(routes)...), nil
+	return append(occupied, occupiedRoutePrefixes(routes)...), errors.Join(inspectionErrors...)
 }
 
 func selectTunIPv6Address(occupied []netip.Prefix) (string, error) {

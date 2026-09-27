@@ -1,2 +1,3 @@
 overrides:
   "nanoid@<3.3.18": "3.3.18"
+  "pixi-live2d-display>gh-pages": "^6.3.0"

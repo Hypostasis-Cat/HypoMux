@@ -33,6 +33,7 @@ type dnsResolveResult struct {
 }
 
 type tunConfigOptions struct {
+	ForceStart    bool
 	IPv4Address   string
 	Stack         string
 	DNSPolicy     string
@@ -213,14 +214,14 @@ func writeSingBoxConfigWithOptions(
 	}
 	ipv4Address := options.IPv4Address
 	if ipv4Address == "" {
-		ipv4Address, err = availableTunIPv4Address()
+		ipv4Address, err = availableTunIPv4Address(options.ForceStart)
 		if err != nil {
 			return "", "", clashAPIConfig{}, err
 		}
 	}
 	address := []string{ipv4Address}
 	if options.IPv6Available {
-		ipv6Address, addressErr := availableTunIPv6Address()
+		ipv6Address, addressErr := availableTunIPv6Address(options.ForceStart)
 		if addressErr != nil {
 			return "", "", clashAPIConfig{}, addressErr
 		}

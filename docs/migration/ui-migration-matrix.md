@@ -141,7 +141,7 @@
 | TUN | 同子网/同网关警告 | `main_window.py:1950-1964` | 首页启动反馈 | Dialog | `TunService.Preflight` | Verified | 仅检测到真实风险时展示；提供继续、返回修改、查看详情，CIDR + 默认网关双条件单测与截图通过 |
 | TUN | DoH 兼容重启 | `main_window.py:2083-2230` | 启动反馈 | Toast、状态文本 | `dns.fallback_required` / `EngineService` | Wired | Core 主动事件已真实送达；旧会话先停止、本次改用传统 DNS、只重启一次且不覆盖用户偏好；真实 DoH 故障设备待验 |
 | TUN | WFP 兼容重启 | `main_window.py:2488-2521` | 启动反馈 | Toast、状态文本 | `tun.state_changed` / `EngineService` | Wired | 仅对 WFP/BFE/Fwpm 等明确错误执行一次兼容 TUN 重启，不把降级写回偏好；普通故障误判单测通过，真实设备待验 |
-| TUN | 启动联网验证 | `main_window.py:2271-2335` | 首页状态 | Spinner、Toast | `EngineService.Start` / `Tun.ConnectivityValidation` | Wired | TUN 激活后通过无代理 HTTP/HTTPS 端点验证；失败调用 deactivate/stop 并恢复代理，强制旁路按配置生效；实机矩阵待验 |
+| TUN | 启动联网验证 | `main_window.py:2271-2335` | 首页状态 | Spinner、Toast | `EngineService.Start` / `Tun.ConnectivityValidation` | Wired | DNS、聚合通道与 TUN 数据路径探测只作为诊断，外部站点失败不阻止启动或触发停机；强制启动跳过启动前 DNS 联网验证及启动/运行期探测；真实创建失败仍回滚。见 2026-09-27 修复复评，实机矩阵待验 |
 | TUN | 周期看门狗 | `main_window.py:2354-2487` | 后台服务 | Toast | `EngineService.Snapshot` / `DiagnosticProbe.BoundTCP` | Wired | 每 30 秒探测 TUN，物理绑定出口正常且连续三次失败才异步安全停止；断网/误判矩阵待验 |
 | 代理 | WinINet 写入与关闭 | `main_window.py:139-157,2756-2848` | 后台服务 | Toast | `SystemProxy.Start/Stop/Recover` | Wired | 启动写入、停止/退出恢复与启动前残留恢复已接真实 Windows 注册表；异常矩阵待验 |
 | 退出 | 精确 TUN 资源清理 | `main.py:83-111`、`tun_manager.py` | Core/Broker | 无 | `Tun.Stop/Recover` | Wired | Core 停止、客户端断开、Service SCM Stop 与 TUN 异常退出均进入统一清理；sing-box Job/进程和动态 WFP 会话显式关闭，动态过滤器亦随 BFE 会话崩溃回收；路由/Wintun 残留实机矩阵待验 |

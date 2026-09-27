@@ -153,6 +153,8 @@ describe("ConnectionsPage interactions", () => {
     });
     mocks.connections.mockResolvedValue(snapshot);
     mocks.routingSnapshot.mockResolvedValue({
+      match_order: ["ip", "domain", "process"],
+      revision: "saved-revision",
       rules: [{ match_type: "process", value: "Existing.exe", outbound: "direct" }],
       outbounds: [
         { id: "aggregation", label: "Aggregated" },
@@ -366,7 +368,7 @@ describe("ConnectionsPage interactions", () => {
     await waitFor(() => expect(mocks.saveRules).toHaveBeenCalledWith([
       { match_type: "process", value: "Existing.exe", outbound: "direct" },
       { match_type: "domain", value: "ethernet.example", outbound: "aggregation" },
-    ]));
+    ], ["ip", "domain", "process"], "saved-revision"));
     await expectNotificationDetail(/new connections take effect immediately/i);
   });
 
@@ -408,6 +410,8 @@ describe("ConnectionsPage interactions", () => {
       { match_type: "domain", value: "other.example", outbound: "direct" },
     ];
     mocks.routingSnapshot.mockResolvedValue({
+      match_order: ["ip", "domain", "process"],
+      revision: "saved-revision",
       rules: existingRules,
       outbounds: [
         { id: "aggregation", label: "Aggregated" },
@@ -440,7 +444,41 @@ describe("ConnectionsPage interactions", () => {
       existingRules[0],
       existingRules[2],
       { match_type: "domain", value: "ethernet.example", outbound: "aggregation" },
-    ]));
+    ], ["ip", "domain", "process"], "saved-revision"));
+  });
+
+  it("keeps the draft open when a concurrent writer changes the revision", async () => {
+    mocks.saveRules.mockRejectedValueOnce(new Error("Rules changed; refresh and retry"));
+    renderPage(<ConnectionsPage adapterRuntime={adapterRuntime} />);
+    const row = (await screen.findByText("Zulu.exe")).closest("article")!;
+    fireEvent.contextMenu(row);
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Add by domain/ }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(await readyDialogAction(dialog, "Add rule"));
+    await expectNotificationDetail(/Rules changed; refresh and retry/);
+    expect(screen.getByRole("dialog")).toBe(dialog);
+    expect(within(dialog).getByText("ethernet.example")).not.toBeNull();
+    expect(mocks.saveRules).toHaveBeenCalledTimes(1);
+    expect(mocks.saveRules.mock.calls[0].slice(1)).toEqual([["ip", "domain", "process"], "saved-revision"]);
+  });
+
+  it("requires reviewing a newly discovered conflict before replacing it", async () => {
+    renderPage(<ConnectionsPage adapterRuntime={adapterRuntime} />);
+    const row = (await screen.findByText("Zulu.exe")).closest("article")!;
+    fireEvent.contextMenu(row);
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Add by domain/ }));
+    const dialog = await screen.findByRole("dialog");
+    const button = await readyDialogAction(dialog, "Add rule");
+    mocks.previewBatch.mockResolvedValue({
+      items: [{ input: "ethernet.example", status: "conflict", existing_outbound: "direct",
+        rule: { match_type: "domain", value: "ethernet.example", outbound: "aggregation" } }],
+      add_count: 0, duplicate_count: 0, conflict_count: 1, invalid_count: 0,
+    });
+    fireEvent.click(button);
+    expect(await screen.findByText("Existing rule changed")).not.toBeNull();
+    expect(mocks.saveRules).not.toHaveBeenCalled();
+    fireEvent.click(await readyDialogAction(dialog, "Update rule"));
+    await waitFor(() => expect(mocks.saveRules).toHaveBeenCalledTimes(1));
   });
 
   it("derives only usable identities and preserves the current single-NIC egress", () => {

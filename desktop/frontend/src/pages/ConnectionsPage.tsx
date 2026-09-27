@@ -405,8 +405,8 @@ export function ConnectionsPage({
     if (!quickRule || !quickRuleOutbound || quickRuleSaving) return;
     setQuickRuleSaving(true);
     try {
-      // Read immediately before saving so a quick add never replaces a newer
-      // copy of the user's rule list with a stale snapshot.
+      // Preserve the order and compare the revision at commit time: AI/MCP or
+      // another editor can still write while the preview is being calculated.
       const latest = await appServices.routing.snapshot();
       const latestRules = latest.rules ?? [];
       const preview = await appServices.routing.previewBatch(
@@ -430,12 +430,25 @@ export function ConnectionsPage({
         });
         return;
       }
+      const confirmedItem = quickRulePreview?.items?.[0];
+      if (item.status === "conflict" && (confirmedItem?.status !== "conflict"
+        || confirmedItem.existing_outbound !== item.existing_outbound)) {
+        setQuickRuleSnapshot(latest);
+        setQuickRulePreview(preview);
+        notify({
+          title: text("现有规则已变化", "Existing rule changed"),
+          message: text("请查看最新冲突后再次确认更新。", "Review the latest conflict before confirming the update."),
+          intent: "warning",
+          dedupeKey: "connections:quick-rule-changed",
+        });
+        return;
+      }
       const identity = routingRuleIdentity(item.rule.match_type, item.rule.value);
       const nextRules = item.status === "conflict"
         ? latestRules.filter((rule) => routingRuleIdentity(rule.match_type, rule.value) !== identity)
         : [...latestRules];
       nextRules.push(item.rule);
-      const saved = await appServices.routing.save(nextRules);
+      const saved = await appServices.routing.save(nextRules, latest.match_order ?? undefined, latest.revision ?? "");
       const applyState = routingApplyState(saved, snapshot.phase, snapshot.mode);
       setQuickRuleOpen(false);
       const savedRule = `${matchTypeLabel(quickRule.matchType)} ${item.rule.value} ${text("已指向", "now uses ")}${outboundLabel(quickRuleOutbound, latest.outbounds ?? [])}`;
@@ -466,7 +479,7 @@ export function ConnectionsPage({
     } finally {
       setQuickRuleSaving(false);
     }
-  }, [matchTypeLabel, notify, outboundLabel, quickRule, quickRuleOutbound, quickRuleSaving, snapshot.mode, snapshot.phase, text]);
+  }, [matchTypeLabel, notify, outboundLabel, quickRule, quickRuleOutbound, quickRulePreview, quickRuleSaving, snapshot.mode, snapshot.phase, text]);
 
   const engineRunning = snapshot.phase === "running";
   const hasViewFilter = query.trim().length > 0 || outboundFilter !== "all" || groupedByAdapter;

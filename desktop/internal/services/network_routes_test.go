@@ -70,9 +70,12 @@ func TestNetworkRouteTakeoverScenarios(t *testing.T) {
 				PrivilegeBrokerAvailable: true, WFPReady: true, DefaultRouteAliases: aliases, NetworkRisks: risks,
 			})
 			snapshot, err := service.Preflight([]string{"ethernet"})
-			wantReady := len(tc.want) == 0 || reflect.DeepEqual(tc.want, []string{"HypoMux-Tun"})
-			if err != nil || snapshot.Ready != wantReady {
+			if err != nil || !snapshot.Ready {
 				t.Fatalf("ready=%t err=%v issues=%+v", snapshot.Ready, err, snapshot.Issues)
+			}
+			wantForeign := len(tc.want) > 0 && !reflect.DeepEqual(tc.want, []string{"HypoMux-Tun"})
+			if hasTunIssue(snapshot, "foreign_tun") != wantForeign {
+				t.Fatalf("lost route overlap advisory: %+v", snapshot.Issues)
 			}
 		})
 	}

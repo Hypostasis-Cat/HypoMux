@@ -62,7 +62,7 @@ func TestDuplicateAdapterSourcesAreActionable(t *testing.T) {
 	}
 }
 
-func TestPreflightEnvironmentIsInformationalButConflictsStillBlock(t *testing.T) {
+func TestPreflightEnvironmentAllowsStartButInvalidSourcesStillBlock(t *testing.T) {
 	platform := tunPlatformSnapshot{PrivilegeBrokerAvailable: true, WFPReady: true,
 		RouteScanError: "timeout", NetworkRisks: []string{"Hyper-V virtual adapter", "ICS running"}}
 	s := testTunService(t, platform)
@@ -78,8 +78,8 @@ func TestPreflightEnvironmentIsInformationalButConflictsStillBlock(t *testing.T)
 	platform.DefaultRouteAliases = []string{"Clash"}
 	s.inspectPlatform = func(bool) tunPlatformSnapshot { return platform }
 	snapshot, _ = s.Preflight([]string{"ethernet"})
-	if snapshot.Ready || !hasTunIssue(snapshot, "foreign_tun") {
-		t.Fatal("partial scan hid a real conflict")
+	if !snapshot.Ready || !hasTunIssue(snapshot, "foreign_tun") {
+		t.Fatal("route overlap should be visible without vetoing startup")
 	}
 	s.listAdapters = func() ([]AdapterView, error) {
 		return []AdapterView{

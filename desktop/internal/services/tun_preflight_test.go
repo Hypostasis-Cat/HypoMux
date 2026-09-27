@@ -157,7 +157,7 @@ func TestTunPreflightTreatsSharedGatewayAsInformational(t *testing.T) {
 	}
 }
 
-func TestTunPreflightElevatedHostWarnsWithoutBlocking(t *testing.T) {
+func TestTunPreflightElevatedHostIsInformationalWithoutConfirmation(t *testing.T) {
 	service := testTunService(t, tunPlatformSnapshot{
 		HostElevated:             true,
 		PrivilegeBrokerAvailable: true,
@@ -175,13 +175,33 @@ func TestTunPreflightElevatedHostWarnsWithoutBlocking(t *testing.T) {
 		if issue.Code != "elevated_ui_host" {
 			t.Fatalf("unexpected elevated compatibility issue: %+v", issue)
 		}
-		if issue.Level != "warning" {
-			t.Fatalf("elevated UI issue must be a warning, got %+v", issue)
+		if issue.Level != "info" {
+			t.Fatalf("supported elevated compatibility mode must not require startup confirmation, got %+v", issue)
 		}
 	}
 	if !hasTunIssue(snapshot, "elevated_ui_host") {
-		t.Fatalf("missing elevated compatibility warning: %+v", snapshot.Issues)
+		t.Fatalf("missing elevated compatibility diagnostic: %+v", snapshot.Issues)
 	}
+}
+
+func TestTunPreflightElevatedCompatibilityDoesNotMuteOtherRisks(t *testing.T) {
+	service := testTunService(t, tunPlatformSnapshot{
+		HostElevated: true, PrivilegeBrokerAvailable: true, WFPReady: true,
+		DefaultRouteAliases: []string{"Other VPN"},
+	})
+	snapshot, err := service.Preflight([]string{"ethernet"})
+	if err != nil || !snapshot.Ready {
+		t.Fatalf("unexpected preflight failure: %+v %v", snapshot, err)
+	}
+	for _, issue := range snapshot.Issues {
+		if issue.Code == "foreign_tun" {
+			if issue.Level != "warning" {
+				t.Fatalf("compatibility mode suppressed unrelated routing warning: %+v", issue)
+			}
+			return
+		}
+	}
+	t.Fatal("missing unrelated routing warning")
 }
 
 func TestTunPreflightElevatedHostStillRequiresCoreChannel(t *testing.T) {
@@ -196,6 +216,9 @@ func TestTunPreflightElevatedHostStillRequiresCoreChannel(t *testing.T) {
 	}
 	if snapshot.Ready {
 		t.Fatalf("missing Core channel was ignored: %+v", snapshot)
+	}
+	if firstTunBlocker(snapshot) == nil {
+		t.Fatal("elevated compatibility must not bypass missing Core channel")
 	}
 	if !hasTunIssue(snapshot, "elevated_ui_host") || !hasTunIssue(snapshot, "privilege_broker_unavailable") {
 		t.Fatalf("unexpected elevated Core-channel evidence: %+v", snapshot.Issues)

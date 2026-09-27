@@ -106,9 +106,9 @@ const previewTunPreflight = (selected: AdapterView[]): TunPreflightSnapshot => {
   const issues = [
     ...(foreign ? [{
       code: "foreign_tun",
-      level: "blocker",
+      level: "warning",
       title: "第三方虚拟隧道正在接管默认路由",
-      detail: "检测到 Clash。请先关闭对应代理或 VPN，再启动虚拟网卡模式。",
+      detail: "检测到 Clash。路由重叠不代表一定无法共存，仍可继续启动；若实际无法联网，请停止 HypoMux 或调整隧道路由。",
     }] : []),
     ...(selected.length > 1 ? [{
       code: "shared_lan_gateway",
@@ -118,7 +118,7 @@ const previewTunPreflight = (selected: AdapterView[]): TunPreflightSnapshot => {
     }] : []),
   ];
   return {
-    ready: !foreign,
+    ready: true,
     checked_at: new Date().toISOString(),
     selected_adapter_ids: selected.map((adapter) => adapter.id),
     host_elevated: false,

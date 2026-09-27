@@ -166,10 +166,13 @@ func (s *TunService) evaluateSelected(selected []AdapterView, reusableForStartup
 		))
 	}
 	if platform.HostElevated {
-		snapshot.Issues = append(snapshot.Issues, tunWarning(
+		// A verified standard token may not exist (for example on UAC-disabled
+		// systems). The supported compatibility mode is diagnostic context, not
+		// an actionable risk requiring confirmation on every TUN start.
+		snapshot.Issues = append(snapshot.Issues, tunInfo(
 			"elevated_ui_host",
-			"桌面界面正在管理员权限下运行",
-			"HypoMux 已进入管理员兼容模式，系统代理与 TUN 仍可使用。建议下次使用普通权限启动；高权限网络操作仍由独立聚合核心承接。",
+			"桌面界面使用管理员兼容模式",
+			"当前以管理员权限运行桌面界面。此状态本身不影响 TUN 启动，无需重复确认；高权限网络操作仍由独立聚合核心处理。",
 		))
 	}
 	if !platform.PrivilegeBrokerAvailable {
@@ -191,9 +194,9 @@ func (s *TunService) evaluateSelected(selected []AdapterView, reusableForStartup
 			))
 		} else if snapshot.ForeignTUN == "" {
 			snapshot.ForeignTUN = clean
-			snapshot.Issues = append(snapshot.Issues, tunBlocker(
+			snapshot.Issues = append(snapshot.Issues, tunWarning(
 				"foreign_tun", "第三方虚拟隧道正在接管大范围网络路由",
-				fmt.Sprintf("检测到 %s。请先关闭对应代理或 VPN，再启动虚拟网卡模式。", clean),
+				fmt.Sprintf("检测到 %s。路由重叠不代表一定无法共存，仍可继续启动；若实际无法联网，可停止 HypoMux 或调整对应隧道的路由。", clean),
 			))
 		}
 	}
@@ -227,6 +230,17 @@ func (s *TunService) evaluateSelected(selected []AdapterView, reusableForStartup
 			"shared_lan_gateway", "所选网卡共用子网和默认网关", detail+"；允许继续，但 Windows 无法保证独立出口或带宽聚合。",
 		))
 	}
+	if settings.ForceTUNBypass {
+		// Environmental heuristics never veto an explicitly forced start.
+		// Keep actual prerequisites (files, usable adapters, elevation) intact.
+		for i := range snapshot.Issues {
+			if snapshot.Issues[i].Level == "warning" {
+				snapshot.Issues[i].Level = "info"
+			}
+		}
+		snapshot.Issues = append(snapshot.Issues, tunInfo("force_start", "强制启动已开启",
+			"跳过启动前 DNS 联网验证、启动后联网探测及运行期联网探测；网络可用性请以实际访问为准。"))
+	}
 	snapshot.Ready = true
 	for _, issue := range snapshot.Issues {
 		if issue.Level == "blocker" {
@@ -239,7 +253,7 @@ func (s *TunService) evaluateSelected(selected []AdapterView, reusableForStartup
 	if reusableForStartup {
 		s.startupCache = startupPreflightCache{
 			key: tunPreflightCacheKey(
-				selected, settings.StrictRoute, rememberedWFPFailure, rememberedWFPDetail,
+				selected, settings.StrictRoute, settings.ForceTUNBypass, rememberedWFPFailure, rememberedWFPDetail,
 			),
 			checkedAt: snapshot.CheckedAt,
 			snapshot:  cloneTunPreflight(snapshot),
@@ -259,7 +273,7 @@ func (s *TunService) consumeRecentPreflight(selected []AdapterView) (TunPrefligh
 	settings := s.settings.Get()
 	rememberedWFPFailure, rememberedWFPDetail := s.settings.rememberedWFPCompatibilityFailure()
 	key := tunPreflightCacheKey(
-		selected, settings.StrictRoute, rememberedWFPFailure, rememberedWFPDetail,
+		selected, settings.StrictRoute, settings.ForceTUNBypass, rememberedWFPFailure, rememberedWFPDetail,
 	)
 	now := s.now().UTC()
 	s.mu.Lock()
@@ -276,6 +290,7 @@ func (s *TunService) consumeRecentPreflight(selected []AdapterView) (TunPrefligh
 func tunPreflightCacheKey(
 	selected []AdapterView,
 	strictRoute bool,
+	forceStart bool,
 	rememberedWFPFailure bool,
 	rememberedWFPDetail string,
 ) string {
@@ -283,8 +298,8 @@ func tunPreflightCacheKey(
 	sort.Slice(adapters, func(i, j int) bool { return adapters[i].ID < adapters[j].ID })
 	parts := make([]string, 0, len(adapters)+1)
 	parts = append(parts, fmt.Sprintf(
-		"strict=%t|remembered=%t|detail=%s",
-		strictRoute, rememberedWFPFailure, strings.TrimSpace(rememberedWFPDetail),
+		"strict=%t|force=%t|remembered=%t|detail=%s",
+		strictRoute, forceStart, rememberedWFPFailure, strings.TrimSpace(rememberedWFPDetail),
 	))
 	for _, adapter := range adapters {
 		parts = append(parts, fmt.Sprintf(
