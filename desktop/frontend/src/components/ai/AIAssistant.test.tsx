@@ -20,6 +20,53 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.useRealTimers(); });
 
 describe("AI assistant", () => {
+  it("keeps an unconfigured form editable while fetching and ignores outdated results", async () => {
+    mocks.config.mockResolvedValue({ protocol: "openai", base_url: "https://api.openai.com/v1", model: "", has_key: false });
+    let resolve!: (models: Array<{ id: string; name: string }>) => void;
+    mocks.models.mockReturnValueOnce(new Promise(done => { resolve = done; }));
+    render(<AIAssistant open onOpenChange={vi.fn()} />);
+    await waitFor(() => expect(mocks.config).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole("tab", { name: "Model" }));
+    fireEvent.click(screen.getByRole("button", { name: "Fetch models" }));
+    expect((screen.getByRole("button", { name: "Fetching models…" }) as HTMLButtonElement).disabled).toBe(true);
+    for (const label of ["API Base URL", "API Key", "Model ID", "API protocol", "Authentication"]) {
+      expect((screen.getByLabelText(label) as HTMLInputElement).disabled).toBe(false);
+    }
+    expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.change(screen.getByLabelText("API Base URL"), { target: { value: "http://localhost:11434/v1" } });
+    mocks.models.mockResolvedValueOnce([{ id: "local-model", name: "Local model" }]);
+    fireEvent.click(screen.getByRole("button", { name: "Fetch models" }));
+    await screen.findByText("Loaded 1 models. Search and select above.");
+    await act(async () => { resolve([{ id: "old-model", name: "Old model" }]); });
+    fireEvent.click(screen.getByRole("combobox", { name: "Model ID" }));
+    expect(await screen.findByRole("option", { name: /Local model/ })).toBeTruthy();
+    expect(screen.queryByRole("option", { name: /Old model/ })).toBeNull();
+    expect(mocks.saveConfig).not.toHaveBeenCalled();
+  });
+  it("recovers from a failed model request and allows retry", async () => {
+    mocks.models.mockRejectedValueOnce(new Error("Invalid API key"));
+    render(<AIAssistant open onOpenChange={vi.fn()} />);
+    await within(screen.getByRole("tabpanel", { name: "Chat" })).findByText("test-model");
+    fireEvent.click(screen.getByRole("tab", { name: "Model" }));
+    fireEvent.click(screen.getByRole("button", { name: "Fetch models" }));
+    expect((await screen.findByRole("alert")).textContent).toBe("Invalid API key");
+    mocks.models.mockResolvedValueOnce([{ id: "retry-model", name: "Retry model" }]);
+    fireEvent.click(screen.getByRole("button", { name: "Fetch models" }));
+    await screen.findByText("Loaded 1 models. Search and select above.");
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+  it("times out a stalled model request without disabling the form", async () => {
+    mocks.models.mockReturnValueOnce(new Promise(() => {}));
+    render(<AIAssistant open onOpenChange={vi.fn()} />);
+    await within(screen.getByRole("tabpanel", { name: "Chat" })).findByText("test-model");
+    vi.useFakeTimers();
+    fireEvent.click(screen.getByRole("tab", { name: "Model" }));
+    fireEvent.click(screen.getByRole("button", { name: "Fetch models" }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(30000); });
+    expect(screen.getByRole("alert").textContent).toContain("Fetching models timed out");
+    expect((screen.getByRole("button", { name: "Fetch models" }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByLabelText("API Key") as HTMLInputElement).disabled).toBe(false);
+  });
   it.each([0, 425])("opens at the latest message after leaving reading position %s", async position => {
     mocks.snapshot.mockResolvedValue({ running: false, entries: [{ id: "history", role: "user", text: "Previous conversation" }], revision: 1, pending: 0 });
     vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(1600);

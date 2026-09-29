@@ -100,8 +100,8 @@ body {
   min-height: 680px;
   color: var(--hm-text-primary);
   background: transparent;
-  user-select: text;
-  -webkit-user-select: text;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 button,
@@ -111,7 +111,10 @@ input {
 
 input,
 textarea,
-[contenteditable="true"] {
+[contenteditable="true"],
+.ai-message,
+.ai-entry pre,
+.ai-markdown {
   user-select: text;
   -webkit-user-select: text;
 }
