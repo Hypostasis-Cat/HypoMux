@@ -83,7 +83,12 @@ func sniffSteamHost(reader *bufio.Reader, client net.Conn, port string) string {
 				}
 				break
 			}
-			n = min(steamSniffLimit+1, max(n+1, reader.Buffered()))
+			if n == steamSniffLimit {
+				break
+			}
+			// Read-ahead may include a body or pipelined requests. Inspect the
+			// bounded prefix before rejecting a header that exceeds the limit.
+			n = min(steamSniffLimit, max(n+1, reader.Buffered()))
 		}
 	}
 	if !steamDownloadHost(host) {

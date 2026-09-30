@@ -724,11 +724,27 @@ func (s *Server) prepareSteamCDN(session *connection, original net.Conn, adapter
 	s.cdn.recognized++
 	generationNow := s.cdn.generation
 	key := cdnKey{adapter.Name, host, port, originalIP}
+	now := s.cdn.now()
 	if s.cdn.enabled && (len(s.cdn.observed) < 512 || !s.cdn.observed[key].IsZero()) {
-		s.cdn.observed[key] = s.cdn.now().Add(2 * time.Minute)
+		s.cdn.observed[key] = now.Add(2 * time.Minute)
 	}
-	if s.cdn.enabled && len(s.cdn.entries) < 512 && s.cdn.entries[key] == nil {
-		s.cdn.entries[key] = &SteamCDNEntry{Adapter: adapter.Name, Domain: host, Port: port, IP: originalIP, Selections: 1, ExpiresAt: time.Now().Add(cdnLifetime)}
+	if s.cdn.enabled {
+		if entry := s.cdn.entries[key]; entry != nil {
+			if !entry.ExpiresAt.After(now) {
+				// A newly connected original can establish a fresh baseline even
+				// while older flows keep its expired record alive. Connecting alone
+				// does not renew its eligibility as a replacement candidate.
+				resetSteamPerformance(entry)
+				entry.Validated = false
+				entry.ProbeBPS = 0
+				entry.ProbedAt = time.Time{}
+				entry.probeAttemptAt = time.Time{}
+				entry.DecisionReason = ""
+				entry.ExpiresAt = now.Add(cdnLifetime)
+			}
+		} else if len(s.cdn.entries) < 512 {
+			s.cdn.entries[key] = &SteamCDNEntry{Adapter: adapter.Name, Domain: host, Port: port, IP: originalIP, Selections: 1, ExpiresAt: now.Add(cdnLifetime)}
+		}
 	}
 	s.cdn.mu.Unlock()
 	s.cdn.note(generationNow, host, adapter.Name, originalIP, "recognized")
