@@ -32,8 +32,16 @@ type appearanceDocument struct {
 }
 
 type AppearanceService struct {
-	mu   sync.Mutex
-	path string
+	mu        sync.Mutex
+	path      string
+	writeFile func(string, []byte, os.FileMode) error
+}
+
+func (s *AppearanceService) write(path string, content []byte) error {
+	if s.writeFile != nil {
+		return s.writeFile(path, content, 0o600)
+	}
+	return atomicWriteFile(path, content, 0o600)
 }
 
 func NewAppearanceService() *AppearanceService {
@@ -61,6 +69,13 @@ func (s *AppearanceService) Save(payload string) (string, error) {
 	}
 	current, _ := s.readDocumentLocked()
 	document := appearanceDocument{Version: 1, Settings: settings}
+	committed := false
+	newBackground := ""
+	defer func() {
+		if !committed && newBackground != "" {
+			_ = os.Remove(newBackground)
+		}
+	}()
 	backgroundSource, _ := settings["backgroundSource"].(string)
 	backgroundURL, _ := settings["localBackgroundUrl"].(string)
 	delete(settings, "localBackgroundUrl")
@@ -73,11 +88,17 @@ func (s *AppearanceService) Save(payload string) (string, error) {
 			}
 			digest := sha256.Sum256(content)
 			document.BackgroundSHA256 = hex.EncodeToString(digest[:])
-			document.BackgroundFile = "background" + extension
+			// Never replace a resource referenced by the current JSON before the
+			// new document commits. A crash can leave an orphan, not a broken old image.
+			document.BackgroundFile = "background-" + document.BackgroundSHA256 + extension
 			backgroundPath := filepath.Join(settingsDirectory(), "appearance", document.BackgroundFile)
 			if current.BackgroundSHA256 != document.BackgroundSHA256 || current.BackgroundFile != document.BackgroundFile {
-				if err := atomicWriteFile(backgroundPath, content, 0o600); err != nil {
+				_, statErr := os.Stat(backgroundPath)
+				if err := s.write(backgroundPath, content); err != nil {
 					return "", fmt.Errorf("保存背景图片失败，请检查配置目录权限：%w", err)
+				}
+				if os.IsNotExist(statErr) {
+					newBackground = backgroundPath
 				}
 			}
 			settings["localBackgroundMime"] = mimeType
@@ -92,10 +113,11 @@ func (s *AppearanceService) Save(payload string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("序列化外观设置失败：%w", err)
 	}
-	if err := atomicWriteFile(s.path, data, 0o600); err != nil {
+	if err := s.write(s.path, data); err != nil {
 		return "", fmt.Errorf("保存外观设置失败：%w", err)
 	}
-	if backgroundSource != "local" && current.BackgroundFile != "" {
+	committed = true
+	if current.BackgroundFile != "" && current.BackgroundFile != document.BackgroundFile {
 		_ = os.Remove(filepath.Join(settingsDirectory(), "appearance", filepath.Base(current.BackgroundFile)))
 	}
 	return s.loadLocked()

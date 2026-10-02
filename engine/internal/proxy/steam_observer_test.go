@@ -340,6 +340,16 @@ func TestSteamObserverProxyAndTUNMetadataThenChunk(t *testing.T) {
 			if string(data) != "ok" {
 				t.Fatal("metadata changed")
 			}
+			if mode == "http" {
+				_ = client.Close()
+				client, e = net.Dial("tcp", endpoint)
+				if e != nil {
+					t.Fatal(e)
+				}
+				defer client.Close()
+				_ = client.SetDeadline(time.Now().Add(3 * time.Second))
+				reader = bufio.NewReader(client)
+			}
 			_, _ = fmt.Fprintf(client, "GET %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n", testSteamChunk, testSteamHost)
 			r, e = http.ReadResponse(reader, nil)
 			if e != nil {

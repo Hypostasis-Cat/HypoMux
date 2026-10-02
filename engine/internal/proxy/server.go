@@ -512,6 +512,22 @@ func (s *Server) dialDirectTCP(ctx context.Context, target string) (net.Conn, er
 }
 
 func (s *Server) relay(clientReader io.Reader, client net.Conn, upstream net.Conn, session *connection) {
+	s.relayTransfers(client, upstream, session,
+		func(writer io.Writer, buffer []byte) error {
+			_, err := io.CopyBuffer(writer, readerOnly{Reader: clientReader}, buffer)
+			return err
+		},
+		func(writer io.Writer, buffer []byte) error {
+			_, err := io.CopyBuffer(writer, readerOnly{Reader: upstream}, buffer)
+			return err
+		})
+}
+
+// HTTP framing and byte tunnels share the same accounting and CDN observation
+// boundary. Transfers may finish at a message boundary rather than TCP EOF.
+func (s *Server) relayTransfers(client net.Conn, upstream net.Conn, session *connection,
+	upload, download func(io.Writer, []byte) error,
+) {
 	if session.cdnObserver == nil {
 		session.cdnObserver = s.newSteamObserver(session)
 	}
@@ -530,10 +546,10 @@ func (s *Server) relay(clientReader io.Reader, client net.Conn, upstream net.Con
 		if session.cdnObserver != nil {
 			writer = steamObserverWriter{Writer: upstream, observer: session.cdnObserver, up: true}
 		}
-		_, _ = io.CopyBuffer(accountingWriter{
+		_ = upload(accountingWriter{
 			Writer: writer,
 			add:    func(amount uint64) { s.registry.AddUp(session, amount) },
-		}, readerOnly{Reader: clientReader}, buffer)
+		}, buffer)
 		closeWrite(upstream)
 	}()
 	go func() {
@@ -565,7 +581,7 @@ func (s *Server) relay(clientReader io.Reader, client net.Conn, upstream net.Con
 		if tracked, ok := upstream.(*leasedConn); ok {
 			writer = performanceWriter{writer: writer, lease: tracked.lease}
 		}
-		_, copyErr := io.CopyBuffer(accountingWriter{
+		copyErr := download(accountingWriter{
 			Writer: writer,
 			add: func(amount uint64) {
 				s.registry.AddDown(session, amount)
@@ -586,7 +602,7 @@ func (s *Server) relay(clientReader io.Reader, client net.Conn, upstream net.Con
 					}
 				}
 			},
-		}, readerOnly{Reader: upstream}, buffer)
+		}, buffer)
 		if session.cdnKey.domain != "" {
 			failed := steamUpstreamFailed(copyErr, clientWriteFailed, session.cdnResponseFailed) && session.cdnTrial
 			s.cdn.accountTransfer(session.cdnKey, session.cdnGeneration, 0, 0, session.cdnTrial, failed)

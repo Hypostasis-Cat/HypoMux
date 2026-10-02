@@ -41,6 +41,7 @@ func main() {
 	if hasArgument(os.Args[1:], "--recover-network") {
 		if err := services.RecoverSystemProxy(); err != nil {
 			log.Printf("recover HypoMux system proxy: %v", err)
+			os.Exit(1)
 		}
 		return
 	}

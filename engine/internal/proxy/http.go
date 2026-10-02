@@ -4,16 +4,22 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"io"
 	"net"
+	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const maxHTTPHeaderBytes = 64 * 1024
+const httpHeaderTimeout = 10 * time.Second
 
 func (s *Server) handleHTTP(reader *bufio.Reader, client net.Conn, session *connection) *Adapter {
+	_ = client.SetReadDeadline(time.Now().Add(httpHeaderTimeout))
 	header, err := readHTTPHeader(reader)
+	_ = client.SetReadDeadline(time.Time{})
 	if err != nil {
 		writeHTTPError(client, "400 Bad Request")
 		return nil
@@ -23,6 +29,23 @@ func (s *Server) handleHTTP(reader *bufio.Reader, client net.Conn, session *conn
 		writeHTTPError(client, "400 Bad Request")
 		return nil
 	}
+	var message *http.Request
+	var messageReader *bufio.Reader
+	if !request.connect {
+		messageReader = bufio.NewReader(io.MultiReader(bytes.NewReader(header), reader))
+		message, err = http.ReadRequest(messageReader)
+		if err != nil {
+			writeHTTPError(client, "400 Bad Request")
+			return nil
+		}
+		defer func() {
+			// Body.Close can drain an unfinished server-side request body. Avoid
+			// waiting for that body after a failed dial or an early response.
+			_ = client.SetReadDeadline(time.Now())
+			_ = message.Body.Close()
+		}()
+		prepareHTTPForwardRequest(message)
+	}
 	upstream, adapter, err := s.connect(session, net.JoinHostPort(request.host, strconv.Itoa(request.port)))
 	if err != nil {
 		writeHTTPError(client, "502 Bad Gateway")
@@ -31,20 +54,15 @@ func (s *Server) handleHTTP(reader *bufio.Reader, client net.Conn, session *conn
 	upstream = s.prepareSteamCDN(session, upstream, adapter, request.host, strconv.Itoa(request.port), steamChunkPath(request.forwardHeader))
 	session.cdnObserver = s.newSteamObserver(session)
 	defer session.cdnObserver.close()
-	if !request.connect {
-		session.cdnObserver.feed(true, request.forwardHeader)
-	}
 	if request.connect {
 		if _, err := client.Write([]byte("HTTP/1.1 200 Connection Established\r\nProxy-Agent: HypoMux\r\n\r\n")); err != nil {
 			_ = upstream.Close()
 			return nil
 		}
-	} else if _, err := upstream.Write(request.forwardHeader); err != nil {
-		_ = upstream.Close()
-		writeHTTPError(client, "502 Bad Gateway")
-		return nil
+		s.relay(reader, client, upstream, session)
+	} else {
+		s.relayHTTP(message, messageReader, client, upstream, session)
 	}
-	s.relay(reader, client, upstream, session)
 	return &adapter
 }
 
@@ -57,17 +75,145 @@ type proxyRequest struct {
 
 func readHTTPHeader(reader *bufio.Reader) ([]byte, error) {
 	var result bytes.Buffer
-	for result.Len() <= maxHTTPHeaderBytes {
-		line, err := reader.ReadBytes('\n')
+	lineStart := 0
+	for {
+		fragment, err := reader.ReadSlice('\n')
+		if len(fragment) > maxHTTPHeaderBytes-result.Len() {
+			return nil, fmt.Errorf("HTTP header exceeds %d bytes", maxHTTPHeaderBytes)
+		}
+		result.Write(fragment)
+		if err == bufio.ErrBufferFull {
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}
-		result.Write(line)
+		line := result.Bytes()[lineStart:]
 		if bytes.Equal(line, []byte("\r\n")) || bytes.Equal(line, []byte("\n")) {
 			return result.Bytes(), nil
 		}
+		lineStart = result.Len()
 	}
-	return nil, fmt.Errorf("HTTP header exceeds %d bytes", maxHTTPHeaderBytes)
+}
+
+func httpUpgrade(header http.Header) bool {
+	if header.Get("Upgrade") == "" {
+		return false
+	}
+	for _, value := range header.Values("Connection") {
+		for _, token := range strings.Split(value, ",") {
+			if strings.EqualFold(strings.TrimSpace(token), "upgrade") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func stripHTTPHopHeaders(header http.Header, upgrade bool) {
+	protocol := header.Get("Upgrade")
+	for _, value := range header.Values("Connection") {
+		for _, token := range strings.Split(value, ",") {
+			header.Del(strings.TrimSpace(token))
+		}
+	}
+	for _, name := range []string{"Connection", "Proxy-Connection", "Proxy-Authorization", "Proxy-Authenticate", "Keep-Alive", "TE", "Trailer", "Transfer-Encoding", "Upgrade"} {
+		header.Del(name)
+	}
+	if upgrade {
+		header.Set("Connection", "Upgrade")
+		header.Set("Upgrade", protocol)
+	}
+}
+
+func prepareHTTPForwardRequest(request *http.Request) {
+	upgrade := httpUpgrade(request.Header)
+	stripHTTPHopHeaders(request.Header, upgrade)
+	request.RequestURI = ""
+	request.URL.Scheme, request.URL.Host = "", ""
+	// One framed request per proxy connection prevents a second authority from
+	// inheriting the first request's upstream or NIC. CONNECT/101 remain tunnels.
+	request.Close = !upgrade
+}
+
+func (s *Server) relayHTTP(request *http.Request, requestReader *bufio.Reader, client, upstream net.Conn, session *connection) {
+	wantsUpgrade := httpUpgrade(request.Header)
+	upgradeDecision := make(chan bool, 1)
+	upstreamReader := bufio.NewReader(upstream)
+	s.relayTransfers(client, upstream, session,
+		func(writer io.Writer, buffer []byte) error {
+			outgoing := *request
+			if request.Body != nil {
+				// Request.Write closes its body internally. Keep cancellation in
+				// our control instead of draining an unfinished client upload.
+				outgoing.Body = io.NopCloser(request.Body)
+			}
+			if err := outgoing.Write(writer); err != nil {
+				_ = client.SetReadDeadline(time.Now())
+				_ = upstream.SetReadDeadline(time.Now())
+				return err
+			}
+			if wantsUpgrade && <-upgradeDecision {
+				_, err := io.CopyBuffer(writer, readerOnly{requestReader}, buffer)
+				return err
+			}
+			return nil
+		},
+		func(writer io.Writer, buffer []byte) error {
+			defer func() {
+				select {
+				case upgradeDecision <- false:
+				default:
+				}
+				// A final response (including an early rejection of an upload)
+				// must not wait for the client to send more request body bytes.
+				_ = client.SetReadDeadline(time.Now())
+				_ = upstream.SetWriteDeadline(time.Now())
+			}()
+			for {
+				header, err := readHTTPHeader(upstreamReader)
+				if err != nil {
+					writeHTTPError(client, "502 Bad Gateway")
+					return err
+				}
+				response, err := http.ReadResponse(bufio.NewReader(io.MultiReader(bytes.NewReader(header), upstreamReader)), request)
+				if err != nil {
+					writeHTTPError(client, "502 Bad Gateway")
+					return err
+				}
+				upgraded := response.StatusCode == http.StatusSwitchingProtocols
+				if upgraded && (!wantsUpgrade || !httpUpgrade(response.Header)) {
+					_ = response.Body.Close()
+					writeHTTPError(client, "502 Bad Gateway")
+					return fmt.Errorf("unexpected HTTP protocol upgrade")
+				}
+				stripHTTPHopHeaders(response.Header, upgraded)
+				final := response.StatusCode >= 200
+				response.Close = final
+				body := response.Body
+				// Response.Write also closes the body before returning an error.
+				// Defer the real close until blocked upstream reads are canceled.
+				response.Body = io.NopCloser(body)
+				err = response.Write(writer)
+				if err != nil {
+					// Closing a partially read body otherwise drains the upstream,
+					// which may wait forever after the client has gone away.
+					_ = upstream.Close()
+				}
+				_ = body.Close()
+				if err != nil {
+					return err
+				}
+				if upgraded {
+					upgradeDecision <- true
+					_, err := io.CopyBuffer(writer, readerOnly{upstreamReader}, buffer)
+					return err
+				}
+				if final {
+					return nil
+				}
+			}
+		})
 }
 
 func parseProxyRequest(header []byte) (proxyRequest, error) {

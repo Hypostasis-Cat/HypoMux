@@ -9,6 +9,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
+	"fmt"
 	"io"
 	"math/big"
 	"net"
@@ -328,7 +329,22 @@ func TestSteamCDNProxyAndTUNRelayFallbackAndDirect(t *testing.T) {
 					return nil, errors.New("candidate unavailable")
 				}
 				a, b := net.Pipe()
-				go func() { defer b.Close(); _, _ = io.Copy(b, b) }()
+				go func() {
+					defer b.Close()
+					if mode == "http" {
+						r, err := http.ReadRequest(bufio.NewReader(b))
+						if err != nil {
+							return
+						}
+						if links := s.scheduler.performanceSnapshot().Links; len(links) != 1 || links[0].Load != 1 {
+							t.Errorf("active HTTP replacement lost or duplicated scheduling load: %+v", links)
+						}
+						body := "GET " + r.URL.RequestURI() + " HTTP/1.1\r\nHost: " + r.Host + "\r\n\r\n"
+						_, _ = fmt.Fprintf(b, "HTTP/1.1 200 OK\r\nContent-Length: %d\r\n\r\n%s", len(body), body)
+						return
+					}
+					_, _ = io.Copy(b, b)
+				}()
 				return cdnRemoteConn{a, target}, nil
 			}
 			endpoints, err := s.Start()
@@ -399,7 +415,16 @@ func TestSteamCDNProxyAndTUNRelayFallbackAndDirect(t *testing.T) {
 				_, _ = io.WriteString(client, payload)
 			}
 			response := make([]byte, len(payload))
-			if _, err := io.ReadFull(client, response); err != nil || string(response) != payload {
+			var responseReader io.Reader = client
+			if mode == "http" {
+				message, err := http.ReadResponse(bufio.NewReader(client), nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer message.Body.Close()
+				responseReader = message.Body
+			}
+			if _, err := io.ReadFull(responseReader, response); err != nil || string(response) != payload {
 				t.Fatal(string(response), err)
 			}
 			mu.Lock()
@@ -418,11 +443,11 @@ func TestSteamCDNProxyAndTUNRelayFallbackAndDirect(t *testing.T) {
 			if mode == "tun-failure" && s.cdn.snapshot().Fallbacks != 1 {
 				t.Fatal("missing fallback")
 			}
-			if mode != "tun-direct" && s.Snapshot(false).Adapters[0].Connections != 1 {
+			if mode != "tun-direct" && ((mode != "http" && s.Snapshot(false).Adapters[0].Connections != 1) || s.Snapshot(false).Adapters[0].Connections > 1) {
 				t.Fatal("replacement double-counted connection")
 			}
 			if mode != "tun-direct" {
-				if links := s.scheduler.performanceSnapshot().Links; len(links) != 1 || links[0].Load != 1 {
+				if links := s.scheduler.performanceSnapshot().Links; len(links) != 1 || (mode != "http" && links[0].Load != 1) || links[0].Load > 1 {
 					t.Fatalf("CDN replacement lost or duplicated scheduling load: %+v", links)
 				}
 			}

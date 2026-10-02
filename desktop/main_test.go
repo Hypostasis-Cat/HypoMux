@@ -4,12 +4,48 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/Hypostasis-Cat/HypoMux/desktop/internal/services"
 )
+
+func TestRecoveryCommandHelper(t *testing.T) {
+	if os.Getenv("HYPOMUX_RECOVERY_TEST_HELPER") == "1" {
+		main()
+	}
+}
+
+func TestRecoveryCommandExitStatus(t *testing.T) {
+	for _, failure := range []bool{false, true} {
+		name := "success"
+		if failure {
+			name = "failure"
+		}
+		t.Run(name, func(t *testing.T) {
+			directory := t.TempDir()
+			if failure {
+				// Reading a directory as a marker fails before any registry access.
+				if err := os.Mkdir(filepath.Join(directory, "proxy-owned"), 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			command := exec.Command(os.Args[0], "-test.run=^TestRecoveryCommandHelper$", "--", "--recover-network")
+			command.Env = append(os.Environ(), "HYPOMUX_RECOVERY_TEST_HELPER=1", "HYPOMUX_DATA_DIR="+directory)
+			output, err := command.CombinedOutput()
+			if failure {
+				if command.ProcessState == nil || command.ProcessState.ExitCode() != 1 || !strings.Contains(string(output), "recover HypoMux system proxy") {
+					t.Fatalf("exit/log mismatch: %v %s", err, output)
+				}
+			} else if err != nil {
+				t.Fatalf("successful recovery failed: %v %s", err, output)
+			}
+		})
+	}
+}
 
 func TestPrivilegeNormalizationPrecedesDesktopSideEffects(t *testing.T) {
 	sourceBytes, err := os.ReadFile("main.go")

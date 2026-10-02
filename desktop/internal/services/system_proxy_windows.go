@@ -16,16 +16,21 @@ import (
 
 const internetSettingsPath = `Software\Microsoft\Windows\CurrentVersion\Internet Settings`
 
+const legacySystemProxyBypass = "<local>;localhost;127.*;10.*;172.16.*;172.17.*;172.18.*;172.19.*;172.2*;172.30.*;172.31.*;192.168.*"
+const systemProxyBypass = "<local>;localhost;127.*;10.*;172.16.*;172.17.*;172.18.*;172.19.*;172.20.*;172.21.*;172.22.*;172.23.*;172.24.*;172.25.*;172.26.*;172.27.*;172.28.*;172.29.*;172.30.*;172.31.*;192.168.*"
+
 type proxySnapshot struct {
-	Version          int    `json:"version,omitempty"`
-	State            string `json:"state,omitempty"`
-	OwnedServer      string `json:"owned_server,omitempty"`
-	HasProxyEnable   bool   `json:"has_proxy_enable"`
-	ProxyEnable      uint64 `json:"proxy_enable"`
-	HasProxyServer   bool   `json:"has_proxy_server"`
-	ProxyServer      string `json:"proxy_server"`
-	HasProxyOverride bool   `json:"has_proxy_override"`
-	ProxyOverride    string `json:"proxy_override"`
+	Version          int                  `json:"version,omitempty"`
+	State            string               `json:"state,omitempty"`
+	OwnedServer      string               `json:"owned_server,omitempty"`
+	OwnedOverride    string               `json:"owned_override,omitempty"`
+	RestoreFrom      *proxyRegistryValues `json:"restore_from,omitempty"`
+	HasProxyEnable   bool                 `json:"has_proxy_enable"`
+	ProxyEnable      uint64               `json:"proxy_enable"`
+	HasProxyServer   bool                 `json:"has_proxy_server"`
+	ProxyServer      string               `json:"proxy_server"`
+	HasProxyOverride bool                 `json:"has_proxy_override"`
+	ProxyOverride    string               `json:"proxy_override"`
 }
 
 func proxyMarkerPath() string {
@@ -43,15 +48,16 @@ func enableSystemProxy(httpPort int, socksPort int) error {
 		return fmt.Errorf("打开 Windows 系统代理设置失败：%w", err)
 	}
 	defer key.Close()
-	enable, _, enableErr := key.GetIntegerValue("ProxyEnable")
-	server, _, serverErr := key.GetStringValue("ProxyServer")
-	override, _, overrideErr := key.GetStringValue("ProxyOverride")
+	original, err := readProxyRegistry(key)
+	if err != nil {
+		return fmt.Errorf("读取原系统代理设置失败：%w", err)
+	}
 	serverValue := fmt.Sprintf("http=127.0.0.1:%d;https=127.0.0.1:%d;socks=127.0.0.1:%d", httpPort, httpPort, socksPort)
 	snapshot := proxySnapshot{
-		Version: 1, State: "prepared", OwnedServer: serverValue,
-		HasProxyEnable: enableErr == nil, ProxyEnable: enable,
-		HasProxyServer: serverErr == nil, ProxyServer: server,
-		HasProxyOverride: overrideErr == nil, ProxyOverride: override,
+		Version: 2, State: "prepared", OwnedServer: serverValue, OwnedOverride: systemProxyBypass,
+		HasProxyEnable: original.HasEnable, ProxyEnable: original.Enable,
+		HasProxyServer: original.HasServer, ProxyServer: original.Server,
+		HasProxyOverride: original.HasOverride, ProxyOverride: original.Override,
 	}
 	data, err := json.Marshal(snapshot)
 	if err != nil {
@@ -66,7 +72,7 @@ func enableSystemProxy(httpPort int, socksPort int) error {
 	if err := key.SetStringValue("ProxyServer", serverValue); err != nil {
 		return fmt.Errorf("写入系统代理地址失败：%w", err)
 	}
-	if err := key.SetStringValue("ProxyOverride", "<local>;localhost;127.*;10.*;172.16.*;172.17.*;172.18.*;172.19.*;172.2*;172.30.*;172.31.*;192.168.*"); err != nil {
+	if err := key.SetStringValue("ProxyOverride", systemProxyBypass); err != nil {
 		return fmt.Errorf("写入系统代理绕过列表失败：%w", err)
 	}
 	if err := notifyProxyChanged(); err != nil {
@@ -114,47 +120,19 @@ func restoreSystemProxyDetailedLocked() (string, error) {
 		return "", fmt.Errorf("打开 Windows 系统代理设置失败：%w", err)
 	}
 	defer key.Close()
-	if snapshot.Version >= 1 && snapshot.State == "active" && snapshot.OwnedServer != "" {
-		currentServer, _, currentErr := key.GetStringValue("ProxyServer")
-		currentEnable, _, enableErr := key.GetIntegerValue("ProxyEnable")
-		if (currentErr == nil && currentServer != snapshot.OwnedServer) || (enableErr == nil && currentEnable != 1) {
-			if removeErr := os.Remove(proxyMarkerPath()); removeErr != nil && !os.IsNotExist(removeErr) {
-				return "", fmt.Errorf("用户已修改系统代理，但清理旧恢复点失败：%w", removeErr)
-			}
-			return "检测到系统代理已由用户或其他软件修改，HypoMux 未覆盖该设置", nil
-		}
+	return restoreProxySnapshot(key, snapshot, proxyRecoveryActions{
+		save:   saveProxySnapshot,
+		notify: notifyProxyChanged,
+		remove: func() error { return os.Remove(proxyMarkerPath()) },
+	})
+}
+
+func saveProxySnapshot(snapshot proxySnapshot) error {
+	data, err := json.Marshal(snapshot)
+	if err != nil {
+		return err
 	}
-	if snapshot.HasProxyEnable {
-		err = key.SetDWordValue("ProxyEnable", uint32(snapshot.ProxyEnable))
-	} else {
-		err = key.DeleteValue("ProxyEnable")
-	}
-	if err != nil && err != registry.ErrNotExist {
-		return "", fmt.Errorf("恢复代理开关失败：%w", err)
-	}
-	if snapshot.HasProxyServer {
-		err = key.SetStringValue("ProxyServer", snapshot.ProxyServer)
-	} else {
-		err = key.DeleteValue("ProxyServer")
-	}
-	if err != nil && err != registry.ErrNotExist {
-		return "", fmt.Errorf("恢复代理地址失败：%w", err)
-	}
-	if snapshot.HasProxyOverride {
-		err = key.SetStringValue("ProxyOverride", snapshot.ProxyOverride)
-	} else {
-		err = key.DeleteValue("ProxyOverride")
-	}
-	if err != nil && err != registry.ErrNotExist {
-		return "", fmt.Errorf("恢复代理绕过列表失败：%w", err)
-	}
-	if err := notifyProxyChanged(); err != nil {
-		return "", err
-	}
-	if err := os.Remove(proxyMarkerPath()); err != nil && !os.IsNotExist(err) {
-		return "", fmt.Errorf("清理代理恢复点失败：%w", err)
-	}
-	return "", nil
+	return atomicWriteFile(proxyMarkerPath(), data, 0o600)
 }
 
 var hypoMuxProxyServerPattern = regexp.MustCompile(`^http=127\.0\.0\.1:[0-9]{1,5};https=127\.0\.0\.1:[0-9]{1,5};socks=127\.0\.0\.1:[0-9]{1,5}$`)
