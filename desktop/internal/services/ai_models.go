@@ -20,8 +20,15 @@ type AIModel struct {
 
 // ListModels uses the form values without saving them or sending chat history.
 func (s *AIService) ListModels(c AIConfig, key string, clearKey bool) ([]AIModel, error) {
+	s.mu.Lock()
+	ctx, finish, err := s.requestLocked(context.Background(), 25*time.Second)
+	s.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	defer finish()
 	c.Model = "model-discovery"
-	c, err := validateAIConfig(c)
+	c, err = validateAIConfig(c)
 	if err != nil {
 		return nil, err
 	}
@@ -36,12 +43,13 @@ func (s *AIService) ListModels(c AIConfig, key string, clearKey bool) ([]AIModel
 	if clearKey {
 		key = ""
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
-	defer cancel()
 	models := []AIModel{}
 	seen := map[string]bool{}
 	cursor := ""
 	for page := 0; page < 20; page++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		endpoint := aiEndpoint(c, "models")
 		if cursor != "" {
 			endpoint += "?after_id=" + url.QueryEscape(cursor)

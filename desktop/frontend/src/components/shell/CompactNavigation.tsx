@@ -19,9 +19,11 @@ export type AppPage = "assistant" | "tools" | "home" | "routing" | "health" | "c
 export function CompactNavigation({
   page,
   onPageChange,
+  aiEnabled = true,
 }: {
   page: AppPage;
   onPageChange: (page: AppPage) => void;
+  aiEnabled?: boolean;
 }) {
   const { locale, t } = useI18n();
   const navigationRef = useRef<HTMLElement>(null);
@@ -60,7 +62,7 @@ export function CompactNavigation({
       resizeObserver.disconnect();
       window.removeEventListener("resize", updateIndicator);
     };
-  }, [navigationPage]);
+  }, [navigationPage, aiEnabled]);
 
   return (
     <nav ref={navigationRef} className="compact-navigation" aria-label={locale === "en" ? "Main navigation" : "主导航"}
@@ -81,7 +83,7 @@ export function CompactNavigation({
         aria-hidden="true"
       />
       <div className="nav-items">
-        {mainItems.map((item) => {
+        {mainItems.filter(item => item.id !== "assistant" || aiEnabled).map((item) => {
           const active = item.id === navigationPage;
           return (
             <Tooltip

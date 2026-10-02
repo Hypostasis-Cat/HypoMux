@@ -34,6 +34,7 @@ import { SettingsSaveQueue, type SaveOutcome } from "../platform/settingsQueue";
 import { adapterListKey } from "../state/adapterRuntime";
 import { SYSTEM_PROXY_TAKEOVER_EVENT } from "../state/systemProxyTakeover";
 import { ADAPTER_VISIBILITY_EVENT } from "../state/adapterVisibility";
+import { publishAIAvailability } from "../state/aiAvailability";
 import { accentColours } from "../theme/appearance.presets";
 import { useAppearance } from "../theme/appearance.store";
 import { backgroundService } from "../theme/background.service";
@@ -42,6 +43,7 @@ import type { AccentPreset, AppearanceMode, MotionMode, PanelMaterial, WindowMat
 import { useI18n } from "../i18n/i18n";
 
 const emptySettings: CompleteAppSettings = {
+  ai_enabled: true,
   steam_cdn_enabled: false,
   mode: "tun",
   language: "zh",
@@ -253,12 +255,12 @@ export function SettingsPage({
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
   }, [networkDirty]);
-  const { preferences: companionPreferences, loaded: companionLoaded } = useSkins();
   const [savingCompanion, setSavingCompanion] = useState(false);
   const [adapters, setAdapters] = useState<AdapterView[]>([]);
   const [configPath, setConfigPath] = useState("");
   const [loading, setLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
+  const { preferences: companionPreferences, loaded: companionLoaded } = useSkins(!loading && !loadFailed && settings.ai_enabled !== false);
   const [loadRevision, setLoadRevision] = useState(0);
   const [saving, setSaving] = useState(false);
   const [wfpStatus, setWfpStatus] = useState("");
@@ -376,7 +378,10 @@ export function SettingsPage({
     ])
       .then(([loaded, path, migrationStatus, loadedAdapters]) => {
         if (cancelled) return;
-        if (revision === settingsRevision.current) setSettings(current => saveQueue.mergeAuthoritative({ ...emptySettings, ...loaded }, current));
+        if (revision === settingsRevision.current) {
+          setSettings(current => saveQueue.mergeAuthoritative({ ...emptySettings, ...loaded }, current));
+          publishAIAvailability(loaded.ai_enabled !== false);
+        }
         setConfigPath(path);
         setMigration(migrationStatus);
         setAdapters(adapterRuntimeRef.current !== undefined ? [...adapterRuntimeRef.current] : loadedAdapters ?? []);
@@ -402,11 +407,13 @@ export function SettingsPage({
       setSaving(true);
       try {
         const persisted = await appServices.settings.update(next, fields);
+        publishAIAvailability(persisted.ai_enabled !== false);
         setLocale(persisted.language);
         notify(t("infobar_success"), success ?? text("设置已保存", "Settings saved"));
         return { ok: true as const, value: true, authoritative: persisted };
       } catch (error) {
         const restored = await appServices.settings.get().catch(() => settings);
+        publishAIAvailability(restored.ai_enabled !== false);
         setLocale(restored.language);
         notify(text("保存失败", "Save failed"), String(error), "error");
         return {
@@ -547,6 +554,7 @@ export function SettingsPage({
         const next = migrationDialog === "migrate"
           ? await appServices.settings.migrateLegacy()
           : await appServices.settings.rollbackLegacy();
+        publishAIAvailability(next.ai_enabled !== false);
         setLocale(next.language);
         setMigration(await appServices.settings.migrationStatus());
         notify(
@@ -585,7 +593,7 @@ export function SettingsPage({
           )}</p>
         </div>
         <div className="settings-save-feedback">
-          <Button onClick={() => window.dispatchEvent(new Event("hypomux:ai-settings"))}>{text("AI 助手设置", "AI assistant settings")}</Button>
+          {!loading && !loadFailed && settings.ai_enabled !== false && <Button onClick={() => window.dispatchEvent(new Event("hypomux:ai-settings"))}>{text("AI 助手设置", "AI assistant settings")}</Button>}
           <span key={loading ? "loading" : loadFailed ? "error" : saving ? "saving" : networkDirty ? "dirty" : "synced"} className="save-state motion-inline-swap" data-error={loadFailed || undefined} role="status" aria-live="polite">{loading
             ? text("正在读取…", "Loading…")
             : loadFailed
@@ -620,7 +628,12 @@ export function SettingsPage({
       <div className="settings-layout">
         <GlassSurface className="settings-section" id="settings-personalization">
           <h2>{t("settings_personalization")}</h2>
-          <SettingRow title={text("显示 AI 小精灵", "Show AI companion")}
+          <SettingRow title={text("启用 AI 功能", "Enable AI features")}
+            description={text("关闭后停用 AI 对话和工具操作、断开外部 AI 连接，并隐藏左侧 AI 入口和小 Mux。模型配置与历史记录会保留；已执行的修改不会撤销。", "Turn off AI chat and tool actions, disconnect external AI access, and hide the AI sidebar entry and Mux. Model settings and history are kept; completed changes are not undone.")}>
+            <SettingSwitch checked={settings.ai_enabled !== false} disabled={loading || loadFailed || saving}
+              onChange={enabled => void patchAndSave({ ai_enabled: enabled })} />
+          </SettingRow>
+          {!loading && !loadFailed && settings.ai_enabled !== false && <SettingRow title={text("显示 AI 小精灵", "Show AI companion")}
             description={text("在页面角落显示小精灵。隐藏后仍可从侧栏打开 AI 助手。", "Show the companion in the corner. You can still open AI Assistant from the sidebar when hidden.")}>
             <SettingSwitch checked={companionPreferences.visible !== false} disabled={!companionLoaded || savingCompanion}
               onChange={(visible) => {
@@ -629,7 +642,7 @@ export function SettingsPage({
                   notify(text("无法保存小精灵设置", "Unable to save companion preference"), String(error), "error");
                 }).finally(() => setSavingCompanion(false));
               }} />
-          </SettingRow>
+          </SettingRow>}
           <SettingRow title={t("settings_theme")} description={t("settings_theme_hint")}>
             <SettingTabs
               selectedValue={appearance.mode}

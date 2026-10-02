@@ -6,6 +6,7 @@ import { defaultAppearance } from "../theme/appearance.presets";
 import { ToolsPage } from "./ToolsPage";
 import { SettingsPage } from "./SettingsPage";
 import { PageActivity } from "../components/shell/PageActivity";
+import { AI_AVAILABILITY_EVENT } from "../state/aiAvailability";
 
 const mocks = vi.hoisted(() => ({
   get: vi.fn(),
@@ -73,6 +74,58 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+});
+
+it("persists the global AI switch and removes AI settings and companion controls", async () => {
+  const changed = vi.fn();
+  window.addEventListener(AI_AVAILABILITY_EVENT, changed);
+  try {
+    render(<SettingsPage adapterRuntime={[]} onOpenBlockedDomains={() => {}} />);
+    await screen.findByText("Settings synced");
+    expect(screen.getByRole("button", { name: "AI assistant settings" })).toBeTruthy();
+    const toggle = screen.getByRole("switch", { name: "Enable AI features" }) as HTMLInputElement;
+    expect(toggle.checked).toBe(true);
+    fireEvent.click(toggle);
+    await waitFor(() => expect(mocks.update).toHaveBeenCalledWith(expect.objectContaining({ ai_enabled: false }), ["ai_enabled"]));
+    await waitFor(() => expect(changed.mock.calls.some(([event]) => event.detail === false)).toBe(true));
+    expect(toggle.checked).toBe(false);
+    expect(screen.queryByRole("button", { name: "AI assistant settings" })).toBeNull();
+    expect(screen.queryByRole("switch", { name: "Show AI companion" })).toBeNull();
+    fireEvent.click(toggle);
+    await waitFor(() => expect(mocks.update).toHaveBeenLastCalledWith(expect.objectContaining({ ai_enabled: true }), ["ai_enabled"]));
+    expect(await screen.findByRole("button", { name: "AI assistant settings" })).toBeTruthy();
+  } finally { window.removeEventListener(AI_AVAILABILITY_EVENT, changed); }
+});
+
+it("publishes AI changes only after save succeeds and restores failed saves", async () => {
+  let reject!: (error: Error) => void;
+  mocks.update.mockReturnValue(new Promise((_, fail) => { reject = fail; }));
+  const changed = vi.fn();
+  window.addEventListener(AI_AVAILABILITY_EVENT, changed);
+  try {
+    render(<SettingsPage adapterRuntime={[]} onOpenBlockedDomains={() => {}} />);
+    await screen.findByText("Settings synced");
+    changed.mockClear();
+    const toggle = screen.getByRole("switch", { name: "Enable AI features" }) as HTMLInputElement;
+    fireEvent.click(toggle);
+    await waitFor(() => expect(mocks.update).toHaveBeenCalled());
+    expect(toggle.disabled).toBe(true);
+    expect(changed).not.toHaveBeenCalled();
+    await act(async () => reject(new Error("disk full")));
+    await waitFor(() => expect(toggle.checked).toBe(true));
+    expect(changed.mock.calls.every(([event]) => event.detail === true)).toBe(true);
+    expect(screen.getByRole("button", { name: "AI assistant settings" })).toBeTruthy();
+  } finally { window.removeEventListener(AI_AVAILABILITY_EVENT, changed); }
+});
+
+it("loads persisted AI opt-out and exposes the switch in Chinese", async () => {
+  mocks.locale = "zh";
+  mocks.get.mockResolvedValue({ ...initial, ai_enabled: false });
+  render(<SettingsPage adapterRuntime={[]} onOpenBlockedDomains={() => {}} />);
+  await screen.findByText("配置已同步");
+  expect((screen.getByRole("switch", { name: "启用 AI 功能" }) as HTMLInputElement).checked).toBe(false);
+  expect(screen.queryByRole("button", { name: "AI 助手设置" })).toBeNull();
+  expect(screen.queryByRole("switch", { name: "显示 AI 小精灵" })).toBeNull();
 });
 
 describe("TUN settings", () => {

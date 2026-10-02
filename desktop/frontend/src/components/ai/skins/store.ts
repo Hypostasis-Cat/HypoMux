@@ -45,9 +45,9 @@ export async function loadSkins() {
   } catch (error) { publish({ ...snapshot, loaded: true, error: `Cannot access skin storage / 无法访问皮肤存储: ${String(error)}` }); }
 }
 let initialLoad: Promise<void> | undefined;
-export function useSkins() {
+export function useSkins(enabled = true) {
   const state = useSyncExternalStore(callback => { listeners.add(callback); return () => { listeners.delete(callback); }; }, () => snapshot);
-  useEffect(() => { initialLoad ??= loadSkins(); }, []);
+  useEffect(() => { if (enabled) initialLoad ??= loadSkins(); }, [enabled]);
   return state;
 }
 let queue = Promise.resolve();

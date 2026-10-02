@@ -98,6 +98,9 @@ func (s *AIService) SaveConfig(c AIConfig, key string, clearKey bool) (AIConfig,
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.availableLocked(); err != nil {
+		return c, err
+	}
 	if s.state.Running {
 		return c, errors.New("请先停止当前对话任务")
 	}

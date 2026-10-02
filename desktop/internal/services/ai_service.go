@@ -43,6 +43,9 @@ type AIService struct {
 	approvals   map[string]aiApproval
 	cancel      context.CancelFunc
 	closed      bool
+	disabled    bool
+	requestID   uint64
+	requests    map[uint64]context.CancelFunc
 	activeTools int
 	settings    *SettingsService
 	adapters    *AdapterService
@@ -73,6 +76,7 @@ func NewAIService(settings *SettingsService, adapters *AdapterService, engine *E
 			}
 		}
 	}
+	s.bindSettings()
 	return s
 }
 func aiID() string {
@@ -152,6 +156,9 @@ func limitAIText(text string) string {
 func (s *AIService) ClearHistory() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.availableLocked(); err != nil {
+		return err
+	}
 	if s.state.Running || len(s.approvals) > 0 || s.activeTools > 0 {
 		return errors.New("请先结束当前任务")
 	}
@@ -174,6 +181,10 @@ func (s *AIService) SendWithContext(text, pageContext string) error {
 		return errors.New("请输入 1–12000 字节的消息")
 	}
 	s.mu.Lock()
+	if err := s.availableLocked(); err != nil {
+		s.mu.Unlock()
+		return err
+	}
 	if s.closed || s.state.Running {
 		s.mu.Unlock()
 		return errors.New("助手正在执行任务，请稍后或停止后续操作")
@@ -198,15 +209,19 @@ func (s *AIService) SendWithContext(text, pageContext string) error {
 	for len(history) > 0 && history[0].Role != "user" {
 		history = history[1:]
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-	s.cancel = cancel
+	ctx, finish, err := s.requestLocked(context.Background(), 10*time.Minute)
+	if err != nil {
+		s.mu.Unlock()
+		return err
+	}
+	s.cancel = s.requests[s.requestID]
 	s.state.Running = true
 	s.state.Error = ""
 	s.mu.Unlock()
 	s.addEntry(AIEntry{Role: "user", Text: text, Context: pageContext, Source: "assistant"})
 	history = append(history, aiMessage{Role: "user", Content: aiContextMessage(text, pageContext)})
 	go func() {
-		defer cancel()
+		defer finish()
 		defer func() { s.mu.Lock(); s.state.Running = false; s.cancel = nil; s.mu.Unlock() }()
 		err := s.run(ctx, config, history)
 		if err != nil {
@@ -237,6 +252,9 @@ func (s *AIService) run(ctx context.Context, c aiStoredConfig, messages []aiMess
 		}
 		message, err := s.complete(ctx, c, messages, aiTools(), false)
 		if err != nil {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
 			return err
 		}
 		messages = append(messages, message)
@@ -270,6 +288,9 @@ func (s *AIService) Cancel() {
 func (s *AIService) Decide(id string, allow bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.availableLocked(); err != nil {
+		return err
+	}
 	p, ok := s.approvals[id]
 	if !ok {
 		return errors.New("该操作已过期或已处理")
@@ -281,9 +302,13 @@ func (s *AIService) Decide(id string, allow bool) error {
 func (s *AIService) approve(ctx context.Context, id string) error {
 	p := aiApproval{reply: make(chan bool, 1)}
 	s.mu.Lock()
-	if s.closed {
+	if err := s.availableLocked(); err != nil {
 		s.mu.Unlock()
-		return errors.New("应用正在退出")
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		s.mu.Unlock()
+		return err
 	}
 	s.approvals[id] = p
 	s.mu.Unlock()
@@ -300,19 +325,25 @@ func (s *AIService) approve(ctx context.Context, id string) error {
 }
 func (s *AIService) TestConnection() (string, error) {
 	s.mu.Lock()
+	ctx, finish, err := s.requestLocked(context.Background(), 45*time.Second)
 	c := s.config
 	s.mu.Unlock()
+	if err != nil {
+		return "", err
+	}
+	defer finish()
 	if _, err := validateAIConfig(c.Config); err != nil {
 		return "", err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
-	defer cancel()
 	tool := aiTool{Name: "connection_test", Description: "Return the nonce unchanged. Does not access the computer.", Schema: map[string]any{"type": "object", "properties": map[string]any{"nonce": map[string]any{"type": "string"}}, "required": []string{"nonce"}, "additionalProperties": false}}
 	nonce := aiID()
 	// Test the same automatic tool mode used by real conversations. Some reasoning
 	// providers support tools but reject forced tool_choice while thinking is on.
 	m, err := s.complete(ctx, c, []aiMessage{{Role: "user", Content: "Call connection_test with nonce " + nonce}}, []aiTool{tool}, false)
 	if err != nil {
+		return "", err
+	}
+	if err := ctx.Err(); err != nil {
 		return "", err
 	}
 	if len(m.Calls) != 1 || m.Calls[0].Function.Name != tool.Name {
@@ -328,24 +359,19 @@ func (s *AIService) TestConnection() (string, error) {
 }
 func (s *AIService) Shutdown() {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.closed = true
-	if s.cancel != nil {
-		s.cancel()
-	}
-	for id, p := range s.approvals {
-		delete(s.approvals, id)
-		p.reply <- false
-	}
-	m := s.mcp
-	s.mcp = nil
-	s.mu.Unlock()
-	if m != nil {
-		m.cancel()
-		_ = m.server.Close()
-	}
+	s.stopLocked()
 }
 
 func (s *AIService) invoke(ctx context.Context, source, name string, args json.RawMessage) (any, error) {
+	s.mu.Lock()
+	ctx, finish, err := s.requestLocked(ctx, 3*time.Minute)
+	s.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	defer finish()
 	tool, ok := findAITool(name)
 	if !ok {
 		return nil, fmt.Errorf("未知工具 %s", name)
@@ -355,13 +381,13 @@ func (s *AIService) invoke(ctx context.Context, source, name string, args json.R
 		return nil, err
 	}
 	s.mu.Lock()
-	closed := s.closed
-	if !closed {
+	availabilityErr := s.availableLocked()
+	if availabilityErr == nil {
 		s.activeTools++
 	}
 	s.mu.Unlock()
-	if closed {
-		return nil, errors.New("应用正在退出")
+	if availabilityErr != nil {
+		return nil, availabilityErr
 	}
 	defer func() { s.mu.Lock(); s.activeTools--; s.mu.Unlock() }()
 	id := s.addEntry(AIEntry{Role: "tool", Tool: name, Arguments: string(args), State: "running", Text: tool.Description, Source: source})
@@ -384,6 +410,11 @@ func (s *AIService) invoke(ctx context.Context, source, name string, args json.R
 			return nil, err
 		}
 	}
+	// Disabling AI waits for an already executing native operation to finish.
+	// New and queued tools recheck cancellation behind the availability gate.
+	// Lock order is execution -> settings; never wait here holding s.mu.
+	s.settings.aiExecution.RLock()
+	defer s.settings.aiExecution.RUnlock()
 	if err = ctx.Err(); err != nil {
 		s.updateEntry(id, "cancelled", safeAIError(err))
 		return nil, err

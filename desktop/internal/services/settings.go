@@ -21,6 +21,7 @@ const (
 )
 
 type AppSettings struct {
+	AIEnabled           bool                  `json:"ai_enabled"`
 	RoutingMatchOrder   []string              `json:"routing_match_order,omitempty"`
 	SteamCDNEnabled     bool                  `json:"steam_cdn_enabled"`
 	Mode                string                `json:"mode"`
@@ -60,6 +61,7 @@ type WFPCompatibilityState struct {
 
 func DefaultSettings() AppSettings {
 	return AppSettings{
+		AIEnabled:           true,
 		Mode:                "tun",
 		Language:            "zh",
 		UpdateChannel:       "stable",
@@ -81,7 +83,10 @@ func DefaultSettings() AppSettings {
 }
 
 type SettingsService struct {
-	mu               sync.RWMutex
+	mu sync.RWMutex
+	// Tool execution takes a read lease; changing AI availability takes the
+	// write lease before mu so no tool can start after a disable commit.
+	aiExecution      sync.RWMutex
 	path             string
 	settings         AppSettings
 	migration        ConfigMigrationStatus
@@ -89,6 +94,8 @@ type SettingsService struct {
 	loadErrorPath    string
 	setAutostart     func(bool) error
 	autostartEnabled func() (bool, error)
+	// Called under mu after a successful commit; must not call settings methods.
+	aiEnabledChanged func(bool)
 }
 
 type ConfigMigrationStatus struct {
@@ -174,6 +181,8 @@ func (s *SettingsService) MigrationStatus() ConfigMigrationStatus {
 }
 
 func (s *SettingsService) MigrateLegacy() (AppSettings, error) {
+	s.aiExecution.Lock()
+	defer s.aiExecution.Unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	legacyPath, err := legacyConfigPath()
@@ -188,6 +197,8 @@ func (s *SettingsService) MigrateLegacy() (AppSettings, error) {
 	if err != nil {
 		return AppSettings{}, err
 	}
+	// Network migration must not opt a user back into AI.
+	migrated.AIEnabled = s.settings.AIEnabled
 	backup := ""
 	if current, readErr := os.ReadFile(s.path); readErr == nil {
 		backup = filepath.Join(settingsDirectory(), "settings.before-legacy-migration.json")
@@ -214,6 +225,8 @@ func (s *SettingsService) MigrateLegacy() (AppSettings, error) {
 }
 
 func (s *SettingsService) RollbackLegacyMigration() (AppSettings, error) {
+	s.aiExecution.Lock()
+	defer s.aiExecution.Unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.migration.Applied {
@@ -244,6 +257,7 @@ func (s *SettingsService) RollbackLegacyMigration() (AppSettings, error) {
 	} else {
 		restored = DefaultSettings()
 	}
+	restored.AIEnabled = s.settings.AIEnabled
 	if err := s.commitLocked(restored); err != nil {
 		return AppSettings{}, err
 	}
@@ -255,6 +269,8 @@ func (s *SettingsService) RollbackLegacyMigration() (AppSettings, error) {
 // Update is the legacy full-replacement interface. Interactive preference
 // edits use UpdateFields so a stale page cannot overwrite unrelated state.
 func (s *SettingsService) Update(next AppSettings) (AppSettings, error) {
+	s.aiExecution.Lock()
+	defer s.aiExecution.Unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.updateLocked(next)
@@ -263,11 +279,20 @@ func (s *SettingsService) Update(next AppSettings) (AppSettings, error) {
 // UpdateFields merges only Settings-page preferences under the persistence
 // lock. Routing, scheduling and startup registration have dedicated services.
 func (s *SettingsService) UpdateFields(values AppSettings, fields []string) (AppSettings, error) {
+	for _, field := range fields {
+		if field == "ai_enabled" {
+			s.aiExecution.Lock()
+			defer s.aiExecution.Unlock()
+			break
+		}
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	next := cloneSettings(s.settings)
 	for _, field := range fields {
 		switch field {
+		case "ai_enabled":
+			next.AIEnabled = values.AIEnabled
 		case "language":
 			next.Language = values.Language
 		case "update_channel":
@@ -505,6 +530,9 @@ func (s *SettingsService) reload() error {
 	}
 	if _, exists := storedFields["hide_virtual_adapters"]; !exists {
 		loaded.HideVirtualAdapters = defaults.HideVirtualAdapters
+	}
+	if _, exists := storedFields["ai_enabled"]; !exists {
+		loaded.AIEnabled = defaults.AIEnabled
 	}
 	if loaded.Mode != "proxy" && loaded.Mode != "tun" {
 		loaded.Mode = defaults.Mode
@@ -753,7 +781,11 @@ func (s *SettingsService) commitLocked(next AppSettings) error {
 	if err := writeSettingsFile(s.path, next); err != nil {
 		return err
 	}
+	aiChanged := s.settings.AIEnabled != next.AIEnabled
 	s.settings = next
+	if aiChanged && s.aiEnabledChanged != nil {
+		s.aiEnabledChanged(next.AIEnabled)
+	}
 	return nil
 }
 

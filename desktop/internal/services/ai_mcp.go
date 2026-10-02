@@ -46,6 +46,9 @@ func (s *AIService) EnableMCP(port int, readOnly bool) (AIMCPConnection, error) 
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.availableLocked(); err != nil {
+		return AIMCPConnection{}, err
+	}
 	if s.closed || s.mcp != nil {
 		return AIMCPConnection{}, errors.New("请先关闭现有外部连接")
 	}
@@ -73,6 +76,13 @@ func (s *AIService) DisableMCP() {
 func (s *AIService) mcpHandler(m *aiMCPServer) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
+		s.mu.Lock()
+		availabilityErr := s.availableLocked()
+		s.mu.Unlock()
+		if availabilityErr != nil || r.Context().Err() != nil {
+			http.Error(w, "AI disabled", http.StatusServiceUnavailable)
+			return
+		}
 		if r.URL.Path != "/mcp" {
 			http.NotFound(w, r)
 			return

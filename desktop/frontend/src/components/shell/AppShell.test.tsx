@@ -1,17 +1,21 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { publishAIAvailability } from "../../state/aiAvailability";
 import { AppShell } from "./AppShell";
 import { usePageActive } from "./PageActivity";
 import type { AppPage } from "./CompactNavigation";
 
-vi.mock("../ai/AIAssistant", () => ({ AIAssistant: () => null }));
+const mocks = vi.hoisted(() => ({ get: vi.fn() }));
+vi.mock("../../platform/services", () => ({ appServices: { settings: { get: mocks.get } } }));
+vi.mock("../ai/AIAssistant", () => ({ AIAssistant: () => <div data-testid="assistant">Mux</div> }));
 vi.mock("../material/useCardGlowField", () => ({ useCardGlowField: () => {} }));
 vi.mock("./TitleBar", () => ({ TitleBar: () => null }));
-vi.mock("./CompactNavigation", () => ({ CompactNavigation: () => null }));
+vi.mock("./CompactNavigation", () => ({ CompactNavigation: ({ aiEnabled }: { aiEnabled: boolean }) => <nav>{aiEnabled && <button>AI assistant</button>}</nav> }));
 vi.mock("../../i18n/i18n", () => ({ useI18n: () => ({ locale: "en" }) }));
 afterEach(cleanup);
+beforeEach(() => { mocks.get.mockReset().mockResolvedValue({ ai_enabled: false }); });
 
 function DraftPage({ page }: { page: AppPage }) {
   const [draft, setDraft] = useState("");
@@ -38,4 +42,48 @@ it("mounts pages on demand and preserves drafts, scroll and DOM identity across 
   expect(scroller.scrollTop).toBe(240);
   expect(scroller.dataset.active).toBe("true");
   expect(screen.getByTestId("settings").dataset.active).toBe("false");
+});
+
+it("does not mount AI while settings load or when persisted AI is off", async () => {
+  let resolve!: (settings: { ai_enabled: boolean }) => void;
+  mocks.get.mockReturnValue(new Promise(done => { resolve = done; }));
+  render(<AppShell page="home" onPageChange={() => {}} pageDirection="forward" animatePage={false} />);
+  expect(screen.queryByTestId("assistant")).toBeNull();
+  expect(screen.queryByRole("button", { name: "AI assistant" })).toBeNull();
+  await act(async () => resolve({ ai_enabled: false }));
+  expect(screen.queryByTestId("assistant")).toBeNull();
+});
+
+it("unmounts AI, hides its entry and redirects an open workspace when disabled", async () => {
+  mocks.get.mockResolvedValue({ ai_enabled: true });
+  const navigate = vi.fn();
+  render(<AppShell page="assistant" onPageChange={navigate} pageDirection="forward" animatePage={false} />);
+  expect(await screen.findByTestId("assistant")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "AI assistant" })).toBeTruthy();
+  expect(navigate).not.toHaveBeenCalled();
+  act(() => publishAIAvailability(false));
+  expect(screen.queryByTestId("assistant")).toBeNull();
+  expect(screen.queryByRole("button", { name: "AI assistant" })).toBeNull();
+  expect(navigate).toHaveBeenCalledWith("home");
+  act(() => publishAIAvailability(true));
+  expect(await screen.findByTestId("assistant")).toBeTruthy();
+});
+
+it("keeps AI disabled after a settings read failure and recovers on confirmed settings", async () => {
+  mocks.get.mockRejectedValue(new Error("read failed"));
+  render(<AppShell page="home" onPageChange={() => {}} pageDirection="forward" animatePage={false} />);
+  await waitFor(() => expect(mocks.get).toHaveBeenCalled());
+  expect(screen.queryByTestId("assistant")).toBeNull();
+  act(() => publishAIAvailability(true));
+  expect(await screen.findByTestId("assistant")).toBeTruthy();
+});
+
+it("ignores an older startup response after a confirmed toggle", async () => {
+  let resolve!: (settings: { ai_enabled: boolean }) => void;
+  mocks.get.mockReturnValue(new Promise(done => { resolve = done; }));
+  render(<AppShell page="home" onPageChange={() => {}} pageDirection="forward" animatePage={false} />);
+  act(() => publishAIAvailability(false));
+  await act(async () => resolve({ ai_enabled: true }));
+  expect(screen.queryByTestId("assistant")).toBeNull();
+  expect(screen.queryByRole("button", { name: "AI assistant" })).toBeNull();
 });
