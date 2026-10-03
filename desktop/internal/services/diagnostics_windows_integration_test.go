@@ -20,9 +20,22 @@ func TestRealWindowsAdapterDiagnostic(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(available) == 0 {
-		t.Skip("no active IPv4 adapter is available")
+		t.Skip("no active IPv4 or IPv6 adapter is available")
 	}
-	if available[0].Metric < 0 {
+	if name := os.Getenv("HYPOMUX_NETWORK_TEST_ADAPTER"); name != "" {
+		found := false
+		for index, adapter := range available {
+			if adapter.Name == name {
+				available[0], available[index] = available[index], available[0]
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("requested diagnostic adapter is unavailable: %s", name)
+		}
+	}
+	if (available[0].Address != "" && available[0].Metric < 0) || (available[0].Address == "" && available[0].IPv6Metric < 0) {
 		t.Fatalf("Windows adapter metadata was not resolved: %+v", available[0])
 	}
 
@@ -36,10 +49,19 @@ func TestRealWindowsAdapterDiagnostic(t *testing.T) {
 		t.Fatalf("unexpected snapshot: %+v", snapshot)
 	}
 	result := snapshot.Results[0]
-	if result.Sent != 10 || result.TargetIP != diagnosticTargetIPv4 {
+	t.Logf("native diagnostic source=%s target=%s sent=%d received=%d bound_tcp=%t detail=%s", result.Address, result.TargetIP, result.Sent, result.Received, result.BoundTCPOK, result.BoundTCPDetail)
+	target := diagnosticTargetIPv4
+	if available[0].Address == "" {
+		target = diagnosticTargetIPv6
+	}
+	if result.Sent != 10 || result.TargetIP != target {
 		t.Fatalf("real ICMP probe did not preserve the v2.2.0 contract: %+v", result)
 	}
-	if result.BoundTCPDetail == "" || len(result.Checks) != 4 {
+	checks := 4
+	if available[0].Address != "" && available[0].SourceIPv6 != "" {
+		checks++
+	}
+	if result.BoundTCPDetail == "" || len(result.Checks) != checks {
 		t.Fatalf("bound TCP evidence or configuration checks are missing: %+v", result)
 	}
 	if len(logs.Snapshot().Sessions) != 1 {

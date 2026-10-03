@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"net/netip"
 	"strings"
 )
 
@@ -22,9 +23,11 @@ type tunDNSConfiguration struct {
 
 func configuredTUNDNS(config tunDNSConfiguration, adapter AdapterView) (dnsResolveResult, error) {
 	result := dnsResolveResult{Adapter: adapter.Name}
-	if config.Policy != "off" && config.Policy != "system" {
+	useNetworkDNS := config.Policy == "auto" && adapter.Address == "" && len(adapter.DNSServers) > 0
+	if config.Policy != "off" && config.Policy != "system" && !useNetworkDNS {
 		for _, endpoint := range config.DoHEndpoints {
-			if net.ParseIP(endpoint.IP) != nil && endpoint.Host != "" && (endpoint.Path == "" || endpoint.Path == "/dns-query") {
+			ip := net.ParseIP(endpoint.IP)
+			if ip != nil && ((ip.To4() != nil && adapter.Address != "") || (ip.To4() == nil && adapter.SourceIPv6 != "")) && endpoint.Host != "" && (endpoint.Path == "" || endpoint.Path == "/dns-query") {
 				result.Transport, result.Server = "doh", endpoint.Host+"@"+net.JoinHostPort(endpoint.IP, "443")
 				return result, nil
 			}
@@ -32,7 +35,7 @@ func configuredTUNDNS(config tunDNSConfiguration, adapter AdapterView) (dnsResol
 		return result, fmt.Errorf("核心未提供当前 DNS 策略 %q 的有效上游配置", config.Policy)
 	}
 	for _, server := range append(append([]string(nil), adapter.DNSServers...), config.LegacyServers...) {
-		if ip := net.ParseIP(strings.TrimSpace(server)); ip != nil && ip.To4() != nil {
+		if ip, err := netip.ParseAddr(strings.TrimSpace(server)); err == nil && ((ip.Unmap().Is4() && adapter.Address != "") || (ip.Is6() && !ip.Is4In6() && adapter.SourceIPv6 != "")) {
 			result.Transport, result.Server = "udp", net.JoinHostPort(ip.String(), "53")
 			return result, nil
 		}
@@ -56,6 +59,14 @@ func prepareTUNDNS(ctx context.Context, adapter AdapterView, force bool,
 		return result, diagnosticErr, err
 	}
 	result, err = configuredTUNDNS(config, adapter)
+	if err != nil && config.Policy == "dnspod" && adapter.Address == "" && adapter.SourceIPv6 != "" {
+		// DNSPod exposes hostname access, so an IPv6-only link must bootstrap
+		// the provider through the Core's source-bound resolver even on force.
+		result, err = resolveConnectivityBootstrap(ctx, adapter.Name, resolve)
+		if err != nil {
+			err = fmt.Errorf("IPv6 DNSPod 上游引导失败: %w", err)
+		}
+	}
 	return result, diagnosticErr, err
 }
 

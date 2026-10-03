@@ -21,6 +21,22 @@ type tunDNSEgressDecision struct {
 	Detail    string
 }
 
+// The alias comes from the route's Windows interface LUID. An IPv6 interface
+// index can differ from net.Interface.Index (the IPv4 index) on the same NIC.
+func defaultDNSRouteAdapter(routes []networkRoute) (string, bool) {
+	var best networkRoute
+	found := false
+	for _, route := range routes {
+		if !route.Connected || !route.MetadataKnown || !route.Prefix.IsValid() || route.Prefix.Bits() != 0 || route.InterfaceIndex == 0 || route.Alias == "" || route.ownTUN() {
+			continue
+		}
+		if !found || route.Metric < best.Metric || (route.Metric == best.Metric && route.InterfaceIndex < best.InterfaceIndex) {
+			best, found = route, true
+		}
+	}
+	return best.Alias, found
+}
+
 func resolveTUNDNSEgress(
 	settings AppSettings,
 	selected []AdapterView,

@@ -19,7 +19,7 @@ func TestRealWindowsTunPreflightIsReadOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(available) == 0 {
-		t.Skip("no active IPv4 adapter is available")
+		t.Skip("no active IPv4 or IPv6 adapter is available")
 	}
 	service := NewTunService(settings, adapters)
 	before := inspectTunPlatform(true)

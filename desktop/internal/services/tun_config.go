@@ -33,14 +33,15 @@ type dnsResolveResult struct {
 }
 
 type tunConfigOptions struct {
-	ForceStart    bool
-	IPv4Address   string
-	Stack         string
-	DNSPolicy     string
-	IPv6Available bool
-	ConfigName    string
-	ClashAPI      *clashAPIConfig
-	ConfigSHA256  *string
+	ForceStart      bool
+	IPv4Address     string
+	Stack           string
+	DNSPolicy       string
+	IPv6Available   bool
+	IPv4Unavailable bool
+	ConfigName      string
+	ClashAPI        *clashAPIConfig
+	ConfigSHA256    *string
 	// RuleSets are the subscribed external lists. They travel in the options
 	// struct rather than the parameter list so the pinned-config call sites keep
 	// their shape; only the sets that already have a published file matter here.
@@ -61,8 +62,9 @@ func writeSingBoxConfig(
 	return writeSingBoxConfigWithOptions(
 		endpoints, dnsAdapter, dnsResult, rules, compatibility, strictRoute,
 		tunConfigOptions{
-			DNSPolicy:     "auto",
-			IPv6Available: strings.TrimSpace(dnsAdapter.SourceIPv6) != "",
+			DNSPolicy:       "auto",
+			IPv6Available:   strings.TrimSpace(dnsAdapter.SourceIPv6) != "",
+			IPv4Unavailable: strings.TrimSpace(dnsAdapter.Address) == "" && strings.TrimSpace(dnsAdapter.SourceIPv6) != "",
 		},
 	)
 }
@@ -161,8 +163,12 @@ func writeSingBoxConfigWithOptions(
 		// Resolve FakeIP/domain destinations before compatibility IP overrides
 		// decide whether to bypass user routing. DNS and self-process bypasses
 		// above must remain ahead of resolution to avoid routing loops.
+		strategy := "prefer_ipv4"
+		if options.IPv6Available && options.IPv4Unavailable {
+			strategy = "prefer_ipv6"
+		}
 		routeRules = append(routeRules,
-			map[string]any{"action": "resolve", "server": "dns-local", "strategy": "prefer_ipv4"},
+			map[string]any{"action": "resolve", "server": "dns-local", "strategy": strategy},
 		)
 	}
 	routeRules = append(routeRules, singBoxCompatibilityRouteRules(compatibility, ruleSetPlan)...)
@@ -445,6 +451,9 @@ func buildDNSUpstream(adapter AdapterView, result dnsResolveResult) (map[string]
 	}
 	if strings.TrimSpace(adapter.Address) != "" {
 		upstream["inet4_bind_address"] = adapter.Address
+	}
+	if strings.TrimSpace(adapter.SourceIPv6) != "" {
+		upstream["inet6_bind_address"] = adapter.SourceIPv6
 	}
 	return upstream, nil
 }

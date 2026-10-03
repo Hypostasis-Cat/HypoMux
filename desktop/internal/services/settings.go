@@ -719,8 +719,8 @@ func validateSettings(value AppSettings) error {
 		return fmt.Errorf("SOCKS5 与 HTTP 端口不能相同（socks_port=%d，http_port=%d）；请将两个端口设为不同值，例如 10800 和 10801", value.SOCKSPort, value.HTTPPort)
 	}
 	ip := net.ParseIP(value.DNSServer)
-	if ip == nil || ip.To4() == nil {
-		return errors.New("DNS 地址格式无效，请输入合法 IPv4 地址")
+	if ip == nil || ip.IsUnspecified() || ip.IsMulticast() || ip.IsLinkLocalUnicast() {
+		return errors.New("DNS 地址格式无效，请输入合法单播 IPv4 或 IPv6 地址；链路本地 DNS 请使用网卡自动配置")
 	}
 	if err := validateRuleSets(value.RuleSets); err != nil {
 		return err

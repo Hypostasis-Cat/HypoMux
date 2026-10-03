@@ -280,13 +280,17 @@ func probeAggregationAlternatives(parent context.Context, endpoint, socks string
 
 func isConnectivityFakeIP(ip net.IP) bool {
 	v4 := ip.To4()
-	return v4 != nil && v4[0] == 198 && (v4[1] == 18 || v4[1] == 19)
+	if v4 != nil {
+		return v4[0] == 198 && (v4[1] == 18 || v4[1] == 19)
+	}
+	v6 := ip.To16()
+	return v6 != nil && v6[0] == 0xfc && v6[1] == 0 && v6[2]&0xc0 == 0 // fc00::/18
 }
 
 func (s *EngineService) resolveConnectivityDNS(ctx context.Context, domain, adapter string) (dnsResolveResult, error) {
 	var result dnsResolveResult
 	err := s.client.Request(ctx, "dns.resolve", map[string]any{
-		"domain": domain, "adapter": adapter, "record_type": "A", "timeout_ms": 1500,
+		"domain": domain, "adapter": adapter, "timeout_ms": 1500,
 	}, &result)
 	return result, err
 }

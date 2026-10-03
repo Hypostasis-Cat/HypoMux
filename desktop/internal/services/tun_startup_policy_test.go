@@ -11,7 +11,7 @@ import (
 func TestTUNDNSDiagnosticFailureDoesNotPreventConfiguration(t *testing.T) {
 	for _, force := range []bool{false, true} {
 		calls := 0
-		result, diagnostic, err := prepareTUNDNS(context.Background(), AdapterView{Name: "Ethernet", DNSServers: []string{"192.168.1.1"}}, force,
+		result, diagnostic, err := prepareTUNDNS(context.Background(), AdapterView{Name: "Ethernet", Address: "192.0.2.10", DNSServers: []string{"192.168.1.1"}}, force,
 			func(context.Context, string, string) (dnsResolveResult, error) {
 				calls++
 				return dnsResolveResult{}, errors.New("test domains blocked by unknown software")
@@ -34,7 +34,7 @@ func TestForcedTUNDNSPreservesEncryptedPolicyAndRejectsMissingConfiguration(t *t
 		Host string `json:"host"`
 		Path string `json:"path"`
 	}{"8.8.8.8", "dns.google", "/dns-query"})
-	result, diagnostic, err := prepareTUNDNS(context.Background(), AdapterView{Name: "Ethernet"}, true, nil,
+	result, diagnostic, err := prepareTUNDNS(context.Background(), AdapterView{Name: "Ethernet", Address: "192.0.2.10"}, true, nil,
 		func(context.Context) (tunDNSConfiguration, error) { return config, nil })
 	if err != nil || diagnostic != nil || result.Transport != "doh" || result.Server != "dns.google@8.8.8.8:443" {
 		t.Fatalf("encrypted policy lost: %+v %v %v", result, diagnostic, err)
@@ -51,7 +51,7 @@ func TestForcedTUNDNSPreservesEncryptedPolicyAndRejectsMissingConfiguration(t *t
 
 func TestTUNDNSKeepsSuccessfullyProbedUpstream(t *testing.T) {
 	want := dnsResolveResult{Adapter: "Ethernet", Transport: "tcp", Server: "192.168.1.1:53"}
-	got, diagnostic, err := prepareTUNDNS(context.Background(), AdapterView{Name: "Ethernet"}, false,
+	got, diagnostic, err := prepareTUNDNS(context.Background(), AdapterView{Name: "Ethernet", Address: "192.0.2.10"}, false,
 		func(context.Context, string, string) (dnsResolveResult, error) { return want, nil },
 		func(context.Context) (tunDNSConfiguration, error) {
 			t.Fatal("unexpected fallback")

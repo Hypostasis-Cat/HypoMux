@@ -37,7 +37,20 @@ func TestRealProxyStartStopAndNetworkRestore(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(available) == 0 {
-		t.Skip("no active IPv4 adapter is available")
+		t.Skip("no active IPv4 or IPv6 adapter is available")
+	}
+	if name := os.Getenv("HYPOMUX_NETWORK_TEST_ADAPTER"); name != "" {
+		found := false
+		for index, adapter := range available {
+			if adapter.Name == name {
+				available[0], available[index] = available[index], available[0]
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("requested network test adapter is unavailable: %s", name)
+		}
 	}
 	available[0].Selected = true
 	if _, err := adapters.SaveSelection("proxy", true, available); err != nil {

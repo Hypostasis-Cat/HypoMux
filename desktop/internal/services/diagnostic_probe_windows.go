@@ -50,6 +50,9 @@ func newDiagnosticProbe() diagnosticProbe {
 }
 
 func (windowsDiagnosticProbe) ICMP(ctx context.Context, source string, target string) icmpProbeResult {
+	if ip := net.ParseIP(source); ip != nil && ip.To4() == nil {
+		return probeICMPv6(ctx, source, target)
+	}
 	sourceIP := net.ParseIP(source).To4()
 	targetIP := net.ParseIP(target).To4()
 	if sourceIP == nil || targetIP == nil {
@@ -133,16 +136,32 @@ func summarizeICMP(rtts []int, sent int, bindFailed bool, note string) icmpProbe
 
 func (windowsDiagnosticProbe) BoundTCP(ctx context.Context, adapter AdapterView) (bool, string) {
 	endpoints := []string{"223.5.5.5:443", "1.12.12.12:443", "8.8.8.8:443"}
+	network, source, ifIndex := "tcp4", adapter.Address, adapter.IfIndex
+	if source == "" && adapter.SourceIPv6 != "" {
+		network, source, ifIndex = "tcp6", adapter.SourceIPv6, adapter.IPv6IfIndex
+		endpoints = []string{"[2400:3200::1]:443", "[2001:4860:4860::8888]:443"}
+	}
+	if net.ParseIP(source) == nil {
+		return false, "所选网卡没有可绑定的源地址"
+	}
 	var failures []string
 	for _, endpoint := range endpoints {
 		dialCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 		dialer := net.Dialer{
 			Timeout:   2 * time.Second,
-			LocalAddr: &net.TCPAddr{IP: net.ParseIP(adapter.Address)},
+			LocalAddr: &net.TCPAddr{IP: net.ParseIP(source)},
 			Control: func(_, _ string, raw syscall.RawConn) error {
 				var optionErr error
 				controlErr := raw.Control(func(fd uintptr) {
-					networkOrderIndex := bits.ReverseBytes32(uint32(adapter.IfIndex))
+					if ifIndex <= 0 {
+						optionErr = fmt.Errorf("invalid source interface index")
+						return
+					}
+					if network == "tcp6" {
+						optionErr = windows.SetsockoptInt(windows.Handle(fd), windows.IPPROTO_IPV6, ipUnicastIf, ifIndex)
+						return
+					}
+					networkOrderIndex := bits.ReverseBytes32(uint32(ifIndex))
 					optionErr = windows.SetsockoptInt(
 						windows.Handle(fd), windows.IPPROTO_IP, ipUnicastIf, int(networkOrderIndex),
 					)
@@ -153,12 +172,12 @@ func (windowsDiagnosticProbe) BoundTCP(ctx context.Context, adapter AdapterView)
 				return optionErr
 			},
 		}
-		connection, err := dialer.DialContext(dialCtx, "tcp4", endpoint)
+		connection, err := dialer.DialContext(dialCtx, network, endpoint)
 		cancel()
 		if err == nil {
 			local := connection.LocalAddr().String()
 			_ = connection.Close()
-			return true, fmt.Sprintf("TCP %s via %s (ifIndex %d)", endpoint, local, adapter.IfIndex)
+			return true, fmt.Sprintf("TCP %s via %s (ifIndex %d)", endpoint, local, ifIndex)
 		}
 		failures = append(failures, fmt.Sprintf("%s: %v", endpoint, err))
 	}

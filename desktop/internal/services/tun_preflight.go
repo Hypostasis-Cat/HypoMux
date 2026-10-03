@@ -152,7 +152,7 @@ func (s *TunService) evaluateSelected(selected []AdapterView, reusableForStartup
 	}
 	if len(selected) == 0 {
 		snapshot.Issues = append(snapshot.Issues, tunBlocker(
-			"no_adapter", "未选择活动网卡", "请至少选择一张具有有效 IPv4 地址的活动网卡。",
+			"no_adapter", "未选择活动网卡", "请至少选择一张具有有效 IPv4 或 IPv6 地址的活动网卡。",
 		))
 	}
 	if !snapshot.EngineAvailable {

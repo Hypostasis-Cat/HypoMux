@@ -20,6 +20,15 @@ type engineState struct {
 	Reason         string    `json:"reason,omitempty"`
 }
 
+const ipv4TUNFallbackNotice = "提示：TUN IPv6 地址配置失败，当前仅接管 IPv4 流量。"
+
+func withTUNFallbackNotice(reason string, ipv4Only bool) string {
+	if ipv4Only {
+		return strings.TrimSpace(ipv4TUNFallbackNotice + " " + reason)
+	}
+	return reason
+}
+
 type engineStatusResult struct {
 	Engine engineState `json:"engine"`
 }
@@ -49,13 +58,15 @@ type tunLifecycleResult struct {
 }
 
 type adapterTelemetry struct {
-	Name        string `json:"name"`
-	Connections int    `json:"connections"`
-	BytesUp     int64  `json:"bytes_up"`
-	BytesDown   int64  `json:"bytes_down"`
-	HealthState string `json:"health_state"`
-	HealthFails int64  `json:"health_failures"`
-	HealthOK    int64  `json:"health_successes"`
+	Name        string              `json:"name"`
+	Connections int                 `json:"connections"`
+	BytesUp     int64               `json:"bytes_up"`
+	BytesDown   int64               `json:"bytes_down"`
+	HealthState string              `json:"health_state"`
+	IPv4Health  FamilyRuntimeHealth `json:"ipv4_health,omitempty"`
+	IPv6Health  FamilyRuntimeHealth `json:"ipv6_health,omitempty"`
+	HealthFails int64               `json:"health_failures"`
+	HealthOK    int64               `json:"health_successes"`
 }
 
 type connectionTelemetry struct {
@@ -96,31 +107,41 @@ type telemetryResult struct {
 }
 
 type AdapterRuntime struct {
-	ID          string  `json:"id"`
-	DownloadBPS float64 `json:"download_bps"`
-	UploadBPS   float64 `json:"upload_bps"`
-	Connections int     `json:"connections"`
-	BytesDown   int64   `json:"bytes_down"`
-	BytesUp     int64   `json:"bytes_up"`
-	HealthState string  `json:"health_state"`
+	ID          string              `json:"id"`
+	DownloadBPS float64             `json:"download_bps"`
+	UploadBPS   float64             `json:"upload_bps"`
+	Connections int                 `json:"connections"`
+	BytesDown   int64               `json:"bytes_down"`
+	BytesUp     int64               `json:"bytes_up"`
+	HealthState string              `json:"health_state"`
+	IPv4Health  FamilyRuntimeHealth `json:"ipv4_health,omitempty"`
+	IPv6Health  FamilyRuntimeHealth `json:"ipv6_health,omitempty"`
+}
+
+type FamilyRuntimeHealth struct {
+	State               string `json:"state"`
+	Successes           uint64 `json:"successes"`
+	Failures            uint64 `json:"failures"`
+	ConsecutiveFailures int    `json:"consecutive_failures"`
 }
 
 type EngineSnapshot struct {
-	Phase         string           `json:"phase"`
-	Mode          string           `json:"mode"`
-	Strategy      string           `json:"strategy,omitempty"`
-	Weighted      bool             `json:"weighted"`
-	Reason        string           `json:"reason,omitempty"`
-	CoreConnected bool             `json:"core_connected"`
-	CoreVersion   string           `json:"core_version,omitempty"`
-	CoreElevated  bool             `json:"core_elevated"`
-	DownloadBPS   float64          `json:"download_bps"`
-	UploadBPS     float64          `json:"upload_bps"`
-	Connections   int              `json:"connections"`
-	SessionBytes  int64            `json:"session_bytes"`
-	TCPProfile    string           `json:"tcp_profile,omitempty"`
-	Adapters      []AdapterRuntime `json:"adapters"`
-	SampledAt     time.Time        `json:"sampled_at"`
+	Phase            string           `json:"phase"`
+	Mode             string           `json:"mode"`
+	Strategy         string           `json:"strategy,omitempty"`
+	Weighted         bool             `json:"weighted"`
+	Reason           string           `json:"reason,omitempty"`
+	CoreConnected    bool             `json:"core_connected"`
+	CoreVersion      string           `json:"core_version,omitempty"`
+	CoreElevated     bool             `json:"core_elevated"`
+	DownloadBPS      float64          `json:"download_bps"`
+	UploadBPS        float64          `json:"upload_bps"`
+	Connections      int              `json:"connections"`
+	SessionBytes     int64            `json:"session_bytes"`
+	TCPProfile       string           `json:"tcp_profile,omitempty"`
+	IPv4OnlyFallback bool             `json:"ipv4_only_fallback,omitempty"`
+	Adapters         []AdapterRuntime `json:"adapters"`
+	SampledAt        time.Time        `json:"sampled_at"`
 }
 
 type WFPRepairResult struct {
@@ -165,6 +186,7 @@ type EngineService struct {
 	lastTUNHealthCheck     time.Time
 	tunNetworkFingerprint  string
 	tunConnectivityNotice  string
+	ipv4OnlyFallback       bool
 	blockedDomains         *BlockedDomainService
 	dnsFallbackApplied     bool
 	wfpFallbackApplied     bool
@@ -424,6 +446,8 @@ func (s *EngineService) Snapshot() (EngineSnapshot, error) {
 	} else if s.proxyRecoveryNotice != "" && snapshot.Reason == "" {
 		snapshot.Reason = "提示：" + s.proxyRecoveryNotice
 	}
+	snapshot.IPv4OnlyFallback = s.ipv4OnlyFallback && status.Engine.State == "running"
+	snapshot.Reason = withTUNFallbackNotice(snapshot.Reason, snapshot.IPv4OnlyFallback)
 	if status.Engine.State != "running" {
 		s.last = telemetrySample{}
 		s.lastCDNLog = time.Time{}
@@ -463,7 +487,7 @@ func (s *EngineService) Snapshot() (EngineSnapshot, error) {
 	for _, item := range telemetry.Adapters {
 		runtime := AdapterRuntime{
 			ID: item.Name, Connections: item.Connections, BytesDown: item.BytesDown,
-			BytesUp: item.BytesUp, HealthState: item.HealthState,
+			BytesUp: item.BytesUp, HealthState: item.HealthState, IPv4Health: item.IPv4Health, IPv6Health: item.IPv6Health,
 		}
 		rates := s.last.adapterRates[item.Name]
 		runtime.DownloadBPS, runtime.UploadBPS = rates[0], rates[1]
@@ -540,7 +564,7 @@ func (s *EngineService) Snapshot() (EngineSnapshot, error) {
 		// of user traffic. They are diagnostic evidence, never a stop command.
 		notice := s.recordTUNConnectivityOutcome(tunErr)
 		if notice != "" {
-			snapshot.Reason = notice
+			snapshot.Reason = withTUNFallbackNotice(notice, snapshot.IPv4OnlyFallback)
 		}
 	}
 	return snapshot, nil
@@ -610,6 +634,7 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 	takeOverSystemProxy := shouldTakeOverSystemProxy(mode, settings)
 	s.mu.Lock()
 	s.tunConnectivityNotice = ""
+	s.ipv4OnlyFallback = false
 	if s.closing {
 		s.mu.Unlock()
 		return EngineSnapshot{}, errors.New("HypoMux 正在退出")
@@ -935,13 +960,14 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 			s.logs.RecordEvent("tun_address", "selected", map[string]any{"ipv4": tunAddress})
 		}
 		configOptions := tunConfigOptions{
-			ForceStart:    settings.ForceTUNBypass,
-			IPv4Address:   tunAddress,
-			Stack:         settings.TUNStack,
-			DNSPolicy:     effectiveDNSPolicy,
-			IPv6Available: selectedAdaptersHaveIPv6(selected),
-			ConfigName:    "sing-box.json",
-			RuleSets:      settings.RuleSets,
+			ForceStart:      settings.ForceTUNBypass,
+			IPv4Address:     tunAddress,
+			Stack:           settings.TUNStack,
+			DNSPolicy:       effectiveDNSPolicy,
+			IPv6Available:   selectedAdaptersHaveIPv6(selected),
+			IPv4Unavailable: !selectedAdaptersHaveIPv4(selected),
+			ConfigName:      "sing-box.json",
+			RuleSets:        settings.RuleSets,
 		}
 		configDigest := ""
 		configOptions.ConfigSHA256 = &configDigest
@@ -957,7 +983,7 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 		}
 		ipv4FallbackPath := ""
 		ipv4FallbackDigest := ""
-		if configOptions.IPv6Available {
+		if configOptions.IPv6Available && !configOptions.IPv4Unavailable {
 			fallbackOptions := configOptions
 			fallbackOptions.IPv6Available = false
 			fallbackOptions.ConfigName = "sing-box-ipv4.json"
@@ -1011,6 +1037,9 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 				"adapter": "HypoMux-Tun",
 			})
 		}
+		s.mu.Lock()
+		s.ipv4OnlyFallback = activated.IPv4OnlyFallback
+		s.mu.Unlock()
 		if activated.IPv4OnlyFallback && s.logs != nil {
 			s.logs.RecordEvent("tun_compatibility", "ipv4_only_fallback", map[string]any{
 				"reason": "sing-box could not configure the IPv6 TUN address",
@@ -1229,6 +1258,15 @@ func engineAdapters(adapters []AdapterView) []map[string]any {
 func selectedAdaptersHaveIPv6(adapters []AdapterView) bool {
 	for _, adapter := range adapters {
 		if strings.TrimSpace(adapter.SourceIPv6) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func selectedAdaptersHaveIPv4(adapters []AdapterView) bool {
+	for _, adapter := range adapters {
+		if strings.TrimSpace(adapter.Address) != "" {
 			return true
 		}
 	}

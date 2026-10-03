@@ -9,7 +9,10 @@ import (
 )
 
 func TestRealEngineHandshakeAndStoppedStatus(t *testing.T) {
-	path := filepath.Clean(filepath.Join("..", "..", "..", "..", "hypomux-engine.exe"))
+	path := os.Getenv("HYPOMUX_ENGINE_PATH")
+	if path == "" {
+		path = filepath.Clean(filepath.Join("..", "..", "..", "..", "hypomux-engine.exe"))
+	}
 	if _, err := os.Stat(path); err != nil {
 		t.Skip("real hypomux-engine.exe is not available")
 	}

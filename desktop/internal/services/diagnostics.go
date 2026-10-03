@@ -13,6 +13,7 @@ import (
 )
 
 const diagnosticTargetIPv4 = "223.5.5.5"
+const diagnosticTargetIPv6 = "2400:3200::1"
 
 type DiagnosticCheck struct {
 	Key    string `json:"key"`
@@ -285,19 +286,23 @@ func (s *DiagnosticsService) Run(adapterIDs []string) (DiagnosticSnapshot, error
 	}
 	selected := make([]AdapterView, 0, len(wanted))
 	for _, adapter := range available {
-		if _, ok := wanted[adapter.ID]; ok && adapter.Operational && adapter.Address != "" {
+		if _, ok := wanted[adapter.ID]; ok && adapter.Operational && (adapter.Address != "" || adapter.SourceIPv6 != "") {
 			selected = append(selected, adapter)
 		}
 	}
 	if len(selected) == 0 {
-		return s.failRun(errors.New("请至少选择一张拥有有效 IPv4 的活动网卡"))
+		return s.failRun(errors.New("请至少选择一张拥有有效 IPv4 或 IPv6 的活动网卡"))
 	}
 
 	started := time.Now()
+	targetIP := diagnosticTargetIPv4
+	if !selectedAdaptersHaveIPv4(selected) {
+		targetIP = diagnosticTargetIPv6
+	}
 	runID := fmt.Sprintf("diag-%x", started.UnixNano())
 	s.mu.Lock()
 	s.latest = DiagnosticSnapshot{
-		State: "running", RunID: runID, TargetIP: diagnosticTargetIPv4,
+		State: "running", RunID: runID, TargetIP: targetIP,
 		StartedAt: started, Total: len(selected), Results: []DiagnosticResult{},
 	}
 	s.mu.Unlock()
@@ -307,11 +312,11 @@ func (s *DiagnosticsService) Run(adapterIDs []string) (DiagnosticSnapshot, error
 		names = append(names, adapter.Name)
 	}
 	logOwned := s.logs.Start("adapter-diagnostic", names, map[string]any{
-		"target_ip":     diagnosticTargetIPv4,
+		"target_ip":     targetIP,
 		"adapter_count": len(selected),
 	})
 	s.logs.RecordEvent("adapter_diagnostic", "started", map[string]any{
-		"run_id": runID, "adapters": names, "target_ip": diagnosticTargetIPv4,
+		"run_id": runID, "adapters": names, "target_ip": targetIP,
 	})
 
 	for _, adapter := range selected {
@@ -332,7 +337,7 @@ func (s *DiagnosticsService) Run(adapterIDs []string) (DiagnosticSnapshot, error
 		s.mu.Unlock()
 		s.logs.RecordEvent("adapter_diagnostic", "result", map[string]any{
 			"adapter":   adapter.Name,
-			"source_ip": adapter.Address,
+			"source_ip": result.Address,
 			"target_ip": result.TargetIP,
 			"status":    result.Status,
 			"packets": map[string]any{
@@ -405,13 +410,17 @@ func (s *DiagnosticsService) Shutdown() {
 }
 
 func (s *DiagnosticsService) runAdapter(ctx context.Context, adapter AdapterView) DiagnosticResult {
-	icmp := s.probe.ICMP(ctx, adapter.Address, diagnosticTargetIPv4)
+	source, target := adapter.Address, diagnosticTargetIPv4
+	if source == "" && adapter.SourceIPv6 != "" {
+		source, target = adapter.SourceIPv6, diagnosticTargetIPv6
+	}
+	icmp := s.probe.ICMP(ctx, source, target)
 	tcpOK, tcpDetail := s.probe.BoundTCP(ctx, adapter)
 	result := DiagnosticResult{
-		AdapterID: adapter.ID, Name: adapter.Name, Address: adapter.Address,
+		AdapterID: adapter.ID, Name: adapter.Name, Address: source,
 		Status: icmp.Status, LossRate: icmp.LossRate,
 		AvgLatencyMS: icmp.AvgLatencyMS, JitterMS: icmp.JitterMS,
-		Sent: icmp.Sent, Received: icmp.Received, TargetIP: diagnosticTargetIPv4,
+		Sent: icmp.Sent, Received: icmp.Received, TargetIP: target,
 		Note: icmp.Note, BoundTCPOK: tcpOK, BoundTCPDetail: tcpDetail,
 		CompletedAt: time.Now(),
 	}
@@ -423,12 +432,25 @@ func (s *DiagnosticsService) runAdapter(ctx context.Context, adapter AdapterView
 		result.Status = "unavailable"
 	}
 	result.Checks = buildDiagnosticChecks(adapter, result)
+	if adapter.Address != "" && adapter.SourceIPv6 != "" && ctx.Err() == nil {
+		v6 := adapter
+		v6.Address = ""
+		ok, detail := s.probe.BoundTCP(ctx, v6)
+		level := "pass"
+		if !ok {
+			level = "warn"
+		}
+		result.Checks = append(result.Checks, DiagnosticCheck{Key: "ipv6_tcp", Level: level, Detail: detail})
+	}
 	return result
 }
 
 func buildDiagnosticChecks(adapter AdapterView, result DiagnosticResult) []DiagnosticCheck {
 	sourceLevel := "pass"
 	sourceDetail := adapter.Address
+	if sourceDetail == "" {
+		sourceDetail = adapter.SourceIPv6
+	}
 	if !result.BoundTCPOK {
 		sourceLevel = "fail"
 		sourceDetail = result.BoundTCPDetail
@@ -443,17 +465,21 @@ func buildDiagnosticChecks(adapter AdapterView, result DiagnosticResult) []Diagn
 		}
 		dns += server
 	}
-	metricLevel, metricDetail := "pass", fmt.Sprintf("%d", adapter.Metric)
-	if adapter.Metric < 0 {
+	metric, autoMetric, gateway := adapter.Metric, adapter.AutoMetric, adapter.Gateway
+	if adapter.Address == "" && adapter.SourceIPv6 != "" {
+		metric, autoMetric, gateway = adapter.IPv6Metric, adapter.IPv6AutoMetric, adapter.IPv6Gateway
+	}
+	metricLevel, metricDetail := "pass", fmt.Sprintf("%d", metric)
+	if metric < 0 {
 		metricLevel, metricDetail = "warn", ""
 	}
 	mode := "fixed"
-	if adapter.AutoMetric {
+	if autoMetric {
 		mode = "auto"
 	}
 	return []DiagnosticCheck{
 		{Key: "source_binding", Level: sourceLevel, Detail: sourceDetail},
-		{Key: "gateway", Level: levelForValue(adapter.Gateway), Detail: adapter.Gateway},
+		{Key: "gateway", Level: levelForValue(gateway), Detail: gateway},
 		{Key: "dns", Level: levelForValue(dns), Detail: dns},
 		{Key: "metric", Level: metricLevel, Detail: metricDetail, Mode: mode},
 	}

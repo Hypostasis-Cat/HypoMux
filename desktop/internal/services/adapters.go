@@ -8,23 +8,26 @@ import (
 )
 
 type AdapterView struct {
-	ID           string   `json:"id"`
-	Name         string   `json:"name"`
-	Description  string   `json:"description"`
-	Address      string   `json:"address"`
-	PrefixLength int      `json:"prefix_length"`
-	SourceIPv6   string   `json:"source_ipv6,omitempty"`
-	IfIndex      int      `json:"if_index"`
-	IPv6IfIndex  int      `json:"ipv6_if_index,omitempty"`
-	Gateway      string   `json:"gateway,omitempty"`
-	DNSServers   []string `json:"dns_servers"`
-	Metric       int      `json:"metric"`
-	AutoMetric   bool     `json:"automatic_metric"`
-	Selected     bool     `json:"selected"`
-	Weight       int      `json:"weight"`
-	Kind         string   `json:"kind"`
-	Operational  bool     `json:"operational"`
-	IsVirtual    bool     `json:"is_virtual,omitempty"`
+	ID             string   `json:"id"`
+	Name           string   `json:"name"`
+	Description    string   `json:"description"`
+	Address        string   `json:"address"`
+	PrefixLength   int      `json:"prefix_length"`
+	SourceIPv6     string   `json:"source_ipv6,omitempty"`
+	IfIndex        int      `json:"if_index"`
+	IPv6IfIndex    int      `json:"ipv6_if_index,omitempty"`
+	Gateway        string   `json:"gateway,omitempty"`
+	IPv6Gateway    string   `json:"ipv6_gateway,omitempty"`
+	IPv6Metric     int      `json:"ipv6_metric,omitempty"`
+	IPv6AutoMetric bool     `json:"ipv6_automatic_metric,omitempty"`
+	DNSServers     []string `json:"dns_servers"`
+	Metric         int      `json:"metric"`
+	AutoMetric     bool     `json:"automatic_metric"`
+	Selected       bool     `json:"selected"`
+	Weight         int      `json:"weight"`
+	Kind           string   `json:"kind"`
+	Operational    bool     `json:"operational"`
+	IsVirtual      bool     `json:"is_virtual,omitempty"`
 }
 
 type AdapterService struct {
@@ -77,9 +80,6 @@ func (s *AdapterService) List() ([]AdapterView, error) {
 				ipv6 = ip.String()
 			}
 		}
-		if ipv4 == "" {
-			continue
-		}
 		id := item.Name
 		_, isSelected := selected[id]
 		weight := settings.AdapterWeights[id]
@@ -98,29 +98,36 @@ func (s *AdapterService) List() ([]AdapterView, error) {
 		}
 		details, hasDetails := metadata[item.Index]
 		if !hasDetails {
-			details = adapterMetadata{Metric: -1, AutoMetric: true}
+			details = adapterMetadata{Metric: -1, AutoMetric: true, IPv6Metric: -1, IPv6AutoMetric: true, IPv6IfIndex: item.Index, PreferredIPv6: ipv6}
+		}
+		ipv6 = details.PreferredIPv6
+		if ipv4 == "" && ipv6 == "" {
+			continue
 		}
 		if details.Description != "" {
 			description = details.Description
 		}
 		result = append(result, AdapterView{
-			ID:           id,
-			Name:         item.Name,
-			Description:  description,
-			Address:      ipv4,
-			PrefixLength: prefixLength,
-			SourceIPv6:   ipv6,
-			IfIndex:      item.Index,
-			IPv6IfIndex:  item.Index,
-			Gateway:      details.Gateway,
-			DNSServers:   details.DNSServers,
-			Metric:       details.Metric,
-			AutoMetric:   details.AutoMetric,
-			Selected:     isSelected,
-			Weight:       weight,
-			Kind:         kind,
-			Operational:  true,
-			IsVirtual:    isVirtualAdapter(item.Name, description),
+			ID:             id,
+			Name:           item.Name,
+			Description:    description,
+			Address:        ipv4,
+			PrefixLength:   prefixLength,
+			SourceIPv6:     ipv6,
+			IfIndex:        item.Index,
+			IPv6IfIndex:    details.IPv6IfIndex,
+			Gateway:        details.Gateway,
+			IPv6Gateway:    details.IPv6Gateway,
+			IPv6Metric:     details.IPv6Metric,
+			IPv6AutoMetric: details.IPv6AutoMetric,
+			DNSServers:     details.DNSServers,
+			Metric:         details.Metric,
+			AutoMetric:     details.AutoMetric,
+			Selected:       isSelected,
+			Weight:         weight,
+			Kind:           kind,
+			Operational:    true,
+			IsVirtual:      isVirtualAdapter(item.Name, description),
 		})
 	}
 	sort.SliceStable(result, func(i, j int) bool {
