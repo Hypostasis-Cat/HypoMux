@@ -72,8 +72,8 @@ Protocol-v1 methods:
 - `engine.hello`: negotiate the protocol and inspect capabilities.
 - `engine.status`: read the canonical engine lifecycle state.
 - `engine.start`: start either the ordinary SOCKS5/HTTP TCP proxy or the
-  named-channel TUN TCP/UDP pool with explicit adapters, required source IPv4,
-  optional source IPv6, interface indices, ports, and scheduling weights.
+  named-channel TUN TCP/UDP pool with explicit adapters, at least one usable IPv4 or IPv6 source,
+  independent interface indices, ports, and scheduling weights.
 - `engine.stop`: close listeners and cancel all accepted and relayed
   connections with a bounded shutdown.
 - `engine.telemetry`: read cumulative per-adapter bytes, active connection
@@ -87,7 +87,8 @@ Protocol-v1 methods:
   HypoMux TUN routes and adapter while leaving the prepared pool available for
   the enclosing transaction.
 - `dns.resolve`: resolve an A or AAAA record through a running engine and a
-  selected adapter for diagnostics.
+  selected adapter for diagnostics. With no record type, IPv6-only adapters
+  prefer AAAA and fall back to A for connection-layer NAT64 synthesis.
 - `dns.status`: inspect DNS policy, upstreams, cache, in-flight work, and
   counters without starting a query.
 - `health.check`: verify that the engine process and protocol loop respond.
@@ -104,11 +105,20 @@ Go owns the sing-box process and its TUN/WFP/route lifetime by default;
 sing-box still implements DNS, FakeIP, Wintun, and strict routing.
 
 Ordinary proxy domain targets are resolved by the Go engine before the
-adapter-bound TCP dial. A records remain preferred, with AAAA fallback only
-through adapters that advertise an explicit IPv6 source. `auto` races the
-built-in DoH endpoints and uses only source-bound traditional DNS if DoH is
-unavailable; explicit providers remain strict. No ordinary proxy DNS path
+adapter-bound TCP dial. A and AAAA queries run concurrently for the adapter's usable families.
+Multiple addresses are attempted with a 250 ms stagger and at most two sockets;
+an unresolved family retains a slot so same-family blackholes cannot starve it.
+`auto` races DoH endpoints and falls back to source-bound traditional DNS.
+On IPv6-only links it first uses adapter DNS to preserve DNS64; explicit
+providers retain strict encrypted query semantics. No ordinary proxy DNS path
 uses the Windows system resolver. TUN DNS remains owned by sing-box.
+
+IPv4 and IPv6 local faults have independent cooldowns and telemetry.
+NAT64 prefix discovery uses only the selected network DNS and RFC 7050;
+RFC 6052 synthesis supports IPv4 literal TCP/UDP and IPv4-only domains.
+A missing advertised prefix fails explicitly; no unbound IPv4 socket is used.
+See [the IPv6 acceptance plan](../docs/ipv6-adaptation-plan.md) for
+local verification, the opt-in public network runner, and unaccepted real-network items.
 
 Adapter-local transport failures use a shared bounded backoff across ordinary
 proxy and every TUN channel. Expired cooldowns become recovery candidates and

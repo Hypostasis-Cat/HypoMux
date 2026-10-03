@@ -2,6 +2,7 @@
 
 - [版本与发布渠道](RELEASE_VERSIONING.md)：正式版、Beta / RC、版本同步命令与更新渠道选择。
 
+- [IPv6 适配与验收](ipv6-adaptation-plan.md)：双栈、IPv6-only、DNS64/NAT64、测试证据与实机验收条件。
 - [算法与性能优化方案](algorithm-performance-plan.md)：分阶段路线、第一阶段实现与微基准结果。
 - [Steam 下载节点优选](steam-cdn-optimization.md)：双模式实现方案、开关行为和验证结果。
 

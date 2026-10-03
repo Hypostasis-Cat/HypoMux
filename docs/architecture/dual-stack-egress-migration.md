@@ -1,6 +1,10 @@
 # Dual-stack physical egress migration
 
 > Historical migration record; the Go/WPF cutover is complete.
+> For the current IPv6-only, DNS64/NAT64 and acceptance work, see
+> [IPv6 adaptation plan](../ipv6-adaptation-plan.md).
+> For the current IPv6-only, DNS64/NAT64 and acceptance work, see
+> [IPv6 adaptation plan](../ipv6-adaptation-plan.md).
 
 Status: implemented behind the Phase 9 development capability gate
 

@@ -1,0 +1,148 @@
+# HypoMux IPv6 适配与验收方案
+
+本次适配将现有 IPv6 TCP 和 UDP 出站能力扩展为双栈与 IPv6-only 出口支持。内部回环端口继续使用 IPv4；公网出站、DNS、Windows 路由与状态按地址族处理。验收以实际行为和测试证据为准，跳过的实机测试不能计为通过。
+
+**2026-10-03 状态：实现和本地自动化检查通过，完整实机验收尚未通过。** 当前用户只有 IPv4 网络，物理出口没有可用的首选 IPv6 地址；公网 IPv6、真实 DNS64/NAT64 与对应系统验收被此条件阻塞。
+
+## 实施顺序
+
+1. 网卡与配置：IPv4 或 IPv6 至少一种有效；IPv6 接口索引、地址状态、DNS、默认路由和跃点独立读取；地址变化参与运行时刷新。
+2. DNS：传统 UDP/TCP 和 DoH 支持匹配的 IPv4/IPv6 源地址与接口；DNS 缓存与连接池隔离完整绑定；IPv6-only 自动策略优先网络 DNS 以保留 DNS64；显式加密 DNS 策略保持原语义。
+3. 连接：按可用源地址查询 A/AAAA，保留多个候选，错峰尝试并取消失败竞速；网络连接失败能够跨协议回退，所有尝试保持网卡绑定与资源上限。
+4. TUN/WFP：DNS 出口、源地址和严格路由放行支持 IPv6；选择无对应协议能力的线路时明确失败；IPv4 回退状态对用户可见，清理包含两种协议路由与过滤器。
+5. 调度与诊断：地址族故障独立记录；IPv6 延迟和连接诊断、状态展示与地址变化刷新；验证大包、UDP 和取消行为。
+6. NAT64：只使用所选网络 DNS 提供的实际 DNS64 前缀，不假定固定前缀；覆盖 IPv6-only 上的 IPv4 字面目标与 IPv4-only 域名。
+
+实现细节：每种协议最多保留 8 个目标地址，每张网卡最多同时尝试 2 个 TCP 连接，间隔 250 ms；另一种协议仍在解析时为它保留连接名额。连接总预算包含 DNS 阶段，取消后关闭落败的数据连接。DNS 查询按源地址、IPv4/IPv6 接口索引及网络 DNS 隔离；共享解析仅在最后一个等待者离开后取消。DoH 连接池中的建连仍受查询超时限制。
+
+IPv6-only 域名优先尝试原生 AAAA；必要时在 2 秒后或原生候选全部失败后，查询 A 并使用真实网络前缀合成地址。DNSPod 没有可依赖的固定 IPv6 接入地址，使用绑定到所选网卡的传统 DNS 解析 `doh.pub` 后进行证书校验的 HTTPS 查询；用户域名仍使用加密查询。双栈 DNSPod 允许 IPv4 或 IPv6 路径胜出。未指定记录类型的 `dns.resolve` 在 IPv6-only 出口优先 AAAA，必要时返回 A 供连接层转换。
+
+现有 IPv4 MTU 探测/设置工具继续保留其明确的 IPv4 范围。IPv6 数据路径使用操作系统 PMTU 处理；真实链路的大包与 ICMPv6 Packet Too Big 行为属于下面的实机验收项。
+
+## 自动化验收标准
+
+| 项目 | 必须满足的行为 |
+| --- | --- |
+| 配置兼容 | 原有 IPv4 配置通过；IPv6-only 配置通过；空、重复、不安全地址拒绝 |
+| DNS | IPv6 UDP/TCP 与 TLS DoH 实际回环查询通过，TCP 回退、取消、源地址绑定及缓存隔离通过 |
+| TCP | IPv4 连接失败而 IPv6 正常时成功；反向回退成功；多个地址重试；慢 DNS 不阻塞另一协议；失败竞速连接关闭 |
+| UDP | IPv6 流稳定、源地址绑定、请求回复头正确；能力不匹配不走未选择网卡 |
+| NAT64 | RFC 6052 支持的前缀长度合成正确；RFC 7050 前缀发现正确；未发现前缀时明确失败 |
+| Windows/TUN | IPv6 默认路由、作用域 DNS、源地址绑定配置、WFP V6 过滤规则、两种协议恢复和降级状态测试通过 |
+| 界面 | IPv6 地址/状态可见；仅 IPv6 地址变化会刷新；IPv4 回退提示可见 |
+| 回归 | engine 与 desktop 全量 Go 测试、vet、前端测试与生产构建通过；竞态检查在支持的编译环境通过 |
+
+## 实机验收标准
+
+必须记录 Windows 版本、网卡、可用地址族与实际运行方式。分别验证公网 IPv4、IPv6、双栈不对称故障、IPv6-only、DNS64/NAT64、TUN 严格路由、睡眠/网络切换及退出后的路由/过滤器恢复。不能用回环或模拟测试替代公网、真实 NAT64 和系统恢复验收。当前机器缺少的网络条件作为未验收项保留，不宣称完整验收通过。
+
+| 场景 | 操作与验收结果 | 当前状态 |
+| --- | --- | --- |
+| 公网 IPv4 基线 | 普通代理和 TUN 下访问 A-only、双栈域名及 IPv4 字面目标，TCP/UDP 正常且选择的出口一致 | 普通代理/TUN 池公网 TCP/UDP 已通过；系统 TUN 及受控 A-only 域名仍待验收 |
+| 公网 IPv6 | 通过指定网卡的 IPv6 源地址访问 AAAA 域名、IPv6 字面目标、DoH；证书和实际源地址验证通过 | 缺少网络，未验收 |
+| 双栈不对称故障 | 分别断开一张网卡的 IPv4/IPv6 路径，另一协议成功；故障状态仅影响对应协议，恢复后可重新使用 | 实机待验收；回退和状态测试通过 |
+| IPv6-only，无 NAT64 | 原生 IPv6 TCP/UDP 与 DNS 正常；IPv4 目标明确失败，不逃逸到其他网卡 | 缺少网络，未验收 |
+| IPv6-only，DNS64/NAT64 | 使用该网络 DNS 发现前缀；IPv4 字面 TCP/UDP、受控 A-only HTTPS 域名均成功；UDP 回复保留原 IPv4 目标 | 缺少网络，未验收 |
+| TUN/WFP 严格模式 | IPv6 DNS、TCP/UDP 只能走指定出口；IPv4 回退提示持续可见；IPv6-only 线路不生成 IPv4-only 回退配置 | IPv6 实机待验收；配置与规则测试通过 |
+| 地址变化与睡眠 | 休眠唤醒、接口索引/源地址变化后重建绑定，缓存和连接不复用旧出口 | 实机待验收；绑定隔离与刷新测试通过 |
+| IPv6 PMTU/大包 | 在有 MTU 瓶颈的真实链路上传输大文件和 UDP，允许必要 ICMPv6，观察无持续黑洞或错误切换出口 | 缺少网络，未验收；回环大包通过 |
+| 退出、崩溃与竞争 VPN | 记录前后两种协议的路由和 WFP 状态；正常退出及异常终止清除 HypoMux 资源，其他 VPN 资源保留 | IPv6 实机待验收；只读预检与生命周期回归通过 |
+
+每项保存执行时间、运行模式、Windows 版本、接口名称/两种协议索引、源地址、DNS、连接结果与前后路由/过滤器快照。完整验收要求上述项目全部通过；测试代码通过和网络脚本返回 0 均不能单独替代系统矩阵。TUN/WFP 系统验收需要高权限独立 Core 的可控测试窗口；当前终端进程并非管理员，普通代理和只读原生检查不受此影响。
+
+### 公网网络验收入口
+
+在项目根目录使用 PowerShell，安装项目要求的 Go 版本后执行。脚本只启动回环测试服务和源地址绑定的外部连接，不修改系统代理、路由或 WFP。
+
+```powershell
+# 双栈网卡也会强制只使用 IPv6 源地址进行这组公网检查。
+.\tools\ipv6-acceptance.ps1 -Adapter "网卡名"
+
+# 在真实 DNS64/NAT64 网络中提供该网络的 IPv6 DNS，以及受控 A-only HTTPS 域名。
+.\tools\ipv6-acceptance.ps1 -Adapter "网卡名" -RequireNAT64 `
+  -DNSServers "该网络的IPv6-DNS地址" -IPv4OnlyDomain "受控的A-only域名" `
+  -Output ".go-cache-local/ipv6-nat64-acceptance.json"
+```
+
+默认 NAT64 TCP/UDP 目标分别为 `8.8.8.8:443` 和 `8.8.8.8:53`，TCP 校验 `dns.google` 证书，UDP 验证 DNS 回复和 SOCKS 原目标。受控域名须有 A、没有 AAAA，且 HTTPS 证书有效。自动选择只考虑活动以太网/Wi-Fi；不要用 Teredo 或 HypoMux 自身的 TUN 代替目标物理网络。脚本返回 `0` 表示本次指定网络检查通过，`1` 表示失败/跳过/未执行，`2` 表示缺少前提。报告始终保留 `full_acceptance=pending_system_matrix`，直到独立系统矩阵完成。
+
+## 标准依据
+
+- [RFC 8305 双栈连接与 NAT64](https://www.rfc-editor.org/rfc/rfc8305.html)
+- [RFC 6052 IPv4 地址嵌入](https://www.rfc-editor.org/rfc/rfc6052.html)
+- [RFC 7050 NAT64 前缀发现](https://www.rfc-editor.org/rfc/rfc7050.html)
+- [RFC 8201 IPv6 路径 MTU](https://www.rfc-editor.org/rfc/rfc8201.html)
+- [Windows 网卡地址元数据](https://learn.microsoft.com/en-us/windows/win32/api/iptypes/ns-iptypes-ip_adapter_addresses_lh)
+
+## 验收记录
+
+测试日期为 2026-10-03，Windows `10.0.26300.0` / AMD64，Go `1.26.6`。竞态检测使用仓库已有 LLVM MinGW Clang，通过 `CGO_ENABLED=1` 和 `CC` 指向其 `x86_64-w64-mingw32-clang.exe`。验证时基于提交 `e66016e129c321557b48935629521e917f17b76e` 的工作区改动，经过验证的实现对应本组 IPv6 适配提交；发布到主分支不改变上文“完整实机验收尚未通过”的状态。
+
+| 检查 | 最终结果 | 本地证据 |
+| --- | --- | --- |
+| engine 全量 `go test -race ./... -count=1 -timeout 120s` | 283 个顶层测试通过，0 失败，2 个公网网络测试因缺少显式环境跳过 | `.go-cache-local/ipv6-engine-tests.jsonl` |
+| desktop 全量 `go test -race ./... -count=1 -timeout 180s` | 显式启用本机可用集成检查后，423 个顶层测试通过，0 失败，3 个安装环境检查跳过 | `.go-cache-local/ipv6-desktop-tests.jsonl` |
+| Windows 原生只读检查 | 默认 DNS 出口、45 条活动路由快照、TUN 只读预检，3 项通过 | `.go-cache-local/ipv6-native-readonly-tests.txt` |
+| 可用实机集成检查 | 真实引擎握手、选定以太网诊断、IPv4 MTU、原生 WLAN API、普通代理启停恢复，5 项通过；也已纳入最终全量竞态运行 | `.go-cache-local/ipv6-available-integration-tests.txt`、`ipv6-real-proxy-lifecycle.jsonl` |
+| Windows 代理实际恢复 | 普通代理测试及最终全量运行前后，`ProxyEnable` / `ProxyServer` / `ProxyOverride` 的存在性、值和类型全部一致 | `.go-cache-local/ipv6-real-proxy-restoration.json`、`ipv6-final-proxy-restoration.json` |
+| 公网 IPv4 数据路径 | 真实引擎 IPC、绑定网卡的 DoH、普通 SOCKS 域名/字面目标、HTTP CONNECT、TUN TCP/UDP 池；11 条检查记录通过，TLS 证书和 DNS 载荷验证有效 | `.go-cache-local/ipv4-public-regression.json` |
+| 前端全量测试 | 340 个测试通过，0 失败，0 跳过 | `.go-cache-local/ipv6-frontend-tests.json` |
+| 静态检查与构建 | 两个模块 `go vet ./...`、engine/desktop 构建、Wails 绑定生成、前端 TypeScript/生产构建通过 | 本地命令均退出 0；验证二进制在 `.go-cache-local` |
+| 公网 IPv6 网络脚本 | 返回 2，`network_status=blocked`，没有执行公网测试 | `.go-cache-local/ipv6-network-acceptance.json` |
+| 真实 DNS64/NAT64 网络脚本 | 返回 2，`network_status=blocked`，没有执行 NAT64 测试 | `.go-cache-local/ipv6-nat64-acceptance.json` |
+
+Go 数量按不含 `/` 的顶层测试统计，子测试未重复计数。前端按具体测试用例统计。desktop 最终全量运行已显式启用 8 项环境集成检查；剩余跳过项目仅为 NSIS 安装目录、已安装服务的信任客户端路径、官方签名安装器校验，不能算通过。公网 IPv6/NAT64 的 2 项 engine 测试仍因缺少对应网络跳过。
+
+以太网实机诊断收到全部 10 次 ICMP 回复，绑定网卡的 `223.5.5.5:443` TCP 连接成功；只读 IPv4 MTU 检查得到 1500，WLAN 只读 API 枚举到 1 个接口。公网 IPv4 数据检查通过引擎回环代理访问 `dns.alidns.com`，校验证书与 DoH DNS 响应；UDP 通过 TUN 池访问 `223.5.5.5:53` 并核对原目标回复头。此检查使用池端口，未激活系统 TUN，因此不替代系统路由/WFP 验收。本机一次性验证脚本与接口参数保存在 `.go-cache-local/verify_ipv4_regression.py` 和 `ipv4-acceptance-adapter.json`。
+
+机器可读汇总位于 `.go-cache-local/ipv6-local-verification.json`，记录基线提交、最终测试数量及两个验证二进制的 SHA-256。前端共 57 个测试文件。
+
+真实 IPv6 回环覆盖 UDP/TCP DNS、证书校验的 TLS DoH、ICMPv6、SOCKS TCP/UDP 和源地址绑定；TCP 256 KiB、UDP 1200/8192 字节通过。NAT64 算法使用独立 RFC 前缀向量覆盖全部 6 种允许长度，转换拨号、取消、缓存隔离和协议回复身份通过自动化测试。这些证据验证实现行为，不证明公网翻译设备或 IPv6 系统路由已经验收。
+
+复现本地回归：
+
+```powershell
+# 竞态检查需先设置可用的 C 编译器 CC，并将其 bin 加入 PATH。
+$env:CGO_ENABLED = "1"
+Push-Location engine
+go test -race ./... -count=1 -timeout 120s
+go vet ./...
+go build -trimpath -o ..\.go-cache-local\ipv6-hypomux-engine.exe ./cmd/hypomux-engine
+Pop-Location
+
+Push-Location desktop
+wails3 generate bindings -clean=true -ts -i
+Pop-Location
+
+Push-Location desktop/frontend
+npm run test
+npm run build
+Pop-Location
+
+Push-Location desktop
+go test -race ./... -count=1 -timeout 180s
+go vet ./...
+go build -trimpath -o ..\.go-cache-local\ipv6-HypoMux.exe .
+$env:HYPOMUX_RUN_TUN_PREFLIGHT_TEST = "1"
+go test ./internal/services -run '^(TestReadOnlyWindowsDefaultDNSEgress|TestReadOnlyNetworkRouteSnapshot|TestRealWindowsTunPreflightIsReadOnly)$' -count=1 -v
+Remove-Item Env:HYPOMUX_RUN_TUN_PREFLIGHT_TEST
+Pop-Location
+```
+
+本机最终全量运行还设置了以下开关，使用本次构建的真实引擎和选定以太网。该组检查包含短暂启用系统代理并恢复；IPv4 MTU 开关需要对应网卡有 IPv4 地址。公网 IPv6 检查仍使用前文独立脚本。
+
+```powershell
+$env:HYPOMUX_ENGINE_PATH = (Resolve-Path .go-cache-local/ipv6-hypomux-engine.exe).Path
+$env:HYPOMUX_NETWORK_TEST_ENGINE = $env:HYPOMUX_ENGINE_PATH
+$env:HYPOMUX_NETWORK_TEST_ADAPTER = "以太网"
+$env:HYPOMUX_RUN_DIAGNOSTIC_TEST = "1"
+$env:HYPOMUX_RUN_NETWORK_TEST = "1"
+$env:HYPOMUX_MTU_SMOKE_ADAPTER = "以太网"
+$env:HYPOMUX_TEST_WLAN_READONLY = "1"
+$env:HYPOMUX_RUN_TUN_PREFLIGHT_TEST = "1"
+Push-Location desktop
+go test -race ./... -count=1 -timeout 180s
+Pop-Location
+```
+
+`.go-cache-local` 属于忽略的本地验证产物；其中的可执行文件没有安装、签名或发布。对外归档网络证据前应核对其中的本机地址和接口信息。下一步是取得上述真实网络条件，运行公网脚本与系统矩阵；在此之前保留“完整验收未通过”的状态。
