@@ -238,7 +238,7 @@ func (a *udpAssociation) createFlow(
 	firstPayload []byte,
 	skip ...string,
 ) (*udpFlow, error) {
-	host, _, err := net.SplitHostPort(target)
+	host, port, err := net.SplitHostPort(target)
 	if err != nil {
 		return nil, fmt.Errorf("UDP target: %w", err)
 	}
@@ -260,10 +260,11 @@ func (a *udpAssociation) createFlow(
 		}
 	}
 	for _, adapter := range adapters {
-		if !adapterSupportsNetwork(adapter, network) {
+		if !adapterSupportsNetwork(adapter, network) && !(targetIP.To4() != nil && adapter.SourceIPv6 != "") {
 			excluded[adapter.Name] = struct{}{}
 		}
 	}
+	excludeCoolingFamilies(adapters, excluded, a.scheduler.health, network)
 	attempts := len(adapters) - len(excluded)
 	if attempts > 2 {
 		attempts = 2
@@ -275,13 +276,27 @@ func (a *udpAssociation) createFlow(
 			break
 		}
 		excluded[adapter.Name] = struct{}{}
+		flowNetwork, dialTarget := network, target
+		if targetIP.To4() != nil && adapter.SourceIP == "" {
+			translateCtx, stop := context.WithTimeout(a.server.ctx, a.server.config.DNS.QueryTimeout)
+			translated, translateErr := a.server.resolver.TranslateIPv4(translateCtx, adapterDNSBinding(adapter), targetIP)
+			stop()
+			if translateErr != nil {
+				failures = append(failures, translateErr)
+				continue
+			}
+			flowNetwork, dialTarget = "udp6", net.JoinHostPort(translated.String(), port)
+		}
 		dialer, err := boundNetworkDialer(
 			adapter,
 			a.server.config.ConnectTimeout,
-			network,
+			flowNetwork,
 		)
 		if err != nil {
-			a.scheduler.MarkFailure(adapter.Name)
+			a.scheduler.health.recordFamily(adapter, flowNetwork, false)
+			if adapter.SourceIP == "" || adapter.SourceIPv6 == "" {
+				a.scheduler.MarkFailure(adapter.Name)
+			}
 			failures = append(failures, fmt.Errorf("%s bind: %w", adapter.Name, err))
 			continue
 		}
@@ -289,7 +304,7 @@ func (a *udpAssociation) createFlow(
 			a.server.ctx,
 			a.server.config.ConnectTimeout,
 		)
-		upstream, err := a.server.dialUDP(ctx, dialer, target)
+		upstream, err := a.server.dialUDP(ctx, dialer, dialTarget)
 		cancel()
 		if err == nil {
 			var written int
@@ -303,12 +318,16 @@ func (a *udpAssociation) createFlow(
 				_ = upstream.Close()
 			}
 			if isLocalConnectFailure(err) {
-				a.scheduler.MarkFailure(adapter.Name)
+				a.scheduler.health.recordFamily(adapter, flowNetwork, false)
+				if adapter.SourceIP == "" || adapter.SourceIPv6 == "" {
+					a.scheduler.MarkFailure(adapter.Name)
+				}
 			}
 			failures = append(failures, fmt.Errorf("%s UDP setup: %w", adapter.Name, err))
 			continue
 		}
 		a.scheduler.MarkSuccess(adapter.Name)
+		a.scheduler.health.recordFamily(adapter, flowNetwork, true)
 		clientLabel := clientAddress.String()
 		telemetry := a.server.registry.BeginAddress(
 			"socks5_udp",
@@ -579,6 +598,11 @@ func (f *udpFlow) recordFailure(err error) {
 		return
 	}
 	if s.snapshot().Strategy == StrategyLatency {
-		s.MarkFailure(f.adapter.Name)
+		if remote, ok := f.connection.RemoteAddr().(*net.UDPAddr); ok {
+			s.health.recordFamily(f.adapter, networkForIP("udp", remote.IP), false)
+		}
+		if f.adapter.SourceIP == "" || f.adapter.SourceIPv6 == "" {
+			s.MarkFailure(f.adapter.Name)
+		}
 	}
 }

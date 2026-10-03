@@ -10,22 +10,24 @@ import (
 )
 
 type AdapterTelemetry struct {
-	Name                string     `json:"name"`
-	SourceIP            string     `json:"source_ip"`
-	IfIndex             int        `json:"if_index"`
-	SourceIPv6          string     `json:"source_ipv6,omitempty"`
-	IPv6IfIndex         int        `json:"ipv6_if_index,omitempty"`
-	Connections         uint64     `json:"connections"`
-	BytesUp             uint64     `json:"bytes_up"`
-	BytesDown           uint64     `json:"bytes_down"`
-	HealthState         string     `json:"health_state"`
-	ConsecutiveFailures int        `json:"consecutive_failures"`
-	HealthSuccesses     uint64     `json:"health_successes"`
-	HealthFailures      uint64     `json:"health_failures"`
-	LastSuccessAt       *time.Time `json:"last_success_at,omitempty"`
-	LastFailureAt       *time.Time `json:"last_failure_at,omitempty"`
-	CooldownUntil       *time.Time `json:"cooldown_until,omitempty"`
-	DomainQuarantines   int        `json:"domain_quarantines"`
+	Name                string               `json:"name"`
+	SourceIP            string               `json:"source_ip"`
+	IfIndex             int                  `json:"if_index"`
+	SourceIPv6          string               `json:"source_ipv6,omitempty"`
+	IPv6IfIndex         int                  `json:"ipv6_if_index,omitempty"`
+	Connections         uint64               `json:"connections"`
+	BytesUp             uint64               `json:"bytes_up"`
+	BytesDown           uint64               `json:"bytes_down"`
+	HealthState         string               `json:"health_state"`
+	ConsecutiveFailures int                  `json:"consecutive_failures"`
+	HealthSuccesses     uint64               `json:"health_successes"`
+	HealthFailures      uint64               `json:"health_failures"`
+	LastSuccessAt       *time.Time           `json:"last_success_at,omitempty"`
+	LastFailureAt       *time.Time           `json:"last_failure_at,omitempty"`
+	CooldownUntil       *time.Time           `json:"cooldown_until,omitempty"`
+	DomainQuarantines   int                  `json:"domain_quarantines"`
+	IPv4Health          FamilyHealthSnapshot `json:"ipv4_health"`
+	IPv6Health          FamilyHealthSnapshot `json:"ipv6_health"`
 }
 
 type DomainQuarantineTelemetry struct {

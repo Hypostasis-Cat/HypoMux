@@ -3,6 +3,7 @@ package dns
 import (
 	"context"
 	"crypto/tls"
+	"fmt"
 	"net"
 	"net/http"
 	"time"
@@ -45,7 +46,10 @@ func (r *Resolver) newDoHTransport(binding Binding, endpoint Endpoint) *http.Tra
 		if err := r.root.Err(); err != nil {
 			return nil, err
 		}
-		connection, err := r.dial(ctx, "tcp4", net.JoinHostPort(endpoint.IP, "443"), binding)
+		if !supportsEndpoint(binding, endpoint.IP) {
+			return nil, fmt.Errorf("DoH endpoint has no matching source address")
+		}
+		connection, err := r.dial(ctx, endpointNetwork("tcp", endpoint.IP), net.JoinHostPort(endpoint.IP, "443"), binding)
 		if err != nil {
 			return nil, err
 		}

@@ -30,10 +30,11 @@ func (s *Server) dialUpstream(
 	if targetIP != nil {
 		network := networkForIP("tcp", targetIP)
 		for _, adapter := range adapters {
-			if !adapterSupportsNetwork(adapter, network) {
+			if !adapterSupportsNetwork(adapter, network) && !(targetIP.To4() != nil && adapter.SourceIPv6 != "") {
 				excluded[adapter.Name] = struct{}{}
 			}
 		}
+		excludeCoolingFamilies(adapters, excluded, channelScheduler.health, network)
 	}
 
 	attempts := len(adapters) - len(excluded)
@@ -63,75 +64,11 @@ func (s *Server) dialUpstream(
 			break
 		}
 		excluded[adapter.Name] = struct{}{}
-		resolvedIP := targetIP
-		if resolvedIP == nil {
-			if s.resolver == nil {
-				failures = append(failures, fmt.Errorf("%s DNS resolver is unavailable", adapter.Name))
-				comparativeFailures = append(comparativeFailures, adapter.Name)
-				continue
-			}
-			resolved, resolveErr := s.resolver.Resolve(ctx, dns.Query{
-				Domain:     host,
-				RecordType: dns.RecordA,
-				Binding:    adapterDNSBinding(adapter),
-			})
-			if resolveErr != nil {
-				if adapter.SourceIPv6 != "" {
-					resolved, resolveErr = s.resolver.Resolve(ctx, dns.Query{
-						Domain:     host,
-						RecordType: dns.RecordAAAA,
-						Binding:    adapterDNSBinding(adapter),
-					})
-				}
-				if resolveErr != nil {
-					failures = append(
-						failures,
-						fmt.Errorf("%s resolve %s: %w", adapter.Name, host, resolveErr),
-					)
-					comparativeFailures = append(comparativeFailures, adapter.Name)
-					continue
-				}
-			}
-			resolvedIP = net.ParseIP(resolved.Address)
-			if resolvedIP == nil {
-				failures = append(
-					failures,
-					fmt.Errorf("%s resolver returned invalid address", adapter.Name),
-				)
-				comparativeFailures = append(comparativeFailures, adapter.Name)
-				continue
-			}
-		}
-		network := networkForIP("tcp", resolvedIP)
-		if !adapterSupportsNetwork(adapter, network) {
-			failures = append(
-				failures,
-				fmt.Errorf("%s has no %s source address", adapter.Name, network),
-			)
-			continue
-		}
-		channelScheduler.watchLatency(resolvedIP.String())
-		dialTarget := net.JoinHostPort(resolvedIP.String(), port)
-		dialer, err := boundNetworkDialer(adapter, s.config.ConnectTimeout, network)
-		if err != nil {
-			channelScheduler.MarkFailure(adapter.Name)
-			failures = append(failures, fmt.Errorf("%s bind: %w", adapter.Name, err))
-			continue
-		}
-		if tuneTCP {
-			enableTCPDialerTuning(dialer)
-		}
-		connection, err := s.dialTCP(ctx, dialer, dialTarget)
+		connection, err := s.dialAdapterTargets(ctx, adapter, host, port, targetIP, channelScheduler, tuneTCP)
 		if err == nil {
-			if tuneTCP {
-				tuneTCPConnection(connection)
-			}
 			channelScheduler.MarkSuccess(adapter.Name, domain)
 			for _, failedAdapter := range comparativeFailures {
-				channelScheduler.health.recordComparativeDomainFailure(
-					failedAdapter,
-					domain,
-				)
+				channelScheduler.health.recordComparativeDomainFailure(failedAdapter, domain)
 			}
 			if pending != nil {
 				pending.attach()
@@ -140,7 +77,7 @@ func (s *Server) dialUpstream(
 			}
 			return connection, adapter, nil
 		}
-		if isLocalConnectFailure(err) {
+		if isLocalConnectFailure(err) && (adapter.SourceIP == "" || adapter.SourceIPv6 == "") {
 			channelScheduler.MarkFailure(adapter.Name)
 		} else if domain != "" {
 			comparativeFailures = append(comparativeFailures, adapter.Name)
@@ -167,11 +104,38 @@ func adapterSupportsNetwork(adapter Adapter, network string) bool {
 	return adapter.SourceIP != ""
 }
 
+// Prefer a working family on another selected NIC, but retain recovery attempts
+// when every matching NIC is cooling down. IPv4 targets may use NAT64 on v6-only.
+func excludeCoolingFamilies(adapters []Adapter, excluded map[string]struct{}, health *healthTable, network string) {
+	actualNetwork := func(a Adapter) string {
+		if (network == "tcp4" || network == "udp4") && a.SourceIP == "" && a.SourceIPv6 != "" {
+			return network[:len(network)-1] + "6"
+		}
+		return network
+	}
+	ready := false
+	for _, a := range adapters {
+		if _, skip := excluded[a.Name]; !skip && health.familyAvailable(a, actualNetwork(a)) {
+			ready = true
+			break
+		}
+	}
+	if ready {
+		for _, a := range adapters {
+			if !health.familyAvailable(a, actualNetwork(a)) {
+				excluded[a.Name] = struct{}{}
+			}
+		}
+	}
+}
+
 func adapterDNSBinding(adapter Adapter) dns.Binding {
 	return dns.Binding{
-		Name:       adapter.Name,
-		SourceIP:   adapter.SourceIP,
-		IfIndex:    adapter.IfIndex,
-		DNSServers: append([]string(nil), adapter.DNSServers...),
+		Name:        adapter.Name,
+		SourceIP:    adapter.SourceIP,
+		IfIndex:     adapter.IfIndex,
+		SourceIPv6:  adapter.SourceIPv6,
+		IPv6IfIndex: adapter.IPv6IfIndex,
+		DNSServers:  append([]string(nil), adapter.DNSServers...),
 	}
 }

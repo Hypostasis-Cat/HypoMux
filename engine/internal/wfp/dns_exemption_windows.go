@@ -23,6 +23,7 @@ const (
 	fwpUint16                      = 2
 	fwpUint32                      = 3
 	fwpByteBlobType                = 12
+	fwpByteArray16Type             = 11
 	fwpMatchEqual                  = 0
 	fwpActionPermit                = 0x00001002
 	fwpmSessionFlagDynamic         = 0x00000001
@@ -34,6 +35,7 @@ const (
 
 var (
 	layerALEAuthConnectV4 = mustGUID("c38d57d1-05a7-4c33-904f-7fbceee60e82")
+	layerALEAuthConnectV6 = mustGUID("4a72393b-319f-44bc-84c3-ba54dcb3b6b4")
 	conditionALEAppID     = mustGUID("d78e1e87-8644-4ea5-9437-d809ecefc971")
 	conditionLocalAddress = mustGUID("d9ee00de-c1ef-4617-bfe3-ffd8f5a08957")
 	conditionInterface    = mustGUID("667fd755-d695-434a-8af5-d3835a1259bc")
@@ -121,10 +123,12 @@ type subLayer struct {
 }
 
 type dnsRule struct {
-	adapter  string
-	sourceIP uint32
-	ifIndex  uint32
-	protocol uint8
+	adapter    string
+	sourceIP   uint32
+	ifIndex    uint32
+	protocol   uint8
+	sourceIPv6 [16]byte
+	ipv6       bool
 }
 
 type dnsSession struct {
@@ -148,7 +152,7 @@ type api struct {
 func OpenDNSExemption(applicationPath string, adapters []Adapter) (DNSExemption, error) {
 	rules := buildRules(adapters)
 	if len(rules) == 0 {
-		return nil, errors.New("no selected adapter has a usable IPv4 address and interface index")
+		return nil, errors.New("no selected adapter has a usable IPv4 or IPv6 address and matching interface index")
 	}
 	if strings.TrimSpace(applicationPath) == "" {
 		executable, err := os.Executable()
@@ -269,6 +273,19 @@ func buildRules(adapters []Adapter) []dnsRule {
 	result := make([]dnsRule, 0, len(adapters)*2)
 	seen := make(map[string]struct{}, len(adapters)*2)
 	for _, adapter := range adapters {
+		ip6 := net.ParseIP(strings.TrimSpace(adapter.SourceIPv6))
+		if ip6 != nil && ip6.To4() == nil && !ip6.IsUnspecified() && !ip6.IsMulticast() && !ip6.IsLinkLocalUnicast() && adapter.IPv6IfIndex != 0 {
+			for _, protocol := range []uint8{ipProtoUDP, ipProtoTCP} {
+				key := fmt.Sprintf("%s/%d/%d", ip6.String(), adapter.IPv6IfIndex, protocol)
+				if _, exists := seen[key]; exists {
+					continue
+				}
+				seen[key] = struct{}{}
+				rule := dnsRule{adapter: adapter.Name, ipv6: true, ifIndex: adapter.IPv6IfIndex, protocol: protocol}
+				copy(rule.sourceIPv6[:], ip6.To16())
+				result = append(result, rule)
+			}
+		}
 		ip := net.ParseIP(strings.TrimSpace(adapter.SourceIP)).To4()
 		if ip == nil || adapter.IfIndex == 0 {
 			continue
@@ -306,6 +323,11 @@ func (wfp *api) addDNSFilter(
 		makeCondition(conditionIPProtocol, fwpUint8, uintptr(rule.protocol)),
 		makeCondition(conditionRemotePort, fwpUint16, uintptr(53)),
 	}
+	layer := layerALEAuthConnectV4
+	if rule.ipv6 {
+		layer = layerALEAuthConnectV6
+		conditions[1] = makeCondition(conditionLocalAddress, fwpByteArray16Type, uintptr(unsafe.Pointer(&rule.sourceIPv6[0])))
+	}
 	filterKey, err := windows.GenerateGUID()
 	if err != nil {
 		return 0, err
@@ -327,7 +349,7 @@ func (wfp *api) addDNSFilter(
 		FilterKey:           filterKey,
 		DisplayData:         displayData{Name: name, Description: description},
 		Flags:               fwpmFilterFlagClearActionRight,
-		LayerKey:            layerALEAuthConnectV4,
+		LayerKey:            layer,
 		SubLayerKey:         subLayerKey,
 		Weight:              value{Type: fwpUint8, Value: 0x0F},
 		NumFilterConditions: uint32(len(conditions)),
@@ -347,6 +369,7 @@ func (wfp *api) addDNSFilter(
 	}
 	runtime.KeepAlive(conditions)
 	runtime.KeepAlive(filterData)
+	runtime.KeepAlive(rule)
 	return filterID, nil
 }
 

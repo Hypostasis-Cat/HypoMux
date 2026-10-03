@@ -3,6 +3,8 @@ package dns
 import (
 	"fmt"
 	"net"
+	"net/netip"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -24,7 +26,7 @@ const (
 	DefaultFailureThreshold = 3
 )
 
-var defaultLegacyServers = []string{"223.5.5.5", "119.29.29.29"}
+var defaultLegacyServers = []string{"223.5.5.5", "119.29.29.29", "2400:3200::1", "2001:4860:4860::8888"}
 
 type Endpoint struct {
 	IP   string `json:"ip"`
@@ -35,6 +37,7 @@ type Endpoint struct {
 var providerEndpoints = map[string][]Endpoint{
 	PolicyAliDNS: {
 		{IP: "223.5.5.5", Host: "dns.alidns.com", Path: "/dns-query"},
+		{IP: "2400:3200::1", Host: "dns.alidns.com", Path: "/dns-query"},
 	},
 	PolicyDNSPod: {
 		{IP: "1.12.12.12", Host: "doh.pub", Path: "/dns-query"},
@@ -43,6 +46,8 @@ var providerEndpoints = map[string][]Endpoint{
 	PolicyGoogle: {
 		{IP: "8.8.8.8", Host: "dns.google", Path: "/dns-query"},
 		{IP: "8.8.4.4", Host: "dns.google", Path: "/dns-query"},
+		{IP: "2001:4860:4860::8888", Host: "dns.google", Path: "/dns-query"},
+		{IP: "2001:4860:4860::8844", Host: "dns.google", Path: "/dns-query"},
 	},
 }
 
@@ -56,10 +61,12 @@ type Config struct {
 }
 
 type Binding struct {
-	Name       string
-	SourceIP   string
-	IfIndex    int
-	DNSServers []string
+	Name        string
+	SourceIP    string
+	IfIndex     int
+	SourceIPv6  string
+	IPv6IfIndex int
+	DNSServers  []string
 }
 
 func DefaultConfig() Config {
@@ -84,7 +91,7 @@ func NormalizeConfig(config Config) (Config, error) {
 		return Config{}, fmt.Errorf("unsupported DNS policy %q", config.Policy)
 	}
 
-	servers, err := normalizeIPv4List(config.LegacyServers)
+	servers, err := normalizeIPList(config.LegacyServers, nil)
 	if err != nil {
 		return Config{}, fmt.Errorf("legacy DNS servers: %w", err)
 	}
@@ -121,18 +128,34 @@ func NormalizeConfig(config Config) (Config, error) {
 func NormalizeBinding(binding Binding) (Binding, error) {
 	binding.Name = strings.TrimSpace(binding.Name)
 	binding.SourceIP = strings.TrimSpace(binding.SourceIP)
+	binding.SourceIPv6 = strings.TrimSpace(binding.SourceIPv6)
 	if binding.Name == "" {
 		return Binding{}, fmt.Errorf("adapter name is required")
 	}
-	source := net.ParseIP(binding.SourceIP)
-	if source == nil || source.To4() == nil {
-		return Binding{}, fmt.Errorf("adapter %q has invalid IPv4 source address", binding.Name)
+	if binding.SourceIP != "" {
+		source := net.ParseIP(binding.SourceIP)
+		if source == nil || source.To4() == nil || source.IsUnspecified() || source.IsMulticast() {
+			return Binding{}, fmt.Errorf("adapter %q has invalid IPv4 source address", binding.Name)
+		}
+		binding.SourceIP = source.To4().String()
 	}
-	binding.SourceIP = source.To4().String()
-	if binding.IfIndex < 0 {
+	if binding.SourceIPv6 != "" {
+		source := net.ParseIP(binding.SourceIPv6)
+		if source == nil || source.To4() != nil || source.IsUnspecified() || source.IsMulticast() || source.IsLinkLocalUnicast() {
+			return Binding{}, fmt.Errorf("adapter %q has invalid IPv6 source address", binding.Name)
+		}
+		binding.SourceIPv6 = source.String()
+	}
+	if binding.SourceIP == "" && binding.SourceIPv6 == "" {
+		return Binding{}, fmt.Errorf("adapter %q requires an IPv4 or IPv6 source address", binding.Name)
+	}
+	if binding.IfIndex < 0 || binding.IPv6IfIndex < 0 {
 		return Binding{}, fmt.Errorf("adapter %q has invalid interface index", binding.Name)
 	}
-	servers, err := normalizeIPv4List(binding.DNSServers)
+	if binding.SourceIPv6 != "" && binding.IPv6IfIndex == 0 {
+		binding.IPv6IfIndex = binding.IfIndex
+	}
+	servers, err := normalizeIPList(binding.DNSServers, &binding)
 	if err != nil {
 		return Binding{}, fmt.Errorf("adapter %q DNS servers: %w", binding.Name, err)
 	}
@@ -151,6 +174,16 @@ func Endpoints(policy string) []Endpoint {
 	return append([]Endpoint(nil), providerEndpoints[policy]...)
 }
 
+func boundEndpoints(policy string, binding Binding) []Endpoint {
+	var endpoints []Endpoint
+	for _, endpoint := range Endpoints(policy) {
+		if supportsEndpoint(binding, endpoint.IP) {
+			endpoints = append(endpoints, endpoint)
+		}
+	}
+	return endpoints
+}
+
 func LegacyServers(config Config, binding Binding) []string {
 	result := append([]string(nil), binding.DNSServers...)
 	for _, server := range config.LegacyServers {
@@ -158,26 +191,72 @@ func LegacyServers(config Config, binding Binding) []string {
 			result = append(result, server)
 		}
 	}
-	return result
+	filtered := result[:0]
+	for _, server := range result {
+		if supportsEndpoint(binding, server) {
+			filtered = append(filtered, server)
+		}
+	}
+	return filtered
 }
 
 func normalizeIPv4List(values []string) ([]string, error) {
+	return normalizeIPList(values, nil)
+}
+
+func normalizeIPList(values []string, binding *Binding) ([]string, error) {
 	result := make([]string, 0, len(values))
 	for _, value := range values {
 		text := strings.TrimSpace(value)
 		if text == "" {
 			continue
 		}
-		ip := net.ParseIP(text)
-		if ip == nil || ip.To4() == nil {
-			return nil, fmt.Errorf("%q is not an IPv4 address", text)
+		ip, err := netip.ParseAddr(text)
+		if err != nil || ip.IsUnspecified() || ip.IsMulticast() {
+			return nil, fmt.Errorf("%q is not a usable DNS IP address", text)
 		}
-		text = ip.To4().String()
+		ip = ip.Unmap()
+		if ip.IsLinkLocalUnicast() {
+			if !ip.Is6() {
+				return nil, fmt.Errorf("link-local IPv4 DNS is unsupported")
+			}
+			if binding != nil {
+				zone := strconv.Itoa(binding.IPv6IfIndex)
+				if binding.IPv6IfIndex <= 0 {
+					return nil, fmt.Errorf("link-local DNS requires an IPv6 interface index")
+				}
+				if ip.Zone() != "" && ip.Zone() != zone && ip.Zone() != binding.Name {
+					return nil, fmt.Errorf("DNS scope does not match adapter %q", binding.Name)
+				}
+				ip = ip.WithZone(zone)
+			} else if ip.Zone() == "" {
+				return nil, fmt.Errorf("link-local DNS requires an interface scope")
+			}
+		} else if ip.Zone() != "" {
+			return nil, fmt.Errorf("global DNS address cannot have an interface scope")
+		}
+		text = ip.String()
 		if !contains(result, text) {
 			result = append(result, text)
 		}
 	}
 	return result, nil
+}
+
+func supportsEndpoint(binding Binding, endpoint string) bool {
+	ip, err := netip.ParseAddr(endpoint)
+	if err == nil && ip.Is6() && ip.IsLinkLocalUnicast() {
+		return binding.SourceIPv6 != "" && binding.IPv6IfIndex > 0 && (ip.Zone() == strconv.Itoa(binding.IPv6IfIndex) || ip.Zone() == binding.Name)
+	}
+	return err == nil && ((ip.Unmap().Is4() && binding.SourceIP != "") || (ip.Is6() && !ip.Is4In6() && binding.SourceIPv6 != ""))
+}
+
+func endpointNetwork(transport, endpoint string) string {
+	ip, err := netip.ParseAddr(endpoint)
+	if err == nil && ip.Unmap().Is4() {
+		return transport + "4"
+	}
+	return transport + "6"
 }
 
 func contains(values []string, wanted string) bool {

@@ -53,3 +53,18 @@ func TestBuildDNSRulesUsesHostOrderIP(t *testing.T) {
 		t.Fatalf("sourceIP = 0x%08X, want 0x%08X (host byte order)", rules[0].sourceIP, want)
 	}
 }
+
+func TestIPv6DNSRulesUseExactSourceInterfaceAndBothTransports(t *testing.T) {
+	rules := buildRules([]Adapter{{Name: "v6", SourceIPv6: "2001:db8::1", IPv6IfIndex: 12}, {Name: "duplicate", SourceIPv6: "2001:db8::1", IPv6IfIndex: 12}, {Name: "unsafe", SourceIPv6: "ff02::1", IPv6IfIndex: 12}})
+	if len(rules) != 2 {
+		t.Fatalf("rules=%+v", rules)
+	}
+	for _, rule := range rules {
+		if !rule.ipv6 || rule.ifIndex != 12 || rule.sourceIPv6[0] != 0x20 || rule.sourceIPv6[15] != 1 {
+			t.Fatalf("bad IPv6 rule %+v", rule)
+		}
+	}
+	if rules[0].protocol != ipProtoUDP || rules[1].protocol != ipProtoTCP {
+		t.Fatal("IPv6 DNS needs both transports")
+	}
+}

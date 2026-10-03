@@ -43,6 +43,7 @@ type domainHealth struct {
 type healthTable struct {
 	mu                    sync.Mutex
 	adapters              map[string]*adapterHealth
+	families              map[familyHealthKey]FamilyHealthSnapshot
 	now                   func() time.Time
 	domainIsolation       bool
 	domainIsolationExpiry bool

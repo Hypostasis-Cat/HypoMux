@@ -32,6 +32,7 @@ type Query struct {
 	Domain     string
 	RecordType RecordType
 	Binding    Binding
+	NetworkDNS bool
 }
 
 type Result struct {
@@ -68,11 +69,15 @@ type FallbackEvent struct {
 }
 
 type cacheKey struct {
-	adapter    string
-	sourceIP   string
-	ifIndex    int
-	domain     string
-	recordType RecordType
+	adapter     string
+	sourceIP    string
+	ifIndex     int
+	sourceIPv6  string
+	ipv6IfIndex int
+	dnsServers  string
+	networkDNS  bool
+	domain      string
+	recordType  RecordType
 }
 
 type cacheEntry struct {
@@ -81,9 +86,12 @@ type cacheEntry struct {
 }
 
 type lookup struct {
-	done   chan struct{}
-	result Result
-	err    error
+	done    chan struct{}
+	result  Result
+	err     error
+	ctx     context.Context
+	cancel  context.CancelFunc
+	waiters int
 }
 
 type Resolver struct {
@@ -162,11 +170,15 @@ func (r *Resolver) Resolve(ctx context.Context, query Query) (Result, error) {
 		return Result{}, err
 	}
 	key := cacheKey{
-		adapter:    binding.Name,
-		sourceIP:   binding.SourceIP,
-		ifIndex:    binding.IfIndex,
-		domain:     domain,
-		recordType: recordType,
+		adapter:     binding.Name,
+		sourceIP:    binding.SourceIP,
+		ifIndex:     binding.IfIndex,
+		sourceIPv6:  binding.SourceIPv6,
+		ipv6IfIndex: binding.IPv6IfIndex,
+		dnsServers:  strings.Join(binding.DNSServers, "\x00"),
+		networkDNS:  query.NetworkDNS,
+		domain:      domain,
+		recordType:  recordType,
 	}
 	r.queries.Add(1)
 
@@ -187,11 +199,24 @@ func (r *Resolver) Resolve(ctx context.Context, query Query) (Result, error) {
 	}
 	call := r.inflight[key]
 	if call == nil {
-		call = &lookup{done: make(chan struct{})}
+		lookupCtx, cancel := context.WithTimeout(r.root, r.config.QueryTimeout)
+		call = &lookup{done: make(chan struct{}), ctx: lookupCtx, cancel: cancel}
 		r.inflight[key] = call
 		go r.runLookup(key, binding, call)
 	}
+	call.waiters++
 	r.mu.Unlock()
+	defer func() {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		call.waiters--
+		if call.waiters == 0 {
+			call.cancel()
+			if r.inflight[key] == call {
+				delete(r.inflight, key)
+			}
+		}
+	}()
 
 	select {
 	case <-call.done:
@@ -229,9 +254,21 @@ func (r *Resolver) Status() Status {
 }
 
 func (r *Resolver) runLookup(key cacheKey, binding Binding, call *lookup) {
-	ctx, cancel := context.WithTimeout(r.root, r.config.QueryTimeout)
-	result, ttl, err := r.resolveUncached(ctx, key.domain, key.recordType, binding)
-	cancel()
+	ctx := call.ctx
+	var result Result
+	var ttl time.Duration
+	var err error
+	if key.networkDNS {
+		_, wireType, typeErr := normalizeRecordType(key.recordType)
+		if typeErr != nil {
+			err = typeErr
+		} else {
+			result, ttl, err = r.resolveLegacyUsing(ctx, key.domain, wireType, binding, networkDNSServers(binding))
+		}
+	} else {
+		result, ttl, err = r.resolveUncached(ctx, key.domain, key.recordType, binding)
+	}
+	call.cancel()
 	if err == nil {
 		result.Domain = key.domain
 		result.RecordType = key.recordType
@@ -253,7 +290,9 @@ func (r *Resolver) runLookup(key cacheKey, binding Binding, call *lookup) {
 	}
 	call.result = result
 	call.err = err
-	delete(r.inflight, key)
+	if r.inflight[key] == call {
+		delete(r.inflight, key)
+	}
 	close(call.done)
 	r.mu.Unlock()
 }
@@ -265,6 +304,19 @@ func (r *Resolver) resolveUncached(
 	binding Binding,
 ) (Result, time.Duration, error) {
 	_, wireType, _ := normalizeRecordType(recordType)
+	// Network-provided DNS preserves the network's DNS64 prefix on IPv6-only
+	// links. Explicit provider policies retain their encrypted-only semantics.
+	if r.config.Policy == PolicyAuto && binding.SourceIP == "" && len(binding.DNSServers) > 0 {
+		legacyCtx, cancel := context.WithTimeout(ctx, remainingQueryBudget(ctx, r.config.QueryTimeout)/2)
+		result, ttl, err := r.resolveLegacyUsing(legacyCtx, domain, wireType, binding, networkDNSServers(binding))
+		cancel()
+		if err == nil {
+			return result, ttl, nil
+		}
+		if ctx.Err() != nil {
+			return Result{}, 0, ctx.Err()
+		}
+	}
 	if r.config.Policy != PolicyOff && r.config.Policy != PolicySystem {
 		// Auto must leave a real deadline budget for source-bound traditional
 		// DNS when HTTPS resolvers silently drop packets.
@@ -311,10 +363,78 @@ func (r *Resolver) resolveDoH(
 	recordType uint16,
 	binding Binding,
 ) (Result, time.Duration, error) {
-	endpoints := Endpoints(r.config.Policy)
+	endpoints := boundEndpoints(r.config.Policy, binding)
+	if binding.SourceIPv6 != "" && r.config.Policy == PolicyDNSPod {
+		return r.resolveDNSPodDualStack(ctx, domain, recordType, binding, endpoints)
+	}
 	if len(endpoints) == 0 {
 		return Result{}, 0, fmt.Errorf("no DoH endpoint configured")
 	}
+	return r.resolveDoHEndpoints(ctx, domain, recordType, binding, endpoints)
+}
+
+// DNSPod hostname bootstrap runs concurrently with existing IPv4 endpoints.
+// Healthy IPv4 must not wait for unavailable IPv6 DNS, and broken IPv4 must
+// not prevent an IPv6-capable link from reaching the encrypted provider.
+func (r *Resolver) resolveDNSPodDualStack(ctx context.Context, domain string, recordType uint16, binding Binding, endpoints []Endpoint) (Result, time.Duration, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	type outcome struct {
+		result Result
+		ttl    time.Duration
+		err    error
+	}
+	outcomes := make(chan outcome, 2)
+	pending := 1
+	if len(endpoints) > 0 {
+		pending++
+		go func() {
+			result, ttl, err := r.resolveDoHEndpoints(ctx, domain, recordType, binding, endpoints)
+			outcomes <- outcome{result, ttl, err}
+		}()
+	}
+	go func() {
+		v6 := binding
+		v6.SourceIP = ""
+		bootstrapCtx, stop := context.WithTimeout(ctx, remainingQueryBudget(ctx, r.config.QueryTimeout)/2)
+		bootstrap, _, err := r.resolveLegacy(bootstrapCtx, "doh.pub", dnsTypeAAAA, v6)
+		stop()
+		if err != nil {
+			outcomes <- outcome{err: fmt.Errorf("IPv6 DoH bootstrap: %w", err)}
+			return
+		}
+		var v6Endpoints []Endpoint
+		for _, address := range bootstrap.Addresses {
+			if supportsEndpoint(v6, address) {
+				v6Endpoints = append(v6Endpoints, Endpoint{IP: address, Host: "doh.pub", Path: "/dns-query"})
+				if len(v6Endpoints) == 8 {
+					break
+				}
+			}
+		}
+		if len(v6Endpoints) == 0 {
+			outcomes <- outcome{err: errors.New("IPv6 DoH bootstrap returned no usable address")}
+			return
+		}
+		result, ttl, err := r.resolveDoHEndpoints(ctx, domain, recordType, binding, v6Endpoints)
+		outcomes <- outcome{result, ttl, err}
+	}()
+	var failures []error
+	for range pending {
+		select {
+		case result := <-outcomes:
+			if result.err == nil {
+				return result.result, result.ttl, nil
+			}
+			failures = append(failures, result.err)
+		case <-ctx.Done():
+			return Result{}, 0, ctx.Err()
+		}
+	}
+	return Result{}, 0, errors.Join(failures...)
+}
+
+func (r *Resolver) resolveDoHEndpoints(ctx context.Context, domain string, recordType uint16, binding Binding, endpoints []Endpoint) (Result, time.Duration, error) {
 	// Race endpoints in small batches, each with its own bounded time budget.
 	// A single shared deadline would let the first endpoints consume the whole
 	// budget while blocked, starving later (possibly healthy) endpoints of any
@@ -396,8 +516,25 @@ func (r *Resolver) resolveLegacy(
 	recordType uint16,
 	binding Binding,
 ) (Result, time.Duration, error) {
-	var failures []error
 	servers := LegacyServers(r.config, binding)
+	return r.resolveLegacyUsing(ctx, domain, recordType, binding, servers)
+}
+
+func networkDNSServers(binding Binding) []string {
+	var servers []string
+	for _, server := range binding.DNSServers {
+		if supportsEndpoint(binding, server) {
+			servers = append(servers, server)
+		}
+	}
+	return servers
+}
+
+func (r *Resolver) resolveLegacyUsing(ctx context.Context, domain string, recordType uint16, binding Binding, servers []string) (Result, time.Duration, error) {
+	var failures []error
+	if len(servers) == 0 {
+		return Result{}, 0, fmt.Errorf("no DNS server matches adapter %q address families", binding.Name)
+	}
 	for index, server := range servers {
 		// Reserve time for TCP and later servers even when the first DNS
 		// server drops UDP instead of returning an error.
@@ -448,11 +585,13 @@ func (r *Resolver) queryUDP(
 		return Result{}, 0, err
 	}
 	address := net.JoinHostPort(server, "53")
-	connection, err := r.dial(ctx, "udp4", address, binding)
+	connection, err := r.dial(ctx, endpointNetwork("udp", server), address, binding)
 	if err != nil {
 		return Result{}, 0, err
 	}
 	defer connection.Close()
+	stopCancellation := context.AfterFunc(ctx, func() { _ = connection.Close() })
+	defer stopCancellation()
 	setContextDeadline(connection, ctx)
 	if _, err := connection.Write(packet); err != nil {
 		return Result{}, 0, err
@@ -486,11 +625,13 @@ func (r *Resolver) queryTCP(
 		return Result{}, 0, err
 	}
 	address := net.JoinHostPort(server, "53")
-	connection, err := r.dial(ctx, "tcp4", address, binding)
+	connection, err := r.dial(ctx, endpointNetwork("tcp", server), address, binding)
 	if err != nil {
 		return Result{}, 0, err
 	}
 	defer connection.Close()
+	stopCancellation := context.AfterFunc(ctx, func() { _ = connection.Close() })
+	defer stopCancellation()
 	setContextDeadline(connection, ctx)
 	if err := binary.Write(connection, binary.BigEndian, uint16(len(packet))); err != nil {
 		return Result{}, 0, err
@@ -634,7 +775,7 @@ func (r *Resolver) makeCacheRoomLocked(now time.Time) {
 }
 
 func bindingKey(binding Binding) string {
-	return binding.Name + "\x00" + binding.SourceIP + "\x00" + strconv.Itoa(binding.IfIndex)
+	return binding.Name + "\x00" + binding.SourceIP + "\x00" + strconv.Itoa(binding.IfIndex) + "\x00" + binding.SourceIPv6 + "\x00" + strconv.Itoa(binding.IPv6IfIndex) + "\x00" + strings.Join(binding.DNSServers, "\x00")
 }
 
 func setContextDeadline(connection net.Conn, ctx context.Context) {

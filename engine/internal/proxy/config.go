@@ -111,11 +111,13 @@ func normalizeConfig(config Config) (Config, error) {
 		if adapter.Name == "" {
 			return Config{}, fmt.Errorf("adapter name is required")
 		}
-		ip := net.ParseIP(adapter.SourceIP)
-		if ip == nil || ip.To4() == nil {
-			return Config{}, fmt.Errorf("adapter %q has invalid IPv4 source address", adapter.Name)
+		if adapter.SourceIP != "" {
+			ip := net.ParseIP(adapter.SourceIP)
+			if ip == nil || ip.To4() == nil || ip.IsUnspecified() || ip.IsMulticast() {
+				return Config{}, fmt.Errorf("adapter %q has invalid IPv4 source address", adapter.Name)
+			}
+			adapter.SourceIP = ip.To4().String()
 		}
-		adapter.SourceIP = ip.To4().String()
 		if adapter.IfIndex < 0 {
 			return Config{}, fmt.Errorf("adapter %q has invalid interface index", adapter.Name)
 		}
@@ -142,10 +144,12 @@ func normalizeConfig(config Config) (Config, error) {
 			}
 		}
 		binding, err := dns.NormalizeBinding(dns.Binding{
-			Name:       adapter.Name,
-			SourceIP:   adapter.SourceIP,
-			IfIndex:    adapter.IfIndex,
-			DNSServers: adapter.DNSServers,
+			Name:        adapter.Name,
+			SourceIP:    adapter.SourceIP,
+			IfIndex:     adapter.IfIndex,
+			SourceIPv6:  adapter.SourceIPv6,
+			IPv6IfIndex: adapter.IPv6IfIndex,
+			DNSServers:  adapter.DNSServers,
 		})
 		if err != nil {
 			return Config{}, err
@@ -157,7 +161,7 @@ func normalizeConfig(config Config) (Config, error) {
 		if _, exists := seenNames[adapter.Name]; exists {
 			return Config{}, fmt.Errorf("duplicate adapter name %q", adapter.Name)
 		}
-		if _, exists := seenIPs[adapter.SourceIP]; exists {
+		if _, exists := seenIPs[adapter.SourceIP]; adapter.SourceIP != "" && exists {
 			return Config{}, fmt.Errorf("duplicate adapter source IP %q", adapter.SourceIP)
 		}
 		if adapter.SourceIPv6 != "" {
@@ -170,7 +174,9 @@ func normalizeConfig(config Config) (Config, error) {
 			seenIPv6[adapter.SourceIPv6] = struct{}{}
 		}
 		seenNames[adapter.Name] = struct{}{}
-		seenIPs[adapter.SourceIP] = struct{}{}
+		if adapter.SourceIP != "" {
+			seenIPs[adapter.SourceIP] = struct{}{}
+		}
 		adapters = append(adapters, adapter)
 	}
 	config.Adapters = adapters

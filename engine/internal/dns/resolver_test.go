@@ -146,7 +146,7 @@ func TestAutoPolicyFallsBackOnlyToBoundTraditionalDNS(t *testing.T) {
 	if result.Transport != "udp" || result.Server != "192.0.2.53:53" {
 		t.Fatalf("fallback result = %#v", result)
 	}
-	if dohDials.Load() != int64(len(Endpoints(PolicyAuto))) || legacyDials.Load() != 1 {
+	if dohDials.Load() != int64(len(boundEndpoints(PolicyAuto, loopbackBinding))) || legacyDials.Load() != 1 {
 		t.Fatalf("DoH dials = %d, legacy dials = %d", dohDials.Load(), legacyDials.Load())
 	}
 	if resolver.Status().AutomaticFallbacks != 1 {
@@ -384,7 +384,7 @@ func TestDoHRaceIsBounded(t *testing.T) {
 }
 
 func TestDoHRaceAdvancesToLaterEndpoints(t *testing.T) {
-	endpoints := Endpoints(PolicyAuto)
+	endpoints := boundEndpoints(PolicyAuto, loopbackBinding)
 	if len(endpoints) < 3 {
 		t.Skip("PolicyAuto no longer provides at least three endpoints")
 	}

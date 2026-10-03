@@ -379,13 +379,18 @@ func (s *Server) startProxy(request protocol.Request) protocol.Response {
 			s.mode = mode
 			s.adapters = make([]wfp.Adapter, 0, len(params.Adapters))
 			for _, adapter := range params.Adapters {
-				if adapter.IfIndex <= 0 {
+				if adapter.SourceIPv6 != "" && adapter.IPv6IfIndex == 0 {
+					adapter.IPv6IfIndex = adapter.IfIndex
+				}
+				if adapter.IfIndex <= 0 && adapter.IPv6IfIndex <= 0 {
 					continue
 				}
 				s.adapters = append(s.adapters, wfp.Adapter{
-					Name:     adapter.Name,
-					SourceIP: adapter.SourceIP,
-					IfIndex:  uint32(adapter.IfIndex),
+					Name:        adapter.Name,
+					SourceIP:    adapter.SourceIP,
+					IfIndex:     uint32(adapter.IfIndex),
+					SourceIPv6:  adapter.SourceIPv6,
+					IPv6IfIndex: uint32(adapter.IPv6IfIndex),
 				})
 			}
 			_, _ = s.runtime.Transition(engineRuntime.StateRunning, mode+" listeners ready")

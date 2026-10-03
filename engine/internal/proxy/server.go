@@ -278,6 +278,10 @@ func (s *Server) Snapshot(includeConnections bool) TelemetrySnapshot {
 	result.SteamCDN = s.cdn.snapshot()
 	health, quarantines := s.health.snapshot()
 	for index := range result.Adapters {
+		telemetry := result.Adapters[index]
+		adapter := Adapter{Name: telemetry.Name, SourceIP: telemetry.SourceIP, IfIndex: telemetry.IfIndex, SourceIPv6: telemetry.SourceIPv6, IPv6IfIndex: telemetry.IPv6IfIndex}
+		result.Adapters[index].IPv4Health = s.health.familySnapshot(adapter, "tcp4")
+		result.Adapters[index].IPv6Health = s.health.familySnapshot(adapter, "tcp6")
 		item := health[result.Adapters[index].Name]
 		result.Adapters[index].HealthState = item.State
 		result.Adapters[index].ConsecutiveFailures = item.ConsecutiveFailures
@@ -368,6 +372,15 @@ func (s *Server) ResolveDNS(
 	if selected == nil {
 		return dns.Result{}, fmt.Errorf("unknown adapter %q", adapterName)
 	}
+	if recordType == "" && selected.SourceIP == "" {
+		result, err := resolver.Resolve(ctx, dns.Query{Domain: domain, RecordType: dns.RecordAAAA, Binding: adapterDNSBinding(*selected)})
+		if err == nil || ctx.Err() != nil {
+			return result, err
+		}
+		// An IPv4-only domain can still be reached through the selected link's
+		// NAT64 translator; callers retain the original domain for TLS/SOCKS.
+		recordType = dns.RecordA
+	}
 	return resolver.Resolve(ctx, dns.Query{
 		Domain:     domain,
 		RecordType: recordType,
@@ -392,9 +405,11 @@ func (s *Server) dialDNS(
 	binding dns.Binding,
 ) (net.Conn, error) {
 	adapter := Adapter{
-		Name:     binding.Name,
-		SourceIP: binding.SourceIP,
-		IfIndex:  binding.IfIndex,
+		Name:        binding.Name,
+		SourceIP:    binding.SourceIP,
+		IfIndex:     binding.IfIndex,
+		SourceIPv6:  binding.SourceIPv6,
+		IPv6IfIndex: binding.IPv6IfIndex,
 	}
 	dialer, err := boundNetworkDialer(adapter, s.config.DNS.QueryTimeout, network)
 	if err != nil {
@@ -456,7 +471,15 @@ func (s *Server) handleClient(protocol string, client net.Conn, session *connect
 }
 
 func (s *Server) connect(session *connection, target string) (net.Conn, Adapter, error) {
-	ctx, cancel := context.WithTimeout(s.ctx, s.config.ConnectTimeout)
+	budget := s.config.ConnectTimeout
+	if session.channel != ChannelDirect {
+		host, _, _ := net.SplitHostPort(target)
+		literal := net.ParseIP(host)
+		for _, adapter := range s.config.Adapters {
+			budget = max(budget, adapterConnectionBudget(s.config, adapter, literal))
+		}
+	}
+	ctx, cancel := context.WithTimeout(s.ctx, budget)
 	defer cancel()
 	if session.channel == ChannelDirect {
 		upstream, err := s.dialDirectTCP(ctx, target)

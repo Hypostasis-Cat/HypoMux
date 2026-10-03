@@ -17,6 +17,23 @@ func latencyFixture() (*latencyTable, []Adapter, *time.Time) {
 	return p, []Adapter{{Name: "a", SourceIP: "127.0.0.1", Weight: 1}, {Name: "b", SourceIP: "127.0.0.2", Weight: 1}}, &now
 }
 
+func TestIPv6LatencyUsesSameFamilyReferences(t *testing.T) {
+	p, adapters, _ := latencyFixture()
+	for i := range adapters {
+		adapters[i].SourceIPv6 = "2001:db8::" + string(rune('1'+i))
+	}
+	samples(p, adapters[0], latencyReferences[0], 1, 3)
+	samples(p, adapters[1], latencyReferences[0], 100, 3)
+	samples(p, adapters[0], latencyReferencesIPv6[0], 100, 3)
+	samples(p, adapters[1], latencyReferencesIPv6[0], 5, 3)
+	if p.selectAdapter(adapters, "[2001:db8::99]:443").Name != "b" {
+		t.Fatal("IPv4 RTT contaminated IPv6 selection")
+	}
+	if p.selectAdapter(adapters, "192.0.2.99:443").Name != "a" {
+		t.Fatal("IPv6 RTT contaminated IPv4 selection")
+	}
+}
+
 func samples(p *latencyTable, a Adapter, target string, rtt, count int) {
 	for range count {
 		r := diagnostic.Result{Sent: 1}

@@ -149,8 +149,6 @@ func readSOCKSHost(reader *bufio.Reader, addressType byte) (string, bool) {
 		if _, err := io.ReadFull(reader, value); err != nil {
 			return "", false
 		}
-		// IPv6 egress is a later migration slice; parse it so the caller gets a
-		// normal connection failure instead of corrupting the SOCKS stream.
 		return net.IP(value).String(), true
 	default:
 		return "", false

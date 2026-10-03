@@ -9,9 +9,10 @@ import (
 )
 
 const (
-	DefaultTargetIP = "223.5.5.5"
-	DefaultCount    = 10
-	MaxCount        = 100
+	DefaultTargetIP   = "223.5.5.5"
+	DefaultTargetIPv6 = "2400:3200::1"
+	DefaultCount      = 10
+	MaxCount          = 100
 )
 
 var (
@@ -24,6 +25,7 @@ type Config struct {
 	TargetIP string
 	Count    int
 	Timeout  time.Duration
+	IfIndex  int
 }
 
 type Result struct {
@@ -57,6 +59,9 @@ func Run(ctx context.Context, config Config) Result {
 		LossRate: 100,
 		SourceIP: strings.TrimSpace(config.SourceIP),
 		TargetIP: strings.TrimSpace(config.TargetIP),
+	}
+	if ip := net.ParseIP(base.SourceIP); ip != nil && ip.To4() == nil {
+		return runIPv6(ctx, config, base)
 	}
 
 	source, ok := parseIPv4(base.SourceIP)
@@ -118,6 +123,9 @@ func withDefaults(config Config) Config {
 	config.TargetIP = strings.TrimSpace(config.TargetIP)
 	if config.TargetIP == "" {
 		config.TargetIP = DefaultTargetIP
+		if ip := net.ParseIP(config.SourceIP); ip != nil && ip.To4() == nil {
+			config.TargetIP = DefaultTargetIPv6
+		}
 	}
 	if config.Count <= 0 {
 		config.Count = DefaultCount

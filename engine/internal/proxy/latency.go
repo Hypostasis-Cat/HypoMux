@@ -14,6 +14,7 @@ const StrategyLatency = "latency-first"
 
 // Reference RTT is only a fallback estimate, never a game RTT measurement.
 var latencyReferences = [...]string{"223.5.5.5", "1.1.1.1"}
+var latencyReferencesIPv6 = [...]string{"2400:3200::1", "2001:4860:4860::8888"}
 
 const (
 	latencyFreshness   = 8 * time.Second
@@ -58,9 +59,9 @@ func latencyHost(target string) string {
 		target = host
 	}
 	ip := net.ParseIP(target)
-	// The existing source-bound diagnostic supports IPv4 only. Do not apply
-	// IPv4 measurements to IPv6 destinations or resolve names on the system NIC.
-	if ip == nil || ip.To4() == nil || ip.IsUnspecified() || ip.IsMulticast() {
+	// Only literal targets are measured; reference measurements must use the
+	// same address family and source binding as the destination.
+	if ip == nil || ip.IsUnspecified() || ip.IsMulticast() || ip.IsLinkLocalUnicast() {
 		return ""
 	}
 	return ip.String()
@@ -136,11 +137,11 @@ func (p *latencyTable) selectAdapter(candidates []Adapter, target string) Adapte
 	if h, _, err := net.SplitHostPort(target); err == nil {
 		ipTarget = h
 	}
-	if ip := net.ParseIP(ipTarget); ip != nil && ip.To4() == nil {
-		p.reasons["unsupported-target"]++
-		return candidates[0]
+	references := latencyReferences
+	if ip := net.ParseIP(ipTarget); (ip != nil && ip.To4() == nil) || (ip == nil && candidates[0].SourceIP == "") {
+		references = latencyReferencesIPv6
 	}
-	sources := []string{host, latencyReferences[0], latencyReferences[1]}
+	sources := []string{host, references[0], references[1]}
 	for _, source := range sources {
 		if source == "" {
 			continue
@@ -200,7 +201,11 @@ func (p *latencyTable) failedAgainst(current, alternative Adapter, target string
 		b := p.values[latencyKey{performanceKey(alternative), source}]
 		return a.fresh(now) && b.fresh(now) && !a.LastReply.IsZero() && a.Failures >= 3 && b.Failures == 0 && now.Sub(b.LastReply) <= 3*time.Second
 	}
-	return failed(host) || (failed(latencyReferences[0]) && failed(latencyReferences[1]))
+	references := latencyReferences
+	if ip := net.ParseIP(host); ip != nil && ip.To4() == nil {
+		references = latencyReferencesIPv6
+	}
+	return failed(host) || (failed(references[0]) && failed(references[1]))
 }
 
 func (s *scheduler) selectForTarget(excluded map[string]struct{}, target string) (Adapter, bool) {
@@ -263,6 +268,8 @@ func (p *latencyTable) round(ctx context.Context, adapters []Adapter) {
 	now := p.now()
 	targets := append([]string(nil), latencyReferences[:]...)
 	keep := map[string]bool{latencyReferences[0]: true, latencyReferences[1]: true}
+	targets = append(targets, latencyReferencesIPv6[:]...)
+	keep[latencyReferencesIPv6[0]], keep[latencyReferencesIPv6[1]] = true, true
 	for host, seen := range p.targets {
 		if now.Sub(seen) > latencyTargetTTL {
 			delete(p.targets, host)
@@ -299,7 +306,11 @@ func (p *latencyTable) round(ctx context.Context, adapters []Adapter) {
 				if ctx.Err() != nil {
 					continue
 				}
-				result := p.probe(ctx, diagnostic.Config{SourceIP: j.adapter.SourceIP, TargetIP: j.target, Count: 1, Timeout: 500 * time.Millisecond})
+				source, index := j.adapter.SourceIP, j.adapter.IfIndex
+				if ip := net.ParseIP(j.target); ip != nil && ip.To4() == nil {
+					source, index = j.adapter.SourceIPv6, j.adapter.IPv6IfIndex
+				}
+				result := p.probe(ctx, diagnostic.Config{SourceIP: source, IfIndex: index, TargetIP: j.target, Count: 1, Timeout: 500 * time.Millisecond})
 				if ctx.Err() == nil {
 					p.record(j.adapter, j.target, result)
 				}
@@ -308,6 +319,9 @@ func (p *latencyTable) round(ctx context.Context, adapters []Adapter) {
 	}
 	for _, target := range targets {
 		for _, a := range adapters {
+			if !adapterSupportsNetwork(a, networkForIP("tcp", net.ParseIP(target))) {
+				continue
+			}
 			select {
 			case jobs <- job{a, target}:
 			case <-ctx.Done():
@@ -335,7 +349,7 @@ func (p *latencyTable) snapshot(adapters []Adapter) ([]LatencyTelemetry, map[str
 				continue
 			}
 			source := "target-icmp"
-			if k.target == latencyReferences[0] || k.target == latencyReferences[1] {
+			if k.target == latencyReferences[0] || k.target == latencyReferences[1] || k.target == latencyReferencesIPv6[0] || k.target == latencyReferencesIPv6[1] {
 				source = "reference-estimate"
 			}
 			items = append(items, LatencyTelemetry{a.Name, k.target, source, v})
