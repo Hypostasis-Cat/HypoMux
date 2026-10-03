@@ -70,8 +70,8 @@ func TestSupervisorPreservesBundledFakeIPAcrossImmediateAndCachedRestarts(t *tes
 	resolver := &net.Resolver{PreferGo: true, Dial: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, "udp4", endpoint)
 	}}
-	lookup := func(domain string) (string, error) {
-		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	lookup := func(domain string, timeout time.Duration) (string, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
 		ips, err := resolver.LookupIP(ctx, "ip4", domain+".supervisor-test.example")
 		if err != nil {
@@ -96,7 +96,7 @@ func TestSupervisorPreservesBundledFakeIPAcrossImmediateAndCachedRestarts(t *tes
 		}
 		return exec.CommandContext(ctx, exe, args...)
 	}
-	supervisor.startupReady = func(string) bool { _, err := lookup("ready"); return err == nil }
+	supervisor.startupReady = func(string) bool { _, err := lookup("ready", 200*time.Millisecond); return err == nil }
 	supervisor.readyStableFor = defaultReadyStableFor
 	c := testConfig(t)
 	c.Executable = executable
@@ -108,9 +108,12 @@ func TestSupervisorPreservesBundledFakeIPAcrossImmediateAndCachedRestarts(t *tes
 	})
 	query := func(name string) string {
 		t.Helper()
-		value, err := lookup(name)
+		// The assertion also exercises the on-disk FakeIP cache. Give a cold or
+		// busy Windows CI host a bounded query budget without delaying Stop or
+		// allowing a periodic cache checkpoint to replace the shutdown flush.
+		value, err := lookup(name, 2*time.Second)
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("lookup %s: %v; stderr=%s", name, err, supervisor.run.stderrSnapshot())
 		}
 		return value
 	}
