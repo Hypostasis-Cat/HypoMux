@@ -59,11 +59,12 @@ export type RuleSet = {
   last_error?: string;
 };
 
-export type EngineSnapshot = GeneratedEngineSnapshot & { strategy?: string };
+export type FamilyRuntimeHealth = { state: string; successes: number; failures: number; consecutive_failures: number };
+export type EngineSnapshot = Omit<GeneratedEngineSnapshot, "adapters"> & { strategy?: string; ipv4_only_fallback?: boolean; adapters: Array<NonNullable<GeneratedEngineSnapshot["adapters"]>[number] & { ipv4_health?: FamilyRuntimeHealth; ipv6_health?: FamilyRuntimeHealth }> | null };
 
 export type RoutingSnapshot = Omit<GeneratedRoutingSnapshot, "match_order" | "revision"> & { match_order?: string[] | null; revision?: string };
 
-export type AdapterView = GeneratedAdapterView & { is_virtual?: boolean };
+export type AdapterView = GeneratedAdapterView & { is_virtual?: boolean; ipv6_gateway?: string; ipv6_metric?: number; ipv6_automatic_metric?: boolean };
 
 export type CompleteAppSettings = Omit<AppSettings, "ai_enabled"> & {
   ai_enabled?: boolean;

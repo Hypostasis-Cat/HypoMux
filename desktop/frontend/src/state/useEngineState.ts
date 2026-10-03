@@ -41,6 +41,8 @@ export type HomeAdapter = AdapterView & {
   latencyMS?: number;
   jitterMS?: number;
   lossRate?: number;
+	 ipv4Health?: string;
+	 ipv6Health?: string;
 };
 
 const emptySnapshot = (mode: EngineMode = "proxy"): EngineSnapshot => ({
@@ -575,6 +577,8 @@ export function useEngineState(
         bytesDown: runtime?.bytes_down ?? 0,
         bytesUp: runtime?.bytes_up ?? 0,
         health: diagnosticHealth ?? healthValue(runtime?.health_state),
+        ipv4Health: runtime?.ipv4_health?.state,
+        ipv6Health: runtime?.ipv6_health?.state,
         latencyMS: diagnostic && diagnostic.received > 0 ? diagnostic.avg_latency_ms : undefined,
         jitterMS: diagnostic && diagnostic.received > 1 ? diagnostic.jitter_ms : undefined,
         lossRate: diagnostic && diagnostic.sent > 0 && diagnostic.loss_rate >= 0 ? diagnostic.loss_rate : undefined,

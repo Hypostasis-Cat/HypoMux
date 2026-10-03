@@ -115,6 +115,7 @@ export function HealthPage({
   }), [text]);
   const checkLabels = useMemo<Record<string, string>>(() => ({
     source_binding: text("源地址与接口绑定", "Source address and interface binding"),
+	 ipv6_tcp: text("IPv6 出口连通性", "IPv6 egress connectivity"),
     gateway: text("默认网关", "Default gateway"),
     dns: text("DNS 配置", "DNS configuration"),
     metric: text("路由跃点", "Route metric"),
@@ -280,7 +281,7 @@ export function HealthPage({
     if (selected.length === 0) {
       notify(
         text("尚未选择网卡", "No adapter selected"),
-        text("请至少选择一张拥有有效 IPv4 的活动网卡。", "Select at least one active adapter with a valid IPv4 address."),
+        text("请至少选择一张拥有有效 IPv4 或 IPv6 的活动网卡。", "Select at least one active adapter with a valid IPv4 or IPv6 address."),
         "warning",
       );
       return;
@@ -449,7 +450,7 @@ export function HealthPage({
         </div>
         <div className="health-adapter-list">
           {loading ? <Spinner label={text("正在读取活动网卡", "Loading active adapters")} /> : adapters.length === 0 ? (
-            <div className="health-empty-inline">{text("未发现拥有有效 IPv4 的活动网卡。", "No active adapter with a valid IPv4 address was found.")}</div>
+            <div className="health-empty-inline">{text("未发现拥有有效 IPv4 或 IPv6 的活动网卡。", "No active adapter with a valid IPv4 or IPv6 address was found.")}</div>
           ) : adapters.map((adapter) => {
             const result = resultByID.get(adapter.id);
             return (
@@ -466,7 +467,7 @@ export function HealthPage({
                 />
                 <span>
                   <strong>{adapter.name}</strong>
-                  <small>{adapter.address} · IF {adapter.if_index}</small>
+                  <small>{adapter.address || adapter.source_ipv6} · IF {adapter.address ? adapter.if_index : adapter.ipv6_if_index}</small>
                 </span>
                 {result && (
                   <Badge appearance="tint" color={statusMeta[result.status as keyof typeof statusMeta]?.color ?? "informative"}>

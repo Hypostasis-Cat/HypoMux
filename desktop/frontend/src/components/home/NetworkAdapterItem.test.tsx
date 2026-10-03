@@ -51,6 +51,12 @@ const renderAdapter = (disabled = false) => {
 describe("NetworkAdapterItem interactions", () => {
   afterEach(() => { cleanup(); vi.useRealTimers(); });
 
+  it("shows IPv6-only addresses and a family failure independently of IPv4", () => {
+    render(<NetworkAdapterItem adapter={{...adapter, address: "", source_ipv6: "2001:db8::1", ipv6Health: "cooldown"}} percentage={100} weighted={false} disabled={false} onOpenConnections={vi.fn()} onSelectedChange={vi.fn()} onWeightChange={vi.fn()} />);
+    expect(screen.getByText("IPv6 2001:db8::1").getAttribute("title")).toBe("2001:db8::1");
+    expect(screen.getByText("IPv6 Cooling down")).toBeTruthy();
+  });
+
   it("plays confirmation only after success, restores the icon, and replays for a later change", () => {
     vi.useFakeTimers();
     const changes = [{ id: adapter.id, name: adapter.name, selected: true }];

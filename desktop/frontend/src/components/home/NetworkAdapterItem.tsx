@@ -45,6 +45,7 @@ export function NetworkAdapterItem({
 }) {
   const { locale, t } = useI18n();
   const text = (zh: string, en: string) => locale === "en" ? en : zh;
+  const familyHealthLabel = (state?: string) => state === "cooldown" ? text("暂不可用", "Cooling down") : state === "probing" ? text("恢复探测", "Probing") : state === "unavailable" ? text("无地址", "No address") : state === "healthy" ? text("可用", "Available") : text("未检测", "Not checked");
   const [inputValue, setInputValue] = useState(String(adapter.weight));
   useEffect(() => setInputValue(String(adapter.weight)), [adapter.weight]);
   const [resultSignal, setResultSignal] = useState<{ status?: "success" | "error"; sequence: number }>({ sequence: 0 });
@@ -102,7 +103,7 @@ export function NetworkAdapterItem({
         </Tooltip>
         <span className="adapter-name">
           <strong title={adapter.name}>{adapter.name}</strong>
-          <span>{adapter.address}</span>
+          <span title={[adapter.address, adapter.source_ipv6].filter(Boolean).join(" · ")}>{[adapter.address, adapter.source_ipv6 && `IPv6 ${adapter.source_ipv6}`].filter(Boolean).join(" · ")}</span>
         </span>
       </div>
 
@@ -130,6 +131,8 @@ export function NetworkAdapterItem({
         <div className="adapter-quality-values">
           <span>{text("延迟", "Latency")} {adapter.latencyMS === undefined ? "—" : `${adapter.latencyMS.toLocaleString(locale, { maximumFractionDigits: 1, useGrouping: false })} ms`}</span>
           <span>{text("丢包", "Loss")} {adapter.lossRate === undefined ? "—" : `${adapter.lossRate.toLocaleString(locale, { maximumFractionDigits: 1, useGrouping: false })}%`}</span>
+          {adapter.address && <span>IPv4 {familyHealthLabel(adapter.ipv4Health)}</span>}
+          {adapter.source_ipv6 && <span>IPv6 {familyHealthLabel(adapter.ipv6Health)}</span>}
         </div>
       </div>
 
