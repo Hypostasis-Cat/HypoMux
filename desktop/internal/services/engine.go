@@ -192,7 +192,7 @@ type EngineService struct {
 	runtimeBindingCancel   context.CancelFunc
 	runtimeBindingRefresh  bool
 	runtimeBindingEnabled  bool
-	lastBindingCheck       time.Time
+	bindingMonitorDone     chan struct{}
 	tunConnectivityNotice  string
 	ipv4OnlyFallback       bool
 	blockedDomains         *BlockedDomainService
@@ -291,7 +291,9 @@ func newEngineService(
 		}
 	}
 	adapters.saveRuntimeSelection = service.saveRuntimeSelection
+	service.bindingMonitorDone = make(chan struct{})
 	go service.consumeCoreEvents()
+	go service.watchRuntimeBindings()
 	return service
 }
 
@@ -463,9 +465,6 @@ func (s *EngineService) Snapshot() (EngineSnapshot, error) {
 		s.lastCDNLog = time.Time{}
 		s.lastPerformanceLog = time.Time{}
 		s.mu.Unlock()
-		if status.Engine.State == "degraded" {
-			s.scheduleRuntimeBindingRefresh()
-		}
 		return snapshot, nil
 	}
 	s.mu.Unlock()
@@ -580,7 +579,6 @@ func (s *EngineService) Snapshot() (EngineSnapshot, error) {
 			snapshot.Reason = withTUNFallbackNotice(notice, snapshot.IPv4OnlyFallback)
 		}
 	}
-	s.scheduleRuntimeBindingRefresh()
 	return snapshot, nil
 }
 
@@ -1267,6 +1265,9 @@ func (s *EngineService) Shutdown() {
 	defer cancel()
 	s.client.Shutdown(ctx)
 	s.client.Close()
+	if s.bindingMonitorDone != nil {
+		<-s.bindingMonitorDone
+	}
 }
 
 func errorText(err error) string {

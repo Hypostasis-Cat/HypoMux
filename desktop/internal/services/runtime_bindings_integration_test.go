@@ -114,9 +114,16 @@ func runRuntimeBindingCoreRecovery(t *testing.T, settings *SettingsService, adap
 	defer service.Shutdown()
 	var mu sync.RWMutex
 	observed := stale
+	changedScan := make(chan struct{}, 1)
 	service.runtimeAdapters = func() ([]AdapterView, error) {
 		mu.RLock()
 		defer mu.RUnlock()
+		if observed.SourceIPv6 == current.SourceIPv6 {
+			select {
+			case changedScan <- struct{}{}:
+			default:
+			}
+		}
 		return cloneRuntimeBindings([]AdapterView{observed}), nil
 	}
 	for _, listener := range reservations {
@@ -163,11 +170,12 @@ func runRuntimeBindingCoreRecovery(t *testing.T, settings *SettingsService, adap
 	mu.Lock()
 	observed = current
 	mu.Unlock()
-	service.mu.Lock()
-	service.lastBindingCheck = time.Now().Add(-6 * time.Second)
-	service.mu.Unlock()
-	if _, err := service.Snapshot(); err != nil {
-		t.Fatal(err)
+	// No Snapshot or other frontend call: the backend's real timer must
+	// detect the change even when no window is polling engine state.
+	select {
+	case <-changedScan:
+	case <-ctx.Done():
+		t.Fatal("backend did not detect the new binding without UI polling", ctx.Err())
 	}
 	if err := service.acquireLifecycle(ctx); err != nil {
 		t.Fatal(err)
@@ -265,5 +273,5 @@ func runRuntimeBindingCoreRecovery(t *testing.T, settings *SettingsService, adap
 	if len(baseline) != 1 || baseline[0].SourceIPv6 != current.SourceIPv6 || notice != "" || !enabled {
 		t.Fatal("successful recovery did not commit its new baseline")
 	}
-	t.Log("actual Core binding replaced; old client closed; verified IPv6 SOCKS TLS passed")
+	t.Log("without UI polling: actual Core binding replaced; old client closed; verified IPv6 SOCKS TLS passed")
 }

@@ -8,6 +8,28 @@ import (
 	"time"
 )
 
+const runtimeBindingPollInterval = 5 * time.Second
+
+// The service owns this monitor, so hiding the WebView or starting silently
+// cannot suspend binding recovery. Stopped sessions do not scan adapters.
+func (s *EngineService) watchRuntimeBindings() {
+	defer close(s.bindingMonitorDone)
+	ticker := time.NewTicker(runtimeBindingPollInterval)
+	defer ticker.Stop()
+	s.runRuntimeBindingMonitor(s.client.Done(), ticker.C)
+}
+
+func (s *EngineService) runRuntimeBindingMonitor(done <-chan struct{}, ticks <-chan time.Time) {
+	for {
+		select {
+		case <-done:
+			return
+		case <-ticks:
+			s.scheduleRuntimeBindingRefresh()
+		}
+	}
+}
+
 func (s *EngineService) availableRuntimeAdapters() ([]AdapterView, error) {
 	if s.runtimeAdapters != nil {
 		return s.runtimeAdapters()
@@ -33,7 +55,6 @@ func (s *EngineService) rememberRuntimeBindingsLocked(mode string, selected []Ad
 	s.runtimeBindingMode = mode
 	s.runtimeBindingEnabled = true
 	s.runtimeBindingNotice = ""
-	s.lastBindingCheck = time.Now()
 }
 
 func (s *EngineService) addRuntimeBindingsLocked(adapters []AdapterView) {
@@ -98,7 +119,7 @@ func (s *EngineService) cancelRuntimeBindingRefresh() {
 func (s *EngineService) scheduleRuntimeBindingRefresh() {
 	s.mu.Lock()
 	if !s.runtimeBindingEnabled || s.closing || s.runtimeBindingRefresh ||
-		len(s.runtimeBindings) == 0 || time.Since(s.lastBindingCheck) < 5*time.Second {
+		len(s.runtimeBindings) == 0 {
 		s.mu.Unlock()
 		return
 	}
@@ -112,7 +133,6 @@ func (s *EngineService) scheduleRuntimeBindingRefresh() {
 	// cancel this background transaction rather than wait for its deadline.
 	ctx, cancel := context.WithTimeout(context.Background(), 240*time.Second)
 	s.runtimeBindingRefresh, s.runtimeBindingCancel = true, cancel
-	s.lastBindingCheck = time.Now()
 	s.mu.Unlock()
 	go func() {
 		defer func() {

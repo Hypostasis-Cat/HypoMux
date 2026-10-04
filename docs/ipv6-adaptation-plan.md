@@ -230,19 +230,21 @@ IPv4 回归只提供 IPv4 源地址与索引，DNS 输入保留匹配的 IPv4 �
 
 ## 2026-10-04 运行时绑定恢复补充
 
-继续核对发现，原有实现会刷新界面和缓存绑定标识，但地址变化后并未自动重建正在运行的 Core 配置。现已在桌面运行状态轮询中加入最多每 5 秒一次的绑定检查：只跟踪实际运行会话的聚合网卡、显式 NIC 通道和 TUN DNS 出口，比较 IPv4/IPv6 源地址、对应接口索引和网络 DNS。权重、描述、跃点以及其他网卡变化不触发重启。
+继续核对发现，原有实现会刷新界面和缓存绑定标识，但地址变化后并未自动重建正在运行的 Core 配置。现由桌面后端独立监测，每 5 秒检查一次绑定：只跟踪实际运行会话的聚合网卡、显式 NIC 通道和 TUN DNS 出口，比较 IPv4/IPv6 源地址、对应接口索引和网络 DNS。监测不依赖界面状态轮询，窗口隐藏、缩到托盘和静默启动不暂停检查；停止会话后不扫描网卡，已有生命周期操作或扫描未结束时跳过本轮，退出时结束监测并等待其返回。权重、描述、跃点以及其他网卡变化不触发重启。
 
 确认绑定变化后，在同一个生命周期事务中停止并重新启动本应用会话，重新枚举 OS 地址，退役旧客户端、DNS/DoH 池、NAT64 缓存、WFP 和侧车 DNS 绑定。用户的 Start/Stop 会取消待执行恢复；清理失败时不会继续启动。临时断网时保留其他可用线路并显示等待提示，可用所选线路绑定变化时允许恢复，不等待已断开的另一张网卡。已有本应用热点会话在重建完成后按原配置恢复，凭据不写入日志；热点恢复顺序通过控制流程测试，真实热点共享重建尚未实机测试。
 
 | 验证 | 结果与范围 |
 | --- | --- |
-| 自动恢复与资源清理 | `TestRuntimeBindingRealCoreIPv6Loopback` 默认编译实际 Core，经桌面 Snapshot 触发从过期 `::2` 到 `::1` 的受控元数据变更；Core 遥测确认新绑定，旧已接入客户端关闭，IPv6 SOCKS TLS 证书及 HTTP 正文通过。使用独立测试证书与 IPv6 回环，不能替代物理地址变化或公网验收 |
+| 自动恢复与资源清理 | `TestRuntimeBindingRealCoreIPv6Loopback` 默认编译实际 Core，不调用 Snapshot，由后端实际定时器检测从过期 `::2` 到 `::1` 的受控元数据变更；Core 遥测确认新绑定，旧已接入客户端关闭，IPv6 SOCKS TLS 证书及 HTTP 正文通过。使用独立测试证书与 IPv6 回环，不能替代物理地址变化或公网验收 |
+| 后端监测生命周期 | 无界面调用时扫描、停止后不扫描、忙碌/关闭/无绑定时跳过、取消进行中的扫描后不重启、客户端永久关闭后监测退出，目标竞态检查通过 |
 | 生命周期与多网卡边界 | 两族地址/接口/DNS 变化、单族能力丢失、其他元数据不触发、断开网卡等待、另一可用网卡恢复、扫描取消、停止后不重启、失败清理不启动及原热点恢复顺序通过 |
 | desktop 全量竞态 | 420 个顶层测试通过，0 失败，13 个显式环境检查跳过；最终多网卡边界和 TLS 正文断言另行通过目标竞态检查 |
+| 后端独立监测收尾回归 | 最终 desktop 全量 `go test -race ./... -count=1 -timeout 180s`：423 个顶层测试通过，0 失败，13 个显式环境检查跳过；`go vet ./...`、desktop 构建及差异检查通过 |
 | 静态检查与构建 | 最终源码 `go vet ./...` 与 desktop 构建通过 |
 | 自动恢复公网补测 | 显式运行 `TestRuntimeBindingRealCoreRecoversStaleIPv6Source` 时，WLAN 已断开且没有首选 IPv6 地址，在前提检查处失败；未启动测试 Core，也未完成该项公网检查 |
 
-本地证据为 `.go-cache-local/ipv6-desktop-runtime-binding-race.jsonl`、`ipv6-desktop-runtime-binding-race-result.json`、`ipv6-runtime-binding-final-race.jsonl` 和 `ipv6-runtime-binding-final-race-result.json`。默认回环测试由常规 desktop Go 测试执行，不依赖公网环境。公网恢复测试需活动物理 IPv6 网卡与独立构建 Core，接入恢复后可运行：
+本地证据为 `.go-cache-local/ipv6-desktop-runtime-binding-race.jsonl`、`ipv6-desktop-runtime-binding-race-result.json`、`ipv6-runtime-binding-final-race.jsonl` 和 `ipv6-runtime-binding-final-race-result.json`；后端独立监测的最终全量记录为 `.go-cache-local/ipv6-background-monitor-race.jsonl` 与 `ipv6-background-monitor-race-result.json`。默认回环测试由常规 desktop Go 测试执行，不依赖公网环境。公网恢复测试需活动物理 IPv6 网卡与独立构建 Core，接入恢复后可运行：
 
 ```powershell
 $env:HYPOMUX_RUN_RUNTIME_BINDING_TEST = "1"

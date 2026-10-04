@@ -5,10 +5,129 @@ import (
 	"errors"
 	"reflect"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/Hypostasis-Cat/HypoMux/desktop/internal/engineclient"
 )
+
+func startTestRuntimeBindingMonitor(t *testing.T, service *EngineService) (tick, stop func()) {
+	t.Helper()
+	done, exited := make(chan struct{}), make(chan struct{})
+	ticks := make(chan time.Time)
+	go func() {
+		defer close(exited)
+		service.runRuntimeBindingMonitor(done, ticks)
+	}()
+	stop = sync.OnceFunc(func() {
+		close(done)
+		select {
+		case <-exited:
+		case <-time.After(time.Second):
+			t.Error("backend monitor did not exit")
+		}
+	})
+	t.Cleanup(stop)
+	tick = func() {
+		t.Helper()
+		select {
+		case ticks <- time.Now():
+		case <-exited:
+			t.Fatal("backend monitor exited before the tick")
+		case <-time.After(time.Second):
+			t.Fatal("backend monitor did not consume the tick")
+		}
+	}
+	return tick, stop
+}
+
+func TestRuntimeBindingMonitorScansWithoutSnapshotsAndStopsScanningAfterStop(t *testing.T) {
+	old := runtimeBindingFixture()
+	var scans atomic.Int64
+	scanned := make(chan struct{}, 1)
+	service := &EngineService{lifecycleGate: make(chan struct{}, 1), runtimeBindings: []AdapterView{old},
+		runtimeBindingEnabled: true, runtimeAdapters: func() ([]AdapterView, error) {
+			scans.Add(1)
+			scanned <- struct{}{}
+			return []AdapterView{old}, nil
+		}}
+	tick, stop := startTestRuntimeBindingMonitor(t, service)
+	tick()
+	select {
+	case <-scanned:
+	case <-time.After(time.Second):
+		t.Fatal("backend did not scan without a Snapshot call")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := service.acquireLifecycle(ctx); err != nil {
+		t.Fatal(err)
+	}
+	service.releaseLifecycle()
+	service.cancelRuntimeBindingRefresh()
+	tick()
+	stop()
+	if err := service.acquireLifecycle(ctx); err != nil {
+		t.Fatal(err)
+	}
+	service.releaseLifecycle()
+	if scans.Load() != 1 {
+		t.Fatal("stopped session still scanned adapters", scans.Load())
+	}
+}
+
+func TestRuntimeBindingMonitorSkipsInactiveAndBusySessions(t *testing.T) {
+	for _, scenario := range []string{"stopped", "closing", "no_bindings", "busy"} {
+		t.Run(scenario, func(t *testing.T) {
+			old := runtimeBindingFixture()
+			var scans atomic.Int64
+			service := &EngineService{lifecycleGate: make(chan struct{}, 1), runtimeBindings: []AdapterView{old},
+				runtimeBindingEnabled: true, runtimeAdapters: func() ([]AdapterView, error) {
+					scans.Add(1)
+					return []AdapterView{old}, nil
+				}}
+			switch scenario {
+			case "stopped":
+				service.runtimeBindingEnabled = false
+			case "closing":
+				service.closing = true
+			case "no_bindings":
+				service.runtimeBindings = nil
+			case "busy":
+				service.lifecycleGate <- struct{}{}
+			}
+			tick, stop := startTestRuntimeBindingMonitor(t, service)
+			tick()
+			stop()
+			if scenario == "busy" {
+				service.releaseLifecycle()
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			if err := service.acquireLifecycle(ctx); err != nil {
+				t.Fatal(err)
+			}
+			service.releaseLifecycle()
+			if scans.Load() != 0 {
+				t.Fatal("inactive/busy session scanned adapters", scans.Load())
+			}
+		})
+	}
+}
+
+func TestRuntimeBindingMonitorExitsWhenClientPermanentlyCloses(t *testing.T) {
+	service := &EngineService{client: engineclient.New(), bindingMonitorDone: make(chan struct{})}
+	t.Cleanup(service.client.Close)
+	go service.watchRuntimeBindings()
+	service.client.Close()
+	select {
+	case <-service.bindingMonitorDone:
+	case <-time.After(time.Second):
+		t.Fatal("closing the client left the backend monitor running")
+	}
+}
 
 func runtimeBindingFixture() AdapterView {
 	return AdapterView{ID: "wifi", Name: "WLAN", SourceIPv6: "2001:db8::1", IPv6IfIndex: 7,
@@ -164,6 +283,8 @@ func TestRuntimeBindingRecoveryGatesCleanupStartupAndOwnedHotspot(t *testing.T) 
 
 func TestRuntimeBindingStopCancelsScanAndPreventsLateRestart(t *testing.T) {
 	entered, release := make(chan struct{}), make(chan struct{})
+	releaseScan := sync.OnceFunc(func() { close(release) })
+	t.Cleanup(releaseScan)
 	var scans atomic.Int64
 	old := runtimeBindingFixture()
 	service := &EngineService{lifecycleGate: make(chan struct{}, 1), runtimeBindings: []AdapterView{old},
@@ -176,22 +297,24 @@ func TestRuntimeBindingStopCancelsScanAndPreventsLateRestart(t *testing.T) {
 		next.SourceIPv6 = "2001:db8::2"
 		return []AdapterView{next}, nil
 	}
-	service.scheduleRuntimeBindingRefresh()
+	tick, stop := startTestRuntimeBindingMonitor(t, service)
+	tick()
 	select {
 	case <-entered:
 	case <-time.After(time.Second):
 		t.Fatal("background scan did not start")
 	}
-	service.scheduleRuntimeBindingRefresh()
+	tick()
 	service.cancelRuntimeBindingRefresh()
-	close(release)
+	releaseScan()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	if err := service.acquireLifecycle(ctx); err != nil {
 		t.Fatal("recovery retained lifecycle ownership after Stop", err)
 	}
 	service.releaseLifecycle()
-	service.scheduleRuntimeBindingRefresh()
+	tick()
+	stop()
 	service.mu.Lock()
 	enabled, refreshing, notice := service.runtimeBindingEnabled, service.runtimeBindingRefresh, service.runtimeBindingNotice
 	service.mu.Unlock()
