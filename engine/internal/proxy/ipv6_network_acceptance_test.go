@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"net"
 	"os"
 	"testing"
@@ -16,10 +17,13 @@ import (
 // Opt-in physical-network checks. The runner treats missing prerequisites as
 // blocked and never turns these skips into successful qualification evidence.
 type ipv6AcceptanceConfig struct {
-	Adapter        Adapter `json:"adapter"`
-	NAT64TCP       string  `json:"nat64_tcp"`
-	NAT64UDP       string  `json:"nat64_udp"`
-	IPv4OnlyDomain string  `json:"ipv4_only_domain"`
+	Adapter         Adapter `json:"adapter"`
+	DNSPolicy       string  `json:"dns_policy"`
+	IPv6UDP         string  `json:"ipv6_udp"`
+	NAT64TCP        string  `json:"nat64_tcp"`
+	NAT64UDP        string  `json:"nat64_udp"`
+	NAT64ServerName string  `json:"nat64_server_name"`
+	IPv4OnlyDomain  string  `json:"ipv4_only_domain"`
 }
 
 func physicalIPv6Config(t *testing.T) ipv6AcceptanceConfig {
@@ -31,6 +35,14 @@ func physicalIPv6Config(t *testing.T) ipv6AcceptanceConfig {
 	var cfg ipv6AcceptanceConfig
 	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
 		t.Fatal(err)
+	}
+	if cfg.DNSPolicy == "" {
+		cfg.DNSPolicy = dns.PolicyAliDNS
+	}
+	switch cfg.DNSPolicy {
+	case dns.PolicyAliDNS, dns.PolicyDNSPod, dns.PolicyGoogle:
+	default:
+		t.Fatalf("unsupported acceptance DNS policy: %s", cfg.DNSPolicy)
 	}
 	if cfg.Adapter.SourceIP != "" || cfg.Adapter.SourceIPv6 == "" || cfg.Adapter.IPv6IfIndex <= 0 {
 		t.Fatal("acceptance requires an explicit IPv6-only source binding")
@@ -57,13 +69,16 @@ func physicalIPv6Config(t *testing.T) ipv6AcceptanceConfig {
 	return cfg
 }
 
-func acceptanceServer(t *testing.T, cfg ipv6AcceptanceConfig) *Server {
+func acceptanceServer(t *testing.T, cfg ipv6AcceptanceConfig, prepare ...func(*Server)) *Server {
 	t.Helper()
-	s, err := New(Config{Adapters: []Adapter{cfg.Adapter}, DNS: dns.Config{Policy: dns.PolicyGoogle}, Channels: []Channel{
+	s, err := New(Config{Adapters: []Adapter{cfg.Adapter}, DNS: dns.Config{Policy: cfg.DNSPolicy}, Channels: []Channel{
 		{Name: ChannelEthernet, AdapterNames: []string{cfg.Adapter.Name}}, {Name: ChannelWiFi, AdapterNames: []string{cfg.Adapter.Name}}, {Name: ChannelAggregation, AdapterNames: []string{cfg.Adapter.Name}},
 	}})
 	if err != nil {
 		t.Fatal(err)
+	}
+	for _, configure := range prepare {
+		configure(s)
 	}
 	if _, err = s.Start(); err != nil {
 		t.Fatal(err)
@@ -95,17 +110,61 @@ func TestPublicIPv6NetworkAcceptance(t *testing.T) {
 	s := acceptanceServer(t, cfg)
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 	defer cancel()
-	answer, err := s.resolver.Resolve(ctx, dns.Query{Domain: "dns.google", RecordType: dns.RecordAAAA, Binding: adapterDNSBinding(cfg.Adapter)})
+	serverName := dns.Endpoints(cfg.DNSPolicy)[0].Host
+	answer, err := s.resolver.Resolve(ctx, dns.Query{Domain: serverName, RecordType: dns.RecordAAAA, Binding: adapterDNSBinding(cfg.Adapter)})
 	if err != nil || net.ParseIP(answer.Address) == nil || net.ParseIP(answer.Address).To4() != nil || answer.Transport != "doh" {
 		t.Fatalf("IPv6 DoH=%+v error=%v", answer, err)
 	}
-	acceptanceTLS(t, ctx, s, net.JoinHostPort(answer.Address, "443"), "dns.google", cfg)
+	t.Logf("verified DoH policy=%s transport=%s server=%s", cfg.DNSPolicy, answer.Transport, answer.Server)
+	acceptanceTLS(t, ctx, s, net.JoinHostPort(answer.Address, "443"), serverName, cfg)
+	acceptanceTLS(t, ctx, s, net.JoinHostPort(serverName, "443"), serverName, cfg)
+}
+
+func TestPublicIPv6UDPNetworkAcceptance(t *testing.T) {
+	cfg := physicalIPv6Config(t)
+	host, port, err := net.SplitHostPort(cfg.IPv6UDP)
+	if err != nil || net.ParseIP(host) == nil || net.ParseIP(host).To4() != nil || port != "53" {
+		t.Fatal("provide a literal IPv6 DNS UDP target on port 53")
+	}
+	cfg.IPv6UDP = net.JoinHostPort(net.ParseIP(host).String(), port)
+	s := acceptanceServer(t, cfg, func(s *Server) {
+		dialUDP := s.dialUDP
+		s.dialUDP = func(ctx context.Context, dialer *net.Dialer, target string) (net.Conn, error) {
+			connection, err := dialUDP(ctx, dialer, target)
+			if err == nil {
+				local, _, splitErr := net.SplitHostPort(connection.LocalAddr().String())
+				if splitErr != nil || !net.ParseIP(local).Equal(net.ParseIP(cfg.Adapter.SourceIPv6)) {
+					connection.Close()
+					return nil, fmt.Errorf("UDP escaped selected IPv6 source: %s", local)
+				}
+				t.Logf("UDP target=%s source=%s", target, connection.LocalAddr())
+			}
+			return connection, err
+		}
+	})
+	control, relay := startUDPAssociation(t, s.endpoints.Channels[ChannelAggregation], 0)
+	defer control.Close()
+	client := listenUDPClient(t)
+	defer client.Close()
+	query := []byte{0x64, 0x06, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 3, 'd', 'n', 's', 6, 'a', 'l', 'i', 'd', 'n', 's', 3, 'c', 'o', 'm', 0, 0, 28, 0, 1}
+	sendSOCKSUDP(t, client, relay, cfg.IPv6UDP, query)
+	client.SetReadDeadline(time.Now().Add(8 * time.Second))
+	buffer := make([]byte, 4096)
+	n, _, err := client.ReadFromUDP(buffer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	packet, ok := parseSOCKSUDPPacket(buffer[:n])
+	if !ok || packet.target != cfg.IPv6UDP || len(packet.payload) < 12 || binary.BigEndian.Uint16(packet.payload) != 0x6406 || packet.payload[2]&0x80 == 0 || packet.payload[3]&0xf != 0 || binary.BigEndian.Uint16(packet.payload[6:]) == 0 {
+		t.Fatalf("IPv6 UDP DNS or reply identity invalid: %+v", packet)
+	}
+	t.Logf("verified public IPv6 UDP DNS reply bytes=%d target=%s", len(packet.payload), packet.target)
 }
 
 func TestPublicNAT64NetworkAcceptance(t *testing.T) {
 	cfg := physicalIPv6Config(t)
-	if cfg.NAT64TCP == "" || cfg.NAT64UDP == "" || cfg.IPv4OnlyDomain == "" {
-		t.Fatal("NAT64 acceptance needs IPv4 TCP/UDP targets and a controlled IPv4-only TLS domain")
+	if cfg.NAT64TCP == "" || cfg.NAT64UDP == "" || cfg.NAT64ServerName == "" || cfg.IPv4OnlyDomain == "" {
+		t.Fatal("NAT64 acceptance needs IPv4 TCP/UDP targets, their TLS hostname and a controlled IPv4-only TLS domain")
 	}
 	for _, target := range []string{cfg.NAT64TCP, cfg.NAT64UDP} {
 		host, _, err := net.SplitHostPort(target)
@@ -125,7 +184,7 @@ func TestPublicNAT64NetworkAcceptance(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Logf("network-advertised prefix=%s DNS=%s", prefix, answer.Server)
-	acceptanceTLS(t, ctx, s, cfg.NAT64TCP, "dns.google", cfg)
+	acceptanceTLS(t, ctx, s, cfg.NAT64TCP, cfg.NAT64ServerName, cfg)
 	domainBinding := adapterDNSBinding(cfg.Adapter)
 	if _, err := s.resolver.Resolve(ctx, dns.Query{Domain: cfg.IPv4OnlyDomain, RecordType: dns.RecordA, Binding: domainBinding}); err != nil {
 		t.Fatal(err)
@@ -138,8 +197,8 @@ func TestPublicNAT64NetworkAcceptance(t *testing.T) {
 	defer control.Close()
 	client := listenUDPClient(t)
 	defer client.Close()
-	// RFC 1035 query for dns.google AAAA, carried through an IPv4 SOCKS target.
-	query := []byte{0x64, 0x06, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 3, 'd', 'n', 's', 6, 'g', 'o', 'o', 'g', 'l', 'e', 0, 0, 28, 0, 1}
+	// RFC 1035 query for the domestic test endpoint, through an IPv4 target.
+	query := []byte{0x64, 0x06, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 3, 'd', 'n', 's', 6, 'a', 'l', 'i', 'd', 'n', 's', 3, 'c', 'o', 'm', 0, 0, 28, 0, 1}
 	sendSOCKSUDP(t, client, relay, cfg.NAT64UDP, query)
 	client.SetReadDeadline(time.Now().Add(8 * time.Second))
 	buffer := make([]byte, 4096)

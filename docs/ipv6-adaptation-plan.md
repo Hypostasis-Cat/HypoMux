@@ -2,7 +2,7 @@
 
 本次适配将现有 IPv6 TCP 和 UDP 出站能力扩展为双栈与 IPv6-only 出口支持。内部回环端口继续使用 IPv4；公网出站、DNS、Windows 路由与状态按地址族处理。验收以实际行为和测试证据为准，跳过的实机测试不能计为通过。
 
-**2026-10-03 状态：实现和本地自动化检查通过，完整实机验收尚未通过。** 当前用户只有 IPv4 网络，物理出口没有可用的首选 IPv6 地址；公网 IPv6、真实 DNS64/NAT64 与对应系统验收被此条件阻塞。
+**2026-10-04 状态：公网 IPv6 HTTPS/DoH、普通代理、严格系统 TUN、正常停止与侧车崩溃恢复已通过；完整实机验收仍未通过。** WLAN 已有真实 IPv6 出口。现有 Mihomo 的 `Meta / block ipv6 dns` WFP 规则阻断 IPv6 TCP/UDP 53；当前网络 DNS64/NAT64、物理 IPv6-only、睡眠和受控 PMTU 场景仍待验收。验收默认使用国内阿里/腾讯端点。
 
 ## 实施顺序
 
@@ -39,16 +39,16 @@ IPv6-only 域名优先尝试原生 AAAA；必要时在 2 秒后或原生候选�
 | 场景 | 操作与验收结果 | 当前状态 |
 | --- | --- | --- |
 | 公网 IPv4 基线 | 普通代理和 TUN 下访问 A-only、双栈域名及 IPv4 字面目标，TCP/UDP 正常且选择的出口一致 | 普通代理/TUN 池公网 TCP/UDP 已通过；系统 TUN 及受控 A-only 域名仍待验收 |
-| 公网 IPv6 | 通过指定网卡的 IPv6 源地址访问 AAAA 域名、IPv6 字面目标、DoH；证书和实际源地址验证通过 | 缺少网络，未验收 |
-| 双栈不对称故障 | 分别断开一张网卡的 IPv4/IPv6 路径，另一协议成功；故障状态仅影响对应协议，恢复后可重新使用 | 实机待验收；回退和状态测试通过 |
-| IPv6-only，无 NAT64 | 原生 IPv6 TCP/UDP 与 DNS 正常；IPv4 目标明确失败，不逃逸到其他网卡 | 缺少网络，未验收 |
-| IPv6-only，DNS64/NAT64 | 使用该网络 DNS 发现前缀；IPv4 字面 TCP/UDP、受控 A-only HTTPS 域名均成功；UDP 回复保留原 IPv4 目标 | 缺少网络，未验收 |
-| TUN/WFP 严格模式 | IPv6 DNS、TCP/UDP 只能走指定出口；IPv4 回退提示持续可见；IPv6-only 线路不生成 IPv4-only 回退配置 | IPv6 实机待验收；配置与规则测试通过 |
+| 公网 IPv6 | 通过指定网卡的 IPv6 源地址访问 AAAA 域名、IPv6 字面目标、DoH；证书和实际源地址验证通过 | TCP/TLS/DoH、SOCKS/HTTP CONNECT/TUN 池通过；公网 UDP 53 被外部规则阻断 |
+| 双栈不对称故障 | 分别断开一张网卡的 IPv4/IPv6 路径，另一协议成功；故障状态仅影响对应协议，恢复后可重新使用 | 真实 WFP 测试进程内双向 TCP 阻断/回退/解除阻断后恢复通过；全接口变化与睡眠仍待验收 |
+| IPv6-only，无 NAT64 | 原生 IPv6 TCP/UDP 与 DNS 正常；IPv4 目标明确失败，不逃逸到其他网卡 | 待验收 |
+| IPv6-only，DNS64/NAT64 | 使用该网络 DNS 发现前缀；IPv4 字面 TCP/UDP、受控 A-only HTTPS 域名均成功；UDP 回复保留原 IPv4 目标 | 待验收 |
+| TUN/WFP 严格模式 | IPv6 DNS、TCP/UDP 只能走指定出口；IPv4 回退提示持续可见；IPv6-only 线路不生成 IPv4-only 回退配置 | 真实严格系统 TUN IPv6 HTTPS、配置与原生 WFP 注册/匹配通过；UDP/DNS64 待验收 |
 | 地址变化与睡眠 | 休眠唤醒、接口索引/源地址变化后重建绑定，缓存和连接不复用旧出口 | 实机待验收；绑定隔离与刷新测试通过 |
-| IPv6 PMTU/大包 | 在有 MTU 瓶颈的真实链路上传输大文件和 UDP，允许必要 ICMPv6，观察无持续黑洞或错误切换出口 | 缺少网络，未验收；回环大包通过 |
-| 退出、崩溃与竞争 VPN | 记录前后两种协议的路由和 WFP 状态；正常退出及异常终止清除 HypoMux 资源，其他 VPN 资源保留 | IPv6 实机待验收；只读预检与生命周期回归通过 |
+| IPv6 PMTU/大包 | 在有 MTU 瓶颈的真实链路上传输大文件和 UDP，允许必要 ICMPv6，观察无持续黑洞或错误切换出口 | 真实系统 TUN HTTPS 约 122 KiB 传输通过；受控 PMTU 瓶颈和大 UDP 仍待验收 |
+| 退出、崩溃与竞争 VPN | 记录前后两种协议的路由和 WFP 状态；正常退出及异常终止清除 HypoMux 资源，其他 VPN 资源保留 | 严格系统 TUN 正常停止/侧车崩溃恢复通过；原生动态 WFP 关闭/拥有进程崩溃清理通过 |
 
-每项保存执行时间、运行模式、Windows 版本、接口名称/两种协议索引、源地址、DNS、连接结果与前后路由/过滤器快照。完整验收要求上述项目全部通过；测试代码通过和网络脚本返回 0 均不能单独替代系统矩阵。TUN/WFP 系统验收需要高权限独立 Core 的可控测试窗口；当前终端进程并非管理员，普通代理和只读原生检查不受此影响。
+每项保存执行时间、运行模式、Windows 版本、接口名称/两种协议索引、源地址、DNS、连接结果与前后路由/过滤器快照。完整验收要求上述项目全部通过；测试代码通过和网络脚本返回 0 均不能单独替代系统矩阵。TUN/WFP 系统验收通过单独提权的测试 Core 执行；独立客户端使用真实系统路由。当前验证不覆盖已安装服务客户端的签名/信任路径。
 
 ### 公网网络验收入口
 
@@ -56,7 +56,10 @@ IPv6-only 域名优先尝试原生 AAAA；必要时在 2 秒后或原生候选�
 
 ```powershell
 # 双栈网卡也会强制只使用 IPv6 源地址进行这组公网检查。
-.\tools\ipv6-acceptance.ps1 -Adapter "网卡名"
+.\tools\ipv6-acceptance.ps1 -Adapter "网卡名" -DNSPolicy alidns
+
+# 同时要求真实 SOCKS IPv6 UDP DNS 请求/回复通过。
+.\tools\ipv6-acceptance.ps1 -Adapter "网卡名" -RequireUDP
 
 # 在真实 DNS64/NAT64 网络中提供该网络的 IPv6 DNS，以及受控 A-only HTTPS 域名。
 .\tools\ipv6-acceptance.ps1 -Adapter "网卡名" -RequireNAT64 `
@@ -64,7 +67,7 @@ IPv6-only 域名优先尝试原生 AAAA；必要时在 2 秒后或原生候选�
   -Output ".go-cache-local/ipv6-nat64-acceptance.json"
 ```
 
-默认 NAT64 TCP/UDP 目标分别为 `8.8.8.8:443` 和 `8.8.8.8:53`，TCP 校验 `dns.google` 证书，UDP 验证 DNS 回复和 SOCKS 原目标。受控域名须有 A、没有 AAAA，且 HTTPS 证书有效。自动选择只考虑活动以太网/Wi-Fi；不要用 Teredo 或 HypoMux 自身的 TUN 代替目标物理网络。脚本返回 `0` 表示本次指定网络检查通过，`1` 表示失败/跳过/未执行，`2` 表示缺少前提。报告始终保留 `full_acceptance=pending_system_matrix`，直到独立系统矩阵完成。
+默认 NAT64 TCP/UDP 目标分别为 `223.5.5.5:443` 和 `223.5.5.5:53`，TCP 校验 `dns.alidns.com` 证书（可用 `-NAT64TCP`、`-NAT64UDP`、`-NAT64ServerName` 替换），UDP 验证 DNS 回复和 SOCKS 原目标。受控域名须有 A、没有 AAAA，且 HTTPS 证书有效。自动选择只考虑活动以太网/Wi-Fi；不要用 Teredo 或 HypoMux 自身的 TUN 代替目标物理网络。脚本返回 `0` 表示本次指定网络检查通过，`1` 表示失败/跳过/未执行，`2` 表示缺少前提。报告始终保留 `full_acceptance=pending_system_matrix`，直到独立系统矩阵完成。
 
 ## 标准依据
 
@@ -74,7 +77,7 @@ IPv6-only 域名优先尝试原生 AAAA；必要时在 2 秒后或原生候选�
 - [RFC 8201 IPv6 路径 MTU](https://www.rfc-editor.org/rfc/rfc8201.html)
 - [Windows 网卡地址元数据](https://learn.microsoft.com/en-us/windows/win32/api/iptypes/ns-iptypes-ip_adapter_addresses_lh)
 
-## 验收记录
+## 2026-10-03 原始验收记录
 
 测试日期为 2026-10-03，Windows `10.0.26300.0` / AMD64，Go `1.26.6`。竞态检测使用仓库已有 LLVM MinGW Clang，通过 `CGO_ENABLED=1` 和 `CC` 指向其 `x86_64-w64-mingw32-clang.exe`。验证时基于提交 `e66016e129c321557b48935629521e917f17b76e` 的工作区改动，经过验证的实现对应本组 IPv6 适配提交；发布到主分支不改变上文“完整实机验收尚未通过”的状态。
 
@@ -146,3 +149,37 @@ Pop-Location
 ```
 
 `.go-cache-local` 属于忽略的本地验证产物；其中的可执行文件没有安装、签名或发布。对外归档网络证据前应核对其中的本机地址和接口信息。下一步是取得上述真实网络条件，运行公网脚本与系统矩阵；在此之前保留“完整验收未通过”的状态。
+
+## 2026-10-04 IPv6 实网补充验收
+
+Windows 10.0.26300.0 / AMD64、Go 1.26.6；使用活动 WLAN 的首选公网 IPv6，保留已有 Mihomo TUN。绑定配置故意不提供 IPv4 源地址，以验证应用的 IPv6-only 出口选择；这不等同于物理网络已经是 IPv6-only。
+
+| 检查 | 结果 | 本地证据 |
+| --- | --- | --- |
+| 国内公网 IPv6 | 阿里 IPv6 DoH、域名/字面 TLS、源地址绑定通过 | `.go-cache-local/ipv6-wifi-final-public.json`（同次 UDP 未通过，报告整体失败） |
+| 真实 Core 代理数据路径 | 普通 SOCKS、HTTP CONNECT、TUN TCP 池 10 项检查通过；UDP 未通过，整体保留失败 | `.go-cache-local/ipv6-public-proxy-regression.json` |
+| 真实严格系统 TUN | 独立 OS 路由客户端从实际 HypoMux IPv6 TUN 地址访问腾讯 HTTPS，证书、所选 WLAN 的 IPv6 连接及约 122 KiB 正文通过 | `.go-cache-local/ipv6-system-acceptance/ipv6-system-tun-acceptance.json` |
+| 停止与异常恢复 | 同一系统测试内正常停止、再次启动、终止其拥有的 sing-box 侧车、检测失败状态、清理通过；物理/竞争 VPN 两族路由保留 | 同上，10 条检查记录 |
+| 原生 WFP | 真实 IPv6 TCP/UDP 放行过滤器注册、源地址/接口约束、系统事件匹配、Close 后删除通过；53 端口连接仍被外部规则拒绝 | `.go-cache-local/ipv6-wfp-latest-acceptance.txt`、`ipv6-wfp-latest-dns-events.xml` |
+| WFP 异常清理 | 仅终止拥有的辅助测试进程，OS 移除其实际动态 IPv6 过滤器通过；此项使用回环资源，不是公网连通证明 | `.go-cache-local/ipv6-wfp-crash-cleanup.txt` |
+| 真实双栈故障回退 | 原生 IPv4/IPv6 TLS 基线通过；分别只阻断测试进程在所选 WLAN 的 TCP 443，另一协议完成普通 SOCKS TLS；关闭拥有的动态规则后原协议立即恢复 | `.go-cache-local/ipv6-wfp-dualstack-acceptance.txt`，两种故障子测试通过 |
+| DNS64 网络发现 | 当前 link-local DNS 和多个国内 IPv6 DNS 的 20 条 TCP/UDP 查询均无有效回复；没有发现可用于实际验收的前缀，不能据此断定网络没有 NAT64 | `.go-cache-local/ipv6-native-dns64-probe.json` |
+| engine 全量竞态 | 283 个顶层测试通过、0 失败、5 个显式实网测试跳过；新双栈故障案例另行执行 | `.go-cache-local/ipv6-engine-final-real-network.jsonl` |
+| desktop 全量竞态 | 415 个顶层测试通过、0 失败、12 个显式环境测试跳过；其中生产 TUN 配置准备已另行显式执行并通过 | `.go-cache-local/ipv6-desktop-final-real-network.jsonl` |
+| 原主分支 CI 报错修复 | Windows 缓存断言的 DNS 超时从 200 ms 调整到 2 s，保留清洁退出/缓存断言，实际 bundled FakeIP 连续重启 20 轮通过；提交 `8541a3d` 的两个 CI 均成功 | GitHub Validate Go Engine / Build Desktop |
+
+WFP 事件显示 `Meta / block ipv6 dns` 在 `ALE_AUTH_CONNECT_V6` 拒绝 TCP 和 UDP 53；同事件也记录 HypoMux 的源地址/接口绑定 permit 已匹配，不能把外部阻断记成通过。现有代理保持原设置。
+
+双栈故障用 `TestRealDualStackTCPFaultFallback` 执行，需管理员权限、`HYPOMUX_RUN_WFP_IPV6_NETWORK_TEST=1`，以及包含两族物理源地址与接口索引的 `HYPOMUX_IPV6_ACCEPTANCE_CONFIG`。它使用实际 Windows WFP 和公网 TLS，不替换连接函数；临时阻断仅匹配本测试可执行文件、对应源地址、接口及 TCP 443，不改变其他进程或路由。普通代理支持域名候选回退，TUN TCP 池仍按其字面目标语义处理。
+
+系统路由报告保留全部前后快照及差异。Windows Teredo 自动换地址产生的 `Protocol=Local` `/128` 主机路由单独记录，不要求恢复旧地址；物理网卡、其他 VPN 和 Teredo 策略路由逐条核对。首次把自动生成主机路由当作固定路由的失败记录保留在本地，修正检查范围后重新执行通过。
+
+### 复现严格系统 TUN 检查
+
+从管理员 PowerShell 执行，需 Go、Python 3.10+ 和仓库 bundled sing-box。脚本编译独立 Core/客户端，使用桌面生产配置生成器，短暂运行严格 TUN，并终止本次测试拥有的侧车以验证恢复。已有 HypoMux-Tun 时拒绝执行；不会重配竞争 VPN。
+
+```powershell
+.\tools\ipv6-system-acceptance.ps1 -Adapter "网卡名" -Python "python.exe"
+```
+
+证据输出到 `.go-cache-local/ipv6-system-acceptance`。退出 0 仅代表本次系统 TCP/TUN/恢复检查通过，报告仍保留 `full_acceptance=pending_network_matrix`。未经过公网 UDP、真实 DNS64/NAT64、物理 IPv6-only、睡眠/重编号和受控 PMTU 验收前，不宣称完整适配验收通过。

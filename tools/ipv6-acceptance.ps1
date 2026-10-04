@@ -1,9 +1,14 @@
 param(
     [string]$Adapter,
     [string[]]$DNSServers = @(),
+    [ValidateSet('alidns', 'dnspod', 'google')]
+    [string]$DNSPolicy = 'alidns',
+    [switch]$RequireUDP,
+    [string]$IPv6UDP = '[2400:3200::1]:53',
     [switch]$RequireNAT64,
-    [string]$NAT64TCP = '8.8.8.8:443',
-    [string]$NAT64UDP = '8.8.8.8:53',
+    [string]$NAT64TCP = '223.5.5.5:443',
+    [string]$NAT64UDP = '223.5.5.5:53',
+    [string]$NAT64ServerName = 'dns.alidns.com',
     [string]$IPv4OnlyDomain,
     [string]$Output = '.go-cache-local/ipv6-network-acceptance.json'
 )
@@ -14,10 +19,10 @@ $reportPath = [IO.Path]::GetFullPath($(if ([IO.Path]::IsPathRooted($Output)) { $
 $report = [ordered]@{
     schema = 1; tested_at_utc = [DateTime]::UtcNow.ToString('o')
     windows_version = [Environment]::OSVersion.VersionString; host_architecture = $env:PROCESSOR_ARCHITECTURE
-    scope = 'source-bound public IPv6 and optional DNS64/NAT64; no system route changes'
+    scope = 'source-bound IPv6 DoH/TCP, optional IPv6 UDP and DNS64/NAT64; no system route changes'
     network_status = 'blocked'; full_acceptance = 'pending_system_matrix'
-    nat64_requested = [bool]$RequireNAT64; reason = ''; tests = @()
-    remaining_system_checks = @('dual-stack asymmetric failures', 'IPv6-only physical network', 'strict TUN/WFP with public IPv6', 'sleep and adapter renumbering', 'IPv6 PMTU and UDP large packets', 'route/filter cleanup after stop and crash')
+    nat64_requested = [bool]$RequireNAT64; udp_requested = [bool]$RequireUDP; dns_policy = $DNSPolicy; reason = ''; tests = @()
+    remaining_system_checks = @('public IPv6 UDP if not requested', 'dual-stack asymmetric failures', 'IPv6-only physical network', 'strict TUN/WFP with public IPv6', 'sleep and adapter renumbering', 'IPv6 PMTU and UDP large packets', 'route/filter cleanup after stop and crash')
 }
 $exitCode = 2
 $previousConfig = $env:HYPOMUX_IPV6_ACCEPTANCE_CONFIG
@@ -56,11 +61,12 @@ try {
         } elseif ($RequireNAT64 -and -not $IPv4OnlyDomain) {
             $report.reason = 'Provide -IPv4OnlyDomain: a controlled A-only HTTPS domain with a valid certificate, to verify domain synthesis as well as literal targets.'
         } else {
-            $config = @{ adapter = @{ name = $chosen.Name; source_ipv6 = $source; ipv6_if_index = $index6; dns_servers = $servers }; nat64_tcp = $NAT64TCP; nat64_udp = $NAT64UDP; ipv4_only_domain = $IPv4OnlyDomain }
+            $config = @{ adapter = @{ name = $chosen.Name; source_ipv6 = $source; ipv6_if_index = $index6; dns_servers = $servers }; dns_policy = $DNSPolicy; ipv6_udp = $IPv6UDP; nat64_tcp = $NAT64TCP; nat64_udp = $NAT64UDP; nat64_server_name = $NAT64ServerName; ipv4_only_domain = $IPv4OnlyDomain }
             $env:HYPOMUX_IPV6_ACCEPTANCE_CONFIG = ConvertTo-Json -InputObject $config -Depth 6 -Compress
-            $pattern = '^TestPublicIPv6NetworkAcceptance$'
             $expected = @('TestPublicIPv6NetworkAcceptance')
-            if ($RequireNAT64) { $pattern = '^TestPublic(IPv6|NAT64)NetworkAcceptance$'; $expected += 'TestPublicNAT64NetworkAcceptance' }
+            if ($RequireUDP) { $expected += 'TestPublicIPv6UDPNetworkAcceptance' }
+            if ($RequireNAT64) { $expected += 'TestPublicNAT64NetworkAcceptance' }
+            $pattern = '^(' + ($expected -join '|') + ')$'
             Push-Location (Join-Path $projectRoot 'engine')
             try { $raw = @(& go test ./internal/proxy -run $pattern -count=1 -json -timeout 90s); $goExit = $LASTEXITCODE } finally { Pop-Location }
             $events = @($raw | ForEach-Object { try { $_ | ConvertFrom-Json } catch { } })
