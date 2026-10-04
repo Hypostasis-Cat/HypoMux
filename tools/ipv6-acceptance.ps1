@@ -5,6 +5,8 @@ param(
     [string]$DNSPolicy = 'alidns',
     [switch]$RequireUDP,
     [string]$IPv6UDP = '[2400:3200::1]:53',
+    [ValidateSet('dns', 'ntp')]
+    [string]$IPv6UDPProtocol = 'dns',
     [switch]$RequireNAT64,
     [string]$NAT64TCP = '223.5.5.5:443',
     [string]$NAT64UDP = '223.5.5.5:53',
@@ -21,7 +23,7 @@ $report = [ordered]@{
     windows_version = [Environment]::OSVersion.VersionString; host_architecture = $env:PROCESSOR_ARCHITECTURE
     scope = 'source-bound IPv6 DoH/TCP, optional IPv6 UDP and DNS64/NAT64; no system route changes'
     network_status = 'blocked'; full_acceptance = 'pending_system_matrix'
-    nat64_requested = [bool]$RequireNAT64; udp_requested = [bool]$RequireUDP; dns_policy = $DNSPolicy; reason = ''; tests = @()
+    nat64_requested = [bool]$RequireNAT64; udp_requested = [bool]$RequireUDP; udp_protocol = $IPv6UDPProtocol; dns_policy = $DNSPolicy; reason = ''; tests = @()
     remaining_system_checks = @('public IPv6 UDP if not requested', 'dual-stack asymmetric failures', 'IPv6-only physical network', 'strict TUN/WFP with public IPv6', 'sleep and adapter renumbering', 'IPv6 PMTU and UDP large packets', 'route/filter cleanup after stop and crash')
 }
 $exitCode = 2
@@ -61,7 +63,7 @@ try {
         } elseif ($RequireNAT64 -and -not $IPv4OnlyDomain) {
             $report.reason = 'Provide -IPv4OnlyDomain: a controlled A-only HTTPS domain with a valid certificate, to verify domain synthesis as well as literal targets.'
         } else {
-            $config = @{ adapter = @{ name = $chosen.Name; source_ipv6 = $source; ipv6_if_index = $index6; dns_servers = $servers }; dns_policy = $DNSPolicy; ipv6_udp = $IPv6UDP; nat64_tcp = $NAT64TCP; nat64_udp = $NAT64UDP; nat64_server_name = $NAT64ServerName; ipv4_only_domain = $IPv4OnlyDomain }
+            $config = @{ adapter = @{ name = $chosen.Name; source_ipv6 = $source; ipv6_if_index = $index6; dns_servers = $servers }; dns_policy = $DNSPolicy; ipv6_udp = $IPv6UDP; ipv6_udp_protocol = $IPv6UDPProtocol; nat64_tcp = $NAT64TCP; nat64_udp = $NAT64UDP; nat64_server_name = $NAT64ServerName; ipv4_only_domain = $IPv4OnlyDomain }
             $env:HYPOMUX_IPV6_ACCEPTANCE_CONFIG = ConvertTo-Json -InputObject $config -Depth 6 -Compress
             $expected = @('TestPublicIPv6NetworkAcceptance')
             if ($RequireUDP) { $expected += 'TestPublicIPv6UDPNetworkAcceptance' }

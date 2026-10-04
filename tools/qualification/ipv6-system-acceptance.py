@@ -113,7 +113,8 @@ def main():
     report = {
         'tested_at_utc': datetime.datetime.now(datetime.timezone.utc).isoformat(),
         'windows_build': sys.getwindowsversion().build,
-        'scope': 'elevated real Core, production strict IPv6 TUN, independent OS-routed client, normal and sidecar crash cleanup',
+        'scope': 'elevated real Core, production strict IPv6 TUN, independent OS-routed TCP and optional UDP, normal and sidecar crash cleanup',
+        'udp_requested': bool(prepared.get('udp_domain')),
         'checks': [], 'adapter': adapter, 'full_acceptance': 'pending_network_matrix',
     }
     core = child = before = None
@@ -144,7 +145,7 @@ def main():
             'mode': 'tun_tcp_pool', 'adapters': [adapter], 'dns': {'policy': 'alidns'}, 'channels': channels,
         }))
         target = None
-        for name in ['www.qq.com', 'www.baidu.com']:
+        for name in ([prepared['https_domain']] if prepared.get('https_domain') else ['www.qq.com', 'www.baidu.com']):
             try:
                 answer = core.call('dns.resolve', {'domain': name, 'record_type': 'AAAA', 'adapter': adapter['name'], 'timeout_ms': 5000})
                 target = (name, answer['address'])
@@ -153,6 +154,11 @@ def main():
             except Exception as error:
                 report.setdefault('destination_errors', []).append({'domain': name, 'error': str(error)})
         require(target, 'no domestic IPv6 HTTPS destination resolved')
+        udp_target = None
+        if prepared.get('udp_domain'):
+            answer = core.call('dns.resolve', {'domain': prepared['udp_domain'], 'record_type': 'AAAA', 'adapter': adapter['name'], 'timeout_ms': 5000})
+            report['udp_destination'] = answer
+            udp_target = '[' + answer['address'] + ']:123'
         activation = json.loads((pathlib.Path(prepared['output']) / 'activation.json').read_text(encoding='utf-8'))
         activation['executable'] = str(output / 'sing-box.exe')  # Exact bundled sibling required by the test Core.
         config_path = pathlib.Path(activation['config_path'])
@@ -163,15 +169,37 @@ def main():
         record('strict_ipv6_tun_activate', state)
         report['running'] = snapshot()
         require(any(a['Name'] == 'HypoMux-Tun' and a['Status'] == 'Up' for a in report['running']['adapters']), 'owned TUN is not active')
+        if prepared.get('tun_mtu'):
+            require(prepared['tun_mtu'] == 1280, 'only the explicit IPv6 minimum MTU test is supported')
+            mtu = powershell("Set-NetIPInterface -InterfaceAlias 'HypoMux-Tun' -AddressFamily IPv6 -NlMtuBytes 1280 -PolicyStore ActiveStore -ErrorAction Stop; Get-NetIPInterface -InterfaceAlias 'HypoMux-Tun' -AddressFamily IPv6 -PolicyStore ActiveStore | Select-Object InterfaceIndex,NlMtu | ConvertTo-Json -Compress")
+            require(mtu['NlMtu'] == 1280, 'owned IPv6 TUN MTU did not change to 1280: ' + repr(mtu))
+            record('owned_tun_ipv6_minimum_mtu', mtu)
+        config = json.loads(config_path.read_text(encoding='utf-8'))
+        tun6 = next(a.split('/')[0] for a in config['inbounds'][0]['address'] if ':' in a)
+        if udp_target:
+            udp_result = subprocess.run(
+                [str(output / 'ipv6-system-client.exe'), '-udp-target=' + udp_target],
+                capture_output=True, text=True, encoding='utf-8', timeout=12,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+            require(udp_result.returncode == 0, 'independent system UDP failed: ' + udp_result.stderr)
+            reply = json.loads(udp_result.stdout)
+            require(reply['event'] == 'udp_reply' and reply['request_verified'] and reply['peer'] == udp_target,
+                    'independent UDP reply identity/correlation mismatch')
+            require(reply['source'].startswith('[' + tun6 + ']:'), 'independent UDP bypassed the HypoMux IPv6 TUN')
+            udp_telemetry = core.call('engine.telemetry', {'include_connections': True})
+            udp_flows = [c for c in udp_telemetry.get('active_connections', [])
+                         if c.get('adapter') == adapter['name'] and c.get('remote') == udp_target]
+            require(udp_flows, 'independent system UDP did not traverse the selected IPv6 pool')
+            record('independent_system_ipv6_udp_via_selected_pool', {'client': reply, 'flows': udp_flows})
         child = subprocess.Popen(
-            [str(output / 'ipv6-system-client.exe'), '-target=[' + target[1] + ']:443', '-server-name=' + target[0]],
+            [str(output / 'ipv6-system-client.exe'), '-target=[' + target[1] + ']:443', '-server-name=' + target[0],
+             '-path=' + prepared.get('payload_path', '/'), '-payload-bytes=' + str(prepared.get('payload_bytes', 0))],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, encoding='utf-8', creationflags=subprocess.CREATE_NO_WINDOW,
         )
         connected = json.loads(child.stdout.readline())
         require(connected['event'] == 'connected' and connected['certificate_verified'], 'independent client failed TLS verification')
-        config = json.loads(config_path.read_text(encoding='utf-8'))
-        tun6 = next(a.split('/')[0] for a in config['inbounds'][0]['address'] if ':' in a)
         require(connected['source'].startswith('[' + tun6 + ']:'), 'independent client bypassed the HypoMux IPv6 TUN')
         telemetry = core.call('engine.telemetry', {'include_connections': True})
         flows = [c for c in telemetry.get('active_connections', []) if c.get('adapter') == adapter['name']

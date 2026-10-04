@@ -1,5 +1,11 @@
 param(
     [Parameter(Mandatory = $true)][string]$Adapter,
+    [switch]$RequireUDP,
+    [string]$NTPDomain = 'ntp.tuna.tsinghua.edu.cn',
+    [ValidateSet(0, 1280)][int]$TUNMTU = 0,
+    [string]$HTTPSDomain = 'www.qq.com',
+    [string]$PayloadPath = '/',
+    [ValidateRange(0, 16777216)][int]$PayloadBytes = 0,
     [string]$Python = 'python',
     [string]$OutputDirectory = '.go-cache-local/ipv6-system-acceptance'
 )
@@ -58,7 +64,7 @@ try {
         if ($_.AddressFamily -eq 'InterNetworkV6' -and $_.IsIPv6LinkLocal) { $_.ToString().Split('%')[0] + '%' + $index6 } else { $_.ToString() }
     } | Select-Object -Unique)
     $inputPath = Join-Path $output 'preparation.json'
-    $prepared = @{adapter = @{name = $Adapter; source_ipv6 = $sources[0].Address.ToString(); ipv6_if_index = $index6; dns_servers = $servers}; endpoints = $endpoints; core = $engine; output = (Join-Path $output 'config')} | ConvertTo-Json -Depth 6
+    $prepared = @{adapter = @{name = $Adapter; source_ipv6 = $sources[0].Address.ToString(); ipv6_if_index = $index6; dns_servers = $servers}; endpoints = $endpoints; core = $engine; output = (Join-Path $output 'config'); udp_domain = $(if ($RequireUDP) { $NTPDomain } else { '' }); tun_mtu = $TUNMTU; https_domain = $HTTPSDomain; payload_path = $PayloadPath; payload_bytes = $PayloadBytes} | ConvertTo-Json -Depth 6
     [IO.File]::WriteAllText($inputPath, $prepared, (New-Object Text.UTF8Encoding($false)))
     $env:HYPOMUX_IPV6_TUN_PREPARE_INPUT = $inputPath
     & go -C (Join-Path $projectRoot 'desktop') test ./internal/services -run '^TestPrepareIPv6SystemAcceptanceConfig$' -count=1 -timeout 90s

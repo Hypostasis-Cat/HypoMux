@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/binary"
@@ -20,6 +21,7 @@ type ipv6AcceptanceConfig struct {
 	Adapter         Adapter `json:"adapter"`
 	DNSPolicy       string  `json:"dns_policy"`
 	IPv6UDP         string  `json:"ipv6_udp"`
+	IPv6UDPProtocol string  `json:"ipv6_udp_protocol"`
 	NAT64TCP        string  `json:"nat64_tcp"`
 	NAT64UDP        string  `json:"nat64_udp"`
 	NAT64ServerName string  `json:"nat64_server_name"`
@@ -122,11 +124,16 @@ func TestPublicIPv6NetworkAcceptance(t *testing.T) {
 
 func TestPublicIPv6UDPNetworkAcceptance(t *testing.T) {
 	cfg := physicalIPv6Config(t)
-	host, port, err := net.SplitHostPort(cfg.IPv6UDP)
-	if err != nil || net.ParseIP(host) == nil || net.ParseIP(host).To4() != nil || port != "53" {
-		t.Fatal("provide a literal IPv6 DNS UDP target on port 53")
+	if cfg.IPv6UDPProtocol == "" {
+		cfg.IPv6UDPProtocol = "dns"
 	}
-	cfg.IPv6UDP = net.JoinHostPort(net.ParseIP(host).String(), port)
+	if cfg.IPv6UDPProtocol != "dns" && cfg.IPv6UDPProtocol != "ntp" {
+		t.Fatal("IPv6 UDP acceptance protocol must be dns or ntp")
+	}
+	host, port, err := net.SplitHostPort(cfg.IPv6UDP)
+	if err != nil || (cfg.IPv6UDPProtocol == "dns" && port != "53") || (cfg.IPv6UDPProtocol == "ntp" && port != "123") {
+		t.Fatal("provide a DNS endpoint on port 53 or an NTP endpoint on port 123")
+	}
 	s := acceptanceServer(t, cfg, func(s *Server) {
 		dialUDP := s.dialUDP
 		s.dialUDP = func(ctx context.Context, dialer *net.Dialer, target string) (net.Conn, error) {
@@ -142,11 +149,33 @@ func TestPublicIPv6UDPNetworkAcceptance(t *testing.T) {
 			return connection, err
 		}
 	})
+	if net.ParseIP(host) == nil && cfg.IPv6UDPProtocol == "ntp" {
+		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+		defer cancel()
+		answer, err := s.resolver.Resolve(ctx, dns.Query{Domain: host, RecordType: dns.RecordAAAA, Binding: adapterDNSBinding(cfg.Adapter)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("resolved NTP IPv6 endpoint domain=%s address=%s DNS=%s", host, answer.Address, answer.Server)
+		host = answer.Address
+	}
+	ip := net.ParseIP(host)
+	if ip == nil || ip.To4() != nil {
+		t.Fatal("IPv6 UDP acceptance requires a real IPv6 destination")
+	}
+	cfg.IPv6UDP = net.JoinHostPort(ip.String(), port)
 	control, relay := startUDPAssociation(t, s.endpoints.Channels[ChannelAggregation], 0)
 	defer control.Close()
 	client := listenUDPClient(t)
 	defer client.Close()
 	query := []byte{0x64, 0x06, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 3, 'd', 'n', 's', 6, 'a', 'l', 'i', 'd', 'n', 's', 3, 'c', 'o', 'm', 0, 0, 28, 0, 1}
+	if cfg.IPv6UDPProtocol == "ntp" {
+		query = make([]byte, 48)
+		query[0] = 0x23 // NTP v4 client request; this test never adjusts the clock.
+		now := time.Now()
+		binary.BigEndian.PutUint32(query[40:], uint32(now.Unix()+2208988800))
+		binary.BigEndian.PutUint32(query[44:], uint32((uint64(now.Nanosecond())<<32)/1e9))
+	}
 	sendSOCKSUDP(t, client, relay, cfg.IPv6UDP, query)
 	client.SetReadDeadline(time.Now().Add(8 * time.Second))
 	buffer := make([]byte, 4096)
@@ -155,10 +184,18 @@ func TestPublicIPv6UDPNetworkAcceptance(t *testing.T) {
 		t.Fatal(err)
 	}
 	packet, ok := parseSOCKSUDPPacket(buffer[:n])
-	if !ok || packet.target != cfg.IPv6UDP || len(packet.payload) < 12 || binary.BigEndian.Uint16(packet.payload) != 0x6406 || packet.payload[2]&0x80 == 0 || packet.payload[3]&0xf != 0 || binary.BigEndian.Uint16(packet.payload[6:]) == 0 {
-		t.Fatalf("IPv6 UDP DNS or reply identity invalid: %+v", packet)
+	if !ok || packet.target != cfg.IPv6UDP {
+		t.Fatalf("IPv6 UDP reply identity invalid: %+v", packet)
 	}
-	t.Logf("verified public IPv6 UDP DNS reply bytes=%d target=%s", len(packet.payload), packet.target)
+	if cfg.IPv6UDPProtocol == "ntp" {
+		p := packet.payload
+		if len(p) < 48 || p[0]&7 != 4 || p[0]>>6 == 3 || p[1] == 0 || p[1] > 15 || !bytes.Equal(p[24:32], query[40:48]) || bytes.Equal(p[40:48], make([]byte, 8)) {
+			t.Fatalf("IPv6 UDP NTP reply or request correlation invalid: %x", p)
+		}
+	} else if len(packet.payload) < 12 || binary.BigEndian.Uint16(packet.payload) != 0x6406 || packet.payload[2]&0x80 == 0 || packet.payload[3]&0xf != 0 || binary.BigEndian.Uint16(packet.payload[6:]) == 0 {
+		t.Fatalf("IPv6 UDP DNS reply invalid: %+v", packet)
+	}
+	t.Logf("verified public IPv6 UDP %s reply bytes=%d target=%s", cfg.IPv6UDPProtocol, len(packet.payload), packet.target)
 }
 
 func TestPublicNAT64NetworkAcceptance(t *testing.T) {
