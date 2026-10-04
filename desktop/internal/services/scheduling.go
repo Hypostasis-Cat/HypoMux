@@ -33,7 +33,7 @@ func (s *EngineService) SaveDiagnosticSelection(ids []string) ([]AdapterView, er
 			return nil, fmt.Errorf("请先停止聚合，再修改体检网卡选择")
 		}
 	}
-	available, err := s.adapters.List()
+	available, err := s.availableRuntimeAdapters()
 	if err != nil {
 		return nil, err
 	}
@@ -91,7 +91,7 @@ func (s *EngineService) SaveScheduling(mode, strategy string, adapters []Adapter
 		return nil, fmt.Errorf("当前 Core 不支持所选调度策略，请更新核心或选择轮询")
 	}
 	// Bind using freshly enumerated OS data, never addresses supplied by the UI.
-	available, err := s.adapters.List()
+	available, err := s.availableRuntimeAdapters()
 	if err != nil {
 		return nil, err
 	}
@@ -105,6 +105,7 @@ func (s *EngineService) SaveScheduling(mode, strategy string, adapters []Adapter
 	if err != nil {
 		return nil, err
 	}
+	s.rememberAdditionalRuntimeBindings(selected)
 	return s.adapters.List()
 }
 

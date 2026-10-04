@@ -185,6 +185,14 @@ type EngineService struct {
 	lastPerformanceLog     time.Time
 	lastTUNHealthCheck     time.Time
 	tunNetworkFingerprint  string
+	runtimeAdapters        func() ([]AdapterView, error)
+	runtimeBindings        []AdapterView
+	runtimeBindingMode     string
+	runtimeBindingNotice   string
+	runtimeBindingCancel   context.CancelFunc
+	runtimeBindingRefresh  bool
+	runtimeBindingEnabled  bool
+	lastBindingCheck       time.Time
 	tunConnectivityNotice  string
 	ipv4OnlyFallback       bool
 	blockedDomains         *BlockedDomainService
@@ -439,6 +447,8 @@ func (s *EngineService) Snapshot() (EngineSnapshot, error) {
 	s.mu.Lock()
 	if s.compatibilityNotice != "" {
 		snapshot.Reason = s.compatibilityNotice
+	} else if s.runtimeBindingNotice != "" {
+		snapshot.Reason = s.runtimeBindingNotice
 	} else if s.tunConnectivityNotice != "" && status.Engine.State == "running" {
 		snapshot.Reason = s.tunConnectivityNotice
 	} else if s.proxyRecoveryError != "" {
@@ -453,6 +463,9 @@ func (s *EngineService) Snapshot() (EngineSnapshot, error) {
 		s.lastCDNLog = time.Time{}
 		s.lastPerformanceLog = time.Time{}
 		s.mu.Unlock()
+		if status.Engine.State == "degraded" {
+			s.scheduleRuntimeBindingRefresh()
+		}
 		return snapshot, nil
 	}
 	s.mu.Unlock()
@@ -567,6 +580,7 @@ func (s *EngineService) Snapshot() (EngineSnapshot, error) {
 			snapshot.Reason = withTUNFallbackNotice(notice, snapshot.IPv4OnlyFallback)
 		}
 	}
+	s.scheduleRuntimeBindingRefresh()
 	return snapshot, nil
 }
 
@@ -624,12 +638,21 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 	if mode != "proxy" && mode != "tun" {
 		return EngineSnapshot{}, fmt.Errorf("不支持的运行模式：%s", mode)
 	}
+	s.cancelRuntimeBindingRefresh()
 	ctx, cancel := context.WithTimeout(context.Background(), 75*time.Second)
 	defer cancel()
 	if err := s.acquireLifecycle(ctx); err != nil {
 		return EngineSnapshot{}, err
 	}
 	defer s.releaseLifecycle()
+	return s.startLocked(ctx, mode)
+}
+
+// The caller holds lifecycleGate across the whole stop/start transaction.
+func (s *EngineService) startLocked(ctx context.Context, mode string) (snapshot EngineSnapshot, returnErr error) {
+	if err := ctx.Err(); err != nil {
+		return EngineSnapshot{}, err
+	}
 	settings := s.settings.Get()
 	takeOverSystemProxy := shouldTakeOverSystemProxy(mode, settings)
 	s.mu.Lock()
@@ -652,7 +675,7 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 		}
 		return EngineSnapshot{}, fmt.Errorf("管理员兼容模式已阻止系统代理：%s；请恢复普通权限后重试", detail)
 	}
-	if !s.compatRestarting {
+	if !s.compatRestarting && !s.runtimeBindingRefresh {
 		s.dnsFallbackApplied = false
 		s.wfpFallbackApplied = false
 		s.compatibilityNotice = ""
@@ -663,7 +686,7 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 	s.clashAPI = clashAPIConfig{}
 	s.mu.Unlock()
 	defer s.clearTransition("starting")
-	available, err := s.adapters.List()
+	available, err := s.availableRuntimeAdapters()
 	if err != nil {
 		return EngineSnapshot{}, err
 	}
@@ -1083,6 +1106,7 @@ func (s *EngineService) Start(mode string) (snapshot EngineSnapshot, returnErr e
 	s.lastCDNLog = time.Time{}
 	s.lastPerformanceLog = time.Time{}
 	s.lastTUNHealthCheck = time.Now()
+	s.rememberRuntimeBindingsLocked(mode, selected, dnsEgress.Adapter)
 	connectivityNotice := s.tunConnectivityNotice
 	s.mu.Unlock()
 	if s.logs != nil {
@@ -1144,14 +1168,19 @@ func (s *EngineService) clearTransition(expected string) {
 }
 
 func (s *EngineService) Stop() (EngineSnapshot, error) {
+	s.cancelRuntimeBindingRefresh()
 	ctx, cancel := context.WithTimeout(context.Background(), 75*time.Second)
 	defer cancel()
 	if err := s.acquireLifecycle(ctx); err != nil {
 		return EngineSnapshot{}, err
 	}
 	defer s.releaseLifecycle()
+	return s.stopLocked(ctx)
+}
+
+func (s *EngineService) stopLocked(ctx context.Context) (EngineSnapshot, error) {
 	// Release hotspot sharing while its TUN connection profile still exists.
-	hotspotCtx, hotspotCancel := context.WithTimeout(context.Background(), 45*time.Second)
+	hotspotCtx, hotspotCancel := context.WithTimeout(ctx, 45*time.Second)
 	hotspotErr := s.stopHotspot(hotspotCtx)
 	hotspotCancel()
 	s.mu.Lock()
@@ -1199,7 +1228,11 @@ func (s *EngineService) Stop() (EngineSnapshot, error) {
 	s.clashAPI = clashAPIConfig{}
 	s.tunAggregationEndpoint = ""
 	s.tunDNSBootstrap = dnsResolveResult{}
-	if !s.compatRestarting {
+	s.runtimeBindings = nil
+	s.runtimeBindingMode = ""
+	s.runtimeBindingEnabled = false
+	s.runtimeBindingNotice = ""
+	if !s.compatRestarting && !s.runtimeBindingRefresh {
 		s.dnsFallbackApplied = false
 		s.wfpFallbackApplied = false
 		s.compatibilityNotice = ""

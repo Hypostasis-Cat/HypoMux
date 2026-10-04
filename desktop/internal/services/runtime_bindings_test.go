@@ -1,0 +1,214 @@
+package services
+
+import (
+	"context"
+	"errors"
+	"reflect"
+	"strings"
+	"sync/atomic"
+	"testing"
+	"time"
+)
+
+func runtimeBindingFixture() AdapterView {
+	return AdapterView{ID: "wifi", Name: "WLAN", SourceIPv6: "2001:db8::1", IPv6IfIndex: 7,
+		DNSServers: []string{"fe80::1%7"}, Operational: true, Selected: true, Weight: 1}
+}
+
+func TestRuntimeBindingChangeIncludesBothFamiliesIndicesAndDNS(t *testing.T) {
+	old := runtimeBindingFixture()
+	old.Address, old.IfIndex = "192.0.2.1", 6
+	for _, field := range []string{"ipv6", "ipv4", "index6", "index4", "dns", "lost_v4", "lost_v6"} {
+		t.Run(field, func(t *testing.T) {
+			next := cloneRuntimeBindings([]AdapterView{old})[0]
+			switch field {
+			case "ipv6":
+				next.SourceIPv6 = "2001:db8::2"
+			case "ipv4":
+				next.Address = "192.0.2.2"
+			case "index6":
+				next.IPv6IfIndex++
+			case "index4":
+				next.IfIndex++
+			case "dns":
+				next.DNSServers[0] = "2001:db8::53"
+			case "lost_v4":
+				next.Address = ""
+			case "lost_v6":
+				next.SourceIPv6 = ""
+			}
+			changed, err := runtimeBindingsChanged([]AdapterView{old}, []AdapterView{next})
+			if !changed || err != nil {
+				t.Fatal(changed, err)
+			}
+		})
+	}
+	old.DNSServers = nil
+	next := old
+	next.Weight, next.IPv6Metric, next.Description = 5, 30, "renamed description"
+	next.DNSServers = []string{}
+	changed, err := runtimeBindingsChanged([]AdapterView{old}, []AdapterView{next, {ID: "other", SourceIPv6: "2001:db8::99"}})
+	if changed || err != nil {
+		t.Fatal("unrelated metadata or nil/empty DNS triggered recovery", changed, err)
+	}
+	if changed, err = runtimeBindingsChanged([]AdapterView{old}, nil); changed || err == nil {
+		t.Fatal("missing NIC must wait for a usable binding", changed, err)
+	}
+	peer := old
+	peer.ID, peer.Name = "peer", "peer"
+	next.SourceIPv6 = "2001:db8::2"
+	if changed, err = runtimeBindingsChanged([]AdapterView{peer, old}, []AdapterView{next}); !changed || err != nil {
+		t.Fatal("missing peer blocked recovery of the still-selected usable NIC", changed, err)
+	}
+}
+
+func TestRuntimeBindingRecoveryGatesCleanupStartupAndOwnedHotspot(t *testing.T) {
+	for _, scenario := range []string{"changed", "unchanged", "missing", "scan_error", "stopped", "status_error", "stop_error", "start_error", "cancel_after_stop", "hotspot", "hotspot_error"} {
+		t.Run(scenario, func(t *testing.T) {
+			old := runtimeBindingFixture()
+			next := cloneRuntimeBindings([]AdapterView{old})[0]
+			next.SourceIPv6 = "2001:db8::2"
+			service := &EngineService{runtimeBindings: []AdapterView{old}, runtimeBindingMode: "tun"}
+			service.runtimeAdapters = func() ([]AdapterView, error) {
+				if scenario == "scan_error" {
+					return nil, errors.New("inspection incomplete")
+				}
+				if scenario == "missing" {
+					return nil, nil
+				}
+				if scenario == "unchanged" {
+					return []AdapterView{old}, nil
+				}
+				return []AdapterView{next}, nil
+			}
+			config := HotspotConfig{SSID: "owned", Password: "owned-secret", Band: "auto"}
+			if strings.HasPrefix(scenario, "hotspot") {
+				service.hotspot = &hotspotSession{config: config, status: HotspotStatus{State: "running"}}
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			var calls []string
+			err := service.refreshRuntimeBindings(ctx, runtimeBindingActions{
+				status: func(context.Context) (string, error) {
+					calls = append(calls, "status")
+					if scenario == "stopped" {
+						return "stopped", nil
+					}
+					if scenario == "status_error" {
+						return "", errors.New("Core unavailable")
+					}
+					return "running", nil
+				},
+				stop: func(context.Context) error {
+					calls = append(calls, "stop")
+					if scenario == "stop_error" {
+						return errors.New("cleanup failed")
+					}
+					if scenario == "cancel_after_stop" {
+						cancel()
+					}
+					return nil
+				},
+				start: func(_ context.Context, mode string) error {
+					if mode != "tun" {
+						t.Fatal("recovery changed the active mode", mode)
+					}
+					calls = append(calls, "start")
+					if scenario == "start_error" {
+						return errors.New("new address disappeared")
+					}
+					return nil
+				},
+				hotspot: func(_ context.Context, got HotspotConfig) error {
+					if got != config {
+						t.Fatal("recovery changed the owned hotspot")
+					}
+					calls = append(calls, "hotspot")
+					if scenario == "hotspot_error" {
+						return errors.New("sharing unavailable")
+					}
+					return nil
+				},
+			})
+			want := []string{"status", "stop", "start"}
+			wantErr := false
+			switch scenario {
+			case "unchanged", "missing":
+				want = nil
+			case "scan_error":
+				want, wantErr = nil, true
+			case "stopped":
+				want = []string{"status"}
+			case "status_error":
+				want, wantErr = []string{"status"}, true
+			case "stop_error", "cancel_after_stop":
+				want, wantErr = []string{"status", "stop"}, true
+			case "start_error":
+				wantErr = true
+			case "hotspot", "hotspot_error":
+				want = append(want, "hotspot")
+				wantErr = scenario == "hotspot_error"
+			}
+			if !reflect.DeepEqual(calls, want) || (err != nil) != wantErr {
+				t.Fatal(calls, want, err)
+			}
+			if scenario == "missing" && !strings.Contains(service.runtimeBindingNotice, "等待网卡") {
+				t.Fatal("missing interface was not reported")
+			}
+			if scenario == "cancel_after_stop" && !errors.Is(err, context.Canceled) {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestRuntimeBindingStopCancelsScanAndPreventsLateRestart(t *testing.T) {
+	entered, release := make(chan struct{}), make(chan struct{})
+	var scans atomic.Int64
+	old := runtimeBindingFixture()
+	service := &EngineService{lifecycleGate: make(chan struct{}, 1), runtimeBindings: []AdapterView{old},
+		runtimeBindingMode: "proxy", runtimeBindingEnabled: true}
+	service.runtimeAdapters = func() ([]AdapterView, error) {
+		scans.Add(1)
+		close(entered)
+		<-release
+		next := old
+		next.SourceIPv6 = "2001:db8::2"
+		return []AdapterView{next}, nil
+	}
+	service.scheduleRuntimeBindingRefresh()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("background scan did not start")
+	}
+	service.scheduleRuntimeBindingRefresh()
+	service.cancelRuntimeBindingRefresh()
+	close(release)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := service.acquireLifecycle(ctx); err != nil {
+		t.Fatal("recovery retained lifecycle ownership after Stop", err)
+	}
+	service.releaseLifecycle()
+	service.scheduleRuntimeBindingRefresh()
+	service.mu.Lock()
+	enabled, refreshing, notice := service.runtimeBindingEnabled, service.runtimeBindingRefresh, service.runtimeBindingNotice
+	service.mu.Unlock()
+	if scans.Load() != 1 || enabled || refreshing || notice != "" {
+		t.Fatal("late recovery survived explicit Stop", scans.Load(), enabled, refreshing, notice)
+	}
+}
+
+func TestRuntimeBindingPoolUpdateRetainsOldExplicitBindingAndCopiesDNS(t *testing.T) {
+	old := runtimeBindingFixture()
+	service := &EngineService{runtimeBindings: cloneRuntimeBindings([]AdapterView{old}), runtimeBindingEnabled: true}
+	next, added := old, old
+	next.SourceIPv6 = "2001:db8::2"
+	added.ID, added.Name = "new", "new"
+	service.rememberAdditionalRuntimeBindings([]AdapterView{next, added})
+	added.DNSServers[0] = "2001:db8::99"
+	if len(service.runtimeBindings) != 2 || service.runtimeBindings[0].SourceIPv6 != "2001:db8::1" || service.runtimeBindings[1].DNSServers[0] != "fe80::1%7" {
+		t.Fatal("pool update hid a stale explicit channel or aliased DNS metadata", service.runtimeBindings)
+	}
+}

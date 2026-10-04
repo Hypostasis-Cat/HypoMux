@@ -44,7 +44,7 @@ IPv6-only 域名优先尝试原生 AAAA；必要时在 2 秒后或原生候选�
 | IPv6-only，无 NAT64 | 原生 IPv6 TCP/UDP 与 DNS 正常；IPv4 目标明确失败，不逃逸到其他网卡 | 待验收 |
 | IPv6-only，DNS64/NAT64 | 使用该网络 DNS 发现前缀；IPv4 字面 TCP/UDP、受控 A-only HTTPS 域名均成功；UDP 回复保留原 IPv4 目标 | 当前网络 DNS 有效回复无合成 AAAA；缺少可用 DNS64/NAT64 网络，待验收 |
 | TUN/WFP 严格模式 | IPv6 DNS、TCP/UDP 只能走指定出口；IPv4 回退提示持续可见；IPv6-only 线路不生成 IPv4-only 回退配置 | 严格系统 TUN IPv6 HTTPS/UDP、DoH 通过；授权临时窗口内原生 WFP DNS 的注册、TCP/UDP 请求与清理通过；Mihomo 严格路由正常设置下仍阻断直连 DNS 53 |
-| 地址变化与睡眠 | 休眠唤醒、接口索引/源地址变化后重建绑定，缓存和连接不复用旧出口 | 实机待验收；绑定隔离与刷新测试通过 |
+| 地址变化与睡眠 | 休眠唤醒、接口索引/源地址变化后重建绑定，缓存和连接不复用旧出口 | 已补齐运行时自动重绑定；真实 Core 的 IPv6 回环恢复、旧连接清理通过；物理睡眠/接口重编号及新恢复路径的公网补测仍待验收 |
 | IPv6 PMTU/大包 | 在有 MTU 瓶颈的真实链路上传输大文件和 UDP，允许必要 ICMPv6，观察无持续黑洞或错误切换出口 | 真实系统 TUN IPv6 MTU 1280 下 4 MiB HTTPS 传输通过；下游瓶颈触发 ICMPv6 Packet Too Big 和大 UDP 仍待验收 |
 | 退出、崩溃与竞争 VPN | 记录前后两种协议的路由和 WFP 状态；正常退出及异常终止清除 HypoMux 资源，其他 VPN 资源保留 | 严格系统 TUN 正常停止、侧车崩溃、Core 崩溃及其 Job 自动结束侧车/恢复路由通过；原生动态 WFP 关闭/拥有进程崩溃清理通过 |
 
@@ -227,3 +227,29 @@ IPv4 回归只提供 IPv4 源地址与索引，DNS 输入保留匹配的 IPv4 �
 ```
 
 证据输出到指定目录，默认 `.go-cache-local/ipv6-system-acceptance`。退出 0 仅代表本次指定系统检查通过，报告仍保留 `full_acceptance=pending_network_matrix`。未经过真实 DNS64/NAT64、物理 IPv6-only、睡眠/重编号、下游 ICMPv6 PMTU 和公网大 UDP 验收前，不宣称完整适配验收通过。
+
+## 2026-10-04 运行时绑定恢复补充
+
+继续核对发现，原有实现会刷新界面和缓存绑定标识，但地址变化后并未自动重建正在运行的 Core 配置。现已在桌面运行状态轮询中加入最多每 5 秒一次的绑定检查：只跟踪实际运行会话的聚合网卡、显式 NIC 通道和 TUN DNS 出口，比较 IPv4/IPv6 源地址、对应接口索引和网络 DNS。权重、描述、跃点以及其他网卡变化不触发重启。
+
+确认绑定变化后，在同一个生命周期事务中停止并重新启动本应用会话，重新枚举 OS 地址，退役旧客户端、DNS/DoH 池、NAT64 缓存、WFP 和侧车 DNS 绑定。用户的 Start/Stop 会取消待执行恢复；清理失败时不会继续启动。临时断网时保留其他可用线路并显示等待提示，可用所选线路绑定变化时允许恢复，不等待已断开的另一张网卡。已有本应用热点会话在重建完成后按原配置恢复，凭据不写入日志；热点恢复顺序通过控制流程测试，真实热点共享重建尚未实机测试。
+
+| 验证 | 结果与范围 |
+| --- | --- |
+| 自动恢复与资源清理 | `TestRuntimeBindingRealCoreIPv6Loopback` 默认编译实际 Core，经桌面 Snapshot 触发从过期 `::2` 到 `::1` 的受控元数据变更；Core 遥测确认新绑定，旧已接入客户端关闭，IPv6 SOCKS TLS 证书及 HTTP 正文通过。使用独立测试证书与 IPv6 回环，不能替代物理地址变化或公网验收 |
+| 生命周期与多网卡边界 | 两族地址/接口/DNS 变化、单族能力丢失、其他元数据不触发、断开网卡等待、另一可用网卡恢复、扫描取消、停止后不重启、失败清理不启动及原热点恢复顺序通过 |
+| desktop 全量竞态 | 420 个顶层测试通过，0 失败，13 个显式环境检查跳过；最终多网卡边界和 TLS 正文断言另行通过目标竞态检查 |
+| 静态检查与构建 | 最终源码 `go vet ./...` 与 desktop 构建通过 |
+| 自动恢复公网补测 | 显式运行 `TestRuntimeBindingRealCoreRecoversStaleIPv6Source` 时，WLAN 已断开且没有首选 IPv6 地址，在前提检查处失败；未启动测试 Core，也未完成该项公网检查 |
+
+本地证据为 `.go-cache-local/ipv6-desktop-runtime-binding-race.jsonl`、`ipv6-desktop-runtime-binding-race-result.json`、`ipv6-runtime-binding-final-race.jsonl` 和 `ipv6-runtime-binding-final-race-result.json`。默认回环测试由常规 desktop Go 测试执行，不依赖公网环境。公网恢复测试需活动物理 IPv6 网卡与独立构建 Core，接入恢复后可运行：
+
+```powershell
+$env:HYPOMUX_RUN_RUNTIME_BINDING_TEST = "1"
+$env:HYPOMUX_NETWORK_TEST_ADAPTER = "网卡名"
+$env:HYPOMUX_ENGINE_PATH = (Resolve-Path .go-cache-local/ipv6-hypomux-engine.exe).Path
+go -C desktop test ./internal/services -run '^TestRuntimeBindingRealCoreRecoversStaleIPv6Source$' -count=1 -v -timeout 90s
+Remove-Item Env:HYPOMUX_RUN_RUNTIME_BINDING_TEST
+```
+
+该入口模拟旧绑定元数据后使用实际 OS 的当前绑定，验证自动恢复链路；真实睡眠唤醒、物理 IPv6-only、接口索引变化、DNS64/NAT64 和下游 PMTU/大 UDP 的实机要求继续保留。

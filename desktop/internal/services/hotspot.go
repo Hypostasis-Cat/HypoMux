@@ -284,6 +284,10 @@ func (s *EngineService) StartHotspot(config HotspotConfig) (HotspotStatus, error
 		return s.HotspotStatus(), err
 	}
 	defer s.releaseLifecycle()
+	return s.startHotspotLocked(ctx, config)
+}
+
+func (s *EngineService) startHotspotLocked(ctx context.Context, config HotspotConfig) (HotspotStatus, error) {
 	s.mu.Lock()
 	closing, endpoint, previous := s.closing, s.tunAggregationEndpoint, s.hotspot
 	s.mu.Unlock()
