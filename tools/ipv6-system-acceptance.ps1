@@ -1,6 +1,8 @@
 param(
     [Parameter(Mandatory = $true)][string]$Adapter,
+    [ValidateSet('IPv6', 'IPv4')][string]$AddressFamily = 'IPv6',
     [switch]$RequireUDP,
+    [switch]$CoreCrash,
     [string]$NTPDomain = 'ntp.tuna.tsinghua.edu.cn',
     [ValidateSet(0, 1280)][int]$TUNMTU = 0,
     [string]$HTTPSDomain = 'www.qq.com',
@@ -18,7 +20,7 @@ try {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = New-Object Security.Principal.WindowsPrincipal($identity)
     if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-        throw 'Run this explicit system test in an elevated PowerShell; it starts strict TUN and terminates only its own sidecar.'
+        throw 'Run this explicit system test in an elevated PowerShell; it starts strict TUN and terminates only its own sidecar and optional test Core.'
     }
     if (@(Get-NetAdapter | Where-Object Name -eq 'HypoMux-Tun').Count -gt 0) {
         throw 'An existing HypoMux-Tun must be stopped before this isolated test.'
@@ -28,13 +30,21 @@ try {
     })
     if ($nic.Count -ne 1) { throw 'Select one active physical Ethernet/Wi-Fi adapter.' }
     $properties = $nic[0].GetIPProperties()
+    $family = if ($AddressFamily -eq 'IPv6') {'InterNetworkV6'} else {'InterNetwork'}
     $sources = @($properties.UnicastAddresses | Where-Object {
-        $_.Address.AddressFamily -eq 'InterNetworkV6' -and -not $_.Address.IsIPv6LinkLocal -and
+        $_.Address.AddressFamily.ToString() -eq $family -and -not $_.Address.IsIPv6LinkLocal -and
         -not $_.Address.IsIPv6Multicast -and -not [Net.IPAddress]::IsLoopback($_.Address) -and
+        -not $_.Address.ToString().StartsWith('169.254.') -and
         $_.DuplicateAddressDetectionState -eq 'Preferred' -and $_.AddressPreferredLifetime -gt 0
     } | Sort-Object { $_.Address.ToString() })
-    if ($sources.Count -eq 0) { throw 'The selected adapter has no preferred usable IPv6 source.' }
-    $index6 = $properties.GetIPv6Properties().Index
+    if ($sources.Count -eq 0) { throw "The selected adapter has no preferred usable $AddressFamily source." }
+    if ($TUNMTU -and $AddressFamily -ne 'IPv6') {throw 'The minimum MTU option requires IPv6.'}
+    $index6 = if ($AddressFamily -eq 'IPv6') {$properties.GetIPv6Properties().Index} else {0}
+    $binding = if ($AddressFamily -eq 'IPv6') {
+        @{name = $Adapter; source_ipv6 = $sources[0].Address.ToString(); ipv6_if_index = $index6}
+    } else {
+        @{name = $Adapter; source_ip = $sources[0].Address.ToString(); address = $sources[0].Address.ToString(); if_index = $properties.GetIPv4Properties().Index}
+    }
     $output = [IO.Path]::GetFullPath($(if ([IO.Path]::IsPathRooted($OutputDirectory)) { $OutputDirectory } else { Join-Path $projectRoot $OutputDirectory }))
     [IO.Directory]::CreateDirectory($output) | Out-Null
     $runtime = Join-Path $projectRoot 'desktop/bin/sing-box.exe'
@@ -60,11 +70,14 @@ try {
             $endpoints[$name] = '127.0.0.1:' + $listener.LocalEndpoint.Port
         }
     } finally { foreach ($listener in $listeners) { $listener.Stop() } }
-    $servers = @($properties.DnsAddresses | ForEach-Object {
-        if ($_.AddressFamily -eq 'InterNetworkV6' -and $_.IsIPv6LinkLocal) { $_.ToString().Split('%')[0] + '%' + $index6 } else { $_.ToString() }
+    $servers = @($properties.DnsAddresses | Where-Object {
+        $AddressFamily -eq 'IPv6' -or $_.AddressFamily -eq 'InterNetwork'
+    } | ForEach-Object {
+        if ($_.AddressFamily -eq 'InterNetworkV6' -and $_.IsIPv6LinkLocal) { $_.ToString().Split('%')[0] + '%' + $properties.GetIPv6Properties().Index } else { $_.ToString() }
     } | Select-Object -Unique)
     $inputPath = Join-Path $output 'preparation.json'
-    $prepared = @{adapter = @{name = $Adapter; source_ipv6 = $sources[0].Address.ToString(); ipv6_if_index = $index6; dns_servers = $servers}; endpoints = $endpoints; core = $engine; output = (Join-Path $output 'config'); udp_domain = $(if ($RequireUDP) { $NTPDomain } else { '' }); tun_mtu = $TUNMTU; https_domain = $HTTPSDomain; payload_path = $PayloadPath; payload_bytes = $PayloadBytes} | ConvertTo-Json -Depth 6
+    $binding.dns_servers = $servers
+    $prepared = @{adapter = $binding; address_family = $AddressFamily; endpoints = $endpoints; core = $engine; output = (Join-Path $output 'config'); udp_domain = $(if ($RequireUDP) { $NTPDomain } else { '' }); tun_mtu = $TUNMTU; https_domain = $HTTPSDomain; payload_path = $PayloadPath; payload_bytes = $PayloadBytes; core_crash = [bool]$CoreCrash} | ConvertTo-Json -Depth 6
     [IO.File]::WriteAllText($inputPath, $prepared, (New-Object Text.UTF8Encoding($false)))
     $env:HYPOMUX_IPV6_TUN_PREPARE_INPUT = $inputPath
     & go -C (Join-Path $projectRoot 'desktop') test ./internal/services -run '^TestPrepareIPv6SystemAcceptanceConfig$' -count=1 -timeout 90s

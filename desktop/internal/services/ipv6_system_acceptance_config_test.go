@@ -24,13 +24,22 @@ func TestPrepareIPv6SystemAcceptanceConfig(t *testing.T) {
 		Endpoints map[string]string `json:"endpoints"`
 		Core      string            `json:"core"`
 		Output    string            `json:"output"`
+		Family    string            `json:"address_family"`
 	}
 	// Windows PowerShell 5.1 writes a UTF-8 BOM with Set-Content -Encoding utf8.
 	if err := json.Unmarshal(bytes.TrimPrefix(data, []byte{0xef, 0xbb, 0xbf}), &input); err != nil {
 		t.Fatal(err)
 	}
-	if input.Adapter.SourceIPv6 == "" || input.Adapter.Address != "" || input.Output == "" || input.Core == "" {
-		t.Fatal("prepare requires an explicit IPv6-only binding, output directory and real Core")
+	if input.Family == "" {
+		input.Family = "IPv6"
+	}
+	if input.Family != "IPv6" && input.Family != "IPv4" {
+		t.Fatal("prepare requires an explicit IPv6 or IPv4 family")
+	}
+	ipv6 := input.Family == "IPv6"
+	if (ipv6 && (input.Adapter.SourceIPv6 == "" || input.Adapter.Address != "")) ||
+		(!ipv6 && (input.Adapter.Address == "" || input.Adapter.SourceIPv6 != "")) || input.Output == "" || input.Core == "" {
+		t.Fatal("prepare requires one explicit source family, output directory and real Core")
 	}
 	if err := os.MkdirAll(input.Output, 0700); err != nil {
 		t.Fatal(err)
@@ -38,11 +47,15 @@ func TestPrepareIPv6SystemAcceptanceConfig(t *testing.T) {
 	t.Setenv("HYPOMUX_DATA_DIR", input.Output)
 	t.Setenv("HYPOMUX_ENGINE_PATH", input.Core)
 	var digest string
+	resolved := dnsResolveResult{Adapter: input.Adapter.Name, Domain: "dns.alidns.com", RecordType: "AAAA", Address: "2400:3200::1", Transport: "doh", Server: "dns.alidns.com@[2400:3200::1]:443"}
+	if !ipv6 {
+		resolved.RecordType, resolved.Address, resolved.Server = "A", "223.5.5.5", "dns.alidns.com@223.5.5.5:443"
+	}
 	executable, configPath, _, err := writeSingBoxConfigWithOptions(
 		input.Endpoints, input.Adapter,
-		dnsResolveResult{Adapter: input.Adapter.Name, Domain: "dns.alidns.com", RecordType: "AAAA", Address: "2400:3200::1", Transport: "doh", Server: "dns.alidns.com@[2400:3200::1]:443"},
+		resolved,
 		nil, detectCompatibilityPlan(), true,
-		tunConfigOptions{DNSPolicy: "alidns", IPv6Available: true, IPv4Unavailable: true, Stack: "system", ConfigSHA256: &digest},
+		tunConfigOptions{DNSPolicy: "alidns", IPv6Available: ipv6, IPv4Unavailable: ipv6, Stack: "system", ConfigSHA256: &digest},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -54,5 +67,5 @@ func TestPrepareIPv6SystemAcceptanceConfig(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(input.Output, "activation.json"), manifest, 0600); err != nil {
 		t.Fatal(err)
 	}
-	t.Log("prepared production IPv6-only source configuration; system TUN has not started")
+	t.Logf("prepared production %s-only source configuration; system TUN has not started", input.Family)
 }

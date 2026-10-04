@@ -2,7 +2,7 @@
 
 本次适配将现有 IPv6 TCP 和 UDP 出站能力扩展为双栈与 IPv6-only 出口支持。内部回环端口继续使用 IPv4；公网出站、DNS、Windows 路由与状态按地址族处理。验收以实际行为和测试证据为准，跳过的实机测试不能计为通过。
 
-**2026-10-04 状态：公网 IPv6 HTTPS/DoH、普通代理、严格系统 TUN 的 TCP/UDP、MTU 1280 下的 4 MiB HTTPS 传输、正常停止与侧车崩溃恢复已通过；完整实机验收仍未通过。** WLAN 已有真实 IPv6 出口。现有 Mihomo 的 `Meta / block ipv6 dns` WFP 规则阻断 IPv6 TCP/UDP 53；当前网络 DNS64/NAT64、物理 IPv6-only、睡眠、受控 ICMPv6 PMTU 和大 UDP 场景仍待验收。验收使用国内阿里、腾讯与清华 TUNA 端点。
+**2026-10-04 状态：公网 IPv6 HTTPS/DoH、普通代理、严格系统 TUN 的 TCP/UDP、MTU 1280 下的 4 MiB HTTPS 传输、正常停止、侧车及 Core 崩溃清理已通过；完整实机验收仍未通过。** WLAN 已有真实 IPv6 出口。现有 Mihomo 的严格路由会阻断直连 IPv6 TCP/UDP 53；经用户明确授权的临时测试窗口内，HypoMux UDP DNS、原生 WFP TCP/UDP DNS 与删除检查通过，随后确认严格路由恢复。该网络 DNS 对 `ipv4only.arpa` 返回有效响应但没有 AAAA，当前接入方式未提供可用 DNS64 前缀。用户确认目前没有额外 IPv6-only/NAT64 网络或可控制的 IPv6 服务端；这些场景及睡眠、下游 ICMPv6 PMTU、大 UDP 仍待验收。验收使用国内阿里、腾讯与清华 TUNA 端点。
 
 ## 实施顺序
 
@@ -38,15 +38,15 @@ IPv6-only 域名优先尝试原生 AAAA；必要时在 2 秒后或原生候选�
 
 | 场景 | 操作与验收结果 | 当前状态 |
 | --- | --- | --- |
-| 公网 IPv4 基线 | 普通代理和 TUN 下访问 A-only、双栈域名及 IPv4 字面目标，TCP/UDP 正常且选择的出口一致 | 普通代理/TUN 池公网 TCP/UDP 已通过；系统 TUN 及受控 A-only 域名仍待验收 |
-| 公网 IPv6 | 通过指定网卡的 IPv6 源地址访问 AAAA 域名、IPv6 字面目标、DoH；证书和实际源地址验证通过 | TCP/TLS/DoH、SOCKS/HTTP CONNECT/TUN 池及公网 UDP NTP 请求/回复通过；传统 DNS 53 被外部规则阻断 |
+| 公网 IPv4 基线 | 普通代理和 TUN 下访问 A-only、双栈域名及 IPv4 字面目标，TCP/UDP 正常且选择的出口一致 | 普通代理/TUN 池与真实系统 TUN TCP/UDP、双栈及官方 IPv4 专用域名、正常及崩溃清理通过 |
+| 公网 IPv6 | 通过指定网卡的 IPv6 源地址访问 AAAA 域名、IPv6 字面目标、DoH；证书和实际源地址验证通过 | TCP/TLS/DoH、SOCKS/HTTP CONNECT/TUN 池及公网 UDP NTP 通过；授权临时窗口内 UDP DNS 53 也通过 |
 | 双栈不对称故障 | 分别断开一张网卡的 IPv4/IPv6 路径，另一协议成功；故障状态仅影响对应协议，恢复后可重新使用 | 真实 WFP 测试进程内双向 TCP 阻断/回退/解除阻断后恢复通过；全接口变化与睡眠仍待验收 |
 | IPv6-only，无 NAT64 | 原生 IPv6 TCP/UDP 与 DNS 正常；IPv4 目标明确失败，不逃逸到其他网卡 | 待验收 |
-| IPv6-only，DNS64/NAT64 | 使用该网络 DNS 发现前缀；IPv4 字面 TCP/UDP、受控 A-only HTTPS 域名均成功；UDP 回复保留原 IPv4 目标 | 待验收 |
-| TUN/WFP 严格模式 | IPv6 DNS、TCP/UDP 只能走指定出口；IPv4 回退提示持续可见；IPv6-only 线路不生成 IPv4-only 回退配置 | 真实严格系统 TUN IPv6 HTTPS/UDP、DoH、配置与原生 WFP 注册/匹配通过；传统 DNS/DNS64 待验收 |
+| IPv6-only，DNS64/NAT64 | 使用该网络 DNS 发现前缀；IPv4 字面 TCP/UDP、受控 A-only HTTPS 域名均成功；UDP 回复保留原 IPv4 目标 | 当前网络 DNS 有效回复无合成 AAAA；缺少可用 DNS64/NAT64 网络，待验收 |
+| TUN/WFP 严格模式 | IPv6 DNS、TCP/UDP 只能走指定出口；IPv4 回退提示持续可见；IPv6-only 线路不生成 IPv4-only 回退配置 | 严格系统 TUN IPv6 HTTPS/UDP、DoH 通过；授权临时窗口内原生 WFP DNS 的注册、TCP/UDP 请求与清理通过；Mihomo 严格路由正常设置下仍阻断直连 DNS 53 |
 | 地址变化与睡眠 | 休眠唤醒、接口索引/源地址变化后重建绑定，缓存和连接不复用旧出口 | 实机待验收；绑定隔离与刷新测试通过 |
 | IPv6 PMTU/大包 | 在有 MTU 瓶颈的真实链路上传输大文件和 UDP，允许必要 ICMPv6，观察无持续黑洞或错误切换出口 | 真实系统 TUN IPv6 MTU 1280 下 4 MiB HTTPS 传输通过；下游瓶颈触发 ICMPv6 Packet Too Big 和大 UDP 仍待验收 |
-| 退出、崩溃与竞争 VPN | 记录前后两种协议的路由和 WFP 状态；正常退出及异常终止清除 HypoMux 资源，其他 VPN 资源保留 | 严格系统 TUN 正常停止/侧车崩溃恢复通过；原生动态 WFP 关闭/拥有进程崩溃清理通过 |
+| 退出、崩溃与竞争 VPN | 记录前后两种协议的路由和 WFP 状态；正常退出及异常终止清除 HypoMux 资源，其他 VPN 资源保留 | 严格系统 TUN 正常停止、侧车崩溃、Core 崩溃及其 Job 自动结束侧车/恢复路由通过；原生动态 WFP 关闭/拥有进程崩溃清理通过 |
 
 每项保存执行时间、运行模式、Windows 版本、接口名称/两种协议索引、源地址、DNS、连接结果与前后路由/过滤器快照。完整验收要求上述项目全部通过；测试代码通过和网络脚本返回 0 均不能单独替代系统矩阵。TUN/WFP 系统验收通过单独提权的测试 Core 执行；独立客户端使用真实系统路由。当前验证不覆盖已安装服务客户端的签名/信任路径。
 
@@ -166,24 +166,34 @@ Windows 10.0.26300.0 / AMD64、Go 1.26.6；使用活动 WLAN 的首选公网 IPv
 | 公网 IPv6 UDP | 清华 TUNA UDP 123 返回有效 48 字节 NTP 响应，物理 IPv6 源地址、请求时间戳关联和 SOCKS 原目标通过；同次 TLS/DoH 也通过 | `.go-cache-local/ipv6-public-ntp-acceptance.json`，本次指定检查整体通过 |
 | 真实 Core 代理数据路径 | 普通 SOCKS、HTTP CONNECT、TUN TCP 池 10 项检查通过；UDP 未通过，整体保留失败 | `.go-cache-local/ipv6-public-proxy-regression.json` |
 | 真实严格系统 TUN | 独立 OS 路由客户端从实际 HypoMux IPv6 TUN 地址访问腾讯 HTTPS，证书、所选 WLAN 的 IPv6 连接及约 122 KiB 正文通过 | `.go-cache-local/ipv6-system-acceptance/ipv6-system-tun-acceptance.json` |
+| IPv4 系统回归 | 同一生产配置生成器强制 IPv4 出口；独立客户端从实际 IPv4 TUN 地址访问腾讯 HTTPS（130,802 字节）和阿里 UDP NTP；正常停止、侧车与 Core 崩溃清理通过 | `.go-cache-local/ipv4-system-baseline/ipv6-system-tun-acceptance.json`，14 项检查通过，报告明确 `address_family=IPv4` |
+| IPv4-only 域名系统回归 | 对提供方声明的 `mirrors4.tuna.tsinghua.edu.cn` 独立验证 A 有效/AAAA 为 NOERROR 无记录，证书校验 HTTPS 经 IPv4 系统 TUN 返回 200/22,488 字节，UDP 与正常/侧车恢复同时通过 | `.go-cache-local/ipv4-only-domain-evidence.json`、`ipv4-system-a-only-acceptance/ipv6-system-tun-acceptance.json`，11 项检查通过 |
+| IPv4-only 域名普通代理回归 | 真实 Core 普通 SOCKS 域名请求及 HTTP CONNECT 域名请求均完成证书校验、200/22,488 字节；Core 遥测显示实际 IPv4 目标与所选 WLAN，正文 SHA-256 与系统 TUN 同端点记录一致 | `.go-cache-local/ipv4-a-only-proxy-acceptance.json`，两个实际请求通过 |
 | 严格系统 TUN UDP | 独立未绑定出口/未设置代理的 OS UDP 客户端从实际 HypoMux IPv6 TUN 地址访问清华 NTP；Core 遥测确认 UDP 经过所选 WLAN IPv6 池，48 字节请求/回复通过；正常与异常恢复同时通过 | `.go-cache-local/ipv6-system-udp-acceptance/ipv6-system-tun-acceptance.json`，11 项检查通过 |
-| IPv6 最小 MTU 与大文件 | 仅将本次拥有的临时 HypoMux TUN IPv6 MTU 调整到 1280；独立客户端经所选 WLAN 下载清华镜像站 4,194,304 字节 HTTPS Range，证书、206/Content-Range、精确长度通过并记录 SHA-256；UDP 与清理同时通过 | `.go-cache-local/ipv6-system-mtu-acceptance/ipv6-system-tun-acceptance.json`，12 项检查通过 |
+| IPv6 最小 MTU 与大文件 | 仅将本次拥有的临时 HypoMux TUN IPv6 MTU 调整到 1280；独立客户端经所选 WLAN 下载清华镜像站 4,194,304 字节 HTTPS Range，证书、206/Content-Range、精确长度通过并记录 SHA-256；最终复核同时包含 UDP、正常停止、侧车和 Core 崩溃清理 | `.go-cache-local/ipv6-system-mtu-acceptance/ipv6-system-tun-acceptance.json`，最终 15 项检查通过；原 12 项报告保存在 `ipv6-system-mtu-before-core-crash.json` |
 | 停止与异常恢复 | 同一系统测试内正常停止、再次启动、终止其拥有的 sing-box 侧车、检测失败状态、清理通过；物理/竞争 VPN 两族路由保留 | 同上，10 条检查记录 |
+| Core 崩溃清理 | 侧车异常后显式重启池，重新激活严格 TUN，再强制结束本次测试 Core；Windows Job 自动结束其侧车，临时网卡消失，物理/竞争 VPN 两族策略路由恢复 | `.go-cache-local/ipv6-system-core-crash-acceptance/ipv6-system-tun-acceptance.json`，14 项检查通过 |
 | 原生 WFP | 真实 IPv6 TCP/UDP 放行过滤器注册、源地址/接口约束、系统事件匹配、Close 后删除通过；53 端口连接仍被外部规则拒绝 | `.go-cache-local/ipv6-wfp-latest-acceptance.txt`、`ipv6-wfp-latest-dns-events.xml` |
 | WFP 异常清理 | 仅终止拥有的辅助测试进程，OS 移除其实际动态 IPv6 过滤器通过；此项使用回环资源，不是公网连通证明 | `.go-cache-local/ipv6-wfp-crash-cleanup.txt` |
 | 真实双栈故障回退 | 原生 IPv4/IPv6 TLS 基线通过；分别只阻断测试进程在所选 WLAN 的 TCP 443，另一协议完成普通 SOCKS TLS；关闭拥有的动态规则后原协议立即恢复 | `.go-cache-local/ipv6-wfp-dualstack-acceptance.txt`，两种故障子测试通过 |
-| DNS64 网络发现 | 当前 link-local DNS 和多个国内 IPv6 DNS 的 20 条 TCP/UDP 查询均无有效回复；没有发现可用于实际验收的前缀，不能据此断定网络没有 NAT64 | `.go-cache-local/ipv6-native-dns64-probe.json` |
+| 授权传统 DNS/WFP 验收 | Mihomo TUN 保持开启，临时关闭其严格路由；HypoMux 公网 UDP DNS 和原生 WFP 的 UDP/TCP DNS、源地址/接口约束、Close 后删除全部通过；finally、外层控制与独立辅助进程保护恢复，最终确认严格路由开启 | `.go-cache-local/ipv6-dns64-window-result.json`，两个实际 Go 测试及其子测试通过 |
+| DNS64 网络发现 | 授权窗口内 20 条查询收到 13 个有效回复、7 个超时；网络 link-local DNS 的 TCP 对照域名返回真实 AAAA，`ipv4only.arpa` 返回 NOERROR/NODATA，无可发现前缀；不能由此断言上游不存在其他 NAT64 机制 | `.go-cache-local/ipv6-native-dns64-probe.json`；原阻断记录保存在 `ipv6-native-dns64-probe-before-approved-window.json` |
 | engine 全量竞态 | 283 个顶层测试通过、0 失败、5 个显式实网测试跳过；新双栈故障案例另行执行 | `.go-cache-local/ipv6-engine-final-real-network.jsonl` |
 | desktop 全量竞态 | 415 个顶层测试通过、0 失败、12 个显式环境测试跳过；其中生产 TUN 配置准备已另行显式执行并通过 | `.go-cache-local/ipv6-desktop-final-real-network.jsonl` |
 | 原主分支 CI 报错修复 | Windows 缓存断言的 DNS 超时从 200 ms 调整到 2 s，保留清洁退出/缓存断言，实际 bundled FakeIP 连续重启 20 轮通过；提交 `8541a3d` 的两个 CI 均成功 | GitHub Validate Go Engine / Build Desktop |
+| 公网 UDP/MTU 检查 CI | 提交 `3adf49b` 的 Go Engine 与 Build Desktop 均成功 | [Go Engine](https://github.com/Hypostasis-Cat/HypoMux/actions/runs/37171201003)、[Build Desktop](https://github.com/Hypostasis-Cat/HypoMux/actions/runs/37171201011) |
 
-WFP 事件显示 `Meta / block ipv6 dns` 在 `ALE_AUTH_CONNECT_V6` 拒绝 TCP 和 UDP 53；同事件也记录 HypoMux 的源地址/接口绑定 permit 已匹配，不能把外部阻断记成通过。现有代理保持原设置。
+原 WFP 事件显示 `Meta / block ipv6 dns` 在 `ALE_AUTH_CONNECT_V6` 拒绝 TCP 和 UDP 53；同事件也记录 HypoMux 的源地址/接口绑定 permit 已匹配，原失败记录保留。授权窗口通过运行时 API 显式保持 `tun.enable=true`、临时设置 `tun.strict-route=false`，未修改代理配置文件或直接删除其他程序的 WFP 规则。API 在 false 时省略该字段，检查需按 false 解释；最终读取控制器确认 TUN 与严格路由均开启。网络 DNS 的真实 NOERROR/NODATA 响应使本次 NAT64 前提检查得到明确结果，不能用手工前缀替代。
 
 双栈故障用 `TestRealDualStackTCPFaultFallback` 执行，需管理员权限、`HYPOMUX_RUN_WFP_IPV6_NETWORK_TEST=1`，以及包含两族物理源地址与接口索引的 `HYPOMUX_IPV6_ACCEPTANCE_CONFIG`。它使用实际 Windows WFP 和公网 TLS，不替换连接函数；临时阻断仅匹配本测试可执行文件、对应源地址、接口及 TCP 443，不改变其他进程或路由。普通代理支持域名候选回退，TUN TCP 池仍按其字面目标语义处理。
 
 系统路由报告保留全部前后快照及差异。Windows Teredo 自动换地址产生的 `Protocol=Local` `/128` 主机路由单独记录，不要求恢复旧地址；物理网卡、其他 VPN 和 Teredo 策略路由逐条核对。首次把自动生成主机路由当作固定路由的失败记录保留在本地，修正检查范围后重新执行通过。
 
 MTU 检查读取 Windows 原生 `NlMtu` 属性。首次使用错误的 `NlMtuBytes` 属性导致检查失败的记录保留在 `.go-cache-local/ipv6-system-mtu-first-attempt.json`，修正后重新执行通过。此检查覆盖最小本地 TUN MTU 下的真实 TCP 传输，不证明下游 ICMPv6 Packet Too Big 或公网大 UDP 行为。
+
+侧车崩溃会使池进入停止/失败状态，Core 崩溃场景需先显式停止并重启池，再激活第三次 TUN；首次遗漏该步骤的失败报告保留。该测试只强制结束由脚本创建的 Core，核对侧车父 PID、可执行文件及创建时间，拒绝清理已复用的 PID。
+
+IPv4 回归只提供 IPv4 源地址与索引，DNS 输入保留匹配的 IPv4 服务器，避免为不使用的 link-local IPv6 DNS 缺少作用域索引。当前网络清华 NTP 的 IPv4 地址在独立原生绑定检查中也超时，阿里/腾讯 NTP IPv4 则有有效回复；最终 IPv4 系统回归使用已验证可达的 `ntp.aliyun.com`，此前失败报告保留。[阿里 NTP 说明](https://developer.aliyun.com/mirror/NTP)提供该公网端点；[清华镜像站域名说明](https://mirrors.tuna.tsinghua.edu.cn/legacy_index)明确 `mirrors4` 只解析 IPv4。本次验证的 A-only 公网端点可供将来 NAT64 网络验收选用，但当前 IPv4 通过不能代替 NAT64 翻译验证。
 
 ### 复现严格系统 TUN 检查
 
@@ -195,8 +205,21 @@ MTU 检查读取 Windows 原生 `NlMtu` 属性。首次使用错误的 `NlMtuByt
 # 同时要求系统路由 UDP 请求/回复。
 .\tools\ipv6-system-acceptance.ps1 -Adapter "网卡名" -RequireUDP -Python "python.exe"
 
+# 同时验证测试 Core 崩溃后 Windows Job 自动结束侧车并恢复路由。
+.\tools\ipv6-system-acceptance.ps1 -Adapter "网卡名" -RequireUDP -CoreCrash -Python "python.exe"
+
+# IPv4 系统回归；地址族必须显式选择，IPv6 MTU 选项仅支持 IPv6。
+.\tools\ipv6-system-acceptance.ps1 -Adapter "网卡名" -AddressFamily IPv4 `
+  -RequireUDP -NTPDomain "ntp.aliyun.com" -CoreCrash -Python "python.exe" `
+  -OutputDirectory ".go-cache-local/ipv4-system-baseline"
+
+# 已独立确认 A-only 的官方国内 HTTPS 域名。
+.\tools\ipv6-system-acceptance.ps1 -Adapter "网卡名" -AddressFamily IPv4 `
+  -RequireUDP -NTPDomain "ntp.aliyun.com" -HTTPSDomain "mirrors4.tuna.tsinghua.edu.cn" `
+  -Python "python.exe" -OutputDirectory ".go-cache-local/ipv4-system-a-only-acceptance"
+
 # 临时测试 TUN 的 IPv6 最小 MTU 与 4 MiB HTTPS 传输；不修改物理网卡 MTU。
-.\tools\ipv6-system-acceptance.ps1 -Adapter "网卡名" -RequireUDP -TUNMTU 1280 `
+.\tools\ipv6-system-acceptance.ps1 -Adapter "网卡名" -RequireUDP -CoreCrash -TUNMTU 1280 `
   -HTTPSDomain "mirrors.tuna.tsinghua.edu.cn" `
   -PayloadPath "/debian/dists/stable/main/binary-amd64/Packages.gz" `
   -PayloadBytes 4194304 -Python "python.exe" `

@@ -104,33 +104,43 @@ class Core:
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Explicit Windows strict IPv6 TUN acceptance; run the PowerShell wrapper.')
+    parser = argparse.ArgumentParser(description='Explicit Windows IPv6 strict TUN acceptance and IPv4 regression; run the PowerShell wrapper.')
     parser.add_argument('--input', type=pathlib.Path, required=True)
     args = parser.parse_args()
     prepared = json.loads(args.input.read_text(encoding='utf-8-sig'))
     output = args.input.resolve().parent
     adapter = prepared['adapter']
+    family = prepared.get('address_family', 'IPv6')
+    require(family in ('IPv6', 'IPv4'), 'explicit IPv6 or IPv4 required')
+    record_type = 'AAAA' if family == 'IPv6' else 'A'
+    def endpoint(address, port):
+        return ('[' + address + ']' if family == 'IPv6' else address) + ':' + str(port)
     report = {
         'tested_at_utc': datetime.datetime.now(datetime.timezone.utc).isoformat(),
         'windows_build': sys.getwindowsversion().build,
-        'scope': 'elevated real Core, production strict IPv6 TUN, independent OS-routed TCP and optional UDP, normal and sidecar crash cleanup',
+        'scope': 'elevated real Core, production strict ' + family + ' TUN, independent OS-routed TCP and optional UDP, normal and crash cleanup',
         'udp_requested': bool(prepared.get('udp_domain')),
+        'core_crash_requested': bool(prepared.get('core_crash')),
+        'address_family': family,
         'checks': [], 'adapter': adapter, 'full_acceptance': 'pending_network_matrix',
     }
-    core = child = before = None
+    core = child = before = orphan = None
     started = False
 
     def record(name, evidence=None):
+        if family == 'IPv4':
+            name = name.replace('ipv6', 'ipv4')
         report['checks'].append({'name': name, 'status': 'passed', 'evidence': evidence})
 
     try:
         require(ctypes.windll.shell32.IsUserAnAdmin(), 'system test requires an elevated controller')
         alias = adapter['name'].replace("'", "''")
-        addresses = powershell("@(Get-NetIPAddress -InterfaceAlias '" + alias + "' -AddressFamily IPv6 | Select-Object IPAddress,AddressState) | ConvertTo-Json -Compress")
+        addresses = powershell("@(Get-NetIPAddress -InterfaceAlias '" + alias + "' -AddressFamily " + family + " | Select-Object IPAddress,AddressState) | ConvertTo-Json -Compress")
         if isinstance(addresses, dict):
             addresses = [addresses]
-        require(any(a['IPAddress'] == adapter['source_ipv6'] and a['AddressState'] == 4 for a in addresses),
-                'configured physical IPv6 source is no longer preferred')
+        source = adapter['source_ipv6' if family == 'IPv6' else 'source_ip']
+        require(any(a['IPAddress'] == source and a['AddressState'] == 4 for a in addresses),
+                'configured physical source is no longer preferred')
         before = snapshot()
         report['before'] = before
         require(not any(a['Name'] == 'HypoMux-Tun' for a in before['adapters']), 'refuse to disturb an existing HypoMux TUN')
@@ -147,25 +157,25 @@ def main():
         target = None
         for name in ([prepared['https_domain']] if prepared.get('https_domain') else ['www.qq.com', 'www.baidu.com']):
             try:
-                answer = core.call('dns.resolve', {'domain': name, 'record_type': 'AAAA', 'adapter': adapter['name'], 'timeout_ms': 5000})
+                answer = core.call('dns.resolve', {'domain': name, 'record_type': record_type, 'adapter': adapter['name'], 'timeout_ms': 5000})
                 target = (name, answer['address'])
                 report['test_destination'] = answer
                 break
             except Exception as error:
                 report.setdefault('destination_errors', []).append({'domain': name, 'error': str(error)})
-        require(target, 'no domestic IPv6 HTTPS destination resolved')
+        require(target, 'no domestic ' + family + ' HTTPS destination resolved')
         udp_target = None
         if prepared.get('udp_domain'):
-            answer = core.call('dns.resolve', {'domain': prepared['udp_domain'], 'record_type': 'AAAA', 'adapter': adapter['name'], 'timeout_ms': 5000})
+            answer = core.call('dns.resolve', {'domain': prepared['udp_domain'], 'record_type': record_type, 'adapter': adapter['name'], 'timeout_ms': 5000})
             report['udp_destination'] = answer
-            udp_target = '[' + answer['address'] + ']:123'
+            udp_target = endpoint(answer['address'], 123)
         activation = json.loads((pathlib.Path(prepared['output']) / 'activation.json').read_text(encoding='utf-8'))
         activation['executable'] = str(output / 'sing-box.exe')  # Exact bundled sibling required by the test Core.
         config_path = pathlib.Path(activation['config_path'])
         require(hashlib.sha256(config_path.read_bytes()).hexdigest() == activation['config_sha256'], 'configuration digest changed')
         state = core.call('tun.activate', activation)
         started = True
-        require(not state.get('ipv4_only_fallback', False) and state['tun']['state'] == 'running', 'strict IPv6 activation failed or fell back')
+        require(state['tun']['state'] == 'running' and (family == 'IPv4' or not state.get('ipv4_only_fallback', False)), 'strict activation failed or IPv6 fell back')
         record('strict_ipv6_tun_activate', state)
         report['running'] = snapshot()
         require(any(a['Name'] == 'HypoMux-Tun' and a['Status'] == 'Up' for a in report['running']['adapters']), 'owned TUN is not active')
@@ -175,10 +185,11 @@ def main():
             require(mtu['NlMtu'] == 1280, 'owned IPv6 TUN MTU did not change to 1280: ' + repr(mtu))
             record('owned_tun_ipv6_minimum_mtu', mtu)
         config = json.loads(config_path.read_text(encoding='utf-8'))
-        tun6 = next(a.split('/')[0] for a in config['inbounds'][0]['address'] if ':' in a)
+        tun_source = next(a.split('/')[0] for a in config['inbounds'][0]['address'] if (':' in a) == (family == 'IPv6'))
+        source_prefix = endpoint(tun_source, '')
         if udp_target:
             udp_result = subprocess.run(
-                [str(output / 'ipv6-system-client.exe'), '-udp-target=' + udp_target],
+                [str(output / 'ipv6-system-client.exe'), '-family=' + family, '-udp-target=' + udp_target],
                 capture_output=True, text=True, encoding='utf-8', timeout=12,
                 creationflags=subprocess.CREATE_NO_WINDOW,
             )
@@ -186,26 +197,25 @@ def main():
             reply = json.loads(udp_result.stdout)
             require(reply['event'] == 'udp_reply' and reply['request_verified'] and reply['peer'] == udp_target,
                     'independent UDP reply identity/correlation mismatch')
-            require(reply['source'].startswith('[' + tun6 + ']:'), 'independent UDP bypassed the HypoMux IPv6 TUN')
+            require(reply['source'].startswith(source_prefix), 'independent UDP bypassed the HypoMux TUN')
             udp_telemetry = core.call('engine.telemetry', {'include_connections': True})
             udp_flows = [c for c in udp_telemetry.get('active_connections', [])
                          if c.get('adapter') == adapter['name'] and c.get('remote') == udp_target]
-            require(udp_flows, 'independent system UDP did not traverse the selected IPv6 pool')
+            require(udp_flows, 'independent system UDP did not traverse the selected pool')
             record('independent_system_ipv6_udp_via_selected_pool', {'client': reply, 'flows': udp_flows})
         child = subprocess.Popen(
-            [str(output / 'ipv6-system-client.exe'), '-target=[' + target[1] + ']:443', '-server-name=' + target[0],
+            [str(output / 'ipv6-system-client.exe'), '-family=' + family, '-target=' + endpoint(target[1], 443), '-server-name=' + target[0],
              '-path=' + prepared.get('payload_path', '/'), '-payload-bytes=' + str(prepared.get('payload_bytes', 0))],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, encoding='utf-8', creationflags=subprocess.CREATE_NO_WINDOW,
         )
         connected = json.loads(child.stdout.readline())
         require(connected['event'] == 'connected' and connected['certificate_verified'], 'independent client failed TLS verification')
-        require(connected['source'].startswith('[' + tun6 + ']:'), 'independent client bypassed the HypoMux IPv6 TUN')
+        require(connected['source'].startswith(source_prefix), 'independent client bypassed the HypoMux TUN')
         telemetry = core.call('engine.telemetry', {'include_connections': True})
         flows = [c for c in telemetry.get('active_connections', []) if c.get('adapter') == adapter['name']
-                 and c.get('remote', '').startswith('[')
-                 and (c.get('remote') == '[' + target[1] + ']:443' or target[0] in c.get('target', ''))]
-        require(flows, 'independent system client did not traverse the selected IPv6 pool')
+                 and c.get('remote') == endpoint(target[1], 443)]
+        require(flows, 'independent system client did not traverse the selected pool')
         record('independent_system_ipv6_tls_via_selected_pool', {'client': connected, 'flows': flows})
         child.stdin.write('fetch\n')
         child.stdin.flush()
@@ -244,6 +254,35 @@ def main():
         report['crash_route_difference'] = route_difference(before, after_crash)
         require_restored(before, after_crash)
         record('sidecar_crash_routes_restored_and_other_tunnels_preserved', {'owned_sidecar_pid': pid})
+        if prepared.get('core_crash'):
+            core.call('engine.stop')
+            record('ipv6_pool_restart_after_sidecar_failure', core.call('engine.start', {
+                'mode': 'tun_tcp_pool', 'adapters': [adapter], 'dns': {'policy': 'alidns'}, 'channels': channels,
+            }))
+            state = core.call('tun.activate', activation)
+            started = True
+            record('strict_tun_restart_for_owned_core_crash', state)
+            pid = state['tun']['pid']
+            owner = powershell("Get-CimInstance Win32_Process -Filter 'ProcessId = " + str(pid) + "' | Select-Object ParentProcessId,ExecutablePath,CreationDate | ConvertTo-Json -Compress")
+            require(owner and owner['ParentProcessId'] == core.process.pid and
+                    pathlib.Path(owner['ExecutablePath']).resolve() == (output / 'sing-box.exe').resolve(), 'Core crash sidecar ownership mismatch')
+            orphan = (pid, owner)
+            core.process.kill()  # Only the independently launched test Core is terminated.
+            core.process.wait(timeout=8)
+            started = False
+            deadline = time.monotonic() + 10
+            while time.monotonic() < deadline:
+                remaining = powershell("Get-CimInstance Win32_Process -Filter 'ProcessId = " + str(pid) + "' | Select-Object ParentProcessId,ExecutablePath,CreationDate | ConvertTo-Json -Compress")
+                if remaining is None:
+                    break
+                time.sleep(0.2)
+            require(remaining is None, 'owned sidecar survived test Core crash')
+            orphan = None
+            after_core_crash = restored_snapshot(before)
+            report['after_core_crash'] = after_core_crash
+            report['core_crash_route_difference'] = route_difference(before, after_core_crash)
+            require_restored(before, after_core_crash)
+            record('core_crash_sidecar_job_terminated_and_routes_restored', {'owned_core_pid': core.process.pid, 'owned_sidecar_pid': pid})
         report['network_status'] = 'passed'
     except Exception as error:
         report.update(network_status='failed', error=str(error))
@@ -254,17 +293,28 @@ def main():
             report['client_stderr'] = child.stderr.read()
         if core is not None:
             try:
-                if started:
-                    core.call('tun.deactivate')
-                core.call('engine.stop')
-                core.call('host.shutdown')
-                core.process.wait(timeout=10)
+                if core.process.poll() is None:
+                    if started:
+                        core.call('tun.deactivate')
+                    core.call('engine.stop')
+                    core.call('host.shutdown')
+                    core.process.wait(timeout=10)
             except Exception as error:
                 report.update(network_status='failed', cleanup_error=str(error))
                 core.process.terminate()
                 core.process.wait(timeout=10)
             finally:
                 core.stderr.close()
+        if orphan is not None:
+            try:
+                pid, owner = orphan
+                remaining = powershell("Get-CimInstance Win32_Process -Filter 'ProcessId = " + str(pid) + "' | Select-Object ParentProcessId,ExecutablePath,CreationDate | ConvertTo-Json -Compress")
+                if remaining is not None:
+                    require(remaining == owner, 'orphan PID identity changed; refuse to terminate a different process')
+                    subprocess.run(['taskkill', '/PID', str(pid), '/F'], capture_output=True, timeout=8,
+                                   creationflags=subprocess.CREATE_NO_WINDOW, check=True)
+            except Exception as error:
+                report.update(network_status='failed', orphan_cleanup_error=str(error))
         if before is not None:
             try:
                 report['final'] = restored_snapshot(before)

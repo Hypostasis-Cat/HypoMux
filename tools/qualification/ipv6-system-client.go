@@ -1,4 +1,4 @@
-// Independent OS-routed IPv6 client for the opt-in system acceptance runner.
+// Independent OS-routed client for IPv6 acceptance and IPv4 regression.
 package main
 
 import (
@@ -21,14 +21,22 @@ import (
 )
 
 func main() {
-	target := flag.String("target", "", "literal IPv6 TLS target")
+	target := flag.String("target", "", "literal TLS target")
 	name := flag.String("server-name", "", "verified TLS hostname")
-	udpTarget := flag.String("udp-target", "", "literal IPv6 NTP target for an independent OS-routed UDP check")
+	udpTarget := flag.String("udp-target", "", "literal NTP target for an independent OS-routed UDP check")
+	family := flag.String("family", "IPv6", "explicit IPv6 or IPv4 system route")
 	path := flag.String("path", "/", "HTTPS request path")
 	payloadBytes := flag.Int("payload-bytes", 0, "exact byte range to request, or zero for the whole response")
 	flag.Parse()
+	if *family != "IPv6" && *family != "IPv4" {
+		panic("provide IPv6 or IPv4 family")
+	}
+	suffix := "6"
+	if *family == "IPv4" {
+		suffix = "4"
+	}
 	if *udpTarget != "" {
-		verifyUDP(*udpTarget)
+		verifyUDP(*udpTarget, suffix)
 		return
 	}
 	parsed, err := url.ParseRequestURI(*path)
@@ -37,7 +45,7 @@ func main() {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 	defer cancel()
-	raw, err := (&net.Dialer{}).DialContext(ctx, "tcp6", *target)
+	raw, err := (&net.Dialer{}).DialContext(ctx, "tcp"+suffix, *target)
 	if err != nil {
 		panic(err)
 	}
@@ -66,7 +74,11 @@ func main() {
 		panic("HTTPS server did not honor the bounded payload range")
 	}
 	digest := sha256.New()
-	count, err := io.Copy(digest, response.Body)
+	reader := io.Reader(response.Body)
+	if *payloadBytes > 0 {
+		reader = io.LimitReader(response.Body, int64(*payloadBytes)+1)
+	}
+	count, err := io.Copy(digest, reader)
 	if err != nil {
 		panic(err)
 	}
@@ -79,10 +91,10 @@ func main() {
 	json.NewEncoder(os.Stdout).Encode(map[string]any{"event": "downloaded", "http_status": response.StatusCode, "bytes": count, "server_name": *name, "path": *path, "sha256": fmt.Sprintf("%x", digest.Sum(nil))})
 }
 
-func verifyUDP(target string) {
+func verifyUDP(target, suffix string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
-	conn, err := (&net.Dialer{}).DialContext(ctx, "udp6", target)
+	conn, err := (&net.Dialer{}).DialContext(ctx, "udp"+suffix, target)
 	if err != nil {
 		panic(err)
 	}
