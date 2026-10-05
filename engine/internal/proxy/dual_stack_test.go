@@ -172,7 +172,7 @@ func TestIPv6OnlyNAT64UDPUsesOriginalReplyTarget(t *testing.T) {
 		t.Fatal(err)
 	}
 	packet, ok := parseSOCKSUDPPacket(buffer[:n])
-	if !ok || packet.target != "192.0.2.33:443" || string(packet.payload) != "translated" {
+	if !ok || packet.addr.String() != "192.0.2.33:443" || string(packet.payload) != "translated" {
 		t.Fatalf("original UDP identity lost: %+v valid=%t", packet, ok)
 	}
 }

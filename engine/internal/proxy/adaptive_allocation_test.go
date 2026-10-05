@@ -200,7 +200,7 @@ func simulateAllocation(t *testing.T, strategy string, capacity [2]float64, star
 	s := newScheduler(adapters, false)
 	s.performance = p
 	if strategy == "adaptive" {
-		s.strategy = StrategyAdaptive
+		s.setStrategy(StrategyAdaptive)
 	}
 	type stream struct {
 		lease     *performanceLease

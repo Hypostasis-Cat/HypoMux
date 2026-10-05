@@ -57,7 +57,7 @@ func (s *scheduler) update(config SchedulingConfig) SchedulingConfig {
 	s.health.mu.Unlock()
 	s.adapters = config.Adapters
 	s.weighted = config.Weighted
-	s.strategy = config.Strategy
+	s.setStrategy(config.Strategy)
 	s.next = 0
 	s.currentWeight = make(map[string]int, len(config.Adapters))
 	return previous

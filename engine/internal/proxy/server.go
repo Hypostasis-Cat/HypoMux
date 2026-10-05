@@ -107,8 +107,8 @@ func New(config Config) (*Server, error) {
 		)
 	}
 	server.performance = newPerformanceTable()
-	server.scheduler.latency = newLatencyTable()
-	server.scheduler.strategy = normalized.Strategy
+	server.scheduler.setLatency(newLatencyTable())
+	server.scheduler.setStrategy(normalized.Strategy)
 	server.scheduler.performance = server.performance
 	for _, scheduler := range server.schedulers {
 		scheduler.performance = server.performance

@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"io"
 	"net"
+	"net/netip"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -313,10 +314,10 @@ func TestParseAndPackSOCKSUDPIPv4(t *testing.T) {
 		[]byte("payload")...,
 	)
 	packet, ok := parseSOCKSUDPPacket(payload)
-	if !ok || packet.target != "192.0.2.1:443" || string(packet.payload) != "payload" {
+	if !ok || packet.addr.String() != "192.0.2.1:443" || string(packet.payload) != "payload" {
 		t.Fatalf("parsed packet = %#v, %v", packet, ok)
 	}
-	reply, ok := packSOCKSUDPReply(packet.target, packet.payload)
+	reply, ok := packSOCKSUDPReply(packet.addr, packet.payload)
 	if !ok || string(reply) != string(payload) {
 		t.Fatalf("packed reply = %v, %v", reply, ok)
 	}
@@ -328,11 +329,11 @@ func TestParseAndPackSOCKSUDPIPv6(t *testing.T) {
 	payload = binary.BigEndian.AppendUint16(payload, 443)
 	payload = append(payload, []byte("payload")...)
 	packet, ok := parseSOCKSUDPPacket(payload)
-	if !ok || packet.target != "[2001:db8::1]:443" ||
+	if !ok || packet.addr.String() != "[2001:db8::1]:443" ||
 		string(packet.payload) != "payload" {
 		t.Fatalf("parsed IPv6 packet = %#v, %v", packet, ok)
 	}
-	reply, ok := packSOCKSUDPReply(packet.target, packet.payload)
+	reply, ok := packSOCKSUDPReply(packet.addr, packet.payload)
 	if !ok || string(reply) != string(payload) {
 		t.Fatalf("packed IPv6 reply = %v, %v", reply, ok)
 	}
@@ -580,7 +581,11 @@ func sendSOCKSUDP(
 	payload []byte,
 ) {
 	t.Helper()
-	packet, ok := packSOCKSUDPReply(target, payload)
+	addr, err := netip.ParseAddrPort(target)
+	if err != nil {
+		t.Fatalf("invalid SOCKS UDP target %q: %v", target, err)
+	}
+	packet, ok := packSOCKSUDPReply(addr, payload)
 	if !ok {
 		t.Fatalf("could not encode SOCKS UDP target %q", target)
 	}

@@ -41,7 +41,9 @@ func steamRequestURI(req *http.Request) (string, string) {
 		if h, p, e := net.SplitHostPort(host); e == nil && p == "80" {
 			host = h
 		}
-		allowed := map[string]bool{}
+		// Every branch below either returns or assigns allowed, so the map must
+		// not be allocated up front: this runs once per Steam chunk request.
+		var allowed map[string]bool
 		switch host {
 		case "xz.pphimalayanrt.com", "xz.sycontroller.com":
 			if q.Get("auth_key") == "" {

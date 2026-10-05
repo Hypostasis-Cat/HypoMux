@@ -119,10 +119,16 @@ func (h *healthTable) candidates(
 	if !h.domainIsolation {
 		domain = ""
 	}
-	healthy := make([]Adapter, 0, len(adapters))
-	domainFallback := make([]Adapter, 0, len(adapters))
-	recovery := make([]Adapter, 0, len(adapters))
-	all := make([]Adapter, 0, len(adapters))
+	// One backing array for the four candidate partitions instead of four
+	// separate allocations. This runs on every adapter selection, so the
+	// allocation count matters. Each segment keeps cap == len(adapters) so the
+	// appends below never reallocate.
+	total := len(adapters)
+	storage := make([]Adapter, 4*total)
+	healthy := storage[0:0:total]
+	domainFallback := storage[total : total : 2*total]
+	recovery := storage[2*total : 2*total : 3*total]
+	all := storage[3*total : 3*total : 4*total]
 	for _, adapter := range adapters {
 		if _, skip := excluded[adapter.Name]; skip {
 			continue
