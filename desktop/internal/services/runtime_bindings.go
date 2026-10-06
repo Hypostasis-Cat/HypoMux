@@ -10,8 +10,14 @@ import (
 
 const runtimeBindingPollInterval = 5 * time.Second
 
+// Survives a failed automatic restart, including its original hotspot intent.
+// Explicit Start/Stop clears it before waiting for the lifecycle gate.
+type runtimeBindingRecovery struct {
+	hotspot *HotspotConfig
+}
+
 // The service owns this monitor, so hiding the WebView or starting silently
-// cannot suspend binding recovery. Stopped sessions do not scan adapters.
+// cannot suspend binding recovery. Explicitly stopped sessions do not scan.
 func (s *EngineService) watchRuntimeBindings() {
 	defer close(s.bindingMonitorDone)
 	ticker := time.NewTicker(runtimeBindingPollInterval)
@@ -86,11 +92,12 @@ func runtimeBindingsChanged(previous, available []AdapterView) (bool, error) {
 	}
 	changed := false
 	var missing error
+	installed := make(map[string]bool, len(previous))
 	for _, old := range previous {
+		installed[old.ID] = true
 		next, ok := current[old.ID]
-		if !ok || !next.Operational || (next.Address == "" && next.SourceIPv6 == "") {
-			// During suspend/disconnect, preserve other working NICs. Rebuild
-			// only after the selected interfaces have usable OS bindings again.
+		if !ok || !usableRuntimeBinding(next) {
+			// Disconnection alone must not interrupt the remaining working NICs.
 			missing = fmt.Errorf("等待网卡 %s 恢复可用地址", old.Name)
 			continue
 		}
@@ -98,21 +105,34 @@ func runtimeBindingsChanged(previous, available []AdapterView) (bool, error) {
 			old.SourceIPv6 != next.SourceIPv6 || old.IfIndex != next.IfIndex ||
 			old.IPv6IfIndex != next.IPv6IfIndex || !slices.Equal(old.DNSServers, next.DNSServers)
 	}
+	// A restart may have omitted a disconnected NIC. Its persisted selection
+	// still matters even if it returns with exactly the same address/index.
+	for _, next := range available {
+		if next.Selected && usableRuntimeBinding(next) && !installed[next.ID] {
+			changed = true
+		}
+	}
 	if !changed && missing != nil {
 		return false, missing
 	}
 	return changed, nil
 }
 
+func usableRuntimeBinding(adapter AdapterView) bool {
+	return adapter.Operational && (adapter.Address != "" || adapter.SourceIPv6 != "")
+}
+
 // Explicit Start/Stop wins over a pending automatic recovery. In particular,
 // a late scan may never restart aggregation after the user pressed Stop.
 func (s *EngineService) cancelRuntimeBindingRefresh() {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.runtimeBindingEnabled = false
-	cancel := s.runtimeBindingCancel
-	s.mu.Unlock()
-	if cancel != nil {
-		cancel()
+	s.runtimeBindingRecovery = nil
+	if s.runtimeBindingCancel != nil {
+		// Serialize cancellation with the startup commit so it cannot re-enable
+		// monitoring after an explicit Stop has already revoked recovery.
+		s.runtimeBindingCancel()
 	}
 }
 
@@ -177,10 +197,12 @@ func (s *EngineService) runtimeBindingActions() runtimeBindingActions {
 func (s *EngineService) refreshRuntimeBindings(ctx context.Context, actions runtimeBindingActions) error {
 	s.mu.Lock()
 	previous, mode := cloneRuntimeBindings(s.runtimeBindings), s.runtimeBindingMode
+	recovery := s.runtimeBindingRecovery
 	closing := s.closing
+	enabled := s.runtimeBindingEnabled
 	hotspot := s.hotspot
 	s.mu.Unlock()
-	if closing || len(previous) == 0 {
+	if closing || !enabled || len(previous) == 0 {
 		return nil
 	}
 	available, err := s.availableRuntimeAdapters()
@@ -191,22 +213,36 @@ func (s *EngineService) refreshRuntimeBindings(ctx context.Context, actions runt
 		return err
 	}
 	changed, err := runtimeBindingsChanged(previous, available)
-	if err != nil {
+	hasSelected := slices.ContainsFunc(available, func(a AdapterView) bool { return a.Selected && usableRuntimeBinding(a) })
+	if err != nil && (recovery == nil || !hasSelected) {
 		s.setRuntimeBindingNotice("提示："+err.Error(), "waiting_for_adapter")
 		return nil
 	}
-	if !changed {
+	if !changed && recovery == nil {
 		s.setRuntimeBindingNotice("", "")
 		return nil
 	}
-	state, err := actions.status(ctx)
-	if err != nil {
-		return err
+	if recovery == nil {
+		state, err := actions.status(ctx)
+		if err != nil {
+			return err
+		}
+		if state != "running" && state != "degraded" {
+			return nil
+		}
+		recovery = &runtimeBindingRecovery{}
+		if hotspot != nil && hotspot.snapshot().State == "running" {
+			config := hotspot.config
+			recovery.hotspot = &config
+		}
 	}
-	if state != "running" && state != "degraded" {
-		return nil
+	s.mu.Lock()
+	if !s.runtimeBindingEnabled || s.closing || ctx.Err() != nil {
+		s.mu.Unlock()
+		return ctx.Err()
 	}
-	resumeHotspot := hotspot != nil && hotspot.snapshot().State == "running"
+	s.runtimeBindingRecovery = recovery
+	s.mu.Unlock()
 	if s.logs != nil {
 		s.logs.RecordEvent("adapter_binding", "refresh_requested", map[string]any{"mode": mode})
 	}
@@ -219,8 +255,16 @@ func (s *EngineService) refreshRuntimeBindings(ctx context.Context, actions runt
 	if err := actions.start(ctx, mode); err != nil {
 		return fmt.Errorf("建立新绑定失败：%w", err)
 	}
-	if resumeHotspot {
-		if err := actions.hotspot(ctx, hotspot.config); err != nil {
+	s.mu.Lock()
+	if s.runtimeBindingRecovery == recovery {
+		s.runtimeBindingRecovery = nil
+	}
+	s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if recovery.hotspot != nil {
+		if err := actions.hotspot(ctx, *recovery.hotspot); err != nil {
 			return fmt.Errorf("聚合已恢复，恢复原热点失败：%w", err)
 		}
 	}
