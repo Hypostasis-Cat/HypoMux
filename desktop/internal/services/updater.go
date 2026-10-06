@@ -89,6 +89,7 @@ type UpdaterService struct {
 	quit              func()
 	mu                sync.RWMutex
 	progress          UpdateProgress
+	operationActive   bool
 }
 
 func NewUpdaterService(quit ...func()) *UpdaterService {
@@ -380,6 +381,10 @@ func sameReleaseMetadata(left ReleaseInfo, right ReleaseInfo) bool {
 }
 
 func (s *UpdaterService) Download(release ReleaseInfo) (string, error) {
+	if !s.beginOperation() {
+		return "", errors.New("更新操作正在进行，请勿重复操作")
+	}
+	defer s.endOperation()
 	s.setProgress(UpdateProgress{State: "starting", Total: release.InstallerSize})
 	if err := validateReleaseInfo(release); err != nil {
 		return "", s.failDownload(err)
@@ -514,17 +519,33 @@ func (s *UpdaterService) failDownload(err error) error {
 // the process exits. Keeping both actions behind one backend call prevents the
 // web layer from bypassing cleanup with a raw application quit.
 func (s *UpdaterService) InstallAndQuit(installerPath string) error {
+	if !s.beginOperation() {
+		return errors.New("更新操作正在进行，请勿重复操作")
+	}
 	if s.quit == nil {
+		s.endOperation()
 		return errors.New("应用退出清理尚未初始化")
 	}
 	if err := s.launchInstaller(installerPath, os.Getpid()); err != nil {
 		s.setProgress(UpdateProgress{State: "failed", Message: err.Error()})
+		s.endOperation()
 		return err
 	}
 	s.setProgress(UpdateProgress{State: "installing"})
 	s.quit()
 	return nil
 }
+
+func (s *UpdaterService) beginOperation() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.operationActive {
+		return false
+	}
+	s.operationActive = true
+	return true
+}
+func (s *UpdaterService) endOperation() { s.mu.Lock(); s.operationActive = false; s.mu.Unlock() }
 
 type updateProgressWriter struct {
 	writer  io.Writer

@@ -9,84 +9,35 @@ import (
 	"github.com/Hypostasis-Cat/HypoMux/desktop/internal/releaseversion"
 )
 
-func TestInstallerMigratesLegacyLayoutsBeforeWritingCorrectedRoot(t *testing.T) {
+func TestInstallerTransactionOrderAndLegacySafety(t *testing.T) {
 	data, err := os.ReadFile("build/windows/nsis/project.nsi")
 	if err != nil {
 		t.Fatal(err)
 	}
-	script := string(data)
-	for _, required := range []string{
-		`!define UNINST_KEY_NAME "HypoMux"`,
-		`InstallDir ""`,
-		`HypoMuxHypoMux`,
-		`{7637d353-b9c0-4145-bc81-7a474e534d07}_is1`,
-		`Call RemoveLegacyInstallations`,
-		`Call RecoverLegacyV22Network`,
-		`Call RecoverWailsInstallations`,
-		`Call StopCoreProcessesForUpgrade`,
-		`Function RemoveLegacyAutostartTask`,
-		`/Delete /TN "\HypoMuxAutoStart" /F`,
-		`File /oname=legacy-v22-recover.ps1 "legacy-v22-recover.ps1"`,
-		`File /oname=stop-core-for-upgrade.ps1 "stop-core-for-upgrade.ps1"`,
-		`File /oname=compare-install-directories.ps1 "compare-install-directories.ps1"`,
-		`File /oname=protect-core-directory.ps1 "protect-core-directory.ps1"`,
-		`!define HYPOMUX_PROTECTED_CORE_ROOT "$APPDATA\HypoMux\Core"`,
-		`!define HYPOMUX_CORE_POLICY_KEY "Software\HypoMux\CoreServicePolicy"`,
-		`Call PrepareProtectedCoreDirectory`,
-		`Call FinalizeProtectedCoreDirectory`,
-		`Function RollbackFreshMachineInstall`,
-		`Call RollbackFreshMachineInstall`,
-		`ReadRegStr $2 HKLM "${HYPOMUX_NESTED_UNINST_KEY}" "InstallLocation"`,
-		`Var HypoMuxPreviousInstallDir`,
-		`Var HypoMuxAutostartEnabled`,
-		`Call DetermineInstallPathChange`,
-		`Call RecoverPreviousWailsInstallation`,
-		`Call RemovePreviousWailsInstallation`,
-		`Call RestoreAutostart`,
-		`WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "HypoMux" '$\"$INSTDIR\${PRODUCT_EXECUTABLE}$\" --silent'`,
-		`"${HYPOMUX_PROTECTED_CORE_BIN}\hypomux-engine.exe" install-service --desktop "$INSTDIR\${PRODUCT_EXECUTABLE}"`,
-		`Delete "$APPDATA\HypoMuxCoreRuntime\tun-config-*.json"`,
-		`IfFileExists "$INSTDIR\bin\hypomux-engine.exe" 0 serviceRemoveRaw`,
-		`"$SYSDIR\sc.exe" delete "${HYPOMUX_CORE_SERVICE}"`,
-		`%USERPROFILE%\.hypomux`,
-	} {
+	script := strings.ReplaceAll(string(data), "\r\n", "\n")
+	start := strings.Index(script, "\nSection\n")
+	end := strings.Index(script, `Section "uninstall"`)
+	if start < 0 || end < start {
+		t.Fatal("missing installer section")
+	}
+	section := script[start:end]
+	previous := -1
+	for _, step := range []string{`Call EnsureWebViewRuntime`, `StrCpy $HypoMuxSetupOperation "begin"`, `Call CloseRunningHypoMux`, `Call StopCoreServiceForUpgrade`, `Call RecoverPreviousWailsInstallation`, `Call RecoverLegacyV22Network`, `Call RecoverWailsInstallations`, `Call StopCoreProcessesForUpgrade`, `StrCpy $HypoMuxSetupOperation "apply"`, `install-service --desktop`, `--core-service-self-test`, `!insertmacro HypoMuxWriteRegistration`, `StrCpy $HypoMuxSetupOperation "commit"`, `Call RemoveLegacyInstallations`, `Call RemovePreviousWailsInstallation`, `Call RemoveLegacyAutostartTask`, `Call RestoreAutostart`} {
+		at := strings.Index(section, step)
+		if at <= previous {
+			t.Fatalf("unsafe/missing step %q at %d after %d", step, at, previous)
+		}
+		previous = at
+	}
+	for _, required := range []string{`!define UNINST_KEY_NAME "HypoMux"`, `InstallDir ""`, `Function .onInstFailed`, `!define MUI_CUSTOMFUNCTION_ABORT RollbackSetupTransaction`, `--setup-transaction rollback`, `--setup-transaction recover`, `IfErrors registrationFailed`} {
 		if !strings.Contains(script, required) {
-			t.Fatalf("installer is missing %q", required)
+			t.Fatalf("missing %q", required)
 		}
 	}
-	if !strings.Contains(script, `Call RemoveLegacyAutostartTask`) ||
-		!strings.Contains(script, `Call un.RemoveLegacyAutostartTask`) {
-		t.Fatal("installer and uninstaller must both remove the legacy elevated autostart task")
-	}
-	if strings.Contains(script, `InstallDir "$PROGRAMFILES64\${INFO_COMPANYNAME}\${INFO_PRODUCTNAME}"`) {
-		t.Fatal("installer still uses the duplicated company/product directory")
-	}
-	uninstallAt := strings.Index(script, `Section "uninstall"`)
-	if uninstallAt < 0 {
-		t.Fatal("installer is missing its uninstall section")
-	}
-	if strings.Contains(script[:uninstallAt], `IfFileExists "$INSTDIR\${PRODUCT_EXECUTABLE}" 0 +2`) {
-		t.Fatal("installer can still launch a legacy Python UI with the Wails-only recovery argument")
-	}
-	closeAt := strings.Index(script, "Call CloseRunningHypoMux")
-	legacyRecoverAt := strings.Index(script, "Call RecoverLegacyV22Network")
-	wailsRecoverAt := strings.Index(script, "Call RecoverWailsInstallations")
-	migrateAt := strings.Index(script, "Call RemoveLegacyInstallations")
-	quiesceAt := strings.Index(script, "Call StopCoreProcessesForUpgrade")
-	writeAt := strings.Index(script, "SetOutPath $INSTDIR")
-	legacyTaskCleanupAt := strings.Index(script, "Call RemoveLegacyAutostartTask")
-	if closeAt < 0 || legacyRecoverAt <= closeAt || wailsRecoverAt <= legacyRecoverAt ||
-		migrateAt <= wailsRecoverAt || quiesceAt <= migrateAt || writeAt <= quiesceAt ||
-		legacyTaskCleanupAt < 0 || legacyTaskCleanupAt >= writeAt {
-		t.Fatalf(
-			"upgrade order is unsafe: task-cleanup=%d close=%d legacy-recover=%d wails-recover=%d migrate=%d quiesce=%d write=%d",
-			legacyTaskCleanupAt, closeAt, legacyRecoverAt, wailsRecoverAt, migrateAt, quiesceAt, writeAt,
-		)
-	}
-	disableAt := strings.Index(script, `sc.exe" config "${HYPOMUX_CORE_SERVICE}" start= disabled`)
-	stopAt := strings.Index(script, `sc.exe" stop "${HYPOMUX_CORE_SERVICE}"`)
-	if disableAt < 0 || stopAt <= disableAt {
-		t.Fatalf("Core service restart must be disabled before stop: disable=%d stop=%d", disableAt, stopAt)
+	for _, unsafe := range []string{`Call PrepareProtectedCoreDirectory`, `ExecWait '$0 /S'`, `ExecWait '$0 /VERYSILENT`, `RMDir /r "$PROGRAMFILES64\HypoMux\HypoMux"`, `!insertmacro wails.webview2runtime`} {
+		if strings.Contains(script[:end], unsafe) {
+			t.Fatalf("unsafe pre-commit operation remains %q", unsafe)
+		}
 	}
 }
 
@@ -95,12 +46,12 @@ func TestInstallerMigratesRegisteredWailsInstallWhenDirectoryChanges(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	script := string(data)
+	script := strings.ReplaceAll(string(data), "\r\n", "\n")
 	captureAt := strings.Index(script, `ReadRegStr $HypoMuxPreviousInstallDir HKLM "${UNINST_KEY}" "InstallLocation"`)
 	compareAt := strings.Index(script, `Call DetermineInstallPathChange`)
 	recoverAt := strings.Index(script, `Call RecoverPreviousWailsInstallation`)
-	copyAt := strings.Index(script, `!insertmacro wails.files`)
-	commitAt := strings.Index(script, `!insertmacro wails.writeUninstaller`)
+	copyAt := strings.Index(script, `StrCpy $HypoMuxSetupOperation "apply"`)
+	commitAt := strings.Index(script, `!insertmacro HypoMuxWriteRegistration`)
 	removeAt := strings.Index(script, `Call RemovePreviousWailsInstallation`)
 	restoreAt := strings.Index(script, `Call RestoreAutostart`)
 	if captureAt < 0 || compareAt <= captureAt || recoverAt <= compareAt || copyAt <= recoverAt || commitAt <= copyAt || removeAt <= commitAt || restoreAt <= removeAt {
@@ -145,17 +96,11 @@ func TestMachineInstallerSeparatesProtectedServiceFromCustomDesktopPath(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	script := string(data)
-	protectedCopyAt := strings.Index(script, `SetOutPath "${HYPOMUX_PROTECTED_CORE_BIN}"`)
-	protectAt := strings.Index(script, `Call FinalizeProtectedCoreDirectory`)
-	installAt := strings.Index(script, `"${HYPOMUX_PROTECTED_CORE_BIN}\hypomux-engine.exe" install-service --desktop "$INSTDIR\${PRODUCT_EXECUTABLE}"`)
-	if protectedCopyAt < 0 || protectAt <= protectedCopyAt || installAt <= protectAt {
-		t.Fatalf(
-			"protected Core order is unsafe: copy=%d protect=%d install=%d",
-			protectedCopyAt,
-			protectAt,
-			installAt,
-		)
+	script := strings.ReplaceAll(string(data), "\r\n", "\n")
+	applyAt := strings.Index(script, `StrCpy $HypoMuxSetupOperation "apply"`)
+	installAt := strings.Index(script, `"${HYPOMUX_PROTECTED_CORE_BIN}\hypomux-engine.exe" install-service --desktop`)
+	if applyAt < 0 || installAt <= applyAt {
+		t.Fatal("protected payload must be transactionally applied before service registration")
 	}
 	if strings.Contains(script, `"$INSTDIR\bin\hypomux-engine.exe" install-service`) {
 		t.Fatal("machine service still runs from the user-selected application directory")
@@ -164,28 +109,14 @@ func TestMachineInstallerSeparatesProtectedServiceFromCustomDesktopPath(t *testi
 		t.Fatal("uninstaller still recursively removes the user-selected application directory")
 	}
 
-	protection, err := os.ReadFile("build/windows/nsis/protect-core-directory.ps1")
+	protection, err := os.ReadFile("internal/setup/platform_windows.go")
 	if err != nil {
 		t.Fatal(err)
 	}
-	protectionScript := string(protection)
-	for _, required := range []string{
-		`CommonApplicationData`,
-		`BuiltinAdministratorsSid`,
-		`LocalSystemSid`,
-		`BuiltinUsersSid`,
-		`SetAccessRuleProtection($true, $false)`,
-		`[System.IO.DirectoryInfo]::new`,
-		`[System.IO.FileInfo]::new`,
-		`[System.IO.FileSystemAclExtensions]::SetAccessControl`,
-		`ReparsePoint`,
-	} {
-		if !strings.Contains(protectionScript, required) {
-			t.Fatalf("protected Core preparation is missing %q", required)
+	for _, required := range []string{`secureDirectory`, `FILE_ATTRIBUTE_REPARSE_POINT`, `SetNamedSecurityInfo`, `PROTECTED_DACL_SECURITY_INFORMATION`, `NumberOfLinks`, `O:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;GRGX;;;BU)`} {
+		if !strings.Contains(string(protection), required) {
+			t.Fatalf("missing native ACL guard %q", required)
 		}
-	}
-	if strings.Contains(protectionScript, `Set-Acl -LiteralPath`) {
-		t.Fatal("protected Core preparation must not depend on the Microsoft.PowerShell.Security module")
 	}
 }
 
@@ -194,7 +125,7 @@ func TestInstallerClearsInheritedPowerShellModulePath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	script := string(data)
+	script := strings.ReplaceAll(string(data), "\r\n", "\n")
 	if !strings.Contains(script, `System::Call 'kernel32::SetEnvironmentVariable(t "PSModulePath", p 0)'`) {
 		t.Fatal("installer does not clear the inherited PowerShell module path")
 	}
@@ -208,7 +139,7 @@ func TestInstallerWindowsVersionCheckIsForwardCompatible(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	script := string(data)
+	script := strings.ReplaceAll(string(data), "\r\n", "\n")
 	for _, required := range []string{
 		`ManifestSupportedOS Win10`,
 		`Function HypoMuxCheckPlatform`,
@@ -235,7 +166,7 @@ func TestInstallerCoreShutdownBarrierIsPathScopedAndBounded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	script := string(data)
+	script := strings.ReplaceAll(string(data), "\r\n", "\n")
 	for _, required := range []string{
 		`[System.IO.Path]::GetFullPath($_.Path).Equals(`,
 		`[System.StringComparison]::OrdinalIgnoreCase`,
@@ -260,7 +191,7 @@ func TestInstallerCoreShutdownBarrierIsPathScopedAndBounded(t *testing.T) {
 	}
 	installer := string(installerData)
 	for _, required := range []string{
-		`MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "$(CoreProcessStopFailed)" IDRETRY stopCoreProcessesRetry`,
+		`MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "$(CoreProcessStopFailed)$\r$\n$\r$\n$(CoreCheckDetails)" IDRETRY stopCoreProcessesRetry`,
 		`System::Call 'kernel32::CreateMutex(`,
 		`SetErrorLevel 66`,
 	} {
@@ -278,7 +209,7 @@ func TestLegacyRecoveryIsNarrowlyScoped(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	script := string(data)
+	script := strings.ReplaceAll(string(data), "\r\n", "\n")
 	for _, required := range []string{
 		`StartsWith($ownedRoot, [System.StringComparison]::OrdinalIgnoreCase)`,
 		`Where-Object InterfaceAlias -EQ 'HypoMux-Tun'`,

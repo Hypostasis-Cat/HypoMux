@@ -1,0 +1,21 @@
+HypoMux 安装诊断工具 v2（仅收集，不修复）
+
+适用：首次安装、安装到一半失败、更新失败，包括 v2.7.0 提示“旧版 Core 文件暂时无法更新”但详情为空。
+
+1. 解压整个压缩包。双击 Start-HypoMux-Install-Diagnostics.cmd。
+2. 没有菜单，不需要输入 1 或 2，也不要求已安装 HypoMux。
+3. 一般十几秒内完成；极端情况下各子检查最多等待 20 秒。
+4. 将窗口显示的整个 HypoMux-Install-Diagnostics-... 文件夹压缩发回。
+   即使失败，也请保留 launcher.log、startup.log，不能只发 report.log。
+5. 同时附上安装包完整文件名、选择的安装目录和错误截图。
+
+不要求管理员权限，不停止 HypoMux、不改服务/网络/权限，不修改安装文件。
+只写诊断文件；超时会结束工具自己启动的诊断 PowerShell 子进程。
+普通权限无法读取的部分会在报告中注明，不会为此停止其他检查。
+日志含本机用户名和安装路径；发送前可以检查、遮盖这些信息。
+
+可选：需要检查自定义安装目录时，在 PowerShell 中运行：
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Collect-HypoMuxInstallDiagnostics.ps1 -InstallDir "D:\Apps\HypoMux" -NoPrompt
+
+本工具检测 PowerShell 启动、相关命令加载、安装注册、服务状态和文件属性。
+它不执行安装器里的结束进程脚本；诊断通过不等于安装一定成功。

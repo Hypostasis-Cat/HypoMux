@@ -10,6 +10,7 @@ import (
 func WebView2Available() bool {
 	return true
 }
+func WebView2MachineAvailable() bool { return true }
 
 func ShowWebView2MissingMessage() {}
 

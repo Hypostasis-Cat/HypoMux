@@ -33,11 +33,21 @@ function Get-OwnedCoreProcesses {
 }
 
 function Test-TargetReplaceable {
-    if (-not [System.IO.File]::Exists($targetPath)) {
-        return $true
-    }
-
     try {
+        # File.Exists also returns false on access errors. Only genuinely
+        # absent files may bypass the replacement check.
+        $attributes = [System.IO.File]::GetAttributes($targetPath)
+        if (($attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "Refusing to modify a linked Core executable: $targetPath"
+        }
+        # ReadOnly is not a process lock and rebooting cannot clear it.
+        # Preserve every other attribute and never loosen the file's ACL.
+        if (($attributes -band [System.IO.FileAttributes]::ReadOnly) -ne 0) {
+            [System.IO.File]::SetAttributes(
+                $targetPath,
+                ($attributes -band (-bnot [System.IO.FileAttributes]::ReadOnly))
+            )
+        }
         # Match the access needed by the installer without demanding that every
         # harmless reader (for example an antivirus scanner) close its handle.
         # Existing handles must still permit writes, so a running or genuinely
@@ -53,8 +63,15 @@ function Test-TargetReplaceable {
         $script:lastReplaceFailure = ''
         return $true
     }
+    catch [System.IO.FileNotFoundException] {
+        return $true
+    }
+    catch [System.IO.DirectoryNotFoundException] {
+        return $true
+    }
     catch {
-        $script:lastReplaceFailure = $_.Exception.Message
+        $cause = $_.Exception.GetBaseException()
+        $script:lastReplaceFailure = '{0} (HRESULT=0x{1:X8})' -f $cause.Message, $cause.HResult
         return $false
     }
 }
@@ -87,7 +104,7 @@ if ($remaining.Count -gt 0) {
     exit 10
 }
 
-Write-Output "Core executable is still write-locked: $targetPath"
+Write-Output "Core executable cannot be replaced: $targetPath"
 if ($lastReplaceFailure) {
     Write-Output "Write probe failed: $lastReplaceFailure"
 }

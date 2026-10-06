@@ -1,4 +1,4 @@
-# -*- coding: UTF-8 -*-
+﻿# -*- coding: UTF-8 -*-
 Unicode true
 
 ####
@@ -84,6 +84,7 @@ ManifestSupportedOS Win10
 # !define MUI_WELCOMEFINISHPAGE_BITMAP "resources\leftimage.bmp" #Include this to add a bitmap on the left side of the Welcome Page. Must be a size of 164x314
 !define MUI_FINISHPAGE_NOAUTOCLOSE # Wait on the INSTFILES page so the user can take a look into the details of the installation steps
 !define MUI_ABORTWARNING # This will warn the user if they exit from the installer.
+!define MUI_CUSTOMFUNCTION_ABORT RollbackSetupTransaction
 
 !insertmacro MUI_PAGE_WELCOME # Welcome to the installer page.
 # !insertmacro MUI_PAGE_LICENSE "resources\eula.txt" # Adds a EULA page to the installer
@@ -131,10 +132,14 @@ LangString CoreServiceForceStopping ${LANG_ENGLISH} "The previous Core Service d
 LangString CoreServiceForceStopping ${LANG_SIMPCHINESE} "旧版 Core 服务未能及时停止，正在结束其服务进程…"
 LangString CoreServiceStopFailed ${LANG_ENGLISH} "Could not stop HypoMux Core Service. Setup cannot safely replace the application files."
 LangString CoreServiceStopFailed ${LANG_SIMPCHINESE} "无法停止 HypoMux Core 服务，安装程序不能安全替换应用文件。"
-LangString CoreProcessStopping ${LANG_ENGLISH} "Stopping remaining HypoMux Core processes before updating files..."
-LangString CoreProcessStopping ${LANG_SIMPCHINESE} "正在结束残留的 HypoMux Core 进程以更新文件…"
-LangString CoreProcessStopFailed ${LANG_ENGLISH} "The old HypoMux Core file cannot be updated yet. Close HypoMux or wait a moment, then retry."
-LangString CoreProcessStopFailed ${LANG_SIMPCHINESE} "旧版 HypoMux Core 文件暂时无法更新。请关闭 HypoMux 或稍候片刻，然后重试。"
+LangString CoreProcessStopping ${LANG_ENGLISH} "Checking existing HypoMux Core files before installation..."
+LangString CoreProcessStopping ${LANG_SIMPCHINESE} "正在检查安装前已有的 HypoMux Core 文件…"
+LangString CoreProcessStopFailed ${LANG_ENGLISH} "HypoMux Core update check failed. See the diagnostic information below."
+LangString CoreProcessStopFailed ${LANG_SIMPCHINESE} "HypoMux Core 更新检查失败。请查看下方诊断信息。"
+LangString CoreCheckDetails ${LANG_ENGLISH} "Result: $0$\r$\nFile: $HypoMuxCoreCheckTarget$\r$\nReport: $HypoMuxCoreCheckLog$\r$\n$1"
+LangString CoreCheckDetails ${LANG_SIMPCHINESE} "返回值：$0$\r$\n文件：$HypoMuxCoreCheckTarget$\r$\n报告：$HypoMuxCoreCheckLog$\r$\n$1"
+LangString CoreCheckLogUnavailable ${LANG_ENGLISH} "Could not write report; copy this message."
+LangString CoreCheckLogUnavailable ${LANG_SIMPCHINESE} "无法写入报告，请复制或截图保存此信息。"
 LangString InstallerAlreadyRunning ${LANG_ENGLISH} "HypoMux Setup is already running. Finish or close it before starting another installer."
 LangString InstallerAlreadyRunning ${LANG_SIMPCHINESE} "HypoMux 安装程序已在运行，请先完成或关闭它。"
 LangString LegacyInstallRemoving ${LANG_ENGLISH} "Removing the previous HypoMux installation before migrating files..."
@@ -157,14 +162,23 @@ LangString WailsNetworkRecoverFailed ${LANG_SIMPCHINESE} "无法安全恢复上�
 #!finalize 'signtool --file "%1"'
 
 Name "${INFO_PRODUCTNAME}"
-OutFile "..\..\..\bin\${INFO_PROJECTNAME}-${ARCH}-installer.exe" # Name of the installer's file.
+!ifndef HYPOMUX_INSTALLER_OUTFILE
+    !define HYPOMUX_INSTALLER_OUTFILE "..\..\..\bin\${INFO_PROJECTNAME}-${ARCH}-installer.exe"
+!endif
+OutFile "${HYPOMUX_INSTALLER_OUTFILE}"
 InstallDir "" ; Preserve /D=; resolve the default in .onInit using the 64-bit registry.
 ShowInstDetails show # This will always show the installation details.
 
-Var HypoMuxFreshInstall
+Var HypoMuxSetupActive
+Var HypoMuxSetupOperation
+Var HypoMuxSetupLog
+Var HypoMuxSetupHelper
+
 Var HypoMuxPreviousInstallDir
 Var HypoMuxInstallPathChanged
 Var HypoMuxAutostartEnabled
+Var HypoMuxCoreCheckTarget
+Var HypoMuxCoreCheckLog
 
 !macro HypoMuxClearInheritedPSModulePath
    ; PowerShell 7 normally substitutes a Windows PowerShell-only module path
@@ -179,7 +193,8 @@ Var HypoMuxAutostartEnabled
    ; them stops and replaces the Core service files.
    System::Call 'kernel32::CreateMutex(p 0, i 0, t "Global\HypoMux-Installer-4C1461C5-0555-4F4C-9D47-6619C5167414") p .r0 ?e'
    Pop $1
-   ${If} $1 == 183
+   ${If} $0 == 0
+   ${OrIf} $1 == 183
        IfSilent hypoMuxSingleInstanceAbort 0
        MessageBox MB_OK|MB_ICONEXCLAMATION "$(InstallerAlreadyRunning)"
        hypoMuxSingleInstanceAbort:
@@ -242,11 +257,15 @@ FunctionEnd
 !include "install-directory.nsh"
 
 Function .onInit
+   SetErrorLevel 1 ; Success is assigned only after transaction commit.
    !insertmacro HypoMuxClearInheritedPSModulePath
    !insertmacro MUI_LANGDLL_DISPLAY
    !insertmacro HypoMuxEnsureSingleInstaller
    Call HypoMuxCheckPlatform
-   StrCpy $HypoMuxFreshInstall "1"
+   !insertmacro wails.setShellContext
+   Call StageSetupPayload
+   StrCpy $HypoMuxSetupOperation "recover"
+   Call RunSetupTransaction
    StrCpy $HypoMuxPreviousInstallDir ""
    StrCpy $HypoMuxInstallPathChanged "0"
    StrCpy $HypoMuxAutostartEnabled "0"
@@ -260,15 +279,13 @@ Function .onInit
    !else
        SetRegView 64
        ReadRegStr $HypoMuxPreviousInstallDir HKLM "${UNINST_KEY}" "InstallLocation"
-       ${If} $HypoMuxPreviousInstallDir != ""
-           StrCpy $HypoMuxFreshInstall "0"
-       ${EndIf}
-       nsExec::Exec '"$SYSDIR\sc.exe" query "${HYPOMUX_CORE_SERVICE}"'
-       Pop $1
-       ${If} $1 == 0
-           StrCpy $HypoMuxFreshInstall "0"
-       ${EndIf}
    !endif
+   ${If} $HypoMuxPreviousInstallDir == ""
+       ReadRegStr $HypoMuxPreviousInstallDir SHELL_CONTEXT "${HYPOMUX_NESTED_UNINST_KEY}" "InstallLocation"
+   ${EndIf}
+   ${If} $HypoMuxPreviousInstallDir == ""
+       ReadRegStr $HypoMuxPreviousInstallDir SHELL_CONTEXT "${HYPOMUX_LEGACY_INNO_KEY}" "InstallLocation"
+   ${EndIf}
    Call HypoMuxInitializeInstallDir
 FunctionEnd
 
@@ -276,6 +293,18 @@ Function un.onInit
    !insertmacro HypoMuxClearInheritedPSModulePath
    !insertmacro MUI_UNGETLANGUAGE
    !insertmacro HypoMuxEnsureSingleInstaller
+   !insertmacro wails.setShellContext
+   Call un.StageSetupPayload
+   nsExec::ExecToStack /TIMEOUT=180000 '"$HypoMuxSetupHelper" --setup-transaction recover --scope ${WAILS_INSTALL_SCOPE}'
+   Pop $0
+   Pop $1
+   ${If} $0 != 0
+       IfSilent unRecoveryFailed
+       MessageBox MB_OK|MB_ICONSTOP "Incomplete setup recovery must finish before uninstalling.$\r$\n$1"
+       unRecoveryFailed:
+       SetErrorLevel 75
+       Abort
+   ${EndIf}
 FunctionEnd
 
 Function RemoveLegacyAutostartTask
@@ -303,18 +332,31 @@ Function RestoreAutostart
 FunctionEnd
 
 Function CloseRunningHypoMux
+    ; Do not make a fresh install depend on a script for closing an old UI.
+    ; A stale registry entry alone does not establish that an old app exists.
+    IfFileExists "$INSTDIR\${PRODUCT_EXECUTABLE}" closeRetry
+    ${If} $HypoMuxPreviousInstallDir != ""
+        IfFileExists "$HypoMuxPreviousInstallDir\${PRODUCT_EXECUTABLE}" closeRetry
+    ${EndIf}
+    IfFileExists "$PROGRAMFILES64\HypoMux\${PRODUCT_EXECUTABLE}" closeRetry
+    IfFileExists "$PROGRAMFILES64\HypoMux\HypoMux\${PRODUCT_EXECUTABLE}" closeRetry
+    Return
 closeRetry:
     SetDetailsPrint textonly
     DetailPrint "$(RunningAppClosing)"
     SetDetailsPrint both
-    nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "Get-Process -Name ${INFO_PROJECTNAME} -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue; Wait-Process -Name ${INFO_PROJECTNAME} -Timeout 15 -ErrorAction SilentlyContinue; if (Get-Process -Name ${INFO_PROJECTNAME} -ErrorAction SilentlyContinue) { exit 1 }"'
+    nsExec::ExecToStack /TIMEOUT=20000 '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "Get-Process -Name ${INFO_PROJECTNAME} -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue; Wait-Process -Name ${INFO_PROJECTNAME} -Timeout 15 -ErrorAction SilentlyContinue; if (Get-Process -Name ${INFO_PROJECTNAME} -ErrorAction SilentlyContinue) { exit 1 }; exit 0"'
     Pop $0
     Pop $1
     ${If} $0 == 0
         Return
     ${EndIf}
-    DetailPrint "$1"
-    MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "$(RunningAppCloseFailed)" IDRETRY closeRetry
+    DetailPrint "Result: $0; $1"
+    IfSilent closeAbort 0
+    MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "$(RunningAppCloseFailed)$\r$\nResult: $0$\r$\n$1" IDRETRY closeRetry
+    closeAbort:
+    SetErrorLevel 68
+    Call RollbackSetupTransaction
     Abort "$(RunningAppCloseFailed)"
 FunctionEnd
 
@@ -325,22 +367,29 @@ Function StopCoreServiceForUpgrade
     ; Disable restart before requesting a stop. A previous Core can have
     ; recovery actions, and install-service restores Automatic start after
     ; the new executable has been written successfully.
-    nsExec::Exec '"$SYSDIR\sc.exe" query "${HYPOMUX_CORE_SERVICE}"'
+    nsExec::ExecToStack /TIMEOUT=10000 '"$SYSDIR\sc.exe" query "${HYPOMUX_CORE_SERVICE}"'
     Pop $0
-    ${If} $0 != 0
+    Pop $1
+    ${If} $0 == 1060
         Return
+    ${EndIf}
+    ${If} $0 != 0
+        DetailPrint "Result: $0; $1"
+        Call RollbackSetupTransaction
+    Abort "$(CoreServiceStopFailed) $0"
     ${EndIf}
     nsExec::Exec '"$SYSDIR\sc.exe" config "${HYPOMUX_CORE_SERVICE}" start= disabled'
     Pop $0
     ${If} $0 != 0
-        Abort "$(CoreServiceStopFailed)"
+        Call RollbackSetupTransaction
+    Abort "$(CoreServiceStopFailed)"
     ${EndIf}
 
     ; sc.exe only submits the stop request. Waiting is kept in a separate
     ; bounded process so a deadlocked legacy service cannot freeze Setup.
     nsExec::Exec '"$SYSDIR\sc.exe" stop "${HYPOMUX_CORE_SERVICE}"'
     Pop $0
-    nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "try { if (Get-Service -Name ${HYPOMUX_CORE_SERVICE} -ErrorAction SilentlyContinue) { (Get-Service -Name ${HYPOMUX_CORE_SERVICE}).WaitForStatus([System.ServiceProcess.ServiceControllerStatus]::Stopped, [TimeSpan]::FromSeconds(20)) }; exit 0 } catch { exit 2 }"'
+    nsExec::ExecToStack /TIMEOUT=30000 '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "try { (Get-Service -Name ${HYPOMUX_CORE_SERVICE} -ErrorAction Stop).WaitForStatus([System.ServiceProcess.ServiceControllerStatus]::Stopped, [TimeSpan]::FromSeconds(20)); exit 0 } catch { [Console]::Error.WriteLine($$_.Exception.Message); exit 2 }"'
     Pop $0
     Pop $1
     ${If} $0 == 0
@@ -351,13 +400,15 @@ Function StopCoreServiceForUpgrade
     ; only the process hosting HypoMuxCore; automatic restart is already off.
     nsExec::Exec '"$SYSDIR\taskkill.exe" /F /FI "SERVICES eq ${HYPOMUX_CORE_SERVICE}"'
     Pop $0
-    Sleep 1000
-    nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "if ((Get-CimInstance Win32_Service | Where-Object Name -EQ ${HYPOMUX_CORE_SERVICE}).ProcessId -ne 0) { exit 1 }"'
+    ; Killing the process is asynchronous with SCM state updates. Wait for a
+    ; bounded stopped state instead of one fixed sleep and a CIM snapshot.
+    nsExec::ExecToStack /TIMEOUT=15000 '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "try { (Get-Service -Name ${HYPOMUX_CORE_SERVICE} -ErrorAction Stop).WaitForStatus([System.ServiceProcess.ServiceControllerStatus]::Stopped, [TimeSpan]::FromSeconds(10)); exit 0 } catch { [Console]::Error.WriteLine($$_.Exception.Message); exit 2 }"'
     Pop $0
     Pop $1
     ${If} $0 != 0
         DetailPrint "$1"
-        Abort "$(CoreServiceStopFailed)"
+        Call RollbackSetupTransaction
+    Abort "$(CoreServiceStopFailed)"
     ${EndIf}
 FunctionEnd
 
@@ -373,8 +424,9 @@ Function DetermineInstallPathChange
     ${EndIf}
     ClearErrors
     CreateDirectory "$INSTDIR"
-    IfErrors 0 +2
-        Abort "$(InstallPathInspectFailed)"
+    IfErrors 0 +3
+        Call RollbackSetupTransaction
+    Abort "$(InstallPathInspectFailed)"
     InitPluginsDir
     SetOutPath "$PLUGINSDIR"
     File /oname=compare-install-directories.ps1 "compare-install-directories.ps1"
@@ -389,6 +441,7 @@ Function DetermineInstallPathChange
         Return
     ${EndIf}
     DetailPrint "$1"
+    Call RollbackSetupTransaction
     Abort "$(InstallPathInspectFailed)"
 FunctionEnd
 
@@ -396,97 +449,83 @@ Function StopCoreProcessesForUpgrade
     SetDetailsPrint textonly
     DetailPrint "$(CoreProcessStopping)"
     SetDetailsPrint both
-    ; Recovery commands can briefly launch Core outside the service. Use the
-    ; exact installation path as the ownership boundary, then require an
-    ; exclusive open before NSIS attempts to replace the executable.
-    InitPluginsDir
-    SetOutPath "$PLUGINSDIR"
-    File /oname=stop-core-for-upgrade.ps1 "stop-core-for-upgrade.ps1"
-
     stopCoreProcessesRetry:
 
     ; If the user changed the directory on the installer page, the previous
     ; registered Core still has to be unlocked before its exact owned files
     ; can be removed after the new installation commits.
     ${If} $HypoMuxInstallPathChanged == "1"
-        nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\stop-core-for-upgrade.ps1" -EnginePath "$HypoMuxPreviousInstallDir\bin\hypomux-engine.exe"'
-        Pop $0
-        Pop $1
+        StrCpy $HypoMuxCoreCheckTarget "$HypoMuxPreviousInstallDir\bin\hypomux-engine.exe"
+        Call CheckExistingCoreForUpgrade
         ${If} $0 != 0
-            DetailPrint "$1"
-            IfSilent stopCoreProcessesAbort 0
-            MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "$(CoreProcessStopFailed)" IDRETRY stopCoreProcessesRetry
-            Goto stopCoreProcessesAbort
+            Goto stopCoreProcessesFailed
         ${EndIf}
     ${EndIf}
 
-    nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\stop-core-for-upgrade.ps1" -EnginePath "$INSTDIR\bin\hypomux-engine.exe"'
-    Pop $0
-    Pop $1
+    StrCpy $HypoMuxCoreCheckTarget "$INSTDIR\bin\hypomux-engine.exe"
+    Call CheckExistingCoreForUpgrade
     ${If} $0 != 0
-        DetailPrint "$1"
-        IfSilent stopCoreProcessesAbort 0
-        MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "$(CoreProcessStopFailed)" IDRETRY stopCoreProcessesRetry
-        Goto stopCoreProcessesAbort
+        Goto stopCoreProcessesFailed
     ${EndIf}
+    !if "${WAILS_INSTALL_SCOPE}" != "user"
+        ; The service image is separate from the desktop copy. Check it before
+        ; PrepareProtectedCoreDirectory attempts to remove the old payload.
+        StrCpy $HypoMuxCoreCheckTarget "${HYPOMUX_PROTECTED_CORE_BIN}\hypomux-engine.exe"
+        Call CheckExistingCoreForUpgrade
+        ${If} $0 != 0
+            Goto stopCoreProcessesFailed
+        ${EndIf}
+    !endif
     Return
 
+    stopCoreProcessesFailed:
+    Call LogCoreUpgradeCheckFailure
+    IfSilent stopCoreProcessesAbort 0
+    MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "$(CoreProcessStopFailed)$\r$\n$\r$\n$(CoreCheckDetails)" IDRETRY stopCoreProcessesRetry
     stopCoreProcessesAbort:
+    SetErrorLevel 67
+    Call RollbackSetupTransaction
     Abort "$(CoreProcessStopFailed)"
 FunctionEnd
 
-Function PrepareProtectedCoreDirectory
+Function CheckExistingCoreForUpgrade
+    ; A fresh or partially removed installation has no old file to unlock.
+    ; Do this in NSIS before extracting or launching the PowerShell helper.
+    ; Existing files retain the path-scoped process and write-access checks.
+    StrCpy $0 "0"
+    StrCpy $1 ""
+    IfFileExists "$HypoMuxCoreCheckTarget" 0 coreUpgradeCheckDone
     InitPluginsDir
     SetOutPath "$PLUGINSDIR"
-    File /oname=protect-core-directory.ps1 "protect-core-directory.ps1"
-    nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\protect-core-directory.ps1" -CoreRoot "${HYPOMUX_PROTECTED_CORE_ROOT}" -Phase Prepare'
+    File /oname=stop-core-for-upgrade.ps1 "stop-core-for-upgrade.ps1"
+    nsExec::ExecToStack /TIMEOUT=30000 '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\stop-core-for-upgrade.ps1" -EnginePath "$HypoMuxCoreCheckTarget"'
     Pop $0
     Pop $1
-    ${If} $0 != 0
-        DetailPrint "$1"
-        Abort "$(CoreDirectoryPrepareFailed)"
-    ${EndIf}
+    coreUpgradeCheckDone:
 FunctionEnd
 
-Function FinalizeProtectedCoreDirectory
-    nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\protect-core-directory.ps1" -CoreRoot "${HYPOMUX_PROTECTED_CORE_ROOT}" -Phase Finalize'
-    Pop $0
-    Pop $1
-    ${If} $0 != 0
-        DetailPrint "$1"
-        Call RollbackFreshMachineInstall
-        Abort "$(CoreDirectoryFinalizeFailed)"
-    ${EndIf}
-FunctionEnd
-
-Function RollbackFreshMachineInstall
-    ${If} $HypoMuxFreshInstall != "1"
-        Return
-    ${EndIf}
-    IfFileExists "${HYPOMUX_PROTECTED_CORE_BIN}\hypomux-engine.exe" 0 rollbackWithAppCore
-        nsExec::ExecToLog '"${HYPOMUX_PROTECTED_CORE_BIN}\hypomux-engine.exe" remove-service'
-        Goto rollbackServiceRemoved
-    rollbackWithAppCore:
-    IfFileExists "$INSTDIR\bin\hypomux-engine.exe" 0 rollbackServiceRemoved
-        nsExec::ExecToLog '"$INSTDIR\bin\hypomux-engine.exe" remove-service'
-    rollbackServiceRemoved:
-    Delete "${HYPOMUX_PROTECTED_CORE_BIN}\libcronet.dll"
-    Delete "${HYPOMUX_PROTECTED_CORE_BIN}\wintun.dll"
-    Delete "${HYPOMUX_PROTECTED_CORE_BIN}\sing-box.exe"
-    Delete "${HYPOMUX_PROTECTED_CORE_BIN}\hypomux-engine.exe"
-    RMDir "${HYPOMUX_PROTECTED_CORE_BIN}"
-    RMDir "${HYPOMUX_PROTECTED_CORE_ROOT}"
-    RMDir "$APPDATA\HypoMux"
-    Delete "$APPDATA\HypoMuxCoreRuntime\tun-config-*.json"
-    RMDir "$APPDATA\HypoMuxCoreRuntime"
-
-    Delete "$INSTDIR\bin\libcronet.dll"
-    Delete "$INSTDIR\bin\wintun.dll"
-    Delete "$INSTDIR\bin\sing-box.exe"
-    Delete "$INSTDIR\bin\hypomux-engine.exe"
-    RMDir "$INSTDIR\bin"
-    Delete "$INSTDIR\${PRODUCT_EXECUTABLE}"
-    RMDir "$INSTDIR"
+Function LogCoreUpgradeCheckFailure
+    ; Preserve the return value even when the child emitted no text or never
+    ; started. The detail list alone is not a durable diagnostic record.
+    Push $2
+    ClearErrors
+    GetTempFileName $HypoMuxCoreCheckLog "$TEMP"
+    IfErrors coreCheckLogFailed
+    FileOpen $2 "$HypoMuxCoreCheckLog" w
+    IfErrors coreCheckLogFailed
+    FileWriteWord $2 0xFEFF
+    FileWriteUTF16LE $2 "HypoMux ${INFO_PRODUCTVERSION} Core update check$\r$\n"
+    FileWriteUTF16LE $2 "Result: $0$\r$\nTarget: $HypoMuxCoreCheckTarget$\r$\n"
+    FileWriteUTF16LE $2 "PowerShell: $SYSDIR\WindowsPowerShell\v1.0\powershell.exe$\r$\n"
+    FileWriteUTF16LE $2 "Helper: $PLUGINSDIR\stop-core-for-upgrade.ps1$\r$\nOutput: $1$\r$\n"
+    FileClose $2
+    IfErrors coreCheckLogFailed
+    Goto coreCheckLogDone
+    coreCheckLogFailed:
+    StrCpy $HypoMuxCoreCheckLog "$(CoreCheckLogUnavailable)"
+    coreCheckLogDone:
+    DetailPrint "$(CoreCheckDetails)"
+    Pop $2
 FunctionEnd
 
 Function RecoverLegacyV22Network
@@ -511,7 +550,8 @@ Function RecoverLegacyV22Network
         Pop $1
         ${If} $0 != 0
             DetailPrint "$1"
-            Abort "$(LegacyNetworkRecoverFailed)"
+            Call RollbackSetupTransaction
+    Abort "$(LegacyNetworkRecoverFailed)"
         ${EndIf}
         legacyV22RecoveryDone:
     !endif
@@ -527,7 +567,8 @@ Function RecoverWailsInstallations
         Pop $1
         ${If} $0 != 0
             DetailPrint "$1"
-            Abort "$(WailsNetworkRecoverFailed)"
+            Call RollbackSetupTransaction
+    Abort "$(WailsNetworkRecoverFailed)"
         ${EndIf}
         IfFileExists "$INSTDIR\${PRODUCT_EXECUTABLE}" 0 nestedWailsRecovery
             nsExec::ExecToStack '"$INSTDIR\${PRODUCT_EXECUTABLE}" --recover-network'
@@ -535,7 +576,8 @@ Function RecoverWailsInstallations
             Pop $1
             ${If} $0 != 0
                 DetailPrint "$1"
-                Abort "$(WailsNetworkRecoverFailed)"
+                Call RollbackSetupTransaction
+    Abort "$(WailsNetworkRecoverFailed)"
             ${EndIf}
 
     nestedWailsRecovery:
@@ -548,7 +590,8 @@ Function RecoverWailsInstallations
             Pop $1
             ${If} $0 != 0
                 DetailPrint "$1"
-                Abort "$(WailsNetworkRecoverFailed)"
+                Call RollbackSetupTransaction
+    Abort "$(WailsNetworkRecoverFailed)"
             ${EndIf}
             IfFileExists "$PROGRAMFILES64\HypoMux\HypoMux\${PRODUCT_EXECUTABLE}" 0 wailsRecoveryDone
                 nsExec::ExecToStack '"$PROGRAMFILES64\HypoMux\HypoMux\${PRODUCT_EXECUTABLE}" --recover-network'
@@ -556,7 +599,8 @@ Function RecoverWailsInstallations
                 Pop $1
                 ${If} $0 != 0
                     DetailPrint "$1"
-                    Abort "$(WailsNetworkRecoverFailed)"
+                    Call RollbackSetupTransaction
+    Abort "$(WailsNetworkRecoverFailed)"
                 ${EndIf}
         wailsRecoveryDone:
     !endif
@@ -576,7 +620,8 @@ Function RecoverPreviousWailsInstallation
         Pop $1
         ${If} $0 != 0
             DetailPrint "$1"
-            Abort "$(WailsNetworkRecoverFailed)"
+            Call RollbackSetupTransaction
+    Abort "$(WailsNetworkRecoverFailed)"
         ${EndIf}
         IfFileExists "$HypoMuxPreviousInstallDir\${PRODUCT_EXECUTABLE}" 0 previousWailsRecoveryDone
             nsExec::ExecToStack '"$HypoMuxPreviousInstallDir\${PRODUCT_EXECUTABLE}" --recover-network'
@@ -584,7 +629,8 @@ Function RecoverPreviousWailsInstallation
             Pop $1
             ${If} $0 != 0
                 DetailPrint "$1"
-                Abort "$(WailsNetworkRecoverFailed)"
+                Call RollbackSetupTransaction
+    Abort "$(WailsNetworkRecoverFailed)"
             ${EndIf}
     previousWailsRecoveryDone:
 FunctionEnd
@@ -593,109 +639,167 @@ Function RemovePreviousWailsInstallation
     ${If} $HypoMuxInstallPathChanged != "1"
         Return
     ${EndIf}
-
-    ; Require the Wails Core marker and delete only files owned by HypoMux.
-    ; Unknown user files keep the old directory non-empty and are preserved.
-    IfFileExists "$HypoMuxPreviousInstallDir\bin\hypomux-engine.exe" 0 previousWailsRemovalDone
-        Delete "$HypoMuxPreviousInstallDir\bin\libcronet.dll"
-        Delete "$HypoMuxPreviousInstallDir\bin\wintun.dll"
-        Delete "$HypoMuxPreviousInstallDir\bin\sing-box.exe"
-        Delete "$HypoMuxPreviousInstallDir\bin\hypomux-engine.exe"
-        RMDir "$HypoMuxPreviousInstallDir\bin"
-        Delete "$HypoMuxPreviousInstallDir\uninstall.exe"
-        Delete "$HypoMuxPreviousInstallDir\${PRODUCT_EXECUTABLE}"
-        RMDir "$HypoMuxPreviousInstallDir"
-    previousWailsRemovalDone:
+    ; Native cleanup validates links and directory identity before deleting
+    ; exact old files. A cleanup failure cannot undo the committed new install.
+    nsExec::ExecToStack /TIMEOUT=60000 '"$HypoMuxSetupHelper" --setup-transaction cleanup-previous --scope ${WAILS_INSTALL_SCOPE} --previous-dir "$HypoMuxPreviousInstallDir\." --install-dir "$INSTDIR\."'
+    Pop $0
+    Pop $1
+    DetailPrint "$1"
 FunctionEnd
 
 Function RemoveLegacyInstallations
+    ; Payload is committed first. Never run a legacy uninstaller over the new
+    ; application, or recursively delete nested/custom installation folders.
     !if "${WAILS_INSTALL_SCOPE}" != "user"
-        SetRegView 64
-
-        ; Affected Wails builds used CompanyName/ProductName as two path
-        ; segments and registered under HypoMuxHypoMux. Remove that exact
-        ; installation before the corrected root is populated.
-        ReadRegStr $0 HKLM "${HYPOMUX_NESTED_UNINST_KEY}" "UninstallString"
-        ReadRegStr $2 HKLM "${HYPOMUX_NESTED_UNINST_KEY}" "InstallLocation"
-        ; Some machines retained the obsolete duplicate key after upgrading its
-        ; payload in place. Never let that stale registration launch the current
-        ; uninstaller and erase the installation we are about to update.
-        ${If} $2 != ""
-            GetFullPathName $2 "$2"
-            GetFullPathName $3 "$INSTDIR"
-            ${If} $2 == $3
-                DeleteRegKey HKLM "${HYPOMUX_NESTED_UNINST_KEY}"
-                Goto nestedRemoved
-            ${EndIf}
-        ${EndIf}
-        ${If} $0 == "$INSTDIR\uninstall.exe"
-            DeleteRegKey HKLM "${HYPOMUX_NESTED_UNINST_KEY}"
-            Goto nestedRemoved
-        ${EndIf}
-        ${If} $0 == '$\"$INSTDIR\uninstall.exe$\"'
-            DeleteRegKey HKLM "${HYPOMUX_NESTED_UNINST_KEY}"
-            Goto nestedRemoved
-        ${EndIf}
-        ${If} $0 == ""
-            IfFileExists "$PROGRAMFILES64\HypoMux\HypoMux\uninstall.exe" 0 nestedRemoved
-            StrCpy $0 "$PROGRAMFILES64\HypoMux\HypoMux\uninstall.exe"
-        ${EndIf}
-        DetailPrint "$(LegacyInstallRemoving)"
-        ClearErrors
-        ExecWait '"$0" /S' $1
-        IfErrors nestedUninstallFailed
-        ${If} $1 != 0
-            Goto nestedUninstallFailed
-        ${EndIf}
-        Goto nestedUninstallSucceeded
-        nestedUninstallFailed:
-        Abort "$(LegacyInstallRemoveFailed)"
-        nestedUninstallSucceeded:
         DeleteRegKey HKLM "${HYPOMUX_NESTED_UNINST_KEY}"
-        RMDir /r "$PROGRAMFILES64\HypoMux\HypoMux"
-        nestedRemoved:
-
-        ; v2.2.0 and earlier used this stable Inno Setup AppId. Running the
-        ; registered uninstaller removes only files owned by that package;
-        ; user configuration under %USERPROFILE%\.hypomux is untouched.
-        ReadRegStr $0 HKLM "${HYPOMUX_LEGACY_INNO_KEY}" "UninstallString"
-        ${If} $0 != ""
-            DetailPrint "$(LegacyInstallRemoving)"
-            ClearErrors
-            ExecWait '$0 /VERYSILENT /SUPPRESSMSGBOXES /NORESTART' $1
-            IfErrors legacyInnoUninstallFailed
-            ${If} $1 != 0
-                Goto legacyInnoUninstallFailed
-            ${EndIf}
-            Goto legacyInnoUninstallSucceeded
-            legacyInnoUninstallFailed:
-            Abort "$(LegacyInstallRemoveFailed)"
-            legacyInnoUninstallSucceeded:
-            DeleteRegKey HKLM "${HYPOMUX_LEGACY_INNO_KEY}"
-        ${EndIf}
-
-        ; Never mix the Python/PySide payload with the Wails application if a
-        ; damaged legacy registration points to a missing uninstaller.
-        IfFileExists "$PROGRAMFILES64\HypoMux\python313.dll" 0 legacyRemoved
-            Abort "$(LegacyInstallRemoveFailed)"
-        legacyRemoved:
+        DeleteRegKey HKLM "${HYPOMUX_LEGACY_INNO_KEY}"
+    !else
+        DeleteRegKey HKCU "${HYPOMUX_NESTED_UNINST_KEY}"
     !endif
 FunctionEnd
 
+!macro HypoMuxStagePayload PREFIX
+Function ${PREFIX}StageSetupPayload
+    InitPluginsDir
+    SetOutPath "$PLUGINSDIR\payload"
+    !insertmacro wails.files
+    !if "${PREFIX}" == ""
+    ; The uninstaller only needs the headless recovery entrypoint, not a
+    ; duplicate archive of Core and its DLLs.
+    File /oname=hypomux-engine.exe "..\..\..\bin\hypomux-engine.exe"
+    File /oname=sing-box.exe "..\..\..\bin\sing-box.exe"
+    File /oname=wintun.dll "..\..\..\bin\wintun.dll"
+    File /oname=libcronet.dll "..\..\..\bin\libcronet.dll"
+    !endif
+    StrCpy $HypoMuxSetupHelper "$PLUGINSDIR\payload\${PRODUCT_EXECUTABLE}"
+    !if "${WAILS_INSTALL_SCOPE}" == "user"
+        StrCpy $HypoMuxSetupLog "$LOCALAPPDATA\HypoMux\SetupTransaction\installer-errors.log"
+    !else
+        StrCpy $HypoMuxSetupLog "$APPDATA\HypoMux\SetupTransaction\installer-errors.log"
+    !endif
+FunctionEnd
+!macroend
+!insertmacro HypoMuxStagePayload ""
+!insertmacro HypoMuxStagePayload "un."
+
+Function LogSetupFailure
+    Push $2
+    FileOpen $2 "$HypoMuxSetupLog" a
+    IfErrors setupLogDone
+    FileWriteUTF16LE $2 "Stage: $HypoMuxSetupOperation; result: $0$\r$\n$1$\r$\n"
+    FileClose $2
+    setupLogDone:
+    Pop $2
+FunctionEnd
+
+Function RollbackSetupTransaction
+    ${If} $HypoMuxSetupActive != "1"
+        Return
+    ${EndIf}
+    Push $0
+    Push $1
+    Push $2
+    GetErrorLevel $2
+    Push $2
+    Call LogSetupFailure
+    ; Clear before invoking recovery to avoid recursive error callbacks.
+    StrCpy $HypoMuxSetupActive "0"
+    nsExec::ExecToStack /TIMEOUT=120000 '"$HypoMuxSetupHelper" --setup-transaction rollback --scope ${WAILS_INSTALL_SCOPE}'
+    Pop $0
+    Pop $1
+    DetailPrint "$1"
+    ${If} $0 != 0
+        IfSilent rollbackReportDone
+        MessageBox MB_OK|MB_ICONSTOP "Recovery incomplete ($0). Backups and report are retained in HypoMux\SetupTransaction under ProgramData (machine) or LocalAppData (user).$\r$\n$1"
+    ${EndIf}
+    rollbackReportDone:
+    Pop $2
+    SetErrorLevel $2
+    Pop $2
+    Pop $1
+    Pop $0
+FunctionEnd
+
+Function RunSetupTransaction
+    DetailPrint "Setup: $HypoMuxSetupOperation"
+    nsExec::ExecToStack /TIMEOUT=180000 '"$HypoMuxSetupHelper" --setup-transaction $HypoMuxSetupOperation --scope ${WAILS_INSTALL_SCOPE} --install-dir "$INSTDIR\." --payload "$PLUGINSDIR\payload"'
+    Pop $0
+    Pop $1
+    DetailPrint "$1"
+    ${If} $0 != 0
+        Call LogSetupFailure
+        IfSilent setupFailureSilent
+        MessageBox MB_OK|MB_ICONSTOP "Setup $HypoMuxSetupOperation failed ($0).$\r$\n$1"
+        setupFailureSilent:
+        Call RollbackSetupTransaction
+        SetErrorLevel 70
+        Abort
+    ${EndIf}
+FunctionEnd
+
+Function .onInstFailed
+    Call RollbackSetupTransaction
+FunctionEnd
+
+Function EnsureWebViewRuntime
+    StrCpy $HypoMuxSetupOperation "webview-runtime"
+    nsExec::ExecToStack '"$HypoMuxSetupHelper" --webview-check ${WAILS_INSTALL_SCOPE}'
+    Pop $0
+    Pop $1
+    ${If} $0 == 0
+        Return
+    ${EndIf}
+    SetOutPath "$PLUGINSDIR\webview2bootstrapper"
+    File "MicrosoftEdgeWebview2Setup.exe"
+    DetailPrint "$(WailsWebViewInstall)"
+    ClearErrors
+    ExecWait '"$PLUGINSDIR\webview2bootstrapper\MicrosoftEdgeWebview2Setup.exe" /silent /install' $0
+    IfErrors webviewFailed
+    DetailPrint "WebView2 bootstrapper exit code: $0"
+    ${If} $0 != 0
+    ${AndIf} $0 != 3010
+        Goto webviewFailed
+    ${EndIf}
+    nsExec::ExecToStack '"$HypoMuxSetupHelper" --webview-check ${WAILS_INSTALL_SCOPE}'
+    Pop $0
+    Pop $1
+    ${If} $0 == 0
+        Return
+    ${EndIf}
+    webviewFailed:
+    Call LogSetupFailure
+    IfSilent webviewFailedSilent
+    MessageBox MB_OK|MB_ICONSTOP "Microsoft Edge WebView2 Runtime installation failed ($0). Please install the runtime and retry.$\r$\nMicrosoft Edge WebView2 运行时安装未完成，请安装运行时后重试。"
+    webviewFailedSilent:
+    SetErrorLevel 71
+    Abort
+FunctionEnd
+
+!macro HypoMuxWriteRegistration
+    WriteUninstaller "$INSTDIR\uninstall.exe"
+    IfErrors registrationFailed
+    WriteRegStr SHELL_CONTEXT "${UNINST_KEY}" "Publisher" "${INFO_COMPANYNAME}"
+    WriteRegStr SHELL_CONTEXT "${UNINST_KEY}" "DisplayName" "${INFO_PRODUCTNAME}"
+    WriteRegStr SHELL_CONTEXT "${UNINST_KEY}" "DisplayVersion" "${INFO_PRODUCTVERSION}"
+    WriteRegStr SHELL_CONTEXT "${UNINST_KEY}" "DisplayIcon" "$INSTDIR\${PRODUCT_EXECUTABLE}"
+    WriteRegStr SHELL_CONTEXT "${UNINST_KEY}" "UninstallString" '$\"$INSTDIR\uninstall.exe$\"'
+    WriteRegStr SHELL_CONTEXT "${UNINST_KEY}" "QuietUninstallString" '$\"$INSTDIR\uninstall.exe$\" /S'
+    IfErrors registrationFailed
+    ${GetSize} "$INSTDIR" "/S=0K" $0 $1 $2
+    IfErrors registrationFailed
+    WriteRegDWORD SHELL_CONTEXT "${UNINST_KEY}" "EstimatedSize" $0
+    IfErrors registrationFailed
+!macroend
+
 Section
     !insertmacro wails.setShellContext
-
-    ; Compare directory identities before changing services, network state or
-    ; files. String comparison is unsafe for 8.3 names, junctions and symlinks.
     Call DetermineInstallPathChange
-
-    !insertmacro wails.webview2runtime
-
-    Call RemoveLegacyAutostartTask
-
-    ; Close the previous UI and stop Core before replacing binaries. Recovery
-    ; is layout-aware: v2.2.0 uses its dedicated cleanup script, while current
-    ; and future Wails builds use their supported recovery entry points.
+    Call EnsureWebViewRuntime
+    ; Snapshot files, registrations and service configuration BEFORE stopping
+    ; anything. The helper stages and hashes every payload before mutation.
+    StrCpy $HypoMuxSetupOperation "begin"
+    Call RunSetupTransaction
+    StrCpy $HypoMuxSetupActive "1"
     Call CloseRunningHypoMux
     !if "${WAILS_INSTALL_SCOPE}" != "user"
         Call StopCoreServiceForUpgrade
@@ -703,73 +807,65 @@ Section
     Call RecoverPreviousWailsInstallation
     Call RecoverLegacyV22Network
     Call RecoverWailsInstallations
-
-    Call RemoveLegacyInstallations
-
-    ; Final path-scoped barrier: nothing may still own the old executable
-    ; when NSIS reaches the File instruction below.
     Call StopCoreProcessesForUpgrade
 
-    !if "${WAILS_INSTALL_SCOPE}" != "user"
-        ; v2.5.5 hotfix: the desktop may live on any drive, but LocalSystem
-        ; must never execute its service image from that user-selected path.
-        Call PrepareProtectedCoreDirectory
-    !endif
-
+    StrCpy $HypoMuxSetupOperation "apply"
+    Call RunSetupTransaction
     SetOutPath $INSTDIR
-
-    !insertmacro wails.files
-
-    ; The UI host remains unprivileged. TUN elevation is requested only for
-    ; this independently launched Core through the authenticated pipe.
-    SetOutPath "$INSTDIR\bin"
-    File "/oname=hypomux-engine.exe" "..\..\..\bin\hypomux-engine.exe"
-    File "/oname=sing-box.exe" "..\..\..\bin\sing-box.exe"
-    File "/oname=wintun.dll" "..\..\..\bin\wintun.dll"
-    File /nonfatal "/oname=libcronet.dll" "..\..\..\bin\libcronet.dll"
-    SetOutPath $INSTDIR
-
     !if "${WAILS_INSTALL_SCOPE}" != "user"
-        SetOutPath "${HYPOMUX_PROTECTED_CORE_BIN}"
-        File "/oname=hypomux-engine.exe" "..\..\..\bin\hypomux-engine.exe"
-        File "/oname=sing-box.exe" "..\..\..\bin\sing-box.exe"
-        File "/oname=wintun.dll" "..\..\..\bin\wintun.dll"
-        File /nonfatal "/oname=libcronet.dll" "..\..\..\bin\libcronet.dll"
-        Call FinalizeProtectedCoreDirectory
-        SetOutPath $INSTDIR
-    !endif
-
-    ; Machine installation elevates once and installs the isolated privileged
-    ; Core. The Wails/WebView2 executable remains asInvoker.
-    !if "${WAILS_INSTALL_SCOPE}" != "user"
+        StrCpy $HypoMuxSetupOperation "install-service"
         DetailPrint "$(CoreServiceInstalling)"
-        nsExec::ExecToStack '"${HYPOMUX_PROTECTED_CORE_BIN}\hypomux-engine.exe" install-service --desktop "$INSTDIR\${PRODUCT_EXECUTABLE}"'
+        nsExec::ExecToStack /TIMEOUT=60000 '"${HYPOMUX_PROTECTED_CORE_BIN}\hypomux-engine.exe" install-service --desktop "$INSTDIR\${PRODUCT_EXECUTABLE}"'
         Pop $0
         Pop $1
         ${If} $0 != 0
             DetailPrint "$1"
-            Call RollbackFreshMachineInstall
-            Abort "$(CoreServiceInstallFailed) $0"
+            Call RollbackSetupTransaction
+            SetErrorLevel 72
+            Abort "$(CoreServiceInstallFailed)"
+        ${EndIf}
+        ; Starting the service is insufficient: verify the authenticated IPC
+        ; handshake and health before committing the new installation.
+        StrCpy $HypoMuxSetupOperation "health-check"
+        nsExec::ExecToStack /TIMEOUT=45000 '"$INSTDIR\${PRODUCT_EXECUTABLE}" --core-service-self-test'
+        Pop $0
+        Pop $1
+        ${If} $0 != 0
+            DetailPrint "$1"
+            Call RollbackSetupTransaction
+            SetErrorLevel 73
+            Abort "Core health check failed. See HypoMux\SetupTransaction\setup.log."
         ${EndIf}
         DetailPrint "$(CoreServiceInstalled)"
     !endif
 
+    ClearErrors
     CreateShortcut "$SMPROGRAMS\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}"
     CreateShortCut "$DESKTOP\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}"
-
+    IfErrors registrationFailed
     !insertmacro wails.associateFiles
     !insertmacro wails.associateCustomProtocols
-
-    !insertmacro wails.writeUninstaller
+    !insertmacro HypoMuxWriteRegistration
     !if "${WAILS_INSTALL_SCOPE}" == "user"
         WriteRegStr HKCU "${UNINST_KEY}" "InstallLocation" "$INSTDIR"
     !else
         WriteRegStr HKLM "${UNINST_KEY}" "InstallLocation" "$INSTDIR"
     !endif
-    ; Commit the new uninstaller registration before removing the previous
-    ; exact Wails payload. A late cleanup failure cannot orphan Add/Remove Apps.
+    IfErrors registrationFailed
+    StrCpy $HypoMuxSetupOperation "commit"
+    Call RunSetupTransaction
+    StrCpy $HypoMuxSetupActive "0"
+    Call RemoveLegacyInstallations
     Call RemovePreviousWailsInstallation
+    Call RemoveLegacyAutostartTask
     Call RestoreAutostart
+    Goto installationDone
+    registrationFailed:
+    Call RollbackSetupTransaction
+    SetErrorLevel 74
+    Abort "Could not register HypoMux."
+    installationDone:
+    SetErrorLevel 0
 SectionEnd
 
 Section "uninstall"

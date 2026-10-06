@@ -12,6 +12,10 @@ import (
 const webView2ClientID = `{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}`
 
 func WebView2Available() bool {
+	return webView2Available(false)
+}
+func WebView2MachineAvailable() bool { return webView2Available(true) }
+func webView2Available(machineOnly bool) bool {
 	checks := []struct {
 		root registry.Key
 		path string
@@ -21,13 +25,16 @@ func WebView2Available() bool {
 		{registry.CURRENT_USER, `Software\Microsoft\EdgeUpdate\Clients\` + webView2ClientID},
 	}
 	for _, check := range checks {
+		if machineOnly && check.root == registry.CURRENT_USER {
+			continue
+		}
 		key, err := registry.OpenKey(check.root, check.path, registry.QUERY_VALUE)
 		if err != nil {
 			continue
 		}
 		version, _, readErr := key.GetStringValue("pv")
 		_ = key.Close()
-		if readErr == nil && version != "" {
+		if readErr == nil && usableWebViewVersion(version) {
 			return true
 		}
 	}

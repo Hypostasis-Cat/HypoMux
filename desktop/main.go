@@ -29,6 +29,9 @@ var assets embed.FS
 var trayIcon []byte
 
 func main() {
+	if code, handled := runNativeHelper(os.Args[1:]); handled {
+		os.Exit(code)
+	}
 	if hasArgument(os.Args[1:], "--core-service-self-test") {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()

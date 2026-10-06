@@ -190,6 +190,13 @@ jobs:
         shell: pwsh
         run: wails3 task windows:package
 
+      - name: Validate native setup and updater entrypoints
+        shell: pwsh
+        run: |
+          $env:HYPOMUX_DESKTOP_HELPER_TEST = (Resolve-Path desktop\bin\hypomux.exe).Path
+          go -C desktop test . -run '^TestInstallerNativeHelperEntrypoints$' -count=1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Stage unsigned executables for SignPath
         if: github.event_name == 'workflow_dispatch' && inputs.signing_mode != 'none'
         shell: pwsh
