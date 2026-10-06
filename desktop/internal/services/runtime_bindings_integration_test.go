@@ -39,7 +39,6 @@ func ensureRuntimeBindingTestCore(t *testing.T) {
 }
 
 func TestRuntimeBindingRealCoreIPv6Loopback(t *testing.T) {
-	ensureRuntimeBindingTestCore(t)
 	t.Setenv("HYPOMUX_DATA_DIR", t.TempDir())
 	listener, err := net.Listen("tcp6", "[::1]:0")
 	if err != nil {
@@ -49,6 +48,16 @@ func TestRuntimeBindingRealCoreIPv6Loopback(t *testing.T) {
 	server.Listener = listener
 	server.StartTLS()
 	defer server.Close()
+	// Listening can succeed while a host network filter blocks IPv6 connects.
+	// Check the same bound source independently of Core; keep this a failure,
+	// so restricted hosts cannot silently claim IPv6 acceptance coverage.
+	dialer := net.Dialer{Timeout: time.Second, LocalAddr: &net.TCPAddr{IP: net.IPv6loopback}}
+	conn, err := dialer.Dial("tcp6", listener.Addr().String())
+	if err != nil {
+		t.Fatalf("host IPv6 loopback connection failed before Core recovery (check host routing/network filters): %v", err)
+	}
+	_ = conn.Close()
+	ensureRuntimeBindingTestCore(t)
 	cert := server.Certificate()
 	roots := x509.NewCertPool()
 	roots.AddCert(cert)

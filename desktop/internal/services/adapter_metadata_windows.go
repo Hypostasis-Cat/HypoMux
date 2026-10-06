@@ -53,6 +53,7 @@ func adapterPlatformMetadata() map[int]adapterMetadata {
 			continue
 		}
 		details := adapterMetadata{
+			IsTunnel:       current.IfType == windows.IF_TYPE_TUNNEL,
 			Description:    windows.UTF16PtrToString(current.Description),
 			Metric:         int(current.Ipv4Metric),
 			AutoMetric:     true,

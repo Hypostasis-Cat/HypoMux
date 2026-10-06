@@ -1,6 +1,7 @@
 package services
 
 type adapterMetadata struct {
+	IsTunnel       bool
 	Description    string
 	Gateway        string
 	DNSServers     []string

@@ -127,7 +127,7 @@ func (s *AdapterService) List() ([]AdapterView, error) {
 			Weight:         weight,
 			Kind:           kind,
 			Operational:    true,
-			IsVirtual:      isVirtualAdapter(item.Name, description),
+			IsVirtual:      details.IsTunnel || isVirtualAdapter(item.Name, description),
 		})
 	}
 	sort.SliceStable(result, func(i, j int) bool {
@@ -154,6 +154,7 @@ func isVirtualAdapter(name, description string) bool {
 		"wintun", "wireguard", "tailscale", "zerotier", "tap-windows", "tap-win32",
 		"meta tunnel", "mihomo", "clash", "radmin vpn", "famatech radmin",
 		"vpn client adapter", "docker", "wsl", "loopback adapter", "虚拟",
+		"teredo", "isatap", "6to4",
 	} {
 		if strings.Contains(value, marker) {
 			return true

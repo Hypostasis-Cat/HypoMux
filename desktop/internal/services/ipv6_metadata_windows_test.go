@@ -8,8 +8,10 @@ import (
 	"golang.org/x/sys/windows"
 	"net"
 	"os"
+	"strings"
 	"syscall"
 	"testing"
+	"time"
 	"unsafe"
 )
 
@@ -95,6 +97,43 @@ func TestDesktopIPv6ICMPRealLoopback(t *testing.T) {
 	result := probeICMPv6(ctx, "::1", "::1")
 	if result.Sent == 0 || result.Received != result.Sent {
 		t.Fatalf("IPv6 ICMP=%+v", result)
+	}
+}
+
+func TestDesktopIPv6ICMPReportsNativeErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		createFails bool
+		want        string
+	}{
+		{"create", true, "Icmp6CreateFile failed:"},
+		{"send", false, "Icmp6SendEcho2 failed:"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			closed, sent := false, 0
+			create := func(...uintptr) (uintptr, uintptr, error) {
+				if tc.createFails {
+					return ^uintptr(0), 0, syscall.Errno(5)
+				}
+				return 1, 0, nil
+			}
+			send := func(uintptr, *windows.RawSockaddrInet6, *windows.RawSockaddrInet6, []byte, []byte, time.Duration) (uintptr, error) {
+				sent++
+				return 0, syscall.Errno(11050)
+			}
+			closeHandle := func(...uintptr) (uintptr, uintptr, error) { closed = true; return 1, 0, nil }
+			result := probeICMPv6WithAPI(context.Background(), "::1", "::1", create, send, closeHandle)
+			if result.Status != "unavailable" || !strings.HasPrefix(result.Note, tc.want) || result.Received != 0 {
+				t.Fatalf("native failure was lost: %+v", result)
+			}
+			if tc.createFails {
+				if closed || sent != 0 || result.Sent != 0 {
+					t.Fatal("used an invalid ICMP handle")
+				}
+			} else if !closed || sent != diagnosticProbeCount || result.Sent != sent || result.LossRate != 100 {
+				t.Fatal("failed sends lost accounting or leaked the handle")
+			}
+		})
 	}
 }
 
