@@ -192,6 +192,7 @@ type EngineService struct {
 	runtimeBindingCancel   context.CancelFunc
 	runtimeBindingRefresh  bool
 	runtimeBindingEnabled  bool
+	runtimeBindingRecovery *runtimeBindingRecovery
 	bindingMonitorDone     chan struct{}
 	tunConnectivityNotice  string
 	ipv4OnlyFallback       bool
@@ -1100,6 +1101,10 @@ func (s *EngineService) startLocked(ctx context.Context, mode string) (snapshot 
 		}
 	}
 	s.mu.Lock()
+	if err := ctx.Err(); err != nil {
+		s.mu.Unlock()
+		return rollback(err)
+	}
 	s.last = telemetrySample{}
 	s.lastCDNLog = time.Time{}
 	s.lastPerformanceLog = time.Time{}
@@ -1226,10 +1231,15 @@ func (s *EngineService) stopLocked(ctx context.Context) (EngineSnapshot, error) 
 	s.clashAPI = clashAPIConfig{}
 	s.tunAggregationEndpoint = ""
 	s.tunDNSBootstrap = dnsResolveResult{}
-	s.runtimeBindings = nil
-	s.runtimeBindingMode = ""
-	s.runtimeBindingEnabled = false
-	s.runtimeBindingNotice = ""
+	// An automatic restart owns a recovery intent until startup succeeds.
+	// Keep it across cleanup/start failures; explicit Stop cancels it first.
+	if s.runtimeBindingRecovery == nil || !s.runtimeBindingEnabled {
+		s.runtimeBindings = nil
+		s.runtimeBindingMode = ""
+		s.runtimeBindingEnabled = false
+		s.runtimeBindingRecovery = nil
+		s.runtimeBindingNotice = ""
+	}
 	if !s.compatRestarting && !s.runtimeBindingRefresh {
 		s.dnsFallbackApplied = false
 		s.wfpFallbackApplied = false

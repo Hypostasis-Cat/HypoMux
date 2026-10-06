@@ -187,7 +187,7 @@ func TestRuntimeBindingRecoveryGatesCleanupStartupAndOwnedHotspot(t *testing.T) 
 			old := runtimeBindingFixture()
 			next := cloneRuntimeBindings([]AdapterView{old})[0]
 			next.SourceIPv6 = "2001:db8::2"
-			service := &EngineService{runtimeBindings: []AdapterView{old}, runtimeBindingMode: "tun"}
+			service := &EngineService{runtimeBindings: []AdapterView{old}, runtimeBindingMode: "tun", runtimeBindingEnabled: true}
 			service.runtimeAdapters = func() ([]AdapterView, error) {
 				if scenario == "scan_error" {
 					return nil, errors.New("inspection incomplete")
@@ -333,5 +333,86 @@ func TestRuntimeBindingPoolUpdateRetainsOldExplicitBindingAndCopiesDNS(t *testin
 	added.DNSServers[0] = "2001:db8::99"
 	if len(service.runtimeBindings) != 2 || service.runtimeBindings[0].SourceIPv6 != "2001:db8::1" || service.runtimeBindings[1].DNSServers[0] != "fe80::1%7" {
 		t.Fatal("pool update hid a stale explicit channel or aliased DNS metadata", service.runtimeBindings)
+	}
+}
+
+func TestRuntimeBindingReturningSelectionIgnoresUnselectedOrUnusableNICs(t *testing.T) {
+	old := runtimeBindingFixture()
+	for _, scenario := range []string{"selected", "unselected", "down", "no_address"} {
+		t.Run(scenario, func(t *testing.T) {
+			next := old
+			next.ID, next.Name = "returning", "returning"
+			switch scenario {
+			case "unselected":
+				next.Selected = false
+			case "down":
+				next.Operational = false
+			case "no_address":
+				next.SourceIPv6 = ""
+			}
+			changed, err := runtimeBindingsChanged([]AdapterView{old}, []AdapterView{old, next})
+			if err != nil || changed != (scenario == "selected") {
+				t.Fatal(changed, err)
+			}
+		})
+	}
+}
+
+func TestRuntimeBindingRetryWaitsForAddressAndPreservesHotspot(t *testing.T) {
+	old := runtimeBindingFixture()
+	next := old
+	next.SourceIPv6 = "2001:db8::2"
+	available := []AdapterView{next}
+	config := HotspotConfig{SSID: "owned", Password: "owned-secret", Band: "auto"}
+	s := &EngineService{runtimeBindings: []AdapterView{old}, runtimeBindingMode: "tun", runtimeBindingEnabled: true,
+		hotspot:         &hotspotSession{config: config, status: HotspotStatus{State: "running"}},
+		runtimeAdapters: func() ([]AdapterView, error) { return available, nil }}
+	starts, stops, restores := 0, 0, 0
+	actions := runtimeBindingActions{
+		status: func(context.Context) (string, error) { return "running", nil },
+		stop:   func(context.Context) error { stops++; s.hotspot = nil; return nil },
+		start: func(context.Context, string) error {
+			starts++
+			if starts == 1 {
+				return errors.New("temporary failure")
+			}
+			s.rememberRuntimeBindingsLocked("tun", available, AdapterView{})
+			return nil
+		},
+		hotspot: func(_ context.Context, got HotspotConfig) error {
+			restores++
+			if got != config {
+				t.Fatal("lost original hotspot configuration")
+			}
+			return nil
+		},
+	}
+	if err := s.refreshRuntimeBindings(context.Background(), actions); err == nil {
+		t.Fatal("expected startup failure")
+	}
+	available = nil
+	if err := s.refreshRuntimeBindings(context.Background(), actions); err != nil {
+		t.Fatal(err)
+	}
+	if starts != 1 || stops != 1 || restores != 0 {
+		t.Fatal("attempted recovery before an address returned")
+	}
+	available = []AdapterView{old} // Restoring the old address must also retry.
+	if err := s.refreshRuntimeBindings(context.Background(), actions); err != nil {
+		t.Fatal(err)
+	}
+	if starts != 2 || stops != 2 || restores != 1 || s.runtimeBindingRecovery != nil {
+		t.Fatal("recovery intent was lost or not retired")
+	}
+}
+
+func TestRuntimeBindingStopHotspotRevokesPendingHotspotRestore(t *testing.T) {
+	config := HotspotConfig{SSID: "owned", Password: "owned-secret", Band: "auto"}
+	s := &EngineService{lifecycleGate: make(chan struct{}, 1), runtimeBindingRecovery: &runtimeBindingRecovery{hotspot: &config}}
+	if _, err := s.StopHotspot(); err != nil {
+		t.Fatal(err)
+	}
+	if s.runtimeBindingRecovery == nil || s.runtimeBindingRecovery.hotspot != nil {
+		t.Fatal("StopHotspot must revoke only the pending hotspot restore")
 	}
 }

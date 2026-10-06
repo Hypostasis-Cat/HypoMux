@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -20,7 +21,8 @@ import (
 	"time"
 )
 
-func TestRuntimeBindingRealCoreIPv6Loopback(t *testing.T) {
+func ensureRuntimeBindingTestCore(t *testing.T) {
+	t.Helper()
 	if os.Getenv("HYPOMUX_ENGINE_PATH") == "" {
 		root, err := filepath.Abs(filepath.Join("..", "..", "..", "engine"))
 		if err != nil {
@@ -34,6 +36,10 @@ func TestRuntimeBindingRealCoreIPv6Loopback(t *testing.T) {
 		}
 		t.Setenv("HYPOMUX_ENGINE_PATH", core)
 	}
+}
+
+func TestRuntimeBindingRealCoreIPv6Loopback(t *testing.T) {
+	ensureRuntimeBindingTestCore(t)
 	t.Setenv("HYPOMUX_DATA_DIR", t.TempDir())
 	listener, err := net.Listen("tcp6", "[::1]:0")
 	if err != nil {
@@ -52,6 +58,155 @@ func TestRuntimeBindingRealCoreIPv6Loopback(t *testing.T) {
 	settings := NewSettingsService()
 	runRuntimeBindingCoreRecovery(t, settings, NewAdapterService(settings), stale, current,
 		listener.Addr().String(), &tls.Config{ServerName: cert.DNSNames[0], RootCAs: roots, MinVersion: tls.VersionTLS12}, false)
+}
+
+// Real Core lifecycle coverage uses IPv4 loopback so IPv6 availability is not
+// a prerequisite for testing recovery intent and persisted NIC selection.
+func TestRuntimeBindingRealCoreRetryAndRejoin(t *testing.T) {
+	ensureRuntimeBindingTestCore(t)
+	for _, scenario := range []string{"start_failure", "stop_failure", "original_address", "explicit_stop", "rejoin"} {
+		t.Run(scenario, func(t *testing.T) {
+			a := AdapterView{ID: "a", Name: "a", Address: "127.0.0.1", Selected: true, Operational: true, Weight: 1}
+			b := AdapterView{ID: "b", Name: "b", Address: "127.0.0.2", Selected: true, Operational: true, Weight: 1}
+			available := []AdapterView{a}
+			if scenario == "rejoin" {
+				available = append(available, b)
+			}
+			s, ctx, poll := newRuntimeBindingLoopbackService(t, &available)
+			a.Address = "127.0.0.3"
+			available = []AdapterView{a}
+			actions := s.runtimeBindingActions()
+			if scenario == "stop_failure" {
+				stop := actions.stop
+				actions.stop = func(ctx context.Context) error {
+					if err := stop(ctx); err != nil {
+						return err
+					}
+					return errors.New("transient cleanup failure")
+				}
+			} else if scenario != "rejoin" {
+				start := actions.start
+				actions.start = func(ctx context.Context, mode string) error {
+					s.runtimeAdapters = func() ([]AdapterView, error) { return nil, errors.New("transient adapter enumeration failure") }
+					return start(ctx, mode)
+				}
+			}
+			err := s.refreshRuntimeBindings(ctx, actions)
+			if (err != nil) != (scenario != "rejoin") {
+				t.Fatalf("unexpected first recovery result: %v", err)
+			}
+			if !s.runtimeBindingEnabled || len(s.runtimeBindings) == 0 {
+				t.Fatal("failed recovery discarded its monitoring state")
+			}
+			if scenario == "original_address" {
+				available[0].Address = "127.0.0.1"
+			}
+			if scenario == "rejoin" {
+				available = append(available, b)
+			}
+			s.runtimeAdapters = func() ([]AdapterView, error) { return cloneRuntimeBindings(available), nil }
+			if scenario == "explicit_stop" {
+				s.cancelRuntimeBindingRefresh()
+				if _, err := s.stopLocked(ctx); err != nil {
+					t.Fatal(err)
+				}
+			}
+			// Exercise the backend scheduler, without a Snapshot/UI call. It must
+			// retry even though the first transaction left the Core stopped.
+			poll()
+			var status engineStatusResult
+			if err := s.client.Request(ctx, "engine.status", nil, &status); err != nil {
+				t.Fatal(err)
+			}
+			if scenario == "explicit_stop" {
+				if status.Engine.State != "stopped" || s.runtimeBindingEnabled || s.runtimeBindingRecovery != nil {
+					t.Fatal("explicit Stop was undone by automatic recovery")
+				}
+				return
+			}
+			var telemetry struct {
+				Adapters []struct {
+					Name   string `json:"name"`
+					Source string `json:"source_ip"`
+				} `json:"adapters"`
+			}
+			if err := s.client.Request(ctx, "engine.telemetry", nil, &telemetry); err != nil {
+				t.Fatal(err)
+			}
+			if status.Engine.State != "running" || len(telemetry.Adapters) != len(available) || s.runtimeBindingRecovery != nil {
+				t.Fatalf("Core did not recover: state=%s adapters=%+v pending=%v", status.Engine.State, telemetry.Adapters, s.runtimeBindingRecovery != nil)
+			}
+			for _, expected := range available {
+				found := false
+				for _, actual := range telemetry.Adapters {
+					found = found || actual.Name == expected.Name && actual.Source == expected.Address
+				}
+				if !found {
+					t.Fatalf("Core lost selected binding %+v", expected)
+				}
+			}
+		})
+	}
+}
+
+// The caller holds the lifecycle gate while replacing the OS inventory fixture.
+func newRuntimeBindingLoopbackService(t *testing.T, available *[]AdapterView) (*EngineService, context.Context, func()) {
+	t.Helper()
+	t.Setenv("HYPOMUX_DATA_DIR", t.TempDir())
+	settings := NewSettingsService()
+	next := settings.Get()
+	next.Mode, next.SystemProxyTakeover = "proxy", false
+	var reservations []net.Listener
+	for range 2 {
+		listener, err := net.Listen("tcp4", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = listener.Close() })
+		reservations = append(reservations, listener)
+	}
+	next.SOCKSPort = reservations[0].Addr().(*net.TCPAddr).Port
+	next.HTTPPort = reservations[1].Addr().(*net.TCPAddr).Port
+	for _, adapter := range *available {
+		next.SelectedAdapterIDs = append(next.SelectedAdapterIDs, adapter.ID)
+	}
+	if _, err := settings.Update(next); err != nil {
+		t.Fatal(err)
+	}
+	s := NewEngineService(settings, NewAdapterService(settings))
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	if err := s.acquireLifecycle(ctx); err != nil {
+		s.Shutdown()
+		cancel()
+		t.Fatal(err)
+	}
+	held := true
+	t.Cleanup(func() {
+		s.cancelRuntimeBindingRefresh()
+		if held {
+			s.releaseLifecycle()
+		}
+		s.Shutdown()
+		cancel()
+	})
+	s.runtimeAdapters = func() ([]AdapterView, error) { return cloneRuntimeBindings(*available), nil }
+	for _, listener := range reservations {
+		_ = listener.Close()
+	}
+	if _, err := s.startLocked(ctx, "proxy"); err != nil {
+		t.Fatal(err)
+	}
+	poll := func() {
+		t.Helper()
+		held = false
+		s.releaseLifecycle()
+		s.scheduleRuntimeBindingRefresh()
+		if err := s.acquireLifecycle(ctx); err != nil {
+			t.Fatal(err)
+		}
+		held = true
+	}
+	return s, ctx, poll
 }
 
 // The old metadata is deliberately stale; the replacement comes from the

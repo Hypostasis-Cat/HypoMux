@@ -386,6 +386,11 @@ func (s *EngineService) StopHotspot() (HotspotStatus, error) {
 		return s.HotspotStatus(), err
 	}
 	defer s.releaseLifecycle()
+	s.mu.Lock()
+	if s.runtimeBindingRecovery != nil {
+		s.runtimeBindingRecovery.hotspot = nil
+	}
+	s.mu.Unlock()
 	err := s.stopHotspot(ctx)
 	if err == nil {
 		s.mu.Lock()
