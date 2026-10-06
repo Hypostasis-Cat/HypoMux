@@ -145,7 +145,8 @@ func TestLatencyPenalizesLossAndJitter(t *testing.T) {
 func TestLatencySchedulerRespectsExclusionsAndIPv6(t *testing.T) {
 	p, a, _ := latencyFixture()
 	s := newScheduler(a, false)
-	s.strategy, s.latency = StrategyLatency, p
+	s.setLatency(p)
+	s.setStrategy(StrategyLatency)
 	samples(p, a[0], latencyReferences[0], 90, 3)
 	samples(p, a[1], latencyReferences[0], 10, 3)
 	if got, _ := s.selectForTarget(nil, "203.0.113.5:7777"); got.Name != "b" {
@@ -203,7 +204,7 @@ func TestLatencyUDPRebuildsSilentFlowAndKeepsControl(t *testing.T) {
 	echoAddress, _, stopEcho := startUDPEchoServer(t)
 	defer stopEcho()
 	s := newTUNPoolTestServer(t)
-	s.scheduler.strategy = StrategyLatency
+	s.scheduler.setStrategy(StrategyLatency)
 	p := s.scheduler.latency
 	p.probe = func(context.Context, diagnostic.Config) diagnostic.Result { return diagnostic.Result{} }
 	endpoints, err := s.Start()

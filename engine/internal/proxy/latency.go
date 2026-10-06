@@ -4,6 +4,7 @@ import (
 	"context"
 	"math"
 	"net"
+	"net/netip"
 	"sync"
 	"time"
 
@@ -43,7 +44,7 @@ type latencyChoice struct {
 type latencyTable struct {
 	mu      sync.Mutex
 	values  map[latencyKey]latencySample
-	targets map[string]time.Time
+	targets map[netip.Addr]time.Time
 	choices map[string]latencyChoice
 	now     func() time.Time
 	probe   func(context.Context, diagnostic.Config) diagnostic.Result
@@ -51,7 +52,7 @@ type latencyTable struct {
 }
 
 func newLatencyTable() *latencyTable {
-	return &latencyTable{values: make(map[latencyKey]latencySample), targets: make(map[string]time.Time), choices: make(map[string]latencyChoice), now: time.Now, probe: diagnostic.Run, reasons: make(map[string]uint64)}
+	return &latencyTable{values: make(map[latencyKey]latencySample), targets: make(map[netip.Addr]time.Time), choices: make(map[string]latencyChoice), now: time.Now, probe: diagnostic.Run, reasons: make(map[string]uint64)}
 }
 
 func latencyHost(target string) string {
@@ -67,17 +68,40 @@ func latencyHost(target string) string {
 	return ip.String()
 }
 
+// latencyWatchable mirrors the literal-address filter applied by latencyHost:
+// only real unicast destination addresses are measured.
+func latencyWatchable(addr netip.Addr) bool {
+	if !addr.IsValid() {
+		return false
+	}
+	return !addr.IsUnspecified() && !addr.IsMulticast() && !addr.IsLinkLocalUnicast()
+}
+
 func (p *latencyTable) watch(target string) {
-	target = latencyHost(target)
-	if target == "" {
+	host := latencyHost(target)
+	if host == "" {
+		return
+	}
+	addr, err := netip.ParseAddr(host)
+	if err != nil {
+		return
+	}
+	p.watchAddr(addr)
+}
+
+// watchAddr registers an already-parsed destination. It is the path taken once
+// per inbound datagram, so it must not parse or allocate a string.
+func (p *latencyTable) watchAddr(addr netip.Addr) {
+	addr = addr.Unmap()
+	if !latencyWatchable(addr) {
 		return
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if _, exists := p.targets[target]; !exists && len(p.targets) >= latencyTargetLimit {
+	if _, exists := p.targets[addr]; !exists && len(p.targets) >= latencyTargetLimit {
 		return
 	}
-	p.targets[target] = p.now()
+	p.targets[addr] = p.now()
 }
 
 func (p *latencyTable) record(a Adapter, target string, result diagnostic.Result) {
@@ -221,11 +245,21 @@ func (s *scheduler) selectForTarget(excluded map[string]struct{}, target string)
 	return s.latency.selectAdapter(candidates, target), true
 }
 
+// watchLatency registers a destination for latency probing. It runs once per
+// inbound UDP datagram, so it must not take the scheduler mutex: the published
+// snapshot is read atomically and is nil unless latency-first is selected. The
+// table keeps its own finer-grained lock.
 func (s *scheduler) watchLatency(target string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.strategy == StrategyLatency && s.latency != nil {
-		s.latency.watch(target)
+	if table := s.latencyWatch.Load(); table != nil {
+		table.watch(target)
+	}
+}
+
+// watchLatencyAddr is the allocation-free entry point used by the datagram path:
+// the destination is already parsed, so no host string is produced.
+func (s *scheduler) watchLatencyAddr(addr netip.Addr) {
+	if table := s.latencyWatch.Load(); table != nil {
+		table.watchAddr(addr)
 	}
 }
 
@@ -270,9 +304,10 @@ func (p *latencyTable) round(ctx context.Context, adapters []Adapter) {
 	keep := map[string]bool{latencyReferences[0]: true, latencyReferences[1]: true}
 	targets = append(targets, latencyReferencesIPv6[:]...)
 	keep[latencyReferencesIPv6[0]], keep[latencyReferencesIPv6[1]] = true, true
-	for host, seen := range p.targets {
+	for addr, seen := range p.targets {
+		host := addr.String()
 		if now.Sub(seen) > latencyTargetTTL {
-			delete(p.targets, host)
+			delete(p.targets, addr)
 			delete(p.choices, host)
 			continue
 		}

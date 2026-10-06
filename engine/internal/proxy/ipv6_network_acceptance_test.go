@@ -184,7 +184,7 @@ func TestPublicIPv6UDPNetworkAcceptance(t *testing.T) {
 		t.Fatal(err)
 	}
 	packet, ok := parseSOCKSUDPPacket(buffer[:n])
-	if !ok || packet.target != cfg.IPv6UDP {
+	if !ok || packet.addr.String() != cfg.IPv6UDP {
 		t.Fatalf("IPv6 UDP reply identity invalid: %+v", packet)
 	}
 	if cfg.IPv6UDPProtocol == "ntp" {
@@ -195,7 +195,7 @@ func TestPublicIPv6UDPNetworkAcceptance(t *testing.T) {
 	} else if len(packet.payload) < 12 || binary.BigEndian.Uint16(packet.payload) != 0x6406 || packet.payload[2]&0x80 == 0 || packet.payload[3]&0xf != 0 || binary.BigEndian.Uint16(packet.payload[6:]) == 0 {
 		t.Fatalf("IPv6 UDP DNS reply invalid: %+v", packet)
 	}
-	t.Logf("verified public IPv6 UDP %s reply bytes=%d target=%s", cfg.IPv6UDPProtocol, len(packet.payload), packet.target)
+	t.Logf("verified public IPv6 UDP %s reply bytes=%d target=%s", cfg.IPv6UDPProtocol, len(packet.payload), packet.addr.String())
 }
 
 func TestPublicNAT64NetworkAcceptance(t *testing.T) {
@@ -244,7 +244,7 @@ func TestPublicNAT64NetworkAcceptance(t *testing.T) {
 		t.Fatal(err)
 	}
 	packet, ok := parseSOCKSUDPPacket(buffer[:n])
-	if !ok || packet.target != cfg.NAT64UDP || len(packet.payload) < 12 || binary.BigEndian.Uint16(packet.payload) != 0x6406 || packet.payload[2]&0x80 == 0 || packet.payload[3]&0xf != 0 || binary.BigEndian.Uint16(packet.payload[6:]) == 0 {
+	if !ok || packet.addr.String() != cfg.NAT64UDP || len(packet.payload) < 12 || binary.BigEndian.Uint16(packet.payload) != 0x6406 || packet.payload[2]&0x80 == 0 || packet.payload[3]&0xf != 0 || binary.BigEndian.Uint16(packet.payload[6:]) == 0 {
 		t.Fatalf("NAT64 UDP DNS or original reply identity invalid: %+v", packet)
 	}
 }

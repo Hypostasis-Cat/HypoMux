@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"sync"
+	"sync/atomic"
 )
 
 type scheduler struct {
@@ -14,6 +15,34 @@ type scheduler struct {
 	next          int
 	currentWeight map[string]int
 	health        *healthTable
+
+	// latencyWatch mirrors "strategy == StrategyLatency && latency != nil" so the
+	// per-datagram path can read it without taking mu. It is republished by
+	// setStrategy/setLatency, the only writers of those two fields.
+	latencyWatch atomic.Pointer[latencyTable]
+}
+
+// setStrategy records the aggregation strategy and republishes the lock-free
+// latency snapshot. Callers must hold s.mu, or call it before the scheduler is
+// shared with other goroutines.
+func (s *scheduler) setStrategy(strategy string) {
+	s.strategy = strategy
+	s.publishLatency()
+}
+
+// setLatency installs the latency table and republishes the lock-free snapshot.
+// Callers must hold s.mu, or call it before the scheduler is shared.
+func (s *scheduler) setLatency(table *latencyTable) {
+	s.latency = table
+	s.publishLatency()
+}
+
+func (s *scheduler) publishLatency() {
+	if s.strategy == StrategyLatency && s.latency != nil {
+		s.latencyWatch.Store(s.latency)
+		return
+	}
+	s.latencyWatch.Store(nil)
 }
 
 func newScheduler(

@@ -20,7 +20,7 @@ func adaptiveFixture() (*performanceTable, []Adapter, *time.Time) {
 func TestAdaptiveReservationsConcurrentAndIdempotent(t *testing.T) {
 	p, adapters, _ := adaptiveFixture()
 	s := newScheduler(adapters, false)
-	s.strategy = StrategyAdaptive
+	s.setStrategy(StrategyAdaptive)
 	s.performance = p
 	var wg sync.WaitGroup
 	leases := make(chan *performanceLease, 100)
@@ -58,7 +58,7 @@ func TestAdaptiveUnqualifiedSamplesMatchRoundRobin(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			p, adapters, now := adaptiveFixture()
 			adaptive := newScheduler(adapters, false)
-			adaptive.strategy = StrategyAdaptive
+			adaptive.setStrategy(StrategyAdaptive)
 			adaptive.performance = p
 			baseline := newScheduler(adapters, false)
 			for i, a := range adapters {
@@ -176,7 +176,7 @@ func TestAdaptiveDialFailureReleasesAllReservations(t *testing.T) {
 func TestAdaptiveLegacyUDPAndStrategyValidation(t *testing.T) {
 	p, adapters, _ := adaptiveFixture()
 	s := newScheduler(adapters, false)
-	s.strategy = StrategyAdaptive
+	s.setStrategy(StrategyAdaptive)
 	s.performance = p
 	for i := 0; i < 6; i++ {
 		a, ok := s.Select(nil)

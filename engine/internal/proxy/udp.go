@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"strconv"
+	"net/netip"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -21,8 +21,11 @@ const (
 	maxSOCKSUDPDatagramBytes    = 65535
 )
 
+// socksUDPPacket carries the destination as a comparable netip value so the
+// per-datagram path never builds a host:port string. The string form is only
+// produced when a flow is actually created.
 type socksUDPPacket struct {
-	target  string
+	addr    netip.AddrPort
 	payload []byte
 }
 
@@ -39,13 +42,14 @@ type udpAssociation struct {
 	sweepInterval time.Duration
 
 	mu     sync.Mutex
-	flows  map[string]*udpFlow
+	flows  map[netip.AddrPort]*udpFlow
 	closed bool
 }
 
 type udpFlow struct {
 	association *udpAssociation
-	target      string
+	addr        netip.AddrPort
+	target      string // Cached at flow creation for latency failover checks.
 	adapter     Adapter
 	connection  net.Conn
 	session     *connection
@@ -92,7 +96,7 @@ func (s *Server) handleUDPAssociation(
 		flowLimit:     s.udpFlowLimit,
 		idleTimeout:   s.udpIdleTimeout,
 		sweepInterval: s.udpSweepInterval,
-		flows:         make(map[string]*udpFlow),
+		flows:         make(map[netip.AddrPort]*udpFlow),
 	}
 	if association.scheduler == nil && association.channel != ChannelDirect {
 		_ = relay.Close()
@@ -131,6 +135,9 @@ func (s *Server) handleUDPAssociation(
 
 func (a *udpAssociation) serve(controlDone <-chan struct{}) error {
 	buffer := make([]byte, maxSOCKSUDPDatagramBytes)
+	// Refresh the periodic read deadline only after it expires, rather than
+	// resetting its timer for every datagram.
+	deadline := time.Time{}
 	for {
 		select {
 		case <-controlDone:
@@ -140,7 +147,10 @@ func (a *udpAssociation) serve(controlDone <-chan struct{}) error {
 		default:
 		}
 
-		_ = a.relay.SetReadDeadline(time.Now().Add(a.sweepInterval))
+		if now := time.Now(); !now.Before(deadline) {
+			deadline = now.Add(a.sweepInterval)
+			_ = a.relay.SetReadDeadline(deadline)
+		}
 		count, clientAddress, err := a.relay.ReadFromUDP(buffer)
 		if err != nil {
 			if errors.Is(err, net.ErrClosed) {
@@ -171,7 +181,7 @@ func (a *udpAssociation) serve(controlDone <-chan struct{}) error {
 
 func (a *udpAssociation) forward(clientAddress *net.UDPAddr, packet socksUDPPacket) {
 	if a.scheduler != nil {
-		a.scheduler.watchLatency(packet.target)
+		a.scheduler.watchLatencyAddr(packet.addr.Addr())
 	}
 	exclude := ""
 	a.mu.Lock()
@@ -179,13 +189,13 @@ func (a *udpAssociation) forward(clientAddress *net.UDPAddr, packet socksUDPPack
 		a.mu.Unlock()
 		return
 	}
-	flow := a.flows[packet.target]
+	flow := a.flows[packet.addr]
 	if flow != nil {
 		a.mu.Unlock()
 		// Outbound writes are not proof of connectivity. Require missing replies
 		// AND comparative probes before retiring a silent flow. Never replay a
 		// datagram already written to the old path.
-		if a.scheduler != nil && time.Since(time.Unix(0, flow.lastReply.Load())) >= 3*time.Second && a.scheduler.latencyFailover(flow.adapter, packet.target) {
+		if a.scheduler != nil && time.Since(time.Unix(0, flow.lastReply.Load())) >= 3*time.Second && a.scheduler.latencyFailover(flow.adapter, flow.target) {
 			exclude = flow.adapter.Name
 			flow.close()
 		} else {
@@ -207,7 +217,7 @@ func (a *udpAssociation) forward(clientAddress *net.UDPAddr, packet socksUDPPack
 	}
 	a.mu.Unlock()
 
-	flow, err := a.createFlow(clientAddress, packet.target, packet.payload, exclude)
+	flow, err := a.createFlow(clientAddress, packet.addr, packet.payload, exclude)
 	if err != nil {
 		return
 	}
@@ -217,13 +227,13 @@ func (a *udpAssociation) forward(clientAddress *net.UDPAddr, packet socksUDPPack
 		flow.close()
 		return
 	}
-	if existing := a.flows[packet.target]; existing != nil {
+	if existing := a.flows[packet.addr]; existing != nil {
 		a.mu.Unlock()
 		flow.close()
 		_ = existing.send(packet.payload)
 		return
 	}
-	a.flows[packet.target] = flow
+	a.flows[packet.addr] = flow
 	a.mu.Unlock()
 	a.server.wg.Add(1)
 	go func() {
@@ -234,10 +244,12 @@ func (a *udpAssociation) forward(clientAddress *net.UDPAddr, packet socksUDPPack
 
 func (a *udpAssociation) createFlow(
 	clientAddress *net.UDPAddr,
-	target string,
+	addr netip.AddrPort,
 	firstPayload []byte,
 	skip ...string,
 ) (*udpFlow, error) {
+	// Cold path: the destination is only stringified when a flow is created.
+	target := addr.String()
 	host, port, err := net.SplitHostPort(target)
 	if err != nil {
 		return nil, fmt.Errorf("UDP target: %w", err)
@@ -248,7 +260,7 @@ func (a *udpAssociation) createFlow(
 	}
 	network := networkForIP("udp", targetIP)
 	if a.channel == ChannelDirect {
-		return a.createDirectFlow(clientAddress, target, network, firstPayload)
+		return a.createDirectFlow(clientAddress, addr, network, firstPayload)
 	}
 	adapters := a.scheduler.snapshot().Adapters
 	excluded := make(map[string]struct{}, len(adapters))
@@ -339,6 +351,7 @@ func (a *udpAssociation) createFlow(
 		a.server.registry.AddUp(telemetry, uint64(len(firstPayload)))
 		flow := &udpFlow{
 			association: a,
+			addr:        addr,
 			target:      target,
 			adapter:     adapter,
 			connection:  upstream,
@@ -356,10 +369,11 @@ func (a *udpAssociation) createFlow(
 
 func (a *udpAssociation) createDirectFlow(
 	clientAddress *net.UDPAddr,
-	target string,
+	addr netip.AddrPort,
 	network string,
 	firstPayload []byte,
 ) (*udpFlow, error) {
+	target := addr.String()
 	dialer := &net.Dialer{Timeout: a.server.config.ConnectTimeout}
 	if network == "udp6" {
 		dialer.LocalAddr = &net.UDPAddr{IP: net.IPv6unspecified}
@@ -391,6 +405,7 @@ func (a *udpAssociation) createDirectFlow(
 	a.server.registry.AddUp(telemetry, uint64(len(firstPayload)))
 	flow := &udpFlow{
 		association: a,
+		addr:        addr,
 		target:      target,
 		connection:  upstream,
 		session:     telemetry,
@@ -418,17 +433,20 @@ func (f *udpFlow) send(payload []byte) error {
 
 func (f *udpFlow) receiveLoop(clientAddress *net.UDPAddr) {
 	defer f.close()
-	packet, headerSize, ok := newSOCKSUDPReplyBuffer(f.target)
+	packet, headerSize, ok := newSOCKSUDPReplyBuffer(f.addr)
 	if !ok {
 		return
 	}
 	// The target is immutable for this flow. Read directly after its cached
 	// SOCKS header; WriteToUDP finishes using the buffer before the next read.
 	buffer := packet[headerSize:]
+	// Same amortisation as serve: re-arm the deadline only after it elapses.
+	deadline := time.Time{}
 	for {
-		_ = f.connection.SetReadDeadline(
-			time.Now().Add(f.association.sweepInterval),
-		)
+		if now := time.Now(); !now.Before(deadline) {
+			deadline = now.Add(f.association.sweepInterval)
+			_ = f.connection.SetReadDeadline(deadline)
+		}
 		count, err := f.connection.Read(buffer)
 		if err != nil {
 			var networkError net.Error
@@ -470,8 +488,8 @@ func (f *udpFlow) close() {
 	f.closeOnce.Do(func() {
 		_ = f.connection.Close()
 		f.association.mu.Lock()
-		if f.association.flows[f.target] == f {
-			delete(f.association.flows, f.target)
+		if f.association.flows[f.addr] == f {
+			delete(f.association.flows, f.addr)
 		}
 		f.association.mu.Unlock()
 		f.association.server.registry.Finish(f.session)
@@ -500,65 +518,63 @@ func parseSOCKSUDPPacket(payload []byte) (socksUDPPacket, bool) {
 	if len(payload) < 4 || payload[0] != 0 || payload[1] != 0 || payload[2] != 0 {
 		return socksUDPPacket{}, false
 	}
-	var ip net.IP
+	var addr netip.Addr
 	var portOffset int
 	switch payload[3] {
 	case 1:
 		if len(payload) < 10 {
 			return socksUDPPacket{}, false
 		}
-		ip = net.IP(payload[4:8]).To4()
+		addr = netip.AddrFrom4([4]byte(payload[4:8]))
 		portOffset = 8
 	case 4:
 		if len(payload) < 22 {
 			return socksUDPPacket{}, false
 		}
-		ip = net.IP(payload[4:20])
+		addr = netip.AddrFrom16([16]byte(payload[4:20]))
 		// 部分客户端会用 IPv6 格式携带 IPv4 映射地址（::ffff:a.b.c.d），
 		// 按 IPv4 处理而不是拒绝，保持与回复编码（IPv4 用 ATYP=1）对称。
-		if mapped := ip.To4(); mapped != nil {
-			ip = mapped
+		if unmapped := addr.Unmap(); unmapped.Is4() {
+			addr = unmapped
 		}
 		portOffset = 20
 	default:
 		return socksUDPPacket{}, false
 	}
-	if ip == nil {
+	if !addr.IsValid() {
 		return socksUDPPacket{}, false
 	}
-	port := int(binary.BigEndian.Uint16(payload[portOffset : portOffset+2]))
+	port := binary.BigEndian.Uint16(payload[portOffset : portOffset+2])
 	payloadOffset := portOffset + 2
 	if port == 0 || len(payload) == payloadOffset {
 		return socksUDPPacket{}, false
 	}
 	return socksUDPPacket{
-		target:  net.JoinHostPort(ip.String(), strconv.Itoa(port)),
+		addr:    netip.AddrPortFrom(addr, port),
 		payload: payload[payloadOffset:],
 	}, true
 }
 
-func packSOCKSUDPReply(target string, payload []byte) ([]byte, bool) {
-	host, portText, err := net.SplitHostPort(target)
-	if err != nil {
+func packSOCKSUDPReply(target netip.AddrPort, payload []byte) ([]byte, bool) {
+	if !target.IsValid() || target.Port() == 0 {
 		return nil, false
 	}
-	ip := net.ParseIP(host)
-	port, err := strconv.Atoi(portText)
-	if ip == nil || err != nil || port <= 0 || port > 65535 {
-		return nil, false
-	}
+	// Encode IPv4-mapped IPv6 addresses as ATYP=1, matching net.IP.To4().
+	addr := target.Addr().Unmap()
 	var packet []byte
-	if ipv4 := ip.To4(); ipv4 != nil {
+	if addr.Is4() {
+		ipv4 := addr.As4()
 		packet = make([]byte, 10+len(payload))
 		packet[3] = 1
-		copy(packet[4:8], ipv4)
-		binary.BigEndian.PutUint16(packet[8:10], uint16(port))
+		copy(packet[4:8], ipv4[:])
+		binary.BigEndian.PutUint16(packet[8:10], target.Port())
 		copy(packet[10:], payload)
 	} else {
+		ipv6 := addr.As16()
 		packet = make([]byte, 22+len(payload))
 		packet[3] = 4
-		copy(packet[4:20], ip.To16())
-		binary.BigEndian.PutUint16(packet[20:22], uint16(port))
+		copy(packet[4:20], ipv6[:])
+		binary.BigEndian.PutUint16(packet[20:22], target.Port())
 		copy(packet[22:], payload)
 	}
 	return packet, true
@@ -567,7 +583,7 @@ func packSOCKSUDPReply(target string, payload []byte) ([]byte, bool) {
 // One allocation for packet storage per flow, rather than per datagram.
 // Preserve the full upstream read size; oversized encapsulated datagrams are
 // still rejected by the UDP socket instead of silently truncating their data.
-func newSOCKSUDPReplyBuffer(target string) ([]byte, int, bool) {
+func newSOCKSUDPReplyBuffer(target netip.AddrPort) ([]byte, int, bool) {
 	header, ok := packSOCKSUDPReply(target, nil)
 	if !ok {
 		return nil, 0, false

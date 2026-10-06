@@ -2,13 +2,15 @@ package proxy
 
 import (
 	"bytes"
+	"net/netip"
 	"testing"
 )
 
 func TestUDPReplyBufferPreservesAddressAndPacketBoundaries(t *testing.T) {
 	for _, target := range []string{"192.0.2.1:443", "[2001:db8::1]:443", "[::ffff:192.0.2.1]:443"} {
+		addr := netip.MustParseAddrPort(target)
 		t.Run(target, func(t *testing.T) {
-			packet, headerSize, ok := newSOCKSUDPReplyBuffer(target)
+			packet, headerSize, ok := newSOCKSUDPReplyBuffer(addr)
 			if !ok || len(packet)-headerSize != maxSOCKSUDPDatagramBytes {
 				t.Fatal("invalid packet buffer")
 			}
@@ -19,16 +21,16 @@ func TestUDPReplyBufferPreservesAddressAndPacketBoundaries(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				want, ok := packSOCKSUDPReply(target, payload)
+				want, ok := packSOCKSUDPReply(addr, payload)
 				if !ok || !bytes.Equal(packet[:headerSize+n], want) {
 					t.Fatalf("header, payload or datagram boundary changed at length %d", size)
 				}
 			}
 		})
 	}
-	for _, target := range []string{"invalid", "192.0.2.1:0", "[2001:db8::1]:65536"} {
-		if _, _, ok := newSOCKSUDPReplyBuffer(target); ok {
-			t.Fatalf("accepted %q", target)
+	for _, addr := range []netip.AddrPort{{}, netip.MustParseAddrPort("192.0.2.1:0"), netip.MustParseAddrPort("[2001:db8::1]:0")} {
+		if _, _, ok := newSOCKSUDPReplyBuffer(addr); ok {
+			t.Fatalf("accepted invalid reply address %v", addr)
 		}
 	}
 }
@@ -38,7 +40,7 @@ var udpReplyBenchmarkSink []byte
 // Measures packet preparation only, not network or end-to-end throughput.
 func BenchmarkUDPReplyPreparation(b *testing.B) {
 	payload := bytes.Repeat([]byte{0xa5}, 1200)
-	const target = "192.0.2.1:443"
+	target := netip.MustParseAddrPort("192.0.2.1:443")
 	b.Run("per-packet-allocation", func(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
