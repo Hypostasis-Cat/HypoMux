@@ -308,6 +308,48 @@ func TestSOCKSUDPStopClosesActiveAssociationWithinDeadline(t *testing.T) {
 	}
 }
 
+func TestSOCKSUDPActiveFlowSurvivesPeriodicReadDeadlines(t *testing.T) {
+	echoAddress, _, stopEcho := startUDPEchoServer(t)
+	defer stopEcho()
+	server := newTUNPoolTestServer(t)
+	server.udpIdleTimeout = 250 * time.Millisecond
+	server.udpSweepInterval = 10 * time.Millisecond
+	var dials atomic.Int64
+	server.dialUDP = func(ctx context.Context, dialer *net.Dialer, target string) (net.Conn, error) {
+		dials.Add(1)
+		return dialer.DialContext(ctx, "udp4", target)
+	}
+	endpoints, err := server.Start()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stopServer(t, server)
+	control, relay := startUDPAssociation(t, endpoints.Channels[ChannelAggregation], 0)
+	defer control.Close()
+	client := listenUDPClient(t)
+	defer client.Close()
+	for i := range 9 {
+		payload := []byte{byte(i)}
+		sendSOCKSUDP(t, client, relay, echoAddress, payload)
+		if reply := readSOCKSUDP(t, client); !bytes.Equal(reply, payload) {
+			t.Fatalf("reply %d lost its datagram boundary: %v", i, reply)
+		}
+		if i < 8 {
+			// Cross several deadline periods while keeping activity below the
+			// idle bound, for longer than one full idle timeout overall.
+			time.Sleep(40 * time.Millisecond)
+		}
+	}
+	if dials.Load() != 1 {
+		t.Fatalf("active flow was replaced across deadlines: %d dials", dials.Load())
+	}
+	waitForUDPFlows(t, server, 0, 2*time.Second)
+	sendSOCKSUDP(t, client, relay, echoAddress, []byte("after-idle"))
+	if reply := readSOCKSUDP(t, client); string(reply) != "after-idle" || dials.Load() != 2 {
+		t.Fatal("idle expiry did not allow a fresh flow on the same association")
+	}
+}
+
 func TestParseAndPackSOCKSUDPIPv4(t *testing.T) {
 	payload := append(
 		[]byte{0, 0, 0, 1, 192, 0, 2, 1, 1, 187},

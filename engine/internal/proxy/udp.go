@@ -49,6 +49,7 @@ type udpAssociation struct {
 type udpFlow struct {
 	association *udpAssociation
 	addr        netip.AddrPort
+	target      string // Cached at flow creation for latency failover checks.
 	adapter     Adapter
 	connection  net.Conn
 	session     *connection
@@ -134,9 +135,8 @@ func (s *Server) handleUDPAssociation(
 
 func (a *udpAssociation) serve(controlDone <-chan struct{}) error {
 	buffer := make([]byte, maxSOCKSUDPDatagramBytes)
-	// Re-arming the read deadline costs a syscall, so refresh it only once the
-	// previous deadline has elapsed. An expired deadline still surfaces as a
-	// timeout, and the loop re-arms it before the next read.
+	// Refresh the periodic read deadline only after it expires, rather than
+	// resetting its timer for every datagram.
 	deadline := time.Time{}
 	for {
 		select {
@@ -195,7 +195,7 @@ func (a *udpAssociation) forward(clientAddress *net.UDPAddr, packet socksUDPPack
 		// Outbound writes are not proof of connectivity. Require missing replies
 		// AND comparative probes before retiring a silent flow. Never replay a
 		// datagram already written to the old path.
-		if a.scheduler != nil && time.Since(time.Unix(0, flow.lastReply.Load())) >= 3*time.Second && a.scheduler.latencyFailover(flow.adapter, packet.addr.String()) {
+		if a.scheduler != nil && time.Since(time.Unix(0, flow.lastReply.Load())) >= 3*time.Second && a.scheduler.latencyFailover(flow.adapter, flow.target) {
 			exclude = flow.adapter.Name
 			flow.close()
 		} else {
@@ -352,6 +352,7 @@ func (a *udpAssociation) createFlow(
 		flow := &udpFlow{
 			association: a,
 			addr:        addr,
+			target:      target,
 			adapter:     adapter,
 			connection:  upstream,
 			session:     telemetry,
@@ -405,6 +406,7 @@ func (a *udpAssociation) createDirectFlow(
 	flow := &udpFlow{
 		association: a,
 		addr:        addr,
+		target:      target,
 		connection:  upstream,
 		session:     telemetry,
 	}
@@ -557,8 +559,7 @@ func packSOCKSUDPReply(target netip.AddrPort, payload []byte) ([]byte, bool) {
 	if !target.IsValid() || target.Port() == 0 {
 		return nil, false
 	}
-	// Unmap first: a 4-in-6 address must be encoded as ATYP=1, and As4 would
-	// panic on it. This mirrors the previous net.IP.To4() behaviour.
+	// Encode IPv4-mapped IPv6 addresses as ATYP=1, matching net.IP.To4().
 	addr := target.Addr().Unmap()
 	var packet []byte
 	if addr.Is4() {

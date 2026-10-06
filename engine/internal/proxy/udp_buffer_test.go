@@ -28,14 +28,9 @@ func TestUDPReplyBufferPreservesAddressAndPacketBoundaries(t *testing.T) {
 			}
 		})
 	}
-	for _, target := range []string{"invalid", "192.0.2.1:0", "[2001:db8::1]:65536"} {
-		addr, err := netip.ParseAddrPort(target)
-		if err != nil {
-			// Unparseable input can never reach the encoder.
-			continue
-		}
+	for _, addr := range []netip.AddrPort{{}, netip.MustParseAddrPort("192.0.2.1:0"), netip.MustParseAddrPort("[2001:db8::1]:0")} {
 		if _, _, ok := newSOCKSUDPReplyBuffer(addr); ok {
-			t.Fatalf("accepted %q", target)
+			t.Fatalf("accepted invalid reply address %v", addr)
 		}
 	}
 }

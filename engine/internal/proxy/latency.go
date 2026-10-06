@@ -92,10 +92,10 @@ func (p *latencyTable) watch(target string) {
 // watchAddr registers an already-parsed destination. It is the path taken once
 // per inbound datagram, so it must not parse or allocate a string.
 func (p *latencyTable) watchAddr(addr netip.Addr) {
+	addr = addr.Unmap()
 	if !latencyWatchable(addr) {
 		return
 	}
-	addr = addr.Unmap()
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if _, exists := p.targets[addr]; !exists && len(p.targets) >= latencyTargetLimit {
