@@ -332,7 +332,7 @@ func (s *EngineService) consumeCoreEvents() {
 func (s *EngineService) handleDNSFallback(event dnsFallbackEvent) {
 	s.mu.Lock()
 	settings := s.settings.Get()
-	if s.closing || settings.Mode != "tun" || s.dnsFallbackApplied || s.compatRestarting {
+	if s.closing || settings.Mode != "tun" || settings.DNSPolicy == "custom" || event.Policy == "custom" || s.dnsFallbackApplied || s.compatRestarting {
 		s.mu.Unlock()
 		return
 	}
@@ -869,7 +869,7 @@ func (s *EngineService) startLocked(ctx context.Context, mode string) (snapshot 
 		"mode": mode, "listen_host": "127.0.0.1", "weighted": settings.Weighted, "strategy": effectiveSchedulingStrategy(settings),
 		"connect_timeout_ms": 6000,
 		"dns": map[string]any{
-			"policy": effectiveDNSPolicy, "legacy_servers": []string{settings.DNSServer},
+			"policy": effectiveDNSPolicy, "legacy_servers": settingsDNSServers(settings), "doh_servers": settings.DoHServers,
 			"cache_ttl_ms": 60000, "query_timeout_ms": 4000,
 		},
 		"adapters":                engineAdapters(selected),
@@ -959,8 +959,21 @@ func (s *EngineService) startLocked(ctx context.Context, mode string) (snapshot 
 		}
 	} else {
 		s.recordStartStage("dns_preparing", nil)
-		dnsResult, dnsDiagnosticErr, dnsErr := prepareTUNDNS(ctx, dnsEgress.Adapter, settings.ForceTUNBypass,
-			s.resolveConnectivityDNS, s.tunDNSConfiguration)
+		var dnsResult dnsResolveResult
+		var dnsDiagnosticErr, dnsErr error
+		var dnsPool []dnsResolveResult
+		if effectiveDNSPolicy != "system" && (len(settings.DNSServers) > 1 || len(settings.DoHServers) > 0 || effectiveDNSPolicy == "custom") {
+			dnsPool, dnsErr = s.configuredTUNDNSPool(ctx, dnsEgress.Adapter)
+			if dnsErr == nil {
+				dnsResult = dnsPool[0]
+				dnsResult.Adapter = dnsEgress.Adapter.Name
+				if !settings.ForceTUNBypass {
+					_, dnsDiagnosticErr = resolveConnectivityBootstrap(ctx, dnsEgress.Adapter.Name, s.resolveConnectivityDNS)
+				}
+			}
+		} else {
+			dnsResult, dnsDiagnosticErr, dnsErr = prepareTUNDNS(ctx, dnsEgress.Adapter, settings.ForceTUNBypass, s.resolveConnectivityDNS, s.tunDNSConfiguration)
+		}
 		if dnsErr != nil {
 			return rollback(fmt.Errorf("准备 TUN DNS 配置失败：%w", dnsErr))
 		}
@@ -990,6 +1003,7 @@ func (s *EngineService) startLocked(ctx context.Context, mode string) (snapshot 
 			IPv4Unavailable: !selectedAdaptersHaveIPv4(selected),
 			ConfigName:      "sing-box.json",
 			RuleSets:        settings.RuleSets,
+			DNSUpstreams:    dnsPool,
 		}
 		configDigest := ""
 		configOptions.ConfigSHA256 = &configDigest

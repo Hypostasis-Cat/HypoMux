@@ -33,6 +33,7 @@ type Query struct {
 	RecordType RecordType
 	Binding    Binding
 	NetworkDNS bool
+	LegacyDNS  bool // Bootstrap DoH hostnames through source-bound traditional DNS.
 }
 
 type Result struct {
@@ -43,6 +44,7 @@ type Result struct {
 	Adapter    string     `json:"adapter"`
 	Transport  string     `json:"transport"`
 	Server     string     `json:"server"`
+	DoHPath    string     `json:"doh_path,omitempty"`
 	Cached     bool       `json:"cached"`
 	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
 }
@@ -76,6 +78,7 @@ type cacheKey struct {
 	ipv6IfIndex int
 	dnsServers  string
 	networkDNS  bool
+	legacyDNS   bool
 	domain      string
 	recordType  RecordType
 }
@@ -110,6 +113,7 @@ type Resolver struct {
 
 	dohMu         sync.Mutex
 	dohTransports map[dohPoolKey]*dohPoolEntry
+	dohRelays     map[dohPoolKey]net.PacketConn
 	dohClosed     bool
 	dohSequence   uint64
 
@@ -177,6 +181,7 @@ func (r *Resolver) Resolve(ctx context.Context, query Query) (Result, error) {
 		ipv6IfIndex: binding.IPv6IfIndex,
 		dnsServers:  strings.Join(binding.DNSServers, "\x00"),
 		networkDNS:  query.NetworkDNS,
+		legacyDNS:   query.LegacyDNS,
 		domain:      domain,
 		recordType:  recordType,
 	}
@@ -240,7 +245,7 @@ func (r *Resolver) Status() Status {
 	return Status{
 		Policy:             r.config.Policy,
 		LegacyServers:      append([]string(nil), r.config.LegacyServers...),
-		DoHEndpoints:       Endpoints(r.config.Policy),
+		DoHEndpoints:       ConfigEndpoints(r.config),
 		CacheEntries:       cacheEntries,
 		Inflight:           inflight,
 		Queries:            r.queries.Load(),
@@ -258,7 +263,10 @@ func (r *Resolver) runLookup(key cacheKey, binding Binding, call *lookup) {
 	var result Result
 	var ttl time.Duration
 	var err error
-	if key.networkDNS {
+	if key.legacyDNS {
+		_, wireType, _ := normalizeRecordType(key.recordType)
+		result, ttl, err = r.resolveLegacy(ctx, key.domain, wireType, binding)
+	} else if key.networkDNS {
 		_, wireType, typeErr := normalizeRecordType(key.recordType)
 		if typeErr != nil {
 			err = typeErr
@@ -363,7 +371,12 @@ func (r *Resolver) resolveDoH(
 	recordType uint16,
 	binding Binding,
 ) (Result, time.Duration, error) {
-	endpoints := boundEndpoints(r.config.Policy, binding)
+	var endpoints []Endpoint
+	for _, endpoint := range ConfigEndpoints(r.config) {
+		if endpoint.IP == "" || supportsEndpoint(binding, endpoint.IP) {
+			endpoints = append(endpoints, endpoint)
+		}
+	}
 	if binding.SourceIPv6 != "" && r.config.Policy == PolicyDNSPod {
 		return r.resolveDNSPodDualStack(ctx, domain, recordType, binding, endpoints)
 	}
@@ -669,21 +682,24 @@ func (r *Resolver) queryDoH(
 	binding Binding,
 	endpoint Endpoint,
 ) (Result, time.Duration, error) {
+	if endpoint.IP == "" {
+		return r.queryBootstrappedDoH(ctx, domain, recordType, binding, endpoint)
+	}
 	packet, queryID, err := buildQuery(domain, recordType)
 	if err != nil {
 		return Result{}, 0, err
 	}
-	address := net.JoinHostPort(endpoint.IP, "443")
+	address := net.JoinHostPort(endpoint.IP, endpoint.port())
 	request, err := http.NewRequestWithContext(
 		ctx,
 		http.MethodPost,
-		"https://"+endpoint.Host+endpoint.Path,
+		"https://"+endpoint.authority()+endpoint.Path,
 		bytes.NewReader(packet),
 	)
 	if err != nil {
 		return Result{}, 0, err
 	}
-	request.Host = endpoint.Host
+	request.Host = endpoint.authority()
 	request.Header.Set("Accept", "application/dns-message")
 	request.Header.Set("Content-Type", "application/dns-message")
 	request.Header.Set("User-Agent", "HypoMux-Engine/1")
@@ -722,6 +738,7 @@ func (r *Resolver) queryDoH(
 		Addresses: append([]string(nil), answer.Addresses...),
 		Transport: "doh",
 		Server:    endpoint.Host + "@" + address,
+		DoHPath:   endpoint.Path,
 	}, answer.TTL, nil
 }
 
@@ -734,6 +751,11 @@ func (r *Resolver) recordDoHSuccess(binding Binding) {
 }
 
 func (r *Resolver) recordStrictFailure(binding Binding, failure error) {
+	// An explicitly custom encrypted-only policy must never request a desktop
+	// compatibility restart that silently changes the policy to plaintext.
+	if r.config.Policy == PolicyCustom {
+		return
+	}
 	key := bindingKey(binding)
 	var handler func(FallbackEvent)
 	r.mu.Lock()

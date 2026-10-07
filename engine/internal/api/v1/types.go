@@ -30,6 +30,7 @@ const (
 	MethodTunDeactivate     = "tun.deactivate"
 	MethodDNSResolve        = "dns.resolve"
 	MethodDNSStatus         = "dns.status"
+	MethodDNSDoHRelay       = "dns.dohRelay"
 	MethodHealthCheck       = "health.check"
 	MethodDiagnosticRun     = "diagnostic.run"
 	MethodMTUSet            = "mtu.set"
@@ -57,6 +58,7 @@ var capabilities = []string{
 	MethodTunDeactivate,
 	MethodDNSResolve,
 	MethodDNSStatus,
+	MethodDNSDoHRelay,
 	MethodHealthCheck,
 	MethodDiagnosticRun,
 	MethodMTUSet,
@@ -193,6 +195,7 @@ type EngineStartParams struct {
 type DNSStartConfig struct {
 	Policy         string   `json:"policy"`
 	LegacyServers  []string `json:"legacy_servers"`
+	DoHServers     []string `json:"doh_servers,omitempty"`
 	CacheTTLMS     int      `json:"cache_ttl_ms"`
 	QueryTimeoutMS int      `json:"query_timeout_ms"`
 }
@@ -201,6 +204,7 @@ func (c DNSStartConfig) ResolverConfig() dns.Config {
 	return dns.Config{
 		Policy:        c.Policy,
 		LegacyServers: append([]string(nil), c.LegacyServers...),
+		DoHServers:    append([]string(nil), c.DoHServers...),
 		CacheTTL:      time.Duration(c.CacheTTLMS) * time.Millisecond,
 		QueryTimeout:  time.Duration(c.QueryTimeoutMS) * time.Millisecond,
 	}
@@ -283,6 +287,7 @@ type LogRecordData struct {
 }
 
 type DNSResolveParams struct {
+	Bootstrap  bool           `json:"bootstrap,omitempty"`
 	TimeoutMS  int            `json:"timeout_ms,omitempty"`
 	Domain     string         `json:"domain"`
 	Adapter    string         `json:"adapter"`
@@ -293,6 +298,15 @@ type DNSFallbackRequiredData struct {
 	Adapter string `json:"adapter"`
 	Policy  string `json:"policy"`
 	Reason  string `json:"reason"`
+}
+
+type DNSDoHRelayParams struct {
+	Adapter  string       `json:"adapter"`
+	Endpoint dns.Endpoint `json:"endpoint"`
+}
+
+type DNSDoHRelayResult struct {
+	Address string `json:"address"`
 }
 
 type ShutdownResult struct {

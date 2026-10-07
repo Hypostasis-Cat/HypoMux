@@ -616,6 +616,9 @@ export function ConnectionsPage({
         </div>
         <div className="connections-heading-actions">
           <SearchBox
+            aria-label={text("搜索活动连接", "Search active connections")}
+            autoComplete="off"
+            spellCheck={false}
             value={query}
             placeholder={text("搜索进程、域名、IP 或网卡", "Search process, domain, IP, or adapter")}
             onChange={(_, data) => setQuery(data.value)}

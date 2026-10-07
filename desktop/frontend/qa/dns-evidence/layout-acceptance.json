@@ -1,0 +1,106 @@
+{
+  "date": "2026-10-07",
+  "fixture": "development browser preview; isolated local settings",
+  "layoutChecks": [
+    {
+      "cardHeights": [
+        292,
+        292
+      ],
+      "count": 1,
+      "height": 577.171875,
+      "saveOffset": 513.171875
+    },
+    {
+      "cardHeights": [
+        292,
+        292
+      ],
+      "count": 2,
+      "focus": "dns_server_2",
+      "height": 577.171875,
+      "saveOffset": 513.171875
+    },
+    {
+      "cardHeights": [
+        292,
+        292
+      ],
+      "count": 6,
+      "focus": "dns_server_6",
+      "height": 577.171875,
+      "saveOffset": 513.171875
+    },
+    {
+      "cardHeights": [
+        292,
+        292
+      ],
+      "count": 16,
+      "focus": "dns_server_16",
+      "height": 577.171875,
+      "saveOffset": 513.171875
+    },
+    {
+      "cardHeights": [
+        292,
+        292
+      ],
+      "count": 32,
+      "focus": "doh_server_16",
+      "height": 577.171875,
+      "overflow": false,
+      "saveOffset": 513.171875,
+      "scrollAreas": [
+        {
+          "clientHeight": 146,
+          "scrollHeight": 632,
+          "scrollTop": 486
+        },
+        {
+          "clientHeight": 146,
+          "scrollHeight": 632,
+          "scrollTop": 486
+        }
+      ]
+    }
+  ],
+  "checks": {
+    "maximumDNS": 16,
+    "maximumDoH": 16,
+    "addButtonsDisabledAtMaximum": true,
+    "persistenceAfterReload": true,
+    "invalidLastEntryFocused": "doh_server_16",
+    "invalidEntryVisible": true,
+    "emptyCustomDoHFocus": "添加 DoH",
+    "inactivePolicyNotice": true,
+    "minimumWindow": {
+      "width": 960,
+      "height": 680,
+      "horizontalOverflow": false,
+      "cardWidth": 393,
+      "cardHeight": 292
+    },
+    "themes": [
+      "light",
+      "dark"
+    ]
+  },
+  "validation": {
+    "frontendTests": 53,
+    "typescript": "passed",
+    "productionBuild": "passed",
+    "targetedGoDNSAndSettingsTests": "passed",
+    "bundledSingBoxChecks": "passed",
+    "realLoopbackScenarios": [
+      "second DoH succeeds",
+      "second traditional DNS succeeds",
+      "custom DoH fails without plaintext downgrade",
+      "FakeIP DNS and real route lookup use separate rules"
+    ]
+  },
+  "limits": [
+    "No Windows TUN or system network settings were changed during acceptance.",
+    "Full IPv6 loopback tests are restricted by this Windows environment."
+  ]
+}

@@ -52,6 +52,7 @@ const initial = {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.locale = "en";
+  window.history.replaceState(null, "", "/");
   mocks.get.mockResolvedValue(initial);
   mocks.setSteamCDNEnabled.mockImplementation(async (enabled) => {
     const saved = { ...initial, steam_cdn_enabled: enabled };
@@ -76,11 +77,45 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+async function openCategory(name: string) {
+  fireEvent.click(screen.getByRole("tab", { name }));
+  await waitFor(() => expect(screen.getByRole("tab", { name }).getAttribute("aria-selected")).toBe("true"));
+}
+
+it("shows common preferences first and exposes one category at a time", async () => {
+  render(<SettingsPage adapterRuntime={[]} onOpenBlockedDomains={() => {}} />);
+  await screen.findByText("Settings synced");
+  expect(screen.getByRole("tabpanel", { name: "General" })).toBeTruthy();
+  expect(screen.getByRole("switch", { name: "Connect Wi-Fi at startup" })).toBeTruthy();
+  expect(screen.queryByRole("textbox", { name: "DNS 1" })).toBeNull();
+  expect(screen.queryByRole("switch", { name: "Enable AI features" })).toBeNull();
+  await openCategory("Appearance");
+  expect(screen.getByRole("tabpanel", { name: "Appearance" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: /^Default background/ })).toBeTruthy();
+  expect(screen.queryByRole("switch", { name: "Connect Wi-Fi at startup" })).toBeNull();
+  expect(new URLSearchParams(window.location.search).get("settingsCategory")).toBe("appearance");
+});
+
+it("opens a linked category and restores category navigation with browser back", async () => {
+  window.history.replaceState(null, "", "/?settingsCategory=network");
+  render(<SettingsPage adapterRuntime={[]} onOpenBlockedDomains={() => {}} />);
+  await screen.findByText("Settings synced");
+  expect(screen.getByRole("tabpanel", { name: "Network & DNS" })).toBeTruthy();
+  fireEvent.change(screen.getByRole("textbox", { name: "DNS 1" }), { target: { value: "1.1.1.1" } });
+  await openCategory("General");
+  expect(screen.getByRole("button", { name: "Review changes" })).toBeTruthy();
+  await act(async () => window.history.back());
+  await screen.findByRole("tabpanel", { name: "Network & DNS" });
+  expect((screen.getByRole("textbox", { name: "DNS 1" }) as HTMLInputElement).value).toBe("1.1.1.1");
+  expect(mocks.update).not.toHaveBeenCalled();
+});
+
 it("persists the global AI switch and removes AI settings and companion controls", async () => {
   const changed = vi.fn();
   window.addEventListener(AI_AVAILABILITY_EVENT, changed);
   try {
     render(<SettingsPage adapterRuntime={[]} onOpenBlockedDomains={() => {}} />);
+    await openCategory("AI Assistant");
     await screen.findByText("Settings synced");
     expect(screen.getByRole("button", { name: "AI assistant settings" })).toBeTruthy();
     const toggle = screen.getByRole("switch", { name: "Enable AI features" }) as HTMLInputElement;
@@ -104,6 +139,7 @@ it("publishes AI changes only after save succeeds and restores failed saves", as
   window.addEventListener(AI_AVAILABILITY_EVENT, changed);
   try {
     render(<SettingsPage adapterRuntime={[]} onOpenBlockedDomains={() => {}} />);
+    await openCategory("AI Assistant");
     await screen.findByText("Settings synced");
     changed.mockClear();
     const toggle = screen.getByRole("switch", { name: "Enable AI features" }) as HTMLInputElement;
@@ -122,6 +158,7 @@ it("loads persisted AI opt-out and exposes the switch in Chinese", async () => {
   mocks.locale = "zh";
   mocks.get.mockResolvedValue({ ...initial, ai_enabled: false });
   render(<SettingsPage adapterRuntime={[]} onOpenBlockedDomains={() => {}} />);
+    await openCategory("AI 助手");
   await screen.findByText("配置已同步");
   expect((screen.getByRole("switch", { name: "启用 AI 功能" }) as HTMLInputElement).checked).toBe(false);
   expect(screen.queryByRole("button", { name: "AI 助手设置" })).toBeNull();
@@ -222,6 +259,7 @@ describe("TUN settings", () => {
     ["gVisor (userspace)", "gvisor"],
   ])("persists %s and explains that it applies on the next start", async (label, stack) => {
     render(<SettingsPage adapterRuntime={[]} onOpenBlockedDomains={() => {}} />);
+    await openCategory("Advanced Network");
     const dropdown = await screen.findByRole("combobox", { name: "TUN stack" });
     await waitFor(() => expect(dropdown.hasAttribute("disabled")).toBe(false));
     expect(dropdown.textContent).toContain("System (default)");
@@ -240,6 +278,7 @@ describe("TUN settings", () => {
     mocks.locale = "zh";
     mocks.get.mockResolvedValue({ ...initial, language: "zh", tun_stack: "gvisor" });
     render(<SettingsPage adapterRuntime={[]} onOpenBlockedDomains={() => {}} />);
+    await openCategory("高级网络");
     await waitFor(() => expect(screen.getByRole("combobox", { name: "TUN 协议栈" }).textContent).toContain("gVisor（用户态）"));
     expect(screen.getByText("FakeIP 与规则集缓存")).toBeTruthy();
   });
@@ -267,23 +306,60 @@ it("disables Wi-Fi startup control when automatic acceleration is off", async ()
 
 
 describe("manual network drafts", () => {
+  it("adds multiple DNS and DoH servers, removes entries, and saves the complete list", async () => {
+    render(<SettingsPage adapterRuntime={[]} onOpenBlockedDomains={() => {}} />);
+    await openCategory("Network & DNS");
+    await screen.findByText("Settings synced");
+    fireEvent.click(screen.getByRole("button", { name: "Add DNS" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "DNS 2" }), { target: { value: "1.1.1.1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add DoH" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "DoH 1" }), { target: { value: "https://dns.example.com:8443/query?key=hello" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add DoH" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "DoH 2" }), { target: { value: "https://dns.google/dns-query" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save ports and DNS" }));
+    await waitFor(() => expect(mocks.update).toHaveBeenLastCalledWith(expect.objectContaining({ dns_servers: ["223.5.5.5", "1.1.1.1"], doh_servers: ["https://dns.example.com:8443/query?key=hello", "https://dns.google/dns-query"] }), ["dns_server", "dns_servers", "doh_servers"]));
+    await screen.findByText("Settings synced");
+    fireEvent.click(screen.getByRole("button", { name: "Remove DoH 1" }));
+    expect((screen.getByRole("textbox", { name: "DoH 1" }) as HTMLInputElement).value).toBe("https://dns.google/dns-query");
+    fireEvent.click(screen.getByRole("button", { name: "Remove DNS 2" }));
+    expect(screen.getByRole("button", { name: "Remove DNS 1" }).hasAttribute("disabled")).toBe(true);
+  });
+
+  it("shows errors beside invalid addresses and prevents saving until corrected", async () => {
+    render(<SettingsPage adapterRuntime={[]} onOpenBlockedDomains={() => {}} />);
+    await openCategory("Network & DNS");
+    await screen.findByText("Settings synced");
+    fireEvent.click(screen.getByRole("button", { name: "Add DoH" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "DoH 1" }), { target: { value: "http://dns.example.com/query" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save ports and DNS" }));
+    expect(await screen.findByText(/Enter a full HTTPS URL/)).toBeTruthy();
+    expect(mocks.update).not.toHaveBeenCalled();
+    await waitFor(() => expect(document.activeElement?.getAttribute("name")).toBe("doh_server_1"));
+    fireEvent.change(screen.getByRole("textbox", { name: "DoH 1" }), { target: { value: "https://dns.example.com/query" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save ports and DNS" }));
+    await waitFor(() => expect(mocks.update).toHaveBeenCalledTimes(1));
+  });
   it("does not include unfinished ports or DNS in an unrelated automatic save", async () => {
     render(<SettingsPage adapterRuntime={[]} onOpenBlockedDomains={() => {}} />);
+    await openCategory("Network & DNS");
     await screen.findByText("Settings synced");
     fireEvent.change(screen.getByRole("spinbutton", { name: "HTTP" }), { target: { value: "12345" } });
-    fireEvent.change(screen.getByRole("textbox", { name: "settings_dns_server" }), { target: { value: "1.1.1.1" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "DNS 1" }), { target: { value: "1.1.1.1" } });
     expect(screen.getByText("Unsaved port and DNS changes")).toBeTruthy();
+    await openCategory("General");
     fireEvent.click(screen.getByRole("switch", { name: "Hide virtual adapters on Home" }));
     await waitFor(() => expect(mocks.update).toHaveBeenCalledWith(expect.objectContaining({ http_port: 10801, dns_server: "223.5.5.5", hide_virtual_adapters: false }), ["hide_virtual_adapters"]));
+    await openCategory("Network & DNS");
     const save = screen.getByRole("button", { name: "Save ports and DNS" });
     await waitFor(() => expect(save.hasAttribute("disabled")).toBe(false));
     expect((screen.getByRole("spinbutton", { name: "HTTP" }) as HTMLInputElement).value).toBe("12345");
     fireEvent.click(save);
-    await waitFor(() => expect(mocks.update).toHaveBeenLastCalledWith(expect.objectContaining({ http_port: 12345, dns_server: "1.1.1.1" }), ["http_port", "dns_server"]));
+    await waitFor(() => expect(mocks.update).toHaveBeenLastCalledWith(expect.objectContaining({ http_port: 12345, dns_server: "1.1.1.1", dns_servers: ["1.1.1.1"] }), ["http_port", "dns_server", "dns_servers"]));
     await screen.findByText("Settings synced");
   });
   it("keeps the draft editable and retryable when saving and recovery both fail", async () => {
     render(<SettingsPage adapterRuntime={[]} onOpenBlockedDomains={() => {}} />);
+    await openCategory("Network & DNS");
     await screen.findByText("Settings synced");
     mocks.update.mockRejectedValueOnce(new Error("offline"));
     mocks.get.mockRejectedValueOnce(new Error("offline"));
@@ -296,6 +372,7 @@ describe("manual network drafts", () => {
   });
   it("preserves edits typed while an earlier manual save is in flight", async () => {
     render(<SettingsPage adapterRuntime={[]} onOpenBlockedDomains={() => {}} />);
+    await openCategory("Network & DNS");
     await screen.findByText("Settings synced");
     let finish!: (value: unknown) => void;
     mocks.update.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
@@ -330,11 +407,14 @@ it("preserves an AI rule saved after loading the settings page", async () => {
 
 it("refreshes AI changes without discarding the manual network draft", async () => {
   render(<SettingsPage adapterRuntime={[]} onOpenBlockedDomains={() => {}} />);
+    await openCategory("Network & DNS");
   await screen.findByText("Settings synced");
   fireEvent.change(screen.getByRole("spinbutton", { name: "HTTP" }), { target: { value: "12345" } });
   mocks.get.mockResolvedValue({ ...initial, hide_virtual_adapters: false });
   act(() => { window.dispatchEvent(new CustomEvent("hypomux:ai-changed")); });
+  await openCategory("General");
   await waitFor(() => expect((screen.getByRole("switch", { name: "Hide virtual adapters on Home" }) as HTMLInputElement).checked).toBe(false));
+  await openCategory("Network & DNS");
   expect((screen.getByRole("spinbutton", { name: "HTTP" }) as HTMLInputElement).value).toBe("12345");
   expect(screen.getByText("Unsaved port and DNS changes")).toBeTruthy();
 });

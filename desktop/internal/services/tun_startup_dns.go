@@ -12,13 +12,16 @@ import (
 // provider catalog or requiring a public test domain to resolve before TUN can
 // be created. This RPC is local and does not perform a network query.
 type tunDNSConfiguration struct {
-	Policy        string   `json:"policy"`
-	LegacyServers []string `json:"legacy_servers"`
-	DoHEndpoints  []struct {
-		IP   string `json:"ip"`
-		Host string `json:"host"`
-		Path string `json:"path"`
-	} `json:"doh_endpoints"`
+	Policy        string           `json:"policy"`
+	LegacyServers []string         `json:"legacy_servers"`
+	DoHEndpoints  []tunDoHEndpoint `json:"doh_endpoints"`
+}
+
+type tunDoHEndpoint struct {
+	IP   string `json:"ip"`
+	Host string `json:"host"`
+	Path string `json:"path"`
+	Port int    `json:"port,omitempty"`
 }
 
 func configuredTUNDNS(config tunDNSConfiguration, adapter AdapterView) (dnsResolveResult, error) {
@@ -27,8 +30,13 @@ func configuredTUNDNS(config tunDNSConfiguration, adapter AdapterView) (dnsResol
 	if config.Policy != "off" && config.Policy != "system" && !useNetworkDNS {
 		for _, endpoint := range config.DoHEndpoints {
 			ip := net.ParseIP(endpoint.IP)
-			if ip != nil && ((ip.To4() != nil && adapter.Address != "") || (ip.To4() == nil && adapter.SourceIPv6 != "")) && endpoint.Host != "" && (endpoint.Path == "" || endpoint.Path == "/dns-query") {
-				result.Transport, result.Server = "doh", endpoint.Host+"@"+net.JoinHostPort(endpoint.IP, "443")
+			if ip != nil && ((ip.To4() != nil && adapter.Address != "") || (ip.To4() == nil && adapter.SourceIPv6 != "")) && endpoint.Host != "" {
+				port := endpoint.Port
+				if port == 0 {
+					port = 443
+				}
+				result.Transport, result.Server = "doh", endpoint.Host+"@"+net.JoinHostPort(endpoint.IP, fmt.Sprint(port))
+				result.DoHPath = endpoint.Path
 				return result, nil
 			}
 		}
@@ -59,12 +67,16 @@ func prepareTUNDNS(ctx context.Context, adapter AdapterView, force bool,
 		return result, diagnosticErr, err
 	}
 	result, err = configuredTUNDNS(config, adapter)
-	if err != nil && config.Policy == "dnspod" && adapter.Address == "" && adapter.SourceIPv6 != "" {
-		// DNSPod exposes hostname access, so an IPv6-only link must bootstrap
-		// the provider through the Core's source-bound resolver even on force.
+	needsBootstrap := config.Policy == "dnspod" && adapter.Address == "" && adapter.SourceIPv6 != ""
+	for _, endpoint := range config.DoHEndpoints {
+		needsBootstrap = needsBootstrap || endpoint.IP == ""
+	}
+	if err != nil && needsBootstrap {
+		// Providers with hostname access need source-bound bootstrap on force
+		// too, including DNSPod's IPv6 path.
 		result, err = resolveConnectivityBootstrap(ctx, adapter.Name, resolve)
 		if err != nil {
-			err = fmt.Errorf("IPv6 DNSPod 上游引导失败: %w", err)
+			err = fmt.Errorf("DoH 上游引导失败: %w", err)
 		}
 	}
 	return result, diagnosticErr, err

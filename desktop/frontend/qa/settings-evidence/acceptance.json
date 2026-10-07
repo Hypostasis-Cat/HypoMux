@@ -1,0 +1,228 @@
+{
+  "categoryChecks": [
+    {
+      "category": "常规",
+      "documentWidth": 960,
+      "groups": [
+        "应用偏好",
+        "开机与启动"
+      ],
+      "height": 680,
+      "overflow": [],
+      "panelScrollWidth": 672,
+      "panelWidth": 672,
+      "width": 960
+    },
+    {
+      "category": "外观",
+      "documentWidth": 960,
+      "groups": [
+        "主题与颜色",
+        "背景",
+        "材质与动效"
+      ],
+      "height": 680,
+      "overflow": [],
+      "panelScrollWidth": 672,
+      "panelWidth": 672,
+      "width": 960
+    },
+    {
+      "category": "网络与 DNS",
+      "documentWidth": 960,
+      "footer": {
+        "bottom": 662,
+        "height": 72,
+        "left": 257,
+        "right": 934,
+        "top": 590,
+        "width": 677,
+        "x": 257,
+        "y": 590
+      },
+      "groups": [
+        "DNS 解析",
+        "本地代理"
+      ],
+      "height": 680,
+      "overflow": [],
+      "panelScrollWidth": 672,
+      "panelWidth": 672,
+      "width": 960
+    },
+    {
+      "category": "AI 助手",
+      "documentWidth": 960,
+      "groups": [
+        "AI 与小 Mux"
+      ],
+      "height": 680,
+      "overflow": [],
+      "panelScrollWidth": 672,
+      "panelWidth": 672,
+      "width": 960
+    },
+    {
+      "category": "高级网络",
+      "documentWidth": 960,
+      "groups": [
+        "TUN 与兼容性",
+        "域名分流",
+        "缓存"
+      ],
+      "height": 680,
+      "overflow": [],
+      "panelScrollWidth": 672,
+      "panelWidth": 672,
+      "width": 960
+    },
+    {
+      "category": "配置文件",
+      "documentWidth": 960,
+      "groups": [
+        "配置管理"
+      ],
+      "height": 680,
+      "overflow": [],
+      "panelScrollWidth": 672,
+      "panelWidth": 672,
+      "width": 960
+    },
+    {
+      "category": "General",
+      "documentWidth": 960,
+      "height": 680,
+      "language": "en",
+      "overflow": [],
+      "width": 960
+    },
+    {
+      "category": "Appearance",
+      "documentWidth": 960,
+      "height": 680,
+      "language": "en",
+      "overflow": [],
+      "width": 960
+    },
+    {
+      "category": "Network & DNS",
+      "documentWidth": 960,
+      "height": 680,
+      "language": "en",
+      "overflow": [],
+      "width": 960
+    },
+    {
+      "category": "AI Assistant",
+      "documentWidth": 960,
+      "height": 680,
+      "language": "en",
+      "overflow": [],
+      "width": 960
+    },
+    {
+      "category": "Advanced Network",
+      "documentWidth": 960,
+      "height": 680,
+      "language": "en",
+      "overflow": [],
+      "width": 960
+    },
+    {
+      "category": "Configuration",
+      "documentWidth": 960,
+      "height": 680,
+      "language": "en",
+      "overflow": [],
+      "width": 960
+    }
+  ],
+  "networkMaximum": {
+    "before": {
+      "cards": [
+        {
+          "bottom": 624.65625,
+          "height": 292,
+          "left": 274,
+          "right": 580,
+          "top": 332.65625,
+          "width": 306,
+          "x": 274,
+          "y": 332.65625
+        },
+        {
+          "bottom": 624.65625,
+          "height": 292,
+          "left": 596,
+          "right": 902,
+          "top": 332.65625,
+          "width": 306,
+          "x": 596,
+          "y": 332.65625
+        }
+      ],
+      "footer": {
+        "bottom": 662,
+        "height": 72,
+        "left": 257,
+        "right": 934,
+        "top": 590,
+        "width": 677,
+        "x": 257,
+        "y": 590
+      }
+    },
+    "after": {
+      "cards": [
+        {
+          "bottom": 474.65625,
+          "height": 292,
+          "left": 274,
+          "right": 580,
+          "top": 182.65625,
+          "width": 306,
+          "x": 274,
+          "y": 182.65625
+        },
+        {
+          "bottom": 474.65625,
+          "height": 292,
+          "left": 596,
+          "right": 902,
+          "top": 182.65625,
+          "width": 306,
+          "x": 596,
+          "y": 182.65625
+        }
+      ],
+      "documentWidth": 960,
+      "focus": "doh_server_16",
+      "footer": {
+        "bottom": 662,
+        "height": 72,
+        "left": 257,
+        "right": 934,
+        "top": 590,
+        "width": 677,
+        "x": 257,
+        "y": 590
+      },
+      "listCounts": [
+        "16 / 16",
+        "16 / 16"
+      ]
+    }
+  },
+  "interactionChecks": {
+    "draftSurvivesCategoryChangeAndBrowserBack": true,
+    "saveReloadKeepsCategoryAndBothServerLists": true,
+    "keyboardArrowAndEnterNavigation": true,
+    "validationFocusesLastInvalidInputAndShowsMessage": true
+  },
+  "automated": {
+    "tests": 55,
+    "typescript": "passed",
+    "productionBuild": "passed"
+  },
+  "fixture": "settings-organization; browser-only local settings, no Windows networking changes"
+}

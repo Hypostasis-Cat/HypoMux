@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -19,6 +20,7 @@ const (
 	PolicyAliDNS = "alidns"
 	PolicyDNSPod = "dnspod"
 	PolicyGoogle = "google"
+	PolicyCustom = "custom"
 
 	DefaultCacheTTL         = 180 * time.Second
 	DefaultQueryTimeout     = 4 * time.Second
@@ -32,6 +34,55 @@ type Endpoint struct {
 	IP   string `json:"ip"`
 	Host string `json:"host"`
 	Path string `json:"path"`
+	Port int    `json:"port,omitempty"`
+}
+
+func (e Endpoint) port() string {
+	if e.Port == 0 {
+		return "443"
+	}
+	return strconv.Itoa(e.Port)
+}
+
+func (e Endpoint) authority() string {
+	if e.Port != 0 && e.Port != 443 {
+		return net.JoinHostPort(e.Host, e.port())
+	}
+	if strings.Contains(e.Host, ":") {
+		return "[" + e.Host + "]"
+	}
+	return e.Host
+}
+
+func parseDoHURL(value string) (Endpoint, string, error) {
+	value = strings.TrimSpace(value)
+	u, err := url.Parse(value)
+	if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.Fragment != "" || u.Opaque != "" || len(value) > 2048 {
+		return Endpoint{}, "", fmt.Errorf("invalid DoH URL: use an HTTPS URL without credentials or a fragment")
+	}
+	port := 443
+	if u.Port() != "" {
+		port, err = strconv.Atoi(u.Port())
+	}
+	if err != nil || port < 1 || port > 65535 || strings.HasSuffix(u.Host, ":") {
+		return Endpoint{}, "", fmt.Errorf("invalid DoH port")
+	}
+	host := strings.ToLower(u.Hostname())
+	endpoint := Endpoint{Host: host, Port: port}
+	if ip := net.ParseIP(host); ip != nil {
+		if ip.IsUnspecified() || ip.IsMulticast() || ip.IsLinkLocalUnicast() {
+			return Endpoint{}, "", fmt.Errorf("invalid DoH IP address")
+		}
+		endpoint.IP = ip.String()
+	} else if _, err := normalizeDomain(host); err != nil {
+		return Endpoint{}, "", fmt.Errorf("invalid DoH hostname: %w", err)
+	}
+	if u.Path == "" {
+		u.Path = "/dns-query"
+	}
+	endpoint.Path = u.RequestURI()
+	u.Host = endpoint.authority()
+	return endpoint, u.String(), nil
 }
 
 var providerEndpoints = map[string][]Endpoint{
@@ -54,6 +105,7 @@ var providerEndpoints = map[string][]Endpoint{
 type Config struct {
 	Policy           string
 	LegacyServers    []string
+	DoHServers       []string
 	CacheTTL         time.Duration
 	QueryTimeout     time.Duration
 	MaxCacheEntries  int
@@ -86,7 +138,7 @@ func NormalizeConfig(config Config) (Config, error) {
 		config.Policy = PolicyAuto
 	}
 	switch config.Policy {
-	case PolicyAuto, PolicyOff, PolicySystem, PolicyAliDNS, PolicyDNSPod, PolicyGoogle:
+	case PolicyAuto, PolicyOff, PolicySystem, PolicyAliDNS, PolicyDNSPod, PolicyGoogle, PolicyCustom:
 	default:
 		return Config{}, fmt.Errorf("unsupported DNS policy %q", config.Policy)
 	}
@@ -101,6 +153,23 @@ func NormalizeConfig(config Config) (Config, error) {
 		}
 	}
 	config.LegacyServers = servers
+	if len(config.DoHServers) > 16 {
+		return Config{}, fmt.Errorf("at most 16 DoH servers are supported")
+	}
+	var dohServers []string
+	for _, value := range config.DoHServers {
+		_, normalized, err := parseDoHURL(value)
+		if err != nil {
+			return Config{}, fmt.Errorf("custom DoH: %w", err)
+		}
+		if !contains(dohServers, normalized) {
+			dohServers = append(dohServers, normalized)
+		}
+	}
+	config.DoHServers = dohServers
+	if config.Policy == PolicyCustom && len(dohServers) == 0 {
+		return Config{}, fmt.Errorf("custom DoH requires at least one HTTPS URL")
+	}
 
 	if config.CacheTTL <= 0 {
 		config.CacheTTL = DefaultCacheTTL
@@ -172,6 +241,20 @@ func Endpoints(policy string) []Endpoint {
 		return result
 	}
 	return append([]Endpoint(nil), providerEndpoints[policy]...)
+}
+
+func ConfigEndpoints(config Config) []Endpoint {
+	if (config.Policy == PolicyAuto || config.Policy == PolicyCustom) && len(config.DoHServers) > 0 {
+		result := make([]Endpoint, 0, len(config.DoHServers))
+		for _, value := range config.DoHServers {
+			endpoint, _, err := parseDoHURL(value)
+			if err == nil {
+				result = append(result, endpoint)
+			}
+		}
+		return result
+	}
+	return Endpoints(config.Policy)
 }
 
 func boundEndpoints(policy string, binding Binding) []Endpoint {

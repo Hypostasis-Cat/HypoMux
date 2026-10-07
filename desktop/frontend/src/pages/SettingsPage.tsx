@@ -41,6 +41,9 @@ import { backgroundService } from "../theme/background.service";
 import { backgroundPresets, builtinBackgrounds, builtinBackgroundSizes } from "../theme/wallpaper";
 import type { AccentPreset, AppearanceMode, MotionMode, PanelMaterial, WindowMaterial } from "../theme/appearance.types";
 import { useI18n } from "../i18n/i18n";
+import { SettingsAddressList } from "./SettingsAddressList";
+import { SettingsNavigation, settingsCategories, useSettingsCategory } from "./SettingsNavigation";
+import { validDNSAddress, validDoHAddress } from "./dnsSettings";
 
 const emptySettings: CompleteAppSettings = {
   ai_enabled: true,
@@ -70,6 +73,14 @@ const emptySettings: CompleteAppSettings = {
   adapter_weights: {},
   routing_rules: [],
 };
+
+function SettingGroup({ title, children }: { title: string; children: React.ReactNode }) {
+  const headingId = useId("settings-group");
+  return <section className="settings-group" aria-labelledby={headingId}>
+    <h2 className="settings-group-heading" id={headingId}>{title}</h2>
+    <GlassSurface className="settings-section">{children}</GlassSurface>
+  </section>;
+}
 
 type SettingRowA11y = { labelId: string; descriptionId: string };
 const SettingRowA11yContext = createContext<SettingRowA11y | null>(null);
@@ -188,30 +199,6 @@ function SettingSlider({
   );
 }
 
-function SettingInput({
-  value,
-  placeholder,
-  disabled,
-  onChange,
-}: {
-  value: string;
-  placeholder?: string;
-  disabled?: boolean;
-  onChange: (value: string) => void;
-}) {
-  const accessible = useSettingRowA11y();
-  return (
-    <Input
-      value={value}
-      placeholder={placeholder}
-      disabled={disabled}
-      aria-labelledby={accessible?.labelId}
-      aria-describedby={accessible?.descriptionId}
-      onChange={(_, data) => onChange(data.value)}
-    />
-  );
-}
-
 function SettingTabs({
   selectedValue,
   onChange,
@@ -224,6 +211,7 @@ function SettingTabs({
   const accessible = useSettingRowA11y();
   return (
     <TabList
+      className="settings-theme-options"
       size="small"
       selectedValue={selectedValue}
       aria-labelledby={accessible?.labelId}
@@ -246,9 +234,12 @@ export function SettingsPage({
   // Manual network edits must never leak into auto-saved preference updates.
   const pageActive = usePageActive();
   const settingsRevision = useRef(0);
-  const [networkDraft, setNetworkDraft] = useState<Partial<Pick<CompleteAppSettings, "socks_port" | "http_port" | "dns_server" | "dns_policy" | "dns_egress_mode" | "dns_adapter_id">>>({});
+  const [networkDraft, setNetworkDraft] = useState<Partial<Pick<CompleteAppSettings, "socks_port" | "http_port" | "dns_server" | "dns_servers" | "doh_servers" | "dns_policy" | "dns_egress_mode" | "dns_adapter_id">>>({});
+  const [networkValidationAttempted, setNetworkValidationAttempted] = useState(false);
   const networkSettings = { ...settings, ...networkDraft };
-  const networkDirty = Object.entries(networkDraft).some(([key, value]) => settings[key as keyof CompleteAppSettings] !== value);
+  const dnsServers = networkSettings.dns_servers ?? [networkSettings.dns_server];
+  const dohServers = networkSettings.doh_servers ?? [];
+  const networkDirty = Object.entries(networkDraft).some(([key, value]) => JSON.stringify(settings[key as keyof CompleteAppSettings]) !== JSON.stringify(value));
   useEffect(() => {
     if (!networkDirty) return;
     const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
@@ -267,49 +258,23 @@ export function SettingsPage({
   const [migration, setMigration] = useState<ConfigMigrationStatus | null>(null);
   const [migrationDialog, setMigrationDialog] = useState<"migrate" | "rollback" | null>(null);
   const [migrationDialogOpen, setMigrationDialogOpen] = useState(false);
-  const [sectionIndexFloating, setSectionIndexFloating] = useState(false);
+  const [category, selectCategory] = useSettingsCategory();
+  const categoryPanelRef = useRef<HTMLDivElement>(null);
   const { settings: appearance, update: updateAppearance, persistenceError: appearancePersistenceError } = useAppearance();
   const { locale, setLocale, t } = useI18n();
   const text = (zh: string, en: string) => locale === "en" ? en : zh;
+  const dnsErrors = dnsServers.map(value => validDNSAddress(value) ? "" : text("请输入有效的单播 IPv4 或 IPv6 地址。", "Enter a valid unicast IPv4 or IPv6 address."));
+  const dohErrors = dohServers.map(value => validDoHAddress(value) ? "" : text("请输入完整 HTTPS 地址，如 https://dns.example.com/dns-query。", "Enter a full HTTPS URL, e.g. https://dns.example.com/dns-query."));
+  const customDoHMissing = networkSettings.dns_policy === "custom" && dohServers.length === 0;
   const backgroundInput = useRef<HTMLInputElement>(null);
   const settingsPageRef = useRef<HTMLElement>(null);
-  const sectionIndexSentinelRef = useRef<HTMLSpanElement>(null);
-  const sectionIndexShellRef = useRef<HTMLDivElement>(null);
-  const sectionIndexRef = useRef<HTMLElement>(null);
   const adapterRuntimeRef = useRef(adapterRuntime);
   const adapterRuntimeKeyRef = useRef<string>();
   adapterRuntimeRef.current = adapterRuntime;
 
   useEffect(() => {
-    const root = settingsPageRef.current;
-    const sentinel = sectionIndexSentinelRef.current;
-    const shell = sectionIndexShellRef.current;
-    const index = sectionIndexRef.current;
-    if (!root || !sentinel || !shell || !index) return;
-
-    const updateCenterShift = () => {
-      const shift = Math.max(0, (shell.clientWidth - index.offsetWidth) / 2);
-      index.style.setProperty("--hm-settings-index-center-shift", `${shift}px`);
-    };
-
-    updateCenterShift();
-    const resizeObserver = new ResizeObserver(updateCenterShift);
-    resizeObserver.observe(shell);
-    resizeObserver.observe(index);
-
-    const observer = new IntersectionObserver(([entry]) => {
-      setSectionIndexFloating(!entry.isIntersecting && root.scrollTop > 0);
-    }, {
-      root,
-      threshold: 0,
-      rootMargin: "-18px 0px 0px 0px",
-    });
-    observer.observe(sentinel);
-    return () => {
-      observer.disconnect();
-      resizeObserver.disconnect();
-    };
-  }, []);
+    categoryPanelRef.current?.scrollTo?.({ top: 0 });
+  }, [category]);
   // Serialize settings persistence and track per-field ownership: concurrent
   // saves would otherwise let an earlier response overwrite a newer optimistic
   // value, and a failed operation's recovery must not overwrite a later
@@ -431,9 +396,23 @@ export function SettingsPage({
     save({ ...settings, ...patch }, success, Object.keys(patch));
 
   const saveNetwork = async () => {
+    setNetworkValidationAttempted(true);
+    if (dnsErrors.some(Boolean) || dohErrors.some(Boolean) || customDoHMissing) {
+      requestAnimationFrame(() => {
+        const root = settingsPageRef.current;
+        const invalid = root?.querySelector<HTMLInputElement>('[aria-invalid="true"] input, input[aria-invalid="true"]')
+          ?? root?.querySelector<HTMLButtonElement>('.settings-custom-doh .settings-address-add');
+        invalid?.focus();
+        const errorEntry = invalid?.closest('.settings-address-entry')
+          ?? root?.querySelector('.settings-custom-doh .settings-resolver-note');
+        errorEntry?.scrollIntoView?.({ block: "nearest", inline: "nearest", behavior: "instant" });
+      });
+      return;
+    }
     const submitted = networkDraft;
-    if (await save({ ...settings, ...submitted }, text("端口与 DNS 设置已保存", "Proxy ports and DNS settings saved"), Object.keys(submitted))) {
+    if (await save({ ...settings, ...submitted }, text("端口与 DNS 设置已保存，重启聚合后生效", "Proxy ports and DNS settings saved; restart aggregation to apply"), Object.keys(submitted))) {
       setNetworkDraft(current => Object.fromEntries(Object.entries(current).filter(([key, value]) => value !== submitted[key as keyof typeof submitted])));
+      setNetworkValidationAttempted(false);
     }
   };
 
@@ -581,19 +560,19 @@ export function SettingsPage({
     }, null);
   };
 
+  const activeCategory = settingsCategories(text).find(item => item.id === category)!;
+
   return (
     <main ref={settingsPageRef} className="settings-page" aria-busy={loading || saving}>
       <header className="page-heading">
         <div>
-          <span className="section-kicker">{text("偏好设置", "HypoMux preferences")}</span>
           <h1>{t("settings_title")}</h1>
           <p>{text(
-            "更改会写入当前用户配置；网络相关选项在引擎运行期间由独立 Core 应用。",
-            "Changes are saved to the current user profile. Network options are applied by the independent Core while the engine runs.",
+            "调整应用偏好，让 HypoMux 更合你的习惯。",
+            "Make HypoMux work the way you like.",
           )}</p>
         </div>
         <div className="settings-save-feedback">
-          {!loading && !loadFailed && settings.ai_enabled !== false && <Button onClick={() => window.dispatchEvent(new Event("hypomux:ai-settings"))}>{text("AI 助手设置", "AI assistant settings")}</Button>}
           <span key={loading ? "loading" : loadFailed ? "error" : saving ? "saving" : networkDirty ? "dirty" : "synced"} className="save-state motion-inline-swap" data-error={loadFailed || undefined} role="status" aria-live="polite">{loading
             ? text("正在读取…", "Loading…")
             : loadFailed
@@ -601,466 +580,524 @@ export function SettingsPage({
               : saving
                 ? text("正在保存…", "Saving…")
                 : networkDirty ? text("端口与 DNS 有未保存的更改", "Unsaved port and DNS changes") : text("配置已同步", "Settings synced")}</span>
+          {networkDirty && category !== "network" && <Button size="small" appearance="subtle" onClick={() => selectCategory("network")}>{text("去保存", "Review changes")}</Button>}
           {loadFailed && <Button size="small" appearance="subtle" icon={<ArrowSync20Regular />} onClick={() => setLoadRevision(value => value + 1)}>{text("重试", "Retry")}</Button>}
         </div>
       </header>
 
-      <span ref={sectionIndexSentinelRef} className="settings-section-index-sentinel" aria-hidden="true" />
-      <div ref={sectionIndexShellRef} className={`settings-section-index-shell${sectionIndexFloating ? " is-floating" : ""}`}>
-        <nav ref={sectionIndexRef} className="settings-section-index" aria-label={text("设置分区", "Settings sections")}>
-          {[
-            ["settings-personalization", t("settings_personalization")],
-            ["settings-global", t("settings_global")],
-            ["settings-network", t("settings_network_dns")],
-            ["settings-advanced", t("settings_advanced_network")],
-            ["settings-config", t("settings_config_group")],
-          ].map(([id, label]) => (
-            <button key={id} type="button" onClick={() => document.getElementById(id)?.scrollIntoView({
-              behavior: appearance.motion === "standard" && !window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "smooth" : "instant",
-              block: "start",
-            })}>
-              {label}
-            </button>
-          ))}
-        </nav>
-      </div>
-
-      <div className="settings-layout">
-        <GlassSurface className="settings-section" id="settings-personalization">
-          <h2>{t("settings_personalization")}</h2>
-          <SettingRow title={text("启用 AI 功能", "Enable AI features")}
-            description={text("关闭后停用 AI 对话和工具操作、断开外部 AI 连接，并隐藏左侧 AI 入口和小 Mux。模型配置与历史记录会保留；已执行的修改不会撤销。", "Turn off AI chat and tool actions, disconnect external AI access, and hide the AI sidebar entry and Mux. Model settings and history are kept; completed changes are not undone.")}>
-            <SettingSwitch checked={settings.ai_enabled !== false} disabled={loading || loadFailed || saving}
-              onChange={enabled => void patchAndSave({ ai_enabled: enabled })} />
-          </SettingRow>
-          {!loading && !loadFailed && settings.ai_enabled !== false && <SettingRow title={text("显示 AI 小精灵", "Show AI companion")}
-            description={text("在页面角落显示小精灵。隐藏后仍可从侧栏打开 AI 助手。", "Show the companion in the corner. You can still open AI Assistant from the sidebar when hidden.")}>
-            <SettingSwitch checked={companionPreferences.visible !== false} disabled={!companionLoaded || savingCompanion}
-              onChange={(visible) => {
-                setSavingCompanion(true);
-                void savePreferences({ visible }).catch((error) => {
-                  notify(text("无法保存小精灵设置", "Unable to save companion preference"), String(error), "error");
-                }).finally(() => setSavingCompanion(false));
-              }} />
-          </SettingRow>}
-          <SettingRow title={t("settings_theme")} description={t("settings_theme_hint")}>
-            <SettingTabs
-              selectedValue={appearance.mode}
-              onChange={(value) => updateAppearance({ mode: value as AppearanceMode })}
-            >
-              <Tab value="system">{t("settings_theme_auto")}</Tab>
-              <Tab value="light">{t("settings_theme_light")}</Tab>
-              <Tab value="dark">{t("settings_theme_dark")}</Tab>
-            </SettingTabs>
-          </SettingRow>
-          <SettingRow
-            title={text("窗口背景材质", "Window background material")}
-            description={text("标题栏与侧栏跟随背景。Mica 柔化背景细节；纯色模式关闭窗口磨砂，保留主题底色。", "The title bar and sidebar follow the background. Mica softens its details; Solid disables chrome frosting while keeping the theme colors.")}
-          >
-            <SettingDropdown
-              value={appearance.material}
-              options={[
-                { value: "mica", label: "Mica" },
-                { value: "solid", label: text("纯色", "Solid") },
-              ]}
-              onChange={(value) => updateAppearance({ material: value as WindowMaterial })}
-            />
-          </SettingRow>
-          <SettingRow title={text("主题背景", "Theme background")} description={text("选择默认背景、内置预设或自己的图片，点击即刻应用。", "Choose the default, a preset, or your own image. Changes apply immediately.")}>
-            <div className="background-preset-picker">
-              <div className="background-preset-grid">
-                <button type="button" className="background-preset-card"
-                  aria-pressed={appearance.backgroundSource === "system"}
-                  onClick={() => updateAppearance({ backgroundSource: "system" })}>
-                  <span className="background-preset-art background-preset-default" aria-hidden="true" />
-                  <strong>{text("默认背景", "Default background")}</strong>
-                  <small>{text("简洁原生 · 跟随主题", "Native simplicity · follows theme")}</small>
-                </button>
-                {backgroundPresets.map((preset) => (
-                  <button type="button" key={preset.id} className="background-preset-card"
-                    aria-pressed={appearance.backgroundSource === "builtin" && appearance.builtinBackground === preset.id}
-                    onClick={() => updateAppearance({
-                      backgroundSource: "builtin", builtinBackground: preset.id,
-                      ...(preset.id === "soft-bloom" ? { panelOpacity: 72 } : {}),
-                    })}>
-                    <span className="background-preset-art" aria-hidden="true" style={{ background: builtinBackgrounds[preset.id], backgroundSize: builtinBackgroundSizes[preset.id] }} />
-                    <strong>{text(preset.name, preset.english)}</strong>
-                    <small>{text(preset.description, preset.englishDescription)}</small>
-                  </button>
-                ))}
-                <div className="background-custom-tile">
-                <button type="button" className="background-preset-card"
-                  aria-pressed={appearance.backgroundSource === "local"}
-                  onClick={() => appearance.localBackgroundUrl
-                    ? updateAppearance({ backgroundSource: "local" })
-                    : backgroundInput.current?.click()}>
-                  <span className="background-preset-art background-preset-custom" aria-hidden="true"
-                    style={appearance.localBackgroundUrl ? { backgroundImage: `url("${appearance.localBackgroundUrl}")` } : undefined}>
-                    {!appearance.localBackgroundUrl && <Image20Regular />}
-                  </span>
-                  <strong>{text("自定义图片", "Custom image")}</strong>
-                  <small>{text("上传喜欢的图片作为背景", "Use a picture of your own")}</small>
-                </button>
-              {appearance.localBackgroundUrl && <div className="background-custom-actions">
-                <Button size="small" icon={<Image20Regular />} aria-label={text("更换图片", "Replace image")} title={text("更换图片", "Replace image")} onClick={() => backgroundInput.current?.click()} />
-                <Button size="small" icon={<Delete20Regular />} aria-label={text("移除图片", "Remove image")} title={text("移除图片", "Remove image")} onClick={() => {
-                  backgroundService.release(appearance.localBackgroundUrl);
-                  updateAppearance({ localBackgroundUrl: undefined, ...(appearance.backgroundSource === "local" ? { backgroundSource: "system" as const } : {}) });
-                }} />
-              </div>}
+      <div className="settings-workspace">
+        <SettingsNavigation category={category} onSelect={selectCategory} networkDirty={networkDirty} text={text} />
+        <div className="settings-category-body">
+          <div ref={categoryPanelRef} className="settings-category-scroll" role="tabpanel" id="settings-category-panel"
+            aria-labelledby={`settings-tab-${category}`} tabIndex={0}>
+            <div className="settings-category-content" key={category}>
+            <header className="settings-category-heading">
+              <p>{category === "network"
+                  ? text("端口与 DNS 保存后重启聚合生效；系统代理开关即时保存。", "Save ports and DNS, then restart aggregation. The system proxy switch saves immediately.")
+                  : activeCategory.description}</p>
+              <span className="settings-persistence-label">{category === "network" ? text("手动保存", "Manual save") : category === "configuration" ? text("配置维护", "Maintenance") : text("自动保存", "Auto save")}</span>
+            </header>
+            {category === "general" && <>
+              <SettingGroup title={text("应用偏好", "App preferences")}>
+                <SettingRow title={t("settings_language")} description={text("保存界面语言偏好", "Save the interface language preference")}>
+                  <SettingDropdown
+                    value={settings.language}
+                    disabled={loading || loadFailed || saving}
+                    options={[
+                      { value: "zh", label: t("settings_language_zh") },
+                      { value: "en", label: t("settings_language_en") },
+                    ]}
+                    onChange={(value) => {
+                      const nextLocale = value as "zh" | "en";
+                      setLocale(nextLocale);
+                      void patchAndSave({ language: nextLocale }, t("settings_lang_saved"));
+                    }}
+                  />
+                </SettingRow>
+                <SettingRow title={t("settings_close_behavior")} description={text(
+                  "关闭主窗口时隐藏到托盘，或直接退出并恢复运行状态",
+                  "Hide the main window to the tray, or exit and restore the active network state.",
+                )}>
+                  <SettingDropdown
+                    value={settings.close_to_tray ? "tray" : "exit"}
+                    disabled={loading || loadFailed || saving}
+                    options={[
+                      { value: "tray", label: t("settings_close_to_tray") },
+                      { value: "exit", label: t("settings_close_to_exit") },
+                    ]}
+                    onChange={(value) => patchAndSave({ close_to_tray: value === "tray" })}
+                  />
+                </SettingRow>
+                <SettingRow title={text("首页隐藏虚拟网卡", "Hide virtual adapters on Home")} description={text(
+                  "默认隐藏 VMware、Hyper-V 等虚拟网卡。关闭后显示全部网卡；已有网卡选择保持不变。",
+                  "Hide virtual adapters such as VMware and Hyper-V by default. Turn off to show all adapters. Existing selections are preserved.",
+                )}>
+                  <SettingSwitch checked={settings.hide_virtual_adapters ?? true} disabled={loading || loadFailed || saving}
+                    onChange={(checked) => patchAndSave({ hide_virtual_adapters: checked })} />
+                </SettingRow>
+                <SettingRow title={text("更新渠道", "Update channel")} description={text(
+                  "正式版适合日常使用；预览版包含 Beta / RC，可能不稳定。切回正式版不会自动降级。保存后可在「关于」中检查更新。",
+                  "Stable is recommended for everyday use. Preview includes Beta / RC and may be unstable. Switching to Stable does not downgrade. Check for updates in About after saving.",
+                )}>
+                  <SettingDropdown
+                    value={settings.update_channel ?? "stable"}
+                    disabled={loading || saving || loadFailed}
+                    options={[
+                      { value: "stable", label: text("正式版", "Stable") },
+                      { value: "preview", label: text("预览版（Beta / RC）", "Preview (Beta / RC)") },
+                    ]}
+                    onChange={(value) => patchAndSave({ update_channel: value as "stable" | "preview" })}
+                  />
+                </SettingRow>
+              </SettingGroup>
+              <SettingGroup title={text("开机与启动", "Startup")}>
+                <SettingRow title={t("settings_autostart")} description={t("settings_autostart_hint")}>
+                  <SettingSwitch checked={settings.autostart} disabled={loading || loadFailed || saving} onChange={(checked) => setAutostart(checked)} />
+                </SettingRow>
+                <SettingRow title={t("settings_auto_start_engine")} description={t("settings_auto_start_engine_hint")}>
+                  <SettingSwitch
+                    checked={settings.auto_start_engine}
+                    disabled={loading || loadFailed || saving || !settings.autostart}
+                    onChange={(checked) => setAutoStartEngine(checked)}
+                  />
+                </SettingRow>
+                <SettingRow title={text("开机自动连接 Wi-Fi", "Connect Wi-Fi at startup")} description={text(
+                  "自动加速前，为已选无线网卡连接 Windows 中已保存且允许自动连接的网络，最多等待 2 分钟。关闭后停止主动连接，已连接的 Wi-Fi 保持连接。",
+                  "Before automatic acceleration, connect selected Wi-Fi adapters using saved Windows networks that allow automatic connection. Wait up to 2 minutes. Turning this off stops connection requests and keeps existing connections.",
+                )}>
+                  <SettingSwitch
+                    checked={settings.auto_connect_wifi ?? false}
+                    disabled={loading || loadFailed || saving || !settings.autostart || !settings.auto_start_engine}
+                    onChange={(checked) => patchAndSave({ auto_connect_wifi: checked })}
+                  />
+                </SettingRow>
+              </SettingGroup>
+            </>}
+            {category === "appearance" && <>
+              <SettingGroup title={text("主题与颜色", "Theme and color")}>
+                <SettingRow title={t("settings_theme")} description={t("settings_theme_hint")}>
+                  <SettingTabs
+                    selectedValue={appearance.mode}
+                    onChange={(value) => updateAppearance({ mode: value as AppearanceMode })}
+                  >
+                    {(["system", "light", "dark"] as const).map(mode => <Tab key={mode} value={mode}
+                      className="settings-theme-option" aria-label={t(mode === "system" ? "settings_theme_auto" : mode === "light" ? "settings_theme_light" : "settings_theme_dark")}>
+                      <span className={`settings-theme-preview is-${mode}`} aria-hidden="true"><i /><span><i /><i /><i /></span></span>
+                      <span>{t(mode === "system" ? "settings_theme_auto" : mode === "light" ? "settings_theme_light" : "settings_theme_dark")}</span>
+                    </Tab>)}
+                  </SettingTabs>
+                </SettingRow>
+                <SettingRow title={t("settings_theme_color")} description={t("settings_theme_color_hint")}>
+                  <div className="accent-row settings-accent-row">
+                    {(Object.keys(accentColours) as Exclude<AccentPreset, "custom">[]).map((name) => (
+                      <button
+                        key={name}
+                        className={`accent-swatch${appearance.accentPreset === name ? " is-active" : ""}`}
+                        style={{ "--swatch": accentColours[name] } as React.CSSProperties}
+                        aria-label={`${t("settings_theme_color")} ${name}`}
+                        aria-pressed={appearance.accentPreset === name}
+                        onClick={() => updateAppearance({ accentPreset: name })}
+                      />
+                    ))}
+                    <input
+                      className="accent-input"
+                      type="color"
+                      value={appearance.customAccent}
+                      aria-label={t("settings_theme_color_custom")}
+                      onChange={(event) => updateAppearance({ customAccent: event.target.value, accentPreset: "custom" })}
+                    />
+                  </div>
+                </SettingRow>
+              </SettingGroup>
+              <SettingGroup title={text("背景", "Background")}>
+                <SettingRow title={text("主题背景", "Theme background")} description={text("选择默认背景、内置预设或自己的图片，点击即刻应用。", "Choose the default, a preset, or your own image. Changes apply immediately.")}>
+                  <div className="background-preset-picker">
+                    <div className="background-preset-grid">
+                      <button type="button" className="background-preset-card"
+                        aria-pressed={appearance.backgroundSource === "system"}
+                        onClick={() => updateAppearance({ backgroundSource: "system" })}>
+                        <span className="background-preset-art background-preset-default" aria-hidden="true" />
+                        <strong>{text("默认背景", "Default background")}</strong>
+                        <small>{text("简洁原生 · 跟随主题", "Native simplicity · follows theme")}</small>
+                      </button>
+                      {backgroundPresets.map((preset) => (
+                        <button type="button" key={preset.id} className="background-preset-card"
+                          aria-pressed={appearance.backgroundSource === "builtin" && appearance.builtinBackground === preset.id}
+                          onClick={() => updateAppearance({
+                            backgroundSource: "builtin", builtinBackground: preset.id,
+                            ...(preset.id === "soft-bloom" ? { panelOpacity: 72 } : {}),
+                          })}>
+                          <span className="background-preset-art" aria-hidden="true" style={{ background: builtinBackgrounds[preset.id], backgroundSize: builtinBackgroundSizes[preset.id] }} />
+                          <strong>{text(preset.name, preset.english)}</strong>
+                          <small>{text(preset.description, preset.englishDescription)}</small>
+                        </button>
+                      ))}
+                      <div className="background-custom-tile">
+                      <button type="button" className="background-preset-card"
+                        aria-pressed={appearance.backgroundSource === "local"}
+                        onClick={() => appearance.localBackgroundUrl
+                          ? updateAppearance({ backgroundSource: "local" })
+                          : backgroundInput.current?.click()}>
+                        <span className="background-preset-art background-preset-custom" aria-hidden="true"
+                          style={appearance.localBackgroundUrl ? { backgroundImage: `url("${appearance.localBackgroundUrl}")` } : undefined}>
+                          {!appearance.localBackgroundUrl && <Image20Regular />}
+                        </span>
+                        <strong>{text("自定义图片", "Custom image")}</strong>
+                        <small>{text("上传喜欢的图片作为背景", "Use a picture of your own")}</small>
+                      </button>
+                    {appearance.localBackgroundUrl && <div className="background-custom-actions">
+                      <Button size="small" icon={<Image20Regular />} aria-label={text("更换图片", "Replace image")} title={text("更换图片", "Replace image")} onClick={() => backgroundInput.current?.click()} />
+                      <Button size="small" icon={<Delete20Regular />} aria-label={text("移除图片", "Remove image")} title={text("移除图片", "Remove image")} onClick={() => {
+                        backgroundService.release(appearance.localBackgroundUrl);
+                        updateAppearance({ localBackgroundUrl: undefined, ...(appearance.backgroundSource === "local" ? { backgroundSource: "system" as const } : {}) });
+                      }} />
+                    </div>}
+                      </div>
+                    </div>
+                    <input
+                      ref={backgroundInput}
+                      className="visually-hidden"
+                      type="file"
+                      aria-label={t("settings_background_image_choose")}
+                      accept=".png,.jpg,.jpeg,.bmp,.webp,image/png,image/jpeg,image/bmp,image/webp"
+                      onChange={async (event) => {
+                        const file = event.target.files?.[0];
+                        if (!file) return;
+                        try {
+                          const dataURL = await backgroundService.fromFile(file);
+                        updateAppearance({
+                          localBackgroundUrl: dataURL,
+                          backgroundSource: "local",
+                        });
+                        } catch (error) {
+                          notify(t("settings_background_image_invalid"), String(error), "error");
+                        } finally {
+                          event.target.value = "";
+                        }
+                      }}
+                    />
+                  </div>
+                </SettingRow>
+              </SettingGroup>
+              <SettingGroup title={text("材质与动效", "Materials and motion")}>
+                <SettingRow
+                  title={text("窗口背景材质", "Window background material")}
+                  description={text("Mica 柔化标题栏与侧栏的背景；纯色保留主题底色，关闭磨砂。", "Mica softens the title bar and sidebar background. Solid keeps the theme colors without frosting.")}
+                >
+                  <SettingDropdown
+                    value={appearance.material}
+                    options={[
+                      { value: "mica", label: "Mica" },
+                      { value: "solid", label: text("纯色", "Solid") },
+                    ]}
+                    onChange={(value) => updateAppearance({ material: value as WindowMaterial })}
+                  />
+                </SettingRow>
+                <SettingRow
+                  title={text("界面动效", "Interface motion")}
+                  description={text(
+                    "控制页面与控件的过渡，自动遵循系统的减少动态效果设置。",
+                    "Page and control transitions respect your system’s reduced motion setting.",
+                  )}
+                >
+                  <SettingDropdown
+                    value={appearance.motion}
+                    options={[
+                      { value: "standard", label: text("完整动效", "Full motion") },
+                      { value: "reduced", label: text("适中动画", "Moderate motion") },
+                      { value: "off", label: text("关闭动效", "Off") },
+                    ]}
+                    onChange={(value) => updateAppearance({ motion: value as MotionMode })}
+                  />
+                </SettingRow>
+                <SettingRow
+                  title={text("卡片材质", "Card material")}
+                  description={text(
+                    "适用于背景预设和自定义图片，选择高斯磨砂或清晰卡片。",
+                    "Choose frosted or clear cards over a preset or custom image.",
+                  )}
+                >
+                  <SettingDropdown
+                    value={appearance.panelMaterial}
+                    disabled={appearance.backgroundSource !== "local" && appearance.backgroundSource !== "builtin"}
+                    options={[
+                      { value: "blur", label: text("高斯磨砂", "Gaussian frost") },
+                      { value: "solid", label: text("纯色卡片", "Solid cards") },
+                    ]}
+                    onChange={(value) => updateAppearance({ panelMaterial: value as PanelMaterial })}
+                  />
+                </SettingRow>
+                <SettingRow
+                  title={text("磨砂强度", "Frost strength")}
+                  description={text(
+                    "使用高斯磨砂时，数值越高，卡片后的背景越柔和。",
+                    "With frosted cards, higher values soften the background behind them.",
+                  )}
+                >
+                  <div className="slider-value">
+                    <SettingSlider
+                      min={0}
+                      max={40}
+                      value={appearance.panelBlur}
+                      valueText={`${appearance.panelBlur}px`}
+                      disabled={(appearance.backgroundSource !== "local" && appearance.backgroundSource !== "builtin") || appearance.panelMaterial !== "blur"}
+                      onChange={(value) => updateAppearance({ panelBlur: value })}
+                    />
+                    <span>{appearance.panelBlur}px</span>
+                  </div>
+                </SettingRow>
+                <SettingRow title={t("settings_content_card_opacity")} description={text("适用于预设和自定义背景；提高不透明度可增强文字可读性。", "Available with presets and custom backgrounds. Higher opacity improves text readability.")}>
+                  <div className="slider-value">
+                    <SettingSlider
+                      min={0}
+                      max={100}
+                      value={appearance.panelOpacity}
+                      valueText={`${appearance.panelOpacity}%`}
+                      disabled={appearance.backgroundSource !== "local" && appearance.backgroundSource !== "builtin"}
+                      onChange={(value) => updateAppearance({ panelOpacity: value })}
+                    />
+                    <span>{appearance.panelOpacity}%</span>
+                  </div>
+                </SettingRow>
+              </SettingGroup>
+            </>}
+            {category === "network" && <>
+              <SettingGroup title={text("DNS 解析", "DNS resolution")}>
+                <SettingRow title={t("settings_doh_policy")} description={networkSettings.dns_policy === "custom"
+                  ? text("使用下方 DoH 列表，失败时不回退 DNS。", "Use the DoH list below without DNS fallback.")
+                  : networkSettings.dns_policy === "off"
+                    ? text("使用下方 DNS 列表。", "Use the DNS list below.")
+                    : networkSettings.dns_policy === "auto"
+                      ? text("优先 DoH，失败后回退 DNS；未添加 DoH 时使用内置服务。", "Try DoH first, then DNS. An empty DoH list uses built-in providers.")
+                      : text("使用所选内置 DoH 服务。", "Use the selected built-in DoH provider.")}>
+                  <SettingDropdown
+                    disabled={loading || loadFailed || saving}
+                    value={networkSettings.dns_policy}
+                    options={[
+                      { value: "auto", label: t("settings_doh_auto") },
+                      { value: "off", label: t("settings_doh_off") },
+                      { value: "alidns", label: t("settings_doh_alidns") },
+                      { value: "dnspod", label: t("settings_doh_dnspod") },
+                      { value: "google", label: "Google DNS" },
+                      { value: "custom", label: text("仅使用自定义 DoH", "Custom DoH only") },
+                    ]}
+                    onChange={(value) => setNetworkDraft((current) => ({ ...current, dns_policy: value }))}
+                  />
+                </SettingRow>
+                <div className="settings-resolver-grid">
+                  <section className="settings-resolver-card" aria-labelledby="settings-dns-list-title">
+                    <div className="settings-resolver-heading">
+                      <h3 id="settings-dns-list-title">DNS</h3>
+                      <span>{text("IPv4 / IPv6 地址", "IPv4 / IPv6 addresses")}</span>
+                    </div>
+                    <SettingsAddressList
+                      disabled={loading || loadFailed || saving} values={dnsServers} label="DNS" minimum={1}
+                      addLabel={text("添加 DNS", "Add DNS")} removeLabel={text("删除 DNS", "Remove DNS")}
+                      placeholder="223.5.5.5" errors={networkValidationAttempted ? dnsErrors : []}
+                      onChange={values => setNetworkDraft(current => ({ ...current, dns_server: values[0], dns_servers: values }))}
+                    />
+                    <div className="settings-resolver-note settings-address-hint">{networkSettings.dns_policy === "custom"
+                      ? text("用于解析 DoH 服务的域名。", "Used to resolve DoH server hostnames.")
+                      : text("按列表顺序尝试。", "Tried in list order.")}</div>
+                  </section>
+                  <section className="settings-resolver-card settings-custom-doh" aria-labelledby="settings-doh-list-title">
+                    <div className="settings-resolver-heading">
+                      <h3 id="settings-doh-list-title">DoH</h3>
+                      <span>{text("自定义 HTTPS 地址", "Custom HTTPS URLs")}</span>
+                    </div>
+                    <SettingsAddressList disabled={loading || loadFailed || saving} values={dohServers} label="DoH" type="url"
+                      addLabel={text("添加 DoH", "Add DoH")} removeLabel={text("删除 DoH", "Remove DoH")}
+                      placeholder="https://dns.example.com/dns-query"
+                      emptyHint={text("暂无自定义 DoH", "No custom DoH servers")}
+                      errors={networkValidationAttempted ? dohErrors : []}
+                      onChange={values => setNetworkDraft(current => ({ ...current, doh_servers: values }))} />
+                    <div className="settings-resolver-note">
+                      {networkValidationAttempted && customDoHMissing
+                        ? <span className="settings-address-error" aria-live="polite">{text("请添加 DoH 地址，或切换解析策略。", "Add a DoH URL or change the policy.")}</span>
+                        : <span className="settings-address-hint">{!["auto", "custom"].includes(networkSettings.dns_policy)
+                          ? text("当前策略不使用此列表。", "This list is inactive with the current policy.")
+                          : text("支持自定义端口、路径和查询参数。", "Supports custom ports, paths, and query parameters.")}</span>}
+                    </div>
+                  </section>
                 </div>
-              </div>
-              <input
-                ref={backgroundInput}
-                className="visually-hidden"
-                type="file"
-                aria-label={t("settings_background_image_choose")}
-                accept=".png,.jpg,.jpeg,.bmp,.webp,image/png,image/jpeg,image/bmp,image/webp"
-                onChange={async (event) => {
-                  const file = event.target.files?.[0];
-                  if (!file) return;
-                  try {
-                    const dataURL = await backgroundService.fromFile(file);
-                  updateAppearance({
-                    localBackgroundUrl: dataURL,
-                    backgroundSource: "local",
-                  });
-                  } catch (error) {
-                    notify(t("settings_background_image_invalid"), String(error), "error");
-                  } finally {
-                    event.target.value = "";
-                  }
-                }}
-              />
+                <SettingRow title={t("settings_dns_egress")} description={t("settings_dns_egress_hint")}>
+                  <SettingDropdown
+                    value={networkSettings.dns_egress_mode === "adapter" ? `adapter:${networkSettings.dns_adapter_id ?? ""}` : networkSettings.dns_egress_mode}
+                    disabled={loading || loadFailed || saving}
+                    options={[
+                      { value: "auto", label: t("settings_dns_egress_auto") },
+                      { value: "system", label: t("settings_dns_egress_system") },
+                      ...adapters
+                        .filter((adapter) => adapter.selected && adapter.operational)
+                        .map((adapter) => ({
+                          value: `adapter:${adapter.id}`,
+                          label: `${t("settings_dns_egress_adapter_prefix")} · ${adapter.name}`,
+                        })),
+                    ]}
+                    onChange={(value) => setNetworkDraft((current) => value.startsWith("adapter:")
+                      ? { ...current, dns_egress_mode: "adapter", dns_adapter_id: value.slice("adapter:".length) }
+                      : { ...current, dns_egress_mode: value, dns_adapter_id: "" })}
+                  />
+                </SettingRow>
+              </SettingGroup>
+              <SettingGroup title={text("本地代理", "Local proxy")}>
+                <SettingRow title={t("settings_proxy_port")} description={text(
+                  "SOCKS5 与 HTTP/HTTPS 监听端口，范围 1–65534",
+                  "SOCKS5 and HTTP/HTTPS listening ports, range 1–65534.",
+                )}>
+                  <div className="port-controls">
+                    <label>SOCKS5 <Input autoComplete="off" disabled={loading || loadFailed} type="number" min={1} max={65534} name="socks_port" value={String(networkSettings.socks_port)} onChange={(_, data) => setNetworkDraft((current) => ({ ...current, socks_port: Number(data.value) }))} /></label>
+                    <label>HTTP <Input autoComplete="off" disabled={loading || loadFailed} type="number" min={1} max={65534} name="http_port" value={String(networkSettings.http_port)} onChange={(_, data) => setNetworkDraft((current) => ({ ...current, http_port: Number(data.value) }))} /></label>
+                  </div>
+                </SettingRow>
+                <SettingRow title={t("settings_system_proxy_takeover")} description={t("settings_system_proxy_takeover_hint")}>
+                  <SettingSwitch
+                    checked={settings.system_proxy_takeover}
+                    disabled={loading || loadFailed || saving}
+                    onChange={(checked) => void patchAndSave(
+                      { system_proxy_takeover: checked },
+                      checked
+                        ? t("settings_system_proxy_takeover_on")
+                        : t("settings_system_proxy_takeover_off"),
+                    )}
+                  />
+                </SettingRow>
+              </SettingGroup>
+            </>}
+            {category === "ai" && <>
+              <SettingGroup title={text("AI 与小 Mux", "AI and Mux")}>
+                <SettingRow title={text("启用 AI 功能", "Enable AI features")}
+                  description={text("关闭 AI 对话、工具操作和外部 AI 连接，隐藏侧栏入口与小 Mux。模型配置与历史保留，已执行的修改不会撤销。", "Turn off AI chat and tool actions, disconnect external AI access, and hide the AI sidebar entry and Mux. Model settings and history are kept; completed changes are not undone.")}>
+                  <SettingSwitch checked={settings.ai_enabled !== false} disabled={loading || loadFailed || saving}
+                    onChange={enabled => void patchAndSave({ ai_enabled: enabled })} />
+                </SettingRow>
+                {!loading && !loadFailed && settings.ai_enabled !== false && <SettingRow title={text("显示 AI 小精灵", "Show AI companion")}
+                  description={text("在页面角落显示小精灵。隐藏后仍可从侧栏打开 AI 助手。", "Show the companion in the corner. You can still open AI Assistant from the sidebar when hidden.")}>
+                  <SettingSwitch checked={companionPreferences.visible !== false} disabled={!companionLoaded || savingCompanion}
+                    onChange={(visible) => {
+                      setSavingCompanion(true);
+                      void savePreferences({ visible }).catch((error) => {
+                        notify(text("无法保存小精灵设置", "Unable to save companion preference"), String(error), "error");
+                      }).finally(() => setSavingCompanion(false));
+                    }} />
+                </SettingRow>}
+                {!loading && !loadFailed && settings.ai_enabled !== false && <SettingRow title={text("模型与连接", "Models and connections")}
+                  description={text("管理 AI 服务、模型和连接方式。", "Manage AI providers, models and connections.")}>
+                  <Button onClick={() => window.dispatchEvent(new Event("hypomux:ai-settings"))}>{text("AI 助手设置", "AI assistant settings")}</Button>
+                </SettingRow>}
+              </SettingGroup>
+            </>}
+            {category === "advanced" && <>
+              <SettingGroup title={text("TUN 与兼容性", "TUN and compatibility")}>
+                <SettingRow
+                  title={text("TUN 协议栈", "TUN stack")}
+                  description={text(
+                    "System 使用系统协议栈；Mixed 使用系统 TCP + gVisor UDP；gVisor 使用完整用户态协议栈。遇到兼容性问题时可切换尝试，保存后下次启动 TUN 生效。",
+                    "System uses the OS stack; Mixed uses system TCP + gVisor UDP; gVisor uses a full userspace stack. Try another stack for compatibility issues. Applies the next time TUN starts.",
+                  )}
+                >
+                  <SettingDropdown
+                    value={settings.tun_stack || "system"}
+                    disabled={loading || loadFailed || saving}
+                    options={[
+                      { value: "system", label: text("System（默认）", "System (default)") },
+                      { value: "mixed", label: text("Mixed（混合）", "Mixed (hybrid)") },
+                      { value: "gvisor", label: text("gVisor（用户态）", "gVisor (userspace)") },
+                    ]}
+                    onChange={(value) => void patchAndSave(
+                      { tun_stack: value },
+                      text("TUN 协议栈已保存，下次启动 TUN 生效", "TUN stack saved; applies the next time TUN starts"),
+                    )}
+                  />
+                </SettingRow>
+                <SettingRow
+                  title={t("settings_force_tun")}
+                  description={t("settings_force_tun_hint")}
+                  danger
+                >
+                  <SettingSwitch checked={settings.force_tun_connectivity_bypass} disabled={loading || loadFailed || saving} onChange={(checked) => patchAndSave({ force_tun_connectivity_bypass: checked })} />
+                </SettingRow>
+                <SettingRow title={t("settings_wfp_strict_route")} description={t("settings_wfp_strict_route_hint")}>
+                  <SettingSwitch checked={settings.strict_route} disabled={loading || loadFailed || saving} onChange={(checked) => patchAndSave({ strict_route: checked })} />
+                </SettingRow>
+                <SettingRow title={t("settings_wfp_repair")} description={wfpStatus || t("settings_wfp_repair_unknown")}>
+                  <Button icon={<ArrowSync20Regular />} disabled={loading || loadFailed || saving} onClick={inspectWfp}>{t("settings_wfp_repair_button")}</Button>
+                </SettingRow>
+              </SettingGroup>
+              <SettingGroup title={text("域名分流", "Domain routing")}>
+                <SettingRow title={t("blocked_enable")} description={t("blocked_enable_hint")}>
+                  <SettingSwitch checked={settings.blocked_domain_bypass} disabled={loading || loadFailed || saving} onChange={(checked) => patchAndSave({ blocked_domain_bypass: checked })} />
+                </SettingRow>
+                <SettingRow title={t("blocked_expiry_toggle")} description={t("blocked_expiry_hint")}>
+                  <SettingSwitch checked={settings.blocked_domain_expiry} disabled={loading || loadFailed || saving} onChange={(checked) => patchAndSave({ blocked_domain_expiry: checked })} />
+                </SettingRow>
+                <SettingRow title={t("settings_blocked_domains_manage")} description={t("settings_blocked_domains_manage_hint")}>
+                  <Button onClick={onOpenBlockedDomains}>{t("settings_blocked_domains_open")}</Button>
+                </SettingRow>
+              </SettingGroup>
+              <SettingGroup title={text("缓存", "Cache")}>
+                <SettingRow
+                  title={text("FakeIP 与规则集缓存", "FakeIP and rule-set cache")}
+                  description={text(
+                    "已自动启用持久化缓存，保留 FakeIP 映射；远程规则集接入后也可复用。缓存位于配置目录下的 cache/sing-box.db，不随 TUN 重启清除。",
+                    "Persistent caching is enabled automatically for FakeIP mappings and future remote rule sets. Stored at cache/sing-box.db inside the configuration directory and retained across TUN restarts.",
+                  )}
+                >
+                  <span>{text("已启用", "Enabled")}</span>
+                </SettingRow>
+              </SettingGroup>
+            </>}
+            {category === "configuration" && <>
+              <SettingGroup title={text("配置管理", "Configuration management")}>
+                <SettingRow title={t("settings_config_path")} description={configPath || text("正在读取配置文件位置…", "Reading configuration path…")}>
+                  <Button
+                    icon={<FolderOpen20Regular />}
+                    disabled={!configPath}
+                    onClick={() => desktopPlatform.openDirectory(configPath.replace(/[\\/][^\\/]+$/, ""))}
+                  >
+                    {text("打开目录", "Open folder")}
+                  </Button>
+                </SettingRow>
+                <SettingRow
+                  title={text("旧版配置迁移与回滚", "Legacy configuration migration and rollback")}
+                  description={migration?.message || text("未检测到 HypoMux v2.x 配置", "No HypoMux v2.x configuration was found")}
+                >
+                  <div className="migration-actions">
+                    <Button
+                      disabled={!migration?.legacy_found || saving}
+                      onClick={() => {
+                        setMigrationDialog("migrate");
+                        setMigrationDialogOpen(true);
+                      }}
+                    >
+                      {text("迁移旧版配置", "Migrate legacy settings")}
+                    </Button>
+                    <Button
+                      appearance="subtle"
+                      disabled={!migration?.applied || saving}
+                      onClick={() => {
+                        setMigrationDialog("rollback");
+                        setMigrationDialogOpen(true);
+                      }}
+                    >
+                      {text("回滚", "Rollback")}
+                    </Button>
+                  </div>
+                </SettingRow>
+              </SettingGroup>
+            </>}
             </div>
-          </SettingRow>
-          <SettingRow title={t("settings_theme_color")} description={t("settings_theme_color_hint")}>
-            <div className="accent-row settings-accent-row">
-              {(Object.keys(accentColours) as Exclude<AccentPreset, "custom">[]).map((name) => (
-                <button
-                  key={name}
-                  className={`accent-swatch${appearance.accentPreset === name ? " is-active" : ""}`}
-                  style={{ "--swatch": accentColours[name] } as React.CSSProperties}
-                  aria-label={`${t("settings_theme_color")} ${name}`}
-                  onClick={() => updateAppearance({ accentPreset: name })}
-                />
-              ))}
-              <input
-                className="accent-input"
-                type="color"
-                value={appearance.customAccent}
-                aria-label={t("settings_theme_color_custom")}
-                onChange={(event) => updateAppearance({ customAccent: event.target.value, accentPreset: "custom" })}
-              />
-            </div>
-          </SettingRow>
-          <SettingRow
-            title={text("界面动效", "Interface motion")}
-            description={text(
-              "统一控制页面与控件过渡；系统开启减少动态效果时，将自动精简动画。",
-              "Controls page and control transitions. Animations are reduced when your system requests reduced motion.",
-            )}
-          >
-            <SettingDropdown
-              value={appearance.motion}
-              options={[
-                { value: "standard", label: text("完整动效", "Full motion") },
-                { value: "reduced", label: text("适中动画", "Moderate motion") },
-                { value: "off", label: text("关闭动效", "Off") },
-              ]}
-              onChange={(value) => updateAppearance({ motion: value as MotionMode })}
-            />
-          </SettingRow>
-          <SettingRow
-            title={text("卡片材质", "Card material")}
-            description={text(
-              "适用于背景预设和自定义图片，选择高斯磨砂或清晰卡片。",
-              "Choose frosted or clear cards over a preset or custom image.",
-            )}
-          >
-            <SettingDropdown
-              value={appearance.panelMaterial}
-              disabled={appearance.backgroundSource !== "local" && appearance.backgroundSource !== "builtin"}
-              options={[
-                { value: "blur", label: text("高斯磨砂", "Gaussian frost") },
-                { value: "solid", label: text("纯色卡片", "Solid cards") },
-              ]}
-              onChange={(value) => updateAppearance({ panelMaterial: value as PanelMaterial })}
-            />
-          </SettingRow>
-          <SettingRow
-            title={text("磨砂强度", "Frost strength")}
-            description={text(
-              "背景预设和自定义图片均可调节；选择高斯磨砂后，数值越高，卡片后的纹理越柔和。",
-              "Works with presets and custom images. With frosted cards, higher values soften the texture behind them.",
-            )}
-          >
-            <div className="slider-value">
-              <SettingSlider
-                min={0}
-                max={40}
-                value={appearance.panelBlur}
-                valueText={`${appearance.panelBlur}px`}
-                disabled={(appearance.backgroundSource !== "local" && appearance.backgroundSource !== "builtin") || appearance.panelMaterial !== "blur"}
-                onChange={(value) => updateAppearance({ panelBlur: value })}
-              />
-              <span>{appearance.panelBlur}px</span>
-            </div>
-          </SettingRow>
-          <SettingRow title={t("settings_content_card_opacity")} description={text("适用于预设和自定义背景；提高不透明度可增强文字可读性。", "Available with presets and custom backgrounds. Higher opacity improves text readability.")}>
-            <div className="slider-value">
-              <SettingSlider
-                min={0}
-                max={100}
-                value={appearance.panelOpacity}
-                valueText={`${appearance.panelOpacity}%`}
-                disabled={appearance.backgroundSource !== "local" && appearance.backgroundSource !== "builtin"}
-                onChange={(value) => updateAppearance({ panelOpacity: value })}
-              />
-              <span>{appearance.panelOpacity}%</span>
-            </div>
-          </SettingRow>
-        </GlassSurface>
-
-        <GlassSurface className="settings-section" id="settings-global">
-          <h2>{t("settings_global")}</h2>
-          <SettingRow title={text("更新渠道", "Update channel")} description={text(
-            "正式版适合日常使用；预览版包含 Beta / RC，可能不稳定。切回正式版不会自动降级。保存后可在「关于」中检查更新。",
-            "Stable is recommended for everyday use. Preview includes Beta / RC and may be unstable. Switching to Stable does not downgrade. Check for updates in About after saving.",
-          )}>
-            <SettingDropdown
-              value={settings.update_channel ?? "stable"}
-              disabled={loading || saving || loadFailed}
-              options={[
-                { value: "stable", label: text("正式版", "Stable") },
-                { value: "preview", label: text("预览版（Beta / RC）", "Preview (Beta / RC)") },
-              ]}
-              onChange={(value) => patchAndSave({ update_channel: value as "stable" | "preview" })}
-            />
-          </SettingRow>
-          <SettingRow title={t("settings_language")} description={text("保存界面语言偏好", "Save the interface language preference")}>
-            <SettingDropdown
-              value={settings.language}
-              disabled={loading || saving}
-              options={[
-                { value: "zh", label: t("settings_language_zh") },
-                { value: "en", label: t("settings_language_en") },
-              ]}
-              onChange={(value) => {
-                const nextLocale = value as "zh" | "en";
-                setLocale(nextLocale);
-                void patchAndSave({ language: nextLocale }, t("settings_lang_saved"));
-              }}
-            />
-          </SettingRow>
-          <SettingRow title={text("首页隐藏虚拟网卡", "Hide virtual adapters on Home")} description={text(
-            "默认隐藏 VMware、Hyper-V 等虚拟网卡。关闭后显示全部网卡；已有网卡选择保持不变。",
-            "Hide virtual adapters such as VMware and Hyper-V by default. Turn off to show all adapters. Existing selections are preserved.",
-          )}>
-            <SettingSwitch checked={settings.hide_virtual_adapters ?? true} disabled={loading || saving}
-              onChange={(checked) => patchAndSave({ hide_virtual_adapters: checked })} />
-          </SettingRow>
-          <SettingRow title={t("settings_close_behavior")} description={text(
-            "关闭主窗口时隐藏到托盘，或直接退出并恢复运行状态",
-            "Hide the main window to the tray, or exit and restore the active network state.",
-          )}>
-            <SettingDropdown
-              value={settings.close_to_tray ? "tray" : "exit"}
-              disabled={loading || saving}
-              options={[
-                { value: "tray", label: t("settings_close_to_tray") },
-                { value: "exit", label: t("settings_close_to_exit") },
-              ]}
-              onChange={(value) => patchAndSave({ close_to_tray: value === "tray" })}
-            />
-          </SettingRow>
-          <SettingRow title={t("settings_proxy_port")} description={text(
-            "SOCKS5 与 HTTP/HTTPS 监听端口，范围 1–65534",
-            "SOCKS5 and HTTP/HTTPS listening ports, range 1–65534.",
-          )}>
-            <div className="port-controls">
-              <label>SOCKS5 <Input disabled={loading || loadFailed} type="number" min={1} max={65534} value={String(networkSettings.socks_port)} onChange={(_, data) => setNetworkDraft((current) => ({ ...current, socks_port: Number(data.value) }))} /></label>
-              <label>HTTP <Input disabled={loading || loadFailed} type="number" min={1} max={65534} value={String(networkSettings.http_port)} onChange={(_, data) => setNetworkDraft((current) => ({ ...current, http_port: Number(data.value) }))} /></label>
-            </div>
-          </SettingRow>
-          <SettingRow title={t("settings_system_proxy_takeover")} description={t("settings_system_proxy_takeover_hint")}>
-            <SettingSwitch
-              checked={settings.system_proxy_takeover}
-              disabled={loading || saving}
-              onChange={(checked) => void patchAndSave(
-                { system_proxy_takeover: checked },
-                checked
-                  ? t("settings_system_proxy_takeover_on")
-                  : t("settings_system_proxy_takeover_off"),
-              )}
-            />
-          </SettingRow>
-        </GlassSurface>
-
-        <GlassSurface className="settings-section" id="settings-network">
-          <h2>{t("settings_network_dns")}</h2>
-          <SettingRow title={t("settings_dns_server")} description={t("settings_dns_fallback_hint")}>
-            <SettingInput
-              disabled={loading || loadFailed}
-              value={networkSettings.dns_server}
-              placeholder={t("settings_dns_placeholder")}
-              onChange={(value) => setNetworkDraft((current) => ({ ...current, dns_server: value }))}
-            />
-          </SettingRow>
-          <SettingRow title={t("settings_doh_policy")} description={t("settings_doh_hint")}>
-            <SettingDropdown
-              disabled={loading || loadFailed}
-              value={networkSettings.dns_policy}
-              options={[
-                { value: "auto", label: t("settings_doh_auto") },
-                { value: "off", label: t("settings_doh_off") },
-                { value: "alidns", label: t("settings_doh_alidns") },
-                { value: "dnspod", label: t("settings_doh_dnspod") },
-                { value: "google", label: "Google DNS" },
-              ]}
-              onChange={(value) => setNetworkDraft((current) => ({ ...current, dns_policy: value }))}
-            />
-          </SettingRow>
-          <SettingRow title={t("settings_dns_egress")} description={t("settings_dns_egress_hint")}>
-            <SettingDropdown
-              value={networkSettings.dns_egress_mode === "adapter" ? `adapter:${networkSettings.dns_adapter_id ?? ""}` : networkSettings.dns_egress_mode}
-              disabled={loading || saving}
-              options={[
-                { value: "auto", label: t("settings_dns_egress_auto") },
-                { value: "system", label: t("settings_dns_egress_system") },
-                ...adapters
-                  .filter((adapter) => adapter.selected && adapter.operational)
-                  .map((adapter) => ({
-                    value: `adapter:${adapter.id}`,
-                    label: `${t("settings_dns_egress_adapter_prefix")} · ${adapter.name}`,
-                  })),
-              ]}
-              onChange={(value) => setNetworkDraft((current) => value.startsWith("adapter:")
-                ? { ...current, dns_egress_mode: "adapter", dns_adapter_id: value.slice("adapter:".length) }
-                : { ...current, dns_egress_mode: value, dns_adapter_id: "" })}
-            />
-          </SettingRow>
-          <div className="settings-actions">
-            <Button appearance="primary" icon={<Save20Regular />} disabled={loading || loadFailed || saving || !networkDirty} onClick={() => void saveNetwork()}>
-              {text("保存端口与 DNS", "Save ports and DNS")}
-            </Button>
           </div>
-        </GlassSurface>
-
-        <GlassSurface className="settings-section" id="settings-advanced">
-          <h2>{t("settings_advanced_network")}</h2>
-          <SettingRow
-            title={text("TUN 协议栈", "TUN stack")}
-            description={text(
-              "System 使用系统协议栈；Mixed 使用系统 TCP + gVisor UDP；gVisor 使用完整用户态协议栈。遇到兼容性问题时可切换尝试，保存后下次启动 TUN 生效。",
-              "System uses the OS stack; Mixed uses system TCP + gVisor UDP; gVisor uses a full userspace stack. Try another stack for compatibility issues. Applies the next time TUN starts.",
-            )}
-          >
-            <SettingDropdown
-              value={settings.tun_stack || "system"}
-              disabled={loading || saving}
-              options={[
-                { value: "system", label: text("System（默认）", "System (default)") },
-                { value: "mixed", label: text("Mixed（混合）", "Mixed (hybrid)") },
-                { value: "gvisor", label: text("gVisor（用户态）", "gVisor (userspace)") },
-              ]}
-              onChange={(value) => void patchAndSave(
-                { tun_stack: value },
-                text("TUN 协议栈已保存，下次启动 TUN 生效", "TUN stack saved; applies the next time TUN starts"),
-              )}
-            />
-          </SettingRow>
-          <SettingRow
-            title={text("FakeIP 与规则集缓存", "FakeIP and rule-set cache")}
-            description={text(
-              "已自动启用持久化缓存，保留 FakeIP 映射；远程规则集接入后也可复用。缓存位于配置目录下的 cache/sing-box.db，不随 TUN 重启清除。",
-              "Persistent caching is enabled automatically for FakeIP mappings and future remote rule sets. Stored at cache/sing-box.db inside the configuration directory and retained across TUN restarts.",
-            )}
-          >
-            <span>{text("已启用", "Enabled")}</span>
-          </SettingRow>
-          <SettingRow
-            title={t("settings_force_tun")}
-            description={t("settings_force_tun_hint")}
-            danger
-          >
-            <SettingSwitch checked={settings.force_tun_connectivity_bypass} onChange={(checked) => patchAndSave({ force_tun_connectivity_bypass: checked })} />
-          </SettingRow>
-          <SettingRow title={t("settings_wfp_strict_route")} description={t("settings_wfp_strict_route_hint")}>
-            <SettingSwitch checked={settings.strict_route} onChange={(checked) => patchAndSave({ strict_route: checked })} />
-          </SettingRow>
-          <SettingRow title={t("settings_wfp_repair")} description={wfpStatus || t("settings_wfp_repair_unknown")}>
-            <Button icon={<ArrowSync20Regular />} onClick={inspectWfp}>{t("settings_wfp_repair_button")}</Button>
-          </SettingRow>
-          <SettingRow title={t("blocked_enable")} description={t("blocked_enable_hint")}>
-            <SettingSwitch checked={settings.blocked_domain_bypass} onChange={(checked) => patchAndSave({ blocked_domain_bypass: checked })} />
-          </SettingRow>
-          <SettingRow title={t("blocked_expiry_toggle")} description={t("blocked_expiry_hint")}>
-            <SettingSwitch checked={settings.blocked_domain_expiry} onChange={(checked) => patchAndSave({ blocked_domain_expiry: checked })} />
-          </SettingRow>
-          <SettingRow title={t("settings_blocked_domains_manage")} description={t("settings_blocked_domains_manage_hint")}>
-            <Button onClick={onOpenBlockedDomains}>{t("settings_blocked_domains_open")}</Button>
-          </SettingRow>
-        </GlassSurface>
-
-        <GlassSurface className="settings-section" id="settings-config">
-          <h2>{t("settings_config_group")}</h2>
-          <SettingRow title={t("settings_autostart")} description={t("settings_autostart_hint")}>
-            <SettingSwitch checked={settings.autostart} disabled={saving} onChange={(checked) => setAutostart(checked)} />
-          </SettingRow>
-          <SettingRow title={t("settings_auto_start_engine")} description={t("settings_auto_start_engine_hint")}>
-            <SettingSwitch
-              checked={settings.auto_start_engine}
-              disabled={saving || !settings.autostart}
-              onChange={(checked) => setAutoStartEngine(checked)}
-            />
-          </SettingRow>
-          <SettingRow title={text("开机自动连接 Wi-Fi", "Connect Wi-Fi at startup")} description={text(
-            "自动加速前，为已选无线网卡连接 Windows 中已保存且允许自动连接的网络，最多等待 2 分钟。关闭后停止主动连接，已连接的 Wi-Fi 保持连接。",
-            "Before automatic acceleration, connect selected Wi-Fi adapters using saved Windows networks that allow automatic connection. Wait up to 2 minutes. Turning this off stops connection requests and keeps existing connections.",
-          )}>
-            <SettingSwitch
-              checked={settings.auto_connect_wifi ?? false}
-              disabled={saving || !settings.autostart || !settings.auto_start_engine}
-              onChange={(checked) => patchAndSave({ auto_connect_wifi: checked })}
-            />
-          </SettingRow>
-          <SettingRow title={t("settings_config_path")} description={configPath || text("正在读取配置文件位置…", "Reading configuration path…")}>
-            <Button
-              icon={<FolderOpen20Regular />}
-              disabled={!configPath}
-              onClick={() => desktopPlatform.openDirectory(configPath.replace(/[\\/][^\\/]+$/, ""))}
-            >
-              {text("打开目录", "Open folder")}
-            </Button>
-          </SettingRow>
-          <SettingRow
-            title={text("旧版配置迁移与回滚", "Legacy configuration migration and rollback")}
-            description={migration?.message || text("未检测到 HypoMux v2.x 配置", "No HypoMux v2.x configuration was found")}
-          >
-            <div className="migration-actions">
-              <Button
-                disabled={!migration?.legacy_found || saving}
-                onClick={() => {
-                  setMigrationDialog("migrate");
-                  setMigrationDialogOpen(true);
-                }}
-              >
-                {text("迁移旧版配置", "Migrate legacy settings")}
-              </Button>
-              <Button
-                appearance="subtle"
-                disabled={!migration?.applied || saving}
-                onClick={() => {
-                  setMigrationDialog("rollback");
-                  setMigrationDialogOpen(true);
-                }}
-              >
-                {text("回滚", "Rollback")}
-              </Button>
+          {category === "network" && <footer className="settings-network-footer">
+            <div>
+              <strong>{loading ? text("正在读取…", "Loading…") : loadFailed ? text("配置未读取", "Settings unavailable") : networkDirty ? text("端口与 DNS 有未保存的更改", "Port and DNS changes pending") : text("端口与 DNS 已同步", "Ports and DNS synced")}</strong>
+              <span>{text("保存后重启聚合生效。", "Restart aggregation after saving to apply.")}</span>
             </div>
-          </SettingRow>
-        </GlassSurface>
+            <Button appearance="primary" icon={<Save20Regular />} disabled={loading || loadFailed || saving || !networkDirty} onClick={() => void saveNetwork()}>
+              {saving ? text("正在保存…", "Saving…") : text("保存端口与 DNS", "Save ports and DNS")}
+            </Button>
+          </footer>}
+        </div>
       </div>
 
       <Dialog open={migrationDialogOpen} onOpenChange={(_, data) => !data.open && setMigrationDialogOpen(false)}>

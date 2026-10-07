@@ -213,6 +213,8 @@ func decodeRequestParams(t *testing.T, request protocol.Request) {
 		target = &TunActivateParams{}
 	case MethodDNSResolve:
 		target = &DNSResolveParams{}
+	case MethodDNSDoHRelay:
+		target = &DNSDoHRelayParams{}
 	case MethodMTUSet:
 		target = &platform.MTUChange{}
 	case MethodDiagnosticRun:
@@ -266,6 +268,8 @@ func decodeResult(t *testing.T, method string, payload json.RawMessage) {
 		target = &dns.Result{}
 	case MethodDNSStatus:
 		target = &dns.Status{}
+	case MethodDNSDoHRelay:
+		target = &DNSDoHRelayResult{}
 	case MethodHealthCheck:
 		target = &HealthResult{}
 	case MethodMTUSet:

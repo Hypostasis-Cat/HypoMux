@@ -29,7 +29,7 @@ export function CompactNavigation({
   const navigationRef = useRef<HTMLElement>(null);
   const activeButtonRef = useRef<HTMLButtonElement | null>(null);
   const [indicatorTop, setIndicatorTop] = useState<number | null>(null);
-  const navigationPage = page === "blocked-domains" ? "settings" : page;
+  const navigationPage = !aiEnabled && page === "assistant" ? "home" : page === "blocked-domains" ? "settings" : page;
   const mainItems = [
     { id: "home", label: t("nav_home"), icon: <Home24Regular />, activeIcon: <Home24Filled /> },
     { id: "assistant", label: locale === "en" ? "AI assistant" : "AI 助手", icon: <Chat24Regular /> },
@@ -49,9 +49,18 @@ export function CompactNavigation({
     }
 
     const updateIndicator = () => {
-      const navigationRect = navigation.getBoundingClientRect();
-      const buttonRect = activeButton.getBoundingClientRect();
-      setIndicatorTop(buttonRect.top - navigationRect.top);
+      // Read layout coordinates, not the in-flight CSS transform. The highlight
+      // and the other entries must travel to the same destination together.
+      let top = 0;
+      let element: HTMLElement | null = activeButton;
+      while (element && element !== navigation) {
+        top += element.offsetTop;
+        element = element.offsetParent as HTMLElement | null;
+      }
+      if (!aiEnabled && activeButton.closest(".nav-item-after-ai")) {
+        top -= navigation.querySelector<HTMLElement>(".nav-item-ai")?.offsetHeight ?? 0;
+      }
+      setIndicatorTop(top);
     };
 
     updateIndicator();
@@ -65,10 +74,10 @@ export function CompactNavigation({
   }, [navigationPage, aiEnabled]);
 
   return (
-    <nav ref={navigationRef} className="compact-navigation" aria-label={locale === "en" ? "Main navigation" : "主导航"}
+    <nav ref={navigationRef} className="compact-navigation" data-ai-enabled={aiEnabled} aria-label={locale === "en" ? "Main navigation" : "主导航"}
       onKeyDown={(event) => {
         if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
-        const buttons = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>(".nav-button"));
+        const buttons = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>(".nav-button:not(:disabled)"));
         const current = buttons.indexOf(event.target as HTMLButtonElement);
         if (current < 0) return;
         event.preventDefault();
@@ -83,11 +92,13 @@ export function CompactNavigation({
         aria-hidden="true"
       />
       <div className="nav-items">
-        {mainItems.filter(item => item.id !== "assistant" || aiEnabled).map((item) => {
+        {mainItems.map((item, index) => {
           const active = item.id === navigationPage;
+          const hidden = item.id === "assistant" && !aiEnabled;
           return (
+            <div key={item.id} className={`nav-item${item.id === "assistant" ? " nav-item-ai" : index > 1 ? " nav-item-after-ai" : ""}`}
+              aria-hidden={hidden || undefined}>
             <Tooltip
-              key={item.id}
               content={item.label}
               relationship="label"
               positioning="after"
@@ -97,6 +108,8 @@ export function CompactNavigation({
                 className={`nav-button${active ? " is-active" : ""}`}
                 aria-label={item.label}
                 aria-current={active ? "page" : undefined}
+                disabled={hidden}
+                tabIndex={hidden ? -1 : undefined}
                 onClick={() => {
                   onPageChange(item.id as AppPage);
                 }}
@@ -104,6 +117,7 @@ export function CompactNavigation({
                 {active && item.activeIcon ? item.activeIcon : item.icon}
               </button>
             </Tooltip>
+            </div>
           );
         })}
       </div>

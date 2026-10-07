@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -359,14 +360,21 @@ func probeDNSBootstrap(parent context.Context, result dnsResolveResult) tunConne
 		}
 		query := buildConnectivityDNSQuery()
 		if transport == "doh" {
+			path := result.DoHPath
+			if path == "" {
+				path = "/dns-query"
+			}
 			request, requestErr := http.NewRequestWithContext(
-				ctx, http.MethodPost, "https://dns-bootstrap.invalid/dns-query", bytes.NewReader(query),
+				ctx, http.MethodPost, "https://dns-bootstrap.invalid"+path, bytes.NewReader(query),
 			)
 			if requestErr != nil {
 				check.Error = requestErr.Error()
 				return check
 			}
 			request.Host = serverName
+			if port != 443 {
+				request.Host = net.JoinHostPort(serverName, strconv.Itoa(port))
+			}
 			request.Header.Set("Accept", "application/dns-message")
 			request.Header.Set("Content-Type", "application/dns-message")
 			request.Header.Set("User-Agent", "HypoMux-Desktop/1")

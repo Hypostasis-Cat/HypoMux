@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -44,6 +43,8 @@ type AppSettings struct {
 	AutoStartEngine     bool                  `json:"auto_start_engine"`
 	AutoConnectWiFi     bool                  `json:"auto_connect_wifi,omitempty"`
 	DNSServer           string                `json:"dns_server"`
+	DNSServers          []string              `json:"dns_servers,omitempty"`
+	DoHServers          []string              `json:"doh_servers,omitempty"`
 	DNSPolicy           string                `json:"dns_policy"`
 	DNSEgressMode       string                `json:"dns_egress_mode"`
 	DNSAdapterID        string                `json:"dns_adapter_id,omitempty"`
@@ -321,6 +322,13 @@ func (s *SettingsService) UpdateFields(values AppSettings, fields []string) (App
 			next.AutoConnectWiFi = values.AutoConnectWiFi
 		case "dns_server":
 			next.DNSServer = values.DNSServer
+			if len(next.DNSServers) > 0 {
+				next.DNSServers[0] = values.DNSServer
+			}
+		case "dns_servers":
+			next.DNSServers = append([]string{}, values.DNSServers...)
+		case "doh_servers":
+			next.DoHServers = append([]string{}, values.DoHServers...)
 		case "dns_policy":
 			next.DNSPolicy = values.DNSPolicy
 		case "dns_egress_mode":
@@ -335,6 +343,11 @@ func (s *SettingsService) UpdateFields(values AppSettings, fields []string) (App
 }
 
 func (s *SettingsService) updateLocked(next AppSettings) (AppSettings, error) {
+	var err error
+	next, err = normalizeDNSSettings(next)
+	if err != nil {
+		return AppSettings{}, err
+	}
 	if next.UpdateChannel == "" {
 		next.UpdateChannel = s.settings.UpdateChannel
 		if next.UpdateChannel == "" {
@@ -591,6 +604,10 @@ func (s *SettingsService) reload() error {
 			loaded.AdapterWeights[id] = AdapterWeightDefault
 		}
 	}
+	loaded, err = normalizeDNSSettings(loaded)
+	if err != nil {
+		return fmt.Errorf("DNS 设置无效：%w", err)
+	}
 	s.settings = loaded
 	return nil
 }
@@ -718,15 +735,14 @@ func validateSettings(value AppSettings) error {
 	if value.SOCKSPort == value.HTTPPort {
 		return fmt.Errorf("SOCKS5 与 HTTP 端口不能相同（socks_port=%d，http_port=%d）；请将两个端口设为不同值，例如 10800 和 10801", value.SOCKSPort, value.HTTPPort)
 	}
-	ip := net.ParseIP(value.DNSServer)
-	if ip == nil || ip.IsUnspecified() || ip.IsMulticast() || ip.IsLinkLocalUnicast() {
-		return errors.New("DNS 地址格式无效，请输入合法单播 IPv4 或 IPv6 地址；链路本地 DNS 请使用网卡自动配置")
+	if _, err := normalizeDNSSettings(value); err != nil {
+		return err
 	}
 	if err := validateRuleSets(value.RuleSets); err != nil {
 		return err
 	}
 	switch value.DNSPolicy {
-	case "auto", "off", "system", "alidns", "dnspod", "google":
+	case "auto", "off", "system", "alidns", "dnspod", "google", "custom":
 	default:
 		return fmt.Errorf("不支持的 DoH 解析策略：%s", value.DNSPolicy)
 	}
@@ -830,6 +846,12 @@ func writeSettingsFile(path string, settings AppSettings) error {
 func cloneSettings(value AppSettings) AppSettings {
 	value.RoutingMatchOrder = append([]string(nil), value.RoutingMatchOrder...)
 	result := value
+	if value.DNSServers != nil {
+		result.DNSServers = append([]string{}, value.DNSServers...)
+	}
+	if value.DoHServers != nil {
+		result.DoHServers = append([]string{}, value.DoHServers...)
+	}
 	result.SelectedAdapterIDs = append([]string(nil), value.SelectedAdapterIDs...)
 	result.AdapterWeights = cloneWeights(value.AdapterWeights)
 	result.RoutingRules = append([]RoutingRule(nil), value.RoutingRules...)

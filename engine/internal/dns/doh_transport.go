@@ -49,7 +49,7 @@ func (r *Resolver) newDoHTransport(binding Binding, endpoint Endpoint) *http.Tra
 		if !supportsEndpoint(binding, endpoint.IP) {
 			return nil, fmt.Errorf("DoH endpoint has no matching source address")
 		}
-		connection, err := r.dial(ctx, endpointNetwork("tcp", endpoint.IP), net.JoinHostPort(endpoint.IP, "443"), binding)
+		connection, err := r.dial(ctx, endpointNetwork("tcp", endpoint.IP), net.JoinHostPort(endpoint.IP, endpoint.port()), binding)
 		if err != nil {
 			return nil, err
 		}
@@ -105,4 +105,8 @@ func (r *Resolver) closeDoHTransports() {
 		entry.transport.CloseIdleConnections()
 	}
 	r.dohTransports = nil
+	for _, relay := range r.dohRelays {
+		_ = relay.Close()
+	}
+	r.dohRelays = nil
 }

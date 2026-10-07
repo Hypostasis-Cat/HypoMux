@@ -85,6 +85,12 @@
       "cancellation": "not_applicable"
     },
     {
+      "name": "dns.dohRelay",
+      "idempotency": "reuse_bound_endpoint_relay",
+      "privilege": "none",
+      "cancellation": "host_context_only"
+    },
+    {
       "name": "health.check",
       "idempotency": "read_only",
       "privilege": "none",

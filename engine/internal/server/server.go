@@ -209,6 +209,8 @@ func (s *Server) handle(ctx context.Context, line []byte) (protocol.Response, bo
 		return s.resolveDNS(ctx, request), false
 	case api.MethodDNSStatus:
 		return s.dnsStatus(request.ID), false
+	case api.MethodDNSDoHRelay:
+		return s.dnsDoHRelay(request), false
 	case api.MethodHealthCheck:
 		return protocol.Result(request.ID, api.HealthResult{
 			OK:           true,
@@ -532,7 +534,7 @@ func (s *Server) resolveDNS(ctx context.Context, request protocol.Request) proto
 		defer cancel()
 		ctx = lookupCtx
 	}
-	result, err := s.proxy.ResolveDNS(ctx, params.Domain, params.Adapter, params.RecordType)
+	result, err := s.proxy.ResolveDNS(ctx, params.Domain, params.Adapter, params.RecordType, params.Bootstrap)
 	if err != nil {
 		return protocol.Failure(
 			request.ID,
@@ -542,6 +544,23 @@ func (s *Server) resolveDNS(ctx context.Context, request protocol.Request) proto
 		)
 	}
 	return protocol.Result(request.ID, result)
+}
+
+func (s *Server) dnsDoHRelay(request protocol.Request) protocol.Response {
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+	if s.proxy == nil || !s.proxy.Running() {
+		return protocol.Failure(request.ID, "invalid_state", "proxy engine is not running", nil)
+	}
+	var params api.DNSDoHRelayParams
+	if err := json.Unmarshal(request.Params, &params); err != nil {
+		return protocol.Failure(request.ID, "invalid_params", "invalid DoH relay params", nil)
+	}
+	address, err := s.proxy.StartDNSDoHRelay(params.Adapter, params.Endpoint)
+	if err != nil {
+		return protocol.Failure(request.ID, "dns_failed", err.Error(), nil)
+	}
+	return protocol.Result(request.ID, api.DNSDoHRelayResult{Address: address})
 }
 
 func (s *Server) dnsStatus(requestID string) protocol.Response {

@@ -29,11 +29,7 @@ func TestTUNDNSDiagnosticFailureDoesNotPreventConfiguration(t *testing.T) {
 
 func TestForcedTUNDNSPreservesEncryptedPolicyAndRejectsMissingConfiguration(t *testing.T) {
 	config := tunDNSConfiguration{Policy: "google"}
-	config.DoHEndpoints = append(config.DoHEndpoints, struct {
-		IP   string `json:"ip"`
-		Host string `json:"host"`
-		Path string `json:"path"`
-	}{"8.8.8.8", "dns.google", "/dns-query"})
+	config.DoHEndpoints = append(config.DoHEndpoints, tunDoHEndpoint{IP: "8.8.8.8", Host: "dns.google", Path: "/dns-query"})
 	result, diagnostic, err := prepareTUNDNS(context.Background(), AdapterView{Name: "Ethernet", Address: "192.0.2.10"}, true, nil,
 		func(context.Context) (tunDNSConfiguration, error) { return config, nil })
 	if err != nil || diagnostic != nil || result.Transport != "doh" || result.Server != "dns.google@8.8.8.8:443" {

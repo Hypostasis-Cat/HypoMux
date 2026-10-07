@@ -66,7 +66,10 @@ export type RoutingSnapshot = Omit<GeneratedRoutingSnapshot, "match_order" | "re
 
 export type AdapterView = GeneratedAdapterView & { is_virtual?: boolean; ipv6_gateway?: string; ipv6_metric?: number; ipv6_automatic_metric?: boolean };
 
-export type CompleteAppSettings = Omit<AppSettings, "ai_enabled"> & {
+export type CompleteAppSettings = Omit<AppSettings, "ai_enabled" | "dns_servers" | "doh_servers"> & {
+	// Optional for settings written before configurable resolver lists.
+	dns_servers?: string[];
+	doh_servers?: string[];
   ai_enabled?: boolean;
   update_channel?: "stable" | "preview";
   strategy?: string;

@@ -342,13 +342,37 @@ func (s *Server) ResolveDNS(
 	domain string,
 	adapterName string,
 	recordType dns.RecordType,
+	bootstrap ...bool,
 ) (dns.Result, error) {
+	resolver, selected, err := s.dnsResolverAdapter(adapterName)
+	if err != nil {
+		return dns.Result{}, err
+	}
+	if recordType == "" && selected.SourceIP == "" {
+		result, err := resolver.Resolve(ctx, dns.Query{Domain: domain, RecordType: dns.RecordAAAA, Binding: adapterDNSBinding(*selected), LegacyDNS: len(bootstrap) > 0 && bootstrap[0]})
+		if err == nil || ctx.Err() != nil {
+			return result, err
+		}
+		recordType = dns.RecordA
+	}
+	return resolver.Resolve(ctx, dns.Query{Domain: domain, RecordType: recordType, Binding: adapterDNSBinding(*selected), LegacyDNS: len(bootstrap) > 0 && bootstrap[0]})
+}
+
+func (s *Server) StartDNSDoHRelay(adapterName string, endpoint dns.Endpoint) (string, error) {
+	resolver, adapter, err := s.dnsResolverAdapter(adapterName)
+	if err != nil {
+		return "", err
+	}
+	return resolver.StartDoHRelay(adapterDNSBinding(*adapter), endpoint)
+}
+
+func (s *Server) dnsResolverAdapter(adapterName string) (*dns.Resolver, *Adapter, error) {
 	s.mu.RLock()
 	resolver := s.resolver
 	running := s.running
 	s.mu.RUnlock()
 	if resolver == nil || !running {
-		return dns.Result{}, fmt.Errorf("proxy engine is not running")
+		return nil, nil, fmt.Errorf("proxy engine is not running")
 	}
 	var selected *Adapter
 	adapters := s.scheduler.snapshot().Adapters
@@ -370,22 +394,9 @@ func (s *Server) ResolveDNS(
 		}
 	}
 	if selected == nil {
-		return dns.Result{}, fmt.Errorf("unknown adapter %q", adapterName)
+		return nil, nil, fmt.Errorf("unknown adapter %q", adapterName)
 	}
-	if recordType == "" && selected.SourceIP == "" {
-		result, err := resolver.Resolve(ctx, dns.Query{Domain: domain, RecordType: dns.RecordAAAA, Binding: adapterDNSBinding(*selected)})
-		if err == nil || ctx.Err() != nil {
-			return result, err
-		}
-		// An IPv4-only domain can still be reached through the selected link's
-		// NAT64 translator; callers retain the original domain for TLS/SOCKS.
-		recordType = dns.RecordA
-	}
-	return resolver.Resolve(ctx, dns.Query{
-		Domain:     domain,
-		RecordType: recordType,
-		Binding:    adapterDNSBinding(*selected),
-	})
+	return resolver, selected, nil
 }
 
 func (s *Server) SetDNSFallbackHandler(handler func(dns.FallbackEvent)) {

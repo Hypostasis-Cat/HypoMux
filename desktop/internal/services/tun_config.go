@@ -22,14 +22,16 @@ type clashAPIConfig struct {
 }
 
 type dnsResolveResult struct {
-	Addresses  []string `json:"addresses,omitempty"`
-	Domain     string   `json:"domain"`
-	Adapter    string   `json:"adapter"`
-	RecordType string   `json:"record_type"`
-	Address    string   `json:"address"`
-	Transport  string   `json:"transport"`
-	Server     string   `json:"server"`
-	Cached     bool     `json:"cached"`
+	Addresses    []string `json:"addresses,omitempty"`
+	Domain       string   `json:"domain"`
+	Adapter      string   `json:"adapter"`
+	RecordType   string   `json:"record_type"`
+	Address      string   `json:"address"`
+	Transport    string   `json:"transport"`
+	Server       string   `json:"server"`
+	DoHPath      string   `json:"doh_path,omitempty"`
+	RelayAddress string   `json:"relay_address,omitempty"`
+	Cached       bool     `json:"cached"`
 }
 
 type tunConfigOptions struct {
@@ -49,6 +51,9 @@ type tunConfigOptions struct {
 	// Executable is used by compatibility tests; production resolves the
 	// bundled runtime asset through the trusted installation layout.
 	Executable string
+	// A configured list is shared with the Core. sing-box evaluates this pool
+	// per query, rather than pinning the one endpoint that won startup probing.
+	DNSUpstreams []dnsResolveResult
 }
 
 func writeSingBoxConfig(
@@ -115,6 +120,9 @@ func writeSingBoxConfigWithOptions(
 	if err != nil {
 		return "", "", clashAPIConfig{}, err
 	}
+	if len(options.DNSUpstreams) > 0 && dnsMode == "" {
+		return "", "", clashAPIConfig{}, fmt.Errorf("多 DNS / 自定义 DoH 需要 sing-box 1.14 或更新版本，请更新运行核心")
+	}
 	clashAPI := clashAPIConfig{}
 	if options.ClashAPI != nil {
 		clashAPI = *options.ClashAPI
@@ -167,9 +175,11 @@ func writeSingBoxConfigWithOptions(
 		if options.IPv6Available && options.IPv4Unavailable {
 			strategy = "prefer_ipv6"
 		}
-		routeRules = append(routeRules,
-			map[string]any{"action": "resolve", "server": "dns-local", "strategy": strategy},
-		)
+		resolveRule := map[string]any{"action": "resolve", "server": "dns-local", "strategy": strategy}
+		if len(options.DNSUpstreams) > 0 {
+			delete(resolveRule, "server")
+		}
+		routeRules = append(routeRules, resolveRule)
 	}
 	routeRules = append(routeRules, singBoxCompatibilityRouteRules(compatibility, ruleSetPlan)...)
 	// Subscribed lists come before the per-outbound manual files so a
@@ -206,6 +216,13 @@ func writeSingBoxConfigWithOptions(
 		"servers": dnsServers,
 		"final":   "dns-local",
 	}
+	if len(options.DNSUpstreams) > 0 {
+		dnsConfig, err = buildTUNDNSPool(dnsAdapter, options)
+		if err != nil {
+			return "", "", clashAPIConfig{}, err
+		}
+		dnsServers = dnsConfig["servers"].([]any)
+	}
 	if usesFakeIP {
 		dnsConfig["servers"] = append(dnsServers,
 			map[string]any{
@@ -213,9 +230,14 @@ func writeSingBoxConfigWithOptions(
 				"inet4_range": "198.18.0.0/15", "inet6_range": "fc00::/18",
 			},
 		)
-		dnsConfig["rules"] = []any{
-			map[string]any{"query_type": []string{"A", "AAAA"}, "server": "dns-fakeip"},
+		fakeRule := map[string]any{"query_type": []string{"A", "AAAA"}, "server": "dns-fakeip"}
+		if len(options.DNSUpstreams) > 0 {
+			// Intercepted DNS may use FakeIP. Route resolve must get real IPs
+			// through the pool, so its non-DNS metadata skips this rule.
+			fakeRule["protocol"] = []string{"dns"}
 		}
+		poolRules, _ := dnsConfig["rules"].([]any)
+		dnsConfig["rules"] = append([]any{fakeRule}, poolRules...)
 		dnsConfig["reverse_mapping"] = true
 	}
 	ipv4Address := options.IPv4Address
@@ -242,6 +264,13 @@ func writeSingBoxConfigWithOptions(
 		tunInbound["dns_mode"] = dnsMode
 	}
 	tunInbound["route_exclude_address"] = tunRouteExclusions(dnsResult, dnsPolicy, options.IPv6Available)
+	if len(options.DNSUpstreams) > 0 {
+		exclusions := tunInbound["route_exclude_address"].([]string)
+		for _, result := range options.DNSUpstreams {
+			exclusions = append(exclusions, dnsBootstrapRouteExclusions(result)...)
+		}
+		tunInbound["route_exclude_address"] = uniqueNonEmpty(exclusions)
+	}
 	// Keep the database outside runtime: config staging, IPv4 fallback and
 	// sidecar restarts must all reuse the same persistent FakeIP/rule-set store.
 	cacheDirectory := filepath.Join(settingsDirectory(), "cache")
@@ -271,6 +300,11 @@ func writeSingBoxConfigWithOptions(
 				"secret":              clashAPI.Secret,
 			},
 		},
+	}
+	if len(options.DNSUpstreams) > 0 {
+		// The self-process direct bypass still needs a valid default resolver.
+		// User destinations go through the earlier resolve action and DNS rules.
+		config["route"].(map[string]any)["default_domain_resolver"] = dnsConfig["final"]
 	}
 	data, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {
@@ -407,6 +441,13 @@ func buildDNSUpstreamForPolicy(
 }
 
 func buildDNSUpstream(adapter AdapterView, result dnsResolveResult) (map[string]any, error) {
+	if result.RelayAddress != "" {
+		host, port, err := splitEndpoint(result.RelayAddress, 53)
+		if err != nil || host != "127.0.0.1" {
+			return nil, fmt.Errorf("无效的 Core DoH 转发地址")
+		}
+		return map[string]any{"type": "udp", "tag": "dns-local", "server": host, "server_port": port}, nil
+	}
 	transport := strings.ToLower(strings.TrimSpace(result.Transport))
 	server := strings.TrimSpace(result.Server)
 	serverName := ""
@@ -439,6 +480,9 @@ func buildDNSUpstream(adapter AdapterView, result dnsResolveResult) (map[string]
 	}
 	if transport == "doh" {
 		upstream["path"] = "/dns-query"
+		if result.DoHPath != "" {
+			upstream["path"] = result.DoHPath
+		}
 	}
 	if transport == "doh" || transport == "dot" {
 		if serverName == "" {
