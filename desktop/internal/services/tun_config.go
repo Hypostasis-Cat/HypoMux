@@ -54,6 +54,9 @@ type tunConfigOptions struct {
 	// A configured list is shared with the Core. sing-box evaluates this pool
 	// per query, rather than pinning the one endpoint that won startup probing.
 	DNSUpstreams []dnsResolveResult
+	// Resolve before TUN activation, independently of a custom DNS egress.
+	// Self-process/compatibility bypasses must not redetect the TUN as uplink.
+	SystemDirectAdapter *AdapterView
 }
 
 func writeSingBoxConfig(
@@ -192,12 +195,16 @@ func writeSingBoxConfigWithOptions(
 	if directPort, directErr := loopbackPort(endpoints, "direct"); directErr == nil {
 		directOutbound = socksOutbound("direct", directPort)
 	}
+	systemDirectAdapter := dnsAdapter
+	if options.SystemDirectAdapter != nil {
+		systemDirectAdapter = *options.SystemDirectAdapter
+	}
 	outbounds := []any{
 		socksOutbound("nic_ethernet", ethernetPort),
 		socksOutbound("nic_wifi", wifiPort),
 		socksOutbound("aggregation", aggregationPort),
 		directOutbound,
-		map[string]any{"type": "direct", "tag": "system-direct"},
+		boundSystemDirectOutbound(systemDirectAdapter),
 	}
 	for name, endpoint := range endpoints {
 		if name == "nic_ethernet" || name == "nic_wifi" || name == "aggregation" || name == "direct" ||
@@ -331,6 +338,24 @@ func writeSingBoxConfigWithOptions(
 		return "", "", clashAPIConfig{}, fmt.Errorf("提交 TUN 配置失败：%w", err)
 	}
 	return singBox, path, clashAPI, nil
+}
+
+// A route to "system-direct" is still a sing-box dial, not a Windows routing
+// exemption. Pin both the interface and its source addresses so re-entered Core
+// traffic cannot depend on automatic interface selection after TUN takes over.
+// Do not apply this to loopback SOCKS outbounds or to the aggregation pool.
+func boundSystemDirectOutbound(adapter AdapterView) map[string]any {
+	outbound := map[string]any{"type": "direct", "tag": "system-direct"}
+	if name := strings.TrimSpace(adapter.Name); name != "" {
+		outbound["bind_interface"] = name
+	}
+	if address := strings.TrimSpace(adapter.Address); address != "" {
+		outbound["inet4_bind_address"] = address
+	}
+	if address := strings.TrimSpace(adapter.SourceIPv6); address != "" {
+		outbound["inet6_bind_address"] = address
+	}
+	return outbound
 }
 
 // Adapter IP overrides are an exception for known third-party proxy processes,

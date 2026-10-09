@@ -704,6 +704,7 @@ func (s *EngineService) startLocked(ctx context.Context, mode string) (snapshot 
 	routingRules := []RoutingRule{}
 	compatibility := compatibilityPlan{}
 	dnsEgress := tunDNSEgressDecision{}
+	systemDirectEgress := tunDNSEgressDecision{}
 	if mode == "tun" {
 		sourceRules := settings.RoutingRules
 		if validMatchOrder(settings.RoutingMatchOrder) {
@@ -720,6 +721,9 @@ func (s *EngineService) startLocked(ctx context.Context, mode string) (snapshot 
 			return EngineSnapshot{}, err
 		}
 		systemDefaultID, systemDefaultErr := systemDefaultDNSAdapterID()
+		// Snapshot the physical default before starting TUN. A custom DNS
+		// adapter or a user CIDR rule must not move the self-process bypass.
+		systemDirectEgress = resolveAutomaticTUNDNSEgress(selected, nil, systemDefaultID, systemDefaultErr)
 		dnsEgress, err = resolveTUNDNSEgress(
 			settings, selected, routingRules, systemDefaultID, systemDefaultErr,
 		)
@@ -995,15 +999,16 @@ func (s *EngineService) startLocked(ctx context.Context, mode string) (snapshot 
 			s.logs.RecordEvent("tun_address", "selected", map[string]any{"ipv4": tunAddress})
 		}
 		configOptions := tunConfigOptions{
-			ForceStart:      settings.ForceTUNBypass,
-			IPv4Address:     tunAddress,
-			Stack:           settings.TUNStack,
-			DNSPolicy:       effectiveDNSPolicy,
-			IPv6Available:   selectedAdaptersHaveIPv6(selected),
-			IPv4Unavailable: !selectedAdaptersHaveIPv4(selected),
-			ConfigName:      "sing-box.json",
-			RuleSets:        settings.RuleSets,
-			DNSUpstreams:    dnsPool,
+			ForceStart:          settings.ForceTUNBypass,
+			IPv4Address:         tunAddress,
+			Stack:               settings.TUNStack,
+			DNSPolicy:           effectiveDNSPolicy,
+			IPv6Available:       selectedAdaptersHaveIPv6(selected),
+			IPv4Unavailable:     !selectedAdaptersHaveIPv4(selected),
+			ConfigName:          "sing-box.json",
+			RuleSets:            settings.RuleSets,
+			DNSUpstreams:        dnsPool,
+			SystemDirectAdapter: &systemDirectEgress.Adapter,
 		}
 		configDigest := ""
 		configOptions.ConfigSHA256 = &configDigest
@@ -1037,6 +1042,12 @@ func (s *EngineService) startLocked(ctx context.Context, mode string) (snapshot 
 			}
 		}
 		if s.logs != nil {
+			s.logs.RecordEvent("tun_egress", "system_direct_bound", map[string]any{
+				"adapter": systemDirectEgress.Adapter.Name,
+				"source":  systemDirectEgress.Source,
+				"ipv4":    systemDirectEgress.Adapter.Address,
+				"ipv6":    systemDirectEgress.Adapter.SourceIPv6,
+			})
 			s.logs.RecordEvent("tun_dns", "upstream_selected", map[string]any{
 				"policy":             effectiveDNSPolicy,
 				"egress_mode":        dnsEgress.Mode,
