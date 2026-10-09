@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"runtime"
+	"syscall"
 	"time"
 	"unsafe"
 
@@ -53,6 +54,7 @@ func probeICMPv6WithAPI(ctx context.Context, source, target string,
 	reply := make([]byte, int(unsafe.Sizeof(echoReply{}))+len(payload)+64)
 	sent, received, total, minimum, maximum := 0, 0, 0, 0, 0
 	note := ""
+	apiFailed := false
 	for range diagnosticProbeCount {
 		if ctx.Err() != nil {
 			break
@@ -67,7 +69,13 @@ func probeICMPv6WithAPI(ctx context.Context, source, target string,
 		sent++
 		count, sendErr := send(handle, &src, &dst, payload, reply, timeout)
 		if count == 0 {
-			note = fmt.Sprintf("Icmp6SendEcho2 failed: %v", sendErr)
+			if errno, ok := sendErr.(syscall.Errno); ok {
+				note = "Icmp6SendEcho2 failed: " + diagnosticICMPError(uint32(errno))
+				apiFailed = apiFailed || errno != 11010
+			} else {
+				note = fmt.Sprintf("Icmp6SendEcho2 failed: %v", sendErr)
+				apiFailed = true
+			}
 			continue
 		}
 		result := (*echoReply)(unsafe.Pointer(&reply[0]))
@@ -97,6 +105,9 @@ func probeICMPv6WithAPI(ctx context.Context, source, target string,
 		status = "unavailable"
 	} else if loss >= 5 || maximum-minimum > 100 {
 		status = "unstable"
+	}
+	if apiFailed {
+		loss, status = -1, "unavailable"
 	}
 	return icmpProbeResult{Status: status, LossRate: loss, AvgLatencyMS: latency, JitterMS: maximum - minimum, Sent: sent, Received: received, Note: note}
 }

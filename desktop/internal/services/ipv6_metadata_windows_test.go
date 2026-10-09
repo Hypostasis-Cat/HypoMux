@@ -130,7 +130,7 @@ func TestDesktopIPv6ICMPReportsNativeErrors(t *testing.T) {
 				if closed || sent != 0 || result.Sent != 0 {
 					t.Fatal("used an invalid ICMP handle")
 				}
-			} else if !closed || sent != diagnosticProbeCount || result.Sent != sent || result.LossRate != 100 {
+			} else if !closed || sent != diagnosticProbeCount || result.Sent != sent || result.LossRate != -1 {
 				t.Fatal("failed sends lost accounting or leaked the handle")
 			}
 		})

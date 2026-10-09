@@ -34,6 +34,7 @@ import { adapterSaveQueue } from "../platform/adapterSaveQueue";
 import { startSerialPoll } from "../platform/serialPoll";
 import type { EnginePhase } from "../state/useEngineState";
 import { adapterListKey } from "../state/adapterRuntime";
+import { currentDiagnostic } from "../state/diagnosticEvidence";
 import { MTUDetectionPage } from "./MTUDetectionPage";
 import { NATDetectionPage } from "./NATDetectionPage";
 import { isNATDetectionBlocked } from "./natDetectionPolicy";
@@ -98,9 +99,9 @@ export function HealthPage({
   const text = useCallback((zh: string, en: string) => locale === "en" ? en : zh, [locale]);
   const statusMeta = useMemo(() => ({
     available: {
-      label: text("可用", "Available"),
+      label: text("探测通过", "Probe passed"),
       color: "success" as const,
-      description: text("绑定出口可达，链路可加入聚合池。", "The bound exit is reachable and can join the aggregation pool."),
+      description: text("至少一个绑定出口 TLS 探测通过；不代表所有网站、DNS 或聚合通道均正常。", "At least one bound TLS probe passed; this does not verify every site, DNS, or aggregation."),
     },
     unstable: {
       label: text("不稳定", "Unstable"),
@@ -108,15 +109,29 @@ export function HealthPage({
       description: text("ICMP 丢包或抖动偏高，使用时可能波动。", "ICMP loss or jitter is high and may cause fluctuations."),
     },
     unavailable: {
-      label: text("不可用", "Unavailable"),
-      color: "danger" as const,
-      description: text("绑定 TCP 失败，该网卡当前无法作为可靠出口。", "The bound TCP check failed; this adapter is not a reliable exit."),
+      label: text("未确认", "Unverified"),
+      color: "warning" as const,
+      description: text("旧版探测未通过，请重新体检以获取分层结果。", "An older probe failed. Run diagnostics again for layered results."),
+    },
+    limited: {
+      label: text("部分连通", "Partial connectivity"),
+      color: "warning" as const,
+      description: text("收到 TCP 或 ICMP 响应，但 TLS 未通过；还不能确认应用可正常联网。", "TCP or ICMP responded, but TLS was not verified. Application connectivity remains unconfirmed."),
+    },
+    unverified: {
+      label: text("未确认", "Unverified"),
+      color: "warning" as const,
+      description: text("本次未能确认出口可用；目标受限、网络变化或 TUN/VPN 干扰均可能影响结果，不能据此断定网卡断网。", "Egress could not be verified. Target restrictions, network changes, or TUN/VPN interference may affect the result; this does not prove an outage."),
     },
   }), [text]);
   const checkLabels = useMemo<Record<string, string>>(() => ({
     source_binding: text("源地址与接口绑定", "Source address and interface binding"),
 	 ipv6_tcp: text("IPv6 出口连通性", "IPv6 egress connectivity"),
     gateway: text("默认网关", "Default gateway"),
+    ipv4_connectivity: text("IPv4 TCP / TLS", "IPv4 TCP / TLS"),
+    ipv6_connectivity: text("IPv6 TCP / TLS", "IPv6 TCP / TLS"),
+    scope: text("结果适用范围", "Scope of results"),
+    environment: text("网络环境变化", "Network environment changes"),
     dns: text("DNS 配置", "DNS configuration"),
     metric: text("路由跃点", "Route metric"),
   }), [text]);
@@ -388,8 +403,8 @@ export function HealthPage({
             : healthView === "mtu" ? text("IPv4 路径探测", "IPv4 path probing") : text("UDP 映射与过滤行为", "UDP mapping and filtering behavior")}</span>
           <h1>{healthView === "link" ? text("网络体检", "Network diagnostics") : healthView === "mtu" ? text("MTU 检测", "MTU detection") : text("NAT 类型检测", "NAT type detection")}</h1>
           <p>{healthView === "link" ? text(
-            "ICMP 负责质量数据，绑定 TCP 负责确认流量确实从所选网卡发出。",
-            "ICMP measures link quality while bound TCP confirms traffic actually leaves through the selected adapter.",
+            "分网卡验证 TCP 与 TLS；ICMP 未回应率仅针对探测目标，不等于实际业务丢包。",
+            "Verify TCP and TLS per adapter. ICMP non-response applies only to the probe target, not application traffic.",
           ) : healthView === "mtu" ? text("检测所选网卡到目标地址的推荐 MTU，并按需应用或恢复。", "Detect a recommended MTU for an adapter and target, then apply or restore it.") : text(
             "使用 RFC 5780 分析所选出口的 UDP 映射与过滤行为，并给出经典 NAT 类型。",
             "Analyze UDP mapping and filtering behavior over the selected egress using RFC 5780.",
@@ -452,7 +467,7 @@ export function HealthPage({
           {loading ? <Spinner label={text("正在读取活动网卡", "Loading active adapters")} /> : adapters.length === 0 ? (
             <div className="health-empty-inline">{text("未发现拥有有效 IPv4 或 IPv6 的活动网卡。", "No active adapter with a valid IPv4 or IPv6 address was found.")}</div>
           ) : adapters.map((adapter) => {
-            const result = resultByID.get(adapter.id);
+            const result = currentDiagnostic(adapter, resultByID.get(adapter.id));
             return (
               <label className={`health-adapter-choice hm-card${adapter.selected ? " is-selected" : ""}`} key={adapter.id}>
                 <Checkbox
@@ -503,8 +518,8 @@ export function HealthPage({
               <Spinner size="medium" />
               <strong>{text("正在建立第一条绑定探测", "Starting the first bound probe")}</strong>
               <span>{text(
-                "每张网卡最多发送 10 个 ICMP 探针，并依次尝试三个 TCP 目标。",
-                "Each adapter sends up to 10 ICMP probes and tries three TCP targets in sequence.",
+                "并行检测 ICMP 和多个绑定 TLS 目标；未通过时重试一次，IPv4 与 IPv6 分别验证。",
+                "ICMP and multiple bound TLS targets are probed concurrently. Failed verification is retried once, with IPv4 and IPv6 checked separately.",
               )}</span>
             </GlassSurface>
           ) : results.length === 0 ? (
@@ -512,8 +527,8 @@ export function HealthPage({
               <HeartPulse20Regular />
               <strong>{text("尚无体检结果", "No diagnostic results")}</strong>
               <span>{text(
-                "选择网卡后开始体检；结果会同步回首页的健康状态、延迟与丢包。",
-                "Select adapters and start diagnostics. Health, latency, and loss results are also shown on Home.",
+                "选择网卡后开始体检；报告保留本次探测证据，首页实时状态由运行中的核心提供。",
+                "Select adapters and start diagnostics. This report preserves probe evidence; live Home status comes from the running Core.",
               )}</span>
               <Button
                 appearance="primary"
@@ -525,7 +540,7 @@ export function HealthPage({
               </Button>
             </GlassSurface>
           ) : results.map((result) => {
-            const meta = statusMeta[result.status as keyof typeof statusMeta] ?? statusMeta.unavailable;
+            const meta = statusMeta[result.status as keyof typeof statusMeta] ?? statusMeta.unverified;
             return (
               <GlassSurface as="article" className="health-result-row" tone="secondary" key={result.adapter_id}>
                 <div className="health-result-identity">
@@ -533,12 +548,13 @@ export function HealthPage({
                   <div><strong>{result.name}</strong><span>{result.address} → {result.target_ip}</span></div>
                 </div>
                 <div className="health-metrics">
-                  <span><small>{text("ICMP 丢包", "ICMP loss")}</small><strong>{result.sent > 0 && result.loss_rate >= 0 ? `${result.loss_rate}%` : "—"}</strong></span>
+                  <span><small>{text("ICMP 未回应", "ICMP non-response")}</small><strong>{result.sent > 0 && result.loss_rate >= 0 ? `${result.loss_rate}%` : "—"}</strong></span>
                   <span><small>{text("平均延迟", "Average latency")}</small><strong>{result.received > 0 ? `${result.avg_latency_ms} ms` : "—"}</strong></span>
                   <span><small>{text("抖动", "Jitter")}</small><strong>{result.received > 1 ? `${result.jitter_ms} ms` : "—"}</strong></span>
                 </div>
                 <div className="health-result-summary">
                   <strong>{meta.description}</strong>
+                  <span>{text("检测时间", "Checked at")}: {result.completed_at ? new Date(String(result.completed_at)).toLocaleString(locale) : "—"}</span>
                   <span>{result.bound_tcp_detail}</span>
                 </div>
                 <Accordion collapsible className="health-checks">

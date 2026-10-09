@@ -3,7 +3,7 @@ import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useEngineState } from "./useEngineState";
 
-const mocks = vi.hoisted(() => ({ list: vi.fn(), save: vi.fn() }));
+const mocks = vi.hoisted(() => ({ list: vi.fn(), save: vi.fn(), diagnosticResults: [] as any[], runtimeAdapters: [] as any[] }));
 vi.mock("../platform/runtime", () => ({ isDesktopRuntime: () => true }));
 vi.mock("../platform/desktop", () => ({ desktopPlatform: { setEngineTrayStatus: vi.fn() } }));
 vi.mock("../platform/serialPoll", () => ({ startSerialPoll: () => () => {} }));
@@ -11,8 +11,8 @@ vi.mock("../platform/services", () => ({
   appServices: {
     adapters: mocks,
     settings: { get: async () => ({ weighted: false, hide_virtual_adapters: false }) },
-    diagnostics: { latest: async () => ({ results: [] }) },
-    engine: { snapshot: async () => ({ phase: "running", mode: "proxy", adapters: [], download_bps: 0 }) },
+    diagnostics: { latest: async () => ({ results: mocks.diagnosticResults }) },
+    engine: { snapshot: async () => ({ phase: "running", mode: "proxy", adapters: mocks.runtimeAdapters, download_bps: 0 }) },
   },
   withServiceTimeout: (task: Promise<unknown>) => task,
 }));
@@ -25,7 +25,16 @@ const added = adapters.map((adapter) => ({ ...adapter, selected: true }));
 
 describe("adapter application feedback", () => {
   beforeEach(() => { vi.clearAllMocks(); mocks.list.mockResolvedValue(adapters); });
-  afterEach(cleanup);
+  afterEach(() => { cleanup(); mocks.diagnosticResults = []; mocks.runtimeAdapters = []; });
+
+  it("does not let a saved diagnostic override live Core health", async () => {
+    mocks.list.mockResolvedValue([{ ...adapters[0], address: "192.0.2.10", operational: true }]);
+    mocks.diagnosticResults = [{ adapter_id: "a", address: "192.0.2.10", status: "available", completed_at: new Date().toISOString(), sent: 10, received: 0, loss_rate: 100 }];
+    mocks.runtimeAdapters = [{ id: "a", health_state: "failed" }];
+    const { result } = renderHook(() => useEngineState(vi.fn()));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.visibleAdapters[0].health).toBe("failed");
+  });
 
   it("waits for backend confirmation before reporting success, even with zero traffic", async () => {
     let confirm!: (value: unknown) => void;

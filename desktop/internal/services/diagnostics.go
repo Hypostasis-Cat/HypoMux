@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"sync"
 	"time"
 
@@ -64,7 +66,7 @@ type icmpProbeResult struct {
 
 type diagnosticProbe interface {
 	ICMP(context.Context, string, string) icmpProbeResult
-	BoundTCP(context.Context, AdapterView) (bool, string)
+	BoundEgress(context.Context, AdapterView) diagnosticEgressResult
 }
 
 type DiagnosticsService struct {
@@ -269,6 +271,9 @@ func (s *DiagnosticsService) Run(adapterIDs []string) (DiagnosticSnapshot, error
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	s.cancel = cancel
+	// Reserve the run before adapter discovery, so concurrent callers cannot
+	// replace each other's cancellation handle or results.
+	s.latest.State = "running"
 	s.mu.Unlock()
 
 	available, err := s.listAdapters()
@@ -328,6 +333,11 @@ func (s *DiagnosticsService) Run(adapterIDs []string) (DiagnosticSnapshot, error
 		result := s.runAdapter(ctx, adapter)
 		if ctx.Err() != nil {
 			return s.completeRun("cancelled", "", logOwned), nil
+		}
+		current, scanErr := s.listAdapters()
+		if scanErr != nil || !diagnosticAdapterUnchanged(adapter, current) {
+			result.Status = "unverified"
+			result.Checks = append(result.Checks, DiagnosticCheck{Key: "environment", Level: "warn", Detail: "体检期间网卡地址、接口或路由配置变化，或无法复查；本次结果仅供参考，请重新体检"})
 		}
 		s.mu.Lock()
 		if s.latest.RunID == runID {
@@ -410,39 +420,86 @@ func (s *DiagnosticsService) Shutdown() {
 }
 
 func (s *DiagnosticsService) runAdapter(ctx context.Context, adapter AdapterView) DiagnosticResult {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
 	source, target := adapter.Address, diagnosticTargetIPv4
 	if source == "" && adapter.SourceIPv6 != "" {
 		source, target = adapter.SourceIPv6, diagnosticTargetIPv6
 	}
-	icmp := s.probe.ICMP(ctx, source, target)
-	tcpOK, tcpDetail := s.probe.BoundTCP(ctx, adapter)
+	var icmp icmpProbeResult
+	var v4, v6 diagnosticEgressResult
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() { defer wg.Done(); icmp = s.probe.ICMP(ctx, source, target) }()
+	if adapter.Address != "" {
+		wg.Add(1)
+		go func() { defer wg.Done(); v4 = s.probe.BoundEgress(ctx, adapter) }()
+	}
+	if adapter.SourceIPv6 != "" {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ipv6 := adapter
+			ipv6.Address = ""
+			v6 = s.probe.BoundEgress(ctx, ipv6)
+		}()
+	}
+	wg.Wait()
+	tcpOK := v4.TCP || v6.TCP
+	var details []string
+	for _, detail := range []string{v4.Detail, v6.Detail} {
+		if detail != "" {
+			details = append(details, detail)
+		}
+	}
 	result := DiagnosticResult{
 		AdapterID: adapter.ID, Name: adapter.Name, Address: source,
 		Status: icmp.Status, LossRate: icmp.LossRate,
 		AvgLatencyMS: icmp.AvgLatencyMS, JitterMS: icmp.JitterMS,
 		Sent: icmp.Sent, Received: icmp.Received, TargetIP: target,
-		Note: icmp.Note, BoundTCPOK: tcpOK, BoundTCPDetail: tcpDetail,
+		Note: icmp.Note, BoundTCPOK: tcpOK, BoundTCPDetail: strings.Join(details, " | "),
 		CompletedAt: time.Now(),
 	}
-	// v2.2.0 treats selected-interface TCP as the authoritative multihomed
-	// result. ICMP remains visible as latency/jitter evidence.
-	if tcpOK {
+	// A finite probe cannot prove general unavailability. ICMP is quality
+	// evidence only; a TCP accept alone may come from a local TUN stack.
+	if v4.TLS || v6.TLS {
 		result.Status = "available"
+	} else if tcpOK || icmp.Received > 0 {
+		result.Status = "limited"
 	} else {
-		result.Status = "unavailable"
+		result.Status = "unverified"
 	}
 	result.Checks = buildDiagnosticChecks(adapter, result)
-	if adapter.Address != "" && adapter.SourceIPv6 != "" && ctx.Err() == nil {
-		v6 := adapter
-		v6.Address = ""
-		ok, detail := s.probe.BoundTCP(ctx, v6)
-		level := "pass"
-		if !ok {
-			level = "warn"
+	for _, family := range []struct {
+		key, source string
+		probe       diagnosticEgressResult
+	}{
+		{"ipv4_connectivity", adapter.Address, v4}, {"ipv6_connectivity", adapter.SourceIPv6, v6},
+	} {
+		if family.source == "" {
+			continue
 		}
-		result.Checks = append(result.Checks, DiagnosticCheck{Key: "ipv6_tcp", Level: level, Detail: detail})
+		level := "warn"
+		if family.probe.TLS {
+			level = "pass"
+		}
+		result.Checks = append(result.Checks, DiagnosticCheck{Key: family.key, Level: level, Detail: family.probe.Detail})
 	}
+	result.Checks = append(result.Checks, DiagnosticCheck{Key: "scope", Level: "info", Detail: "结果仅验证指定目标的接口绑定 TCP/TLS；不验证 DNS、所有网站或聚合转发。TUN/VPN/防火墙可能影响探测路径。ICMP 未回应率仅针对所示目标。"})
 	return result
+}
+
+func diagnosticAdapterUnchanged(before AdapterView, current []AdapterView) bool {
+	for _, after := range current {
+		if after.ID != before.ID {
+			continue
+		}
+		return after.Operational && before.Address == after.Address && before.SourceIPv6 == after.SourceIPv6 &&
+			before.IfIndex == after.IfIndex && before.IPv6IfIndex == after.IPv6IfIndex &&
+			before.Gateway == after.Gateway && before.IPv6Gateway == after.IPv6Gateway &&
+			before.Metric == after.Metric && before.IPv6Metric == after.IPv6Metric && reflect.DeepEqual(before.DNSServers, after.DNSServers)
+	}
+	return false
 }
 
 func buildDiagnosticChecks(adapter AdapterView, result DiagnosticResult) []DiagnosticCheck {
@@ -451,8 +508,11 @@ func buildDiagnosticChecks(adapter AdapterView, result DiagnosticResult) []Diagn
 	if sourceDetail == "" {
 		sourceDetail = adapter.SourceIPv6
 	}
+	if result.BoundTCPDetail != "" {
+		sourceDetail = result.BoundTCPDetail
+	}
 	if !result.BoundTCPOK {
-		sourceLevel = "fail"
+		sourceLevel = "warn"
 		sourceDetail = result.BoundTCPDetail
 	}
 	dns := ""

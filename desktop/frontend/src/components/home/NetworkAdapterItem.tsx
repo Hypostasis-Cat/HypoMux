@@ -130,7 +130,7 @@ export function NetworkAdapterItem({
         <NetworkHealthBadge health={adapter.health} />
         <div className="adapter-quality-values">
           <span>{text("延迟", "Latency")} {adapter.latencyMS === undefined ? "—" : `${adapter.latencyMS.toLocaleString(locale, { maximumFractionDigits: 1, useGrouping: false })} ms`}</span>
-          <span>{text("丢包", "Loss")} {adapter.lossRate === undefined ? "—" : `${adapter.lossRate.toLocaleString(locale, { maximumFractionDigits: 1, useGrouping: false })}%`}</span>
+          <span>{text("ICMP 未回应", "ICMP non-response")} {adapter.lossRate === undefined ? "—" : `${adapter.lossRate.toLocaleString(locale, { maximumFractionDigits: 1, useGrouping: false })}%`}</span>
           {adapter.address && <span>IPv4 {familyHealthLabel(adapter.ipv4Health)}</span>}
           {adapter.source_ipv6 && <span>IPv6 {familyHealthLabel(adapter.ipv6Health)}</span>}
         </div>

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { currentDiagnostic } from "./diagnosticEvidence";
 import {
   appServices,
   type AdapterView,
@@ -561,14 +562,7 @@ export function useEngineState(
         status: "available", received: 4, sent: 4,
         avg_latency_ms: [8, 128.45, 999.99, 1234.56][index % 4],
         jitter_ms: 0, loss_rate: [0, 2.5, 33.333333333, 100][index % 4],
-      } : diagnosticByID.get(adapter.id);
-      const diagnosticHealth = diagnostic?.status === "available"
-        ? "healthy"
-        : diagnostic?.status === "unstable"
-          ? "unstable"
-          : diagnostic?.status === "unavailable"
-            ? "failed"
-            : undefined;
+      } : currentDiagnostic(adapter, diagnosticByID.get(adapter.id));
       return {
         ...adapter,
         downloadBPS: runtime?.download_bps ?? 0,
@@ -576,7 +570,7 @@ export function useEngineState(
         connections: runtime?.connections ?? 0,
         bytesDown: runtime?.bytes_down ?? 0,
         bytesUp: runtime?.bytes_up ?? 0,
-        health: diagnosticHealth ?? healthValue(runtime?.health_state),
+        health: healthValue(runtime?.health_state),
         ipv4Health: runtime?.ipv4_health?.state,
         ipv6Health: runtime?.ipv6_health?.state,
         latencyMS: diagnostic && diagnostic.received > 0 ? diagnostic.avg_latency_ms : undefined,
