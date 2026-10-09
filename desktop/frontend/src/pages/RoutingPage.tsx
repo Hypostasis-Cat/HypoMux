@@ -4,6 +4,7 @@ import {
   Badge,
   Button,
   Checkbox,
+  checkboxClassNames,
   createTableColumn,
   DataGrid,
   DataGridBody,
@@ -918,7 +919,12 @@ export function RoutingPage() {
             getRowId={(item) => item.id}
             selectionMode="multiselect"
             selectedItems={selected}
-            onSelectionChange={(_, data) => setSelected(data.selectedItems)}
+            onSelectionChange={(event, data) => {
+              // DataGrid also selects on row clicks; only accept checkbox interactions.
+              if (event.target instanceof Element && event.target.closest(`.${checkboxClassNames.root}`)) {
+                setSelected(data.selectedItems);
+              }
+            }}
             sortable={false}
 
           >
