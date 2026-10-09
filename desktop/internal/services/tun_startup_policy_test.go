@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func TestTUNDNSDiagnosticFailureDoesNotPreventConfiguration(t *testing.T) {
+func TestTUNDNSDiagnosticFailureRequiresExplicitForce(t *testing.T) {
 	for _, force := range []bool{false, true} {
 		calls := 0
 		result, diagnostic, err := prepareTUNDNS(context.Background(), AdapterView{Name: "Ethernet", Address: "192.0.2.10", DNSServers: []string{"192.168.1.1"}}, force,
@@ -16,8 +16,17 @@ func TestTUNDNSDiagnosticFailureDoesNotPreventConfiguration(t *testing.T) {
 				calls++
 				return dnsResolveResult{}, errors.New("test domains blocked by unknown software")
 			}, func(context.Context) (tunDNSConfiguration, error) {
+				if !force {
+					t.Fatal("normal startup used unverified configuration")
+				}
 				return tunDNSConfiguration{Policy: "off", LegacyServers: []string{"223.5.5.5"}}, nil
 			})
+		if !force {
+			if err == nil || diagnostic == nil || calls == 0 {
+				t.Fatalf("normal startup accepted failed DNS: %+v %v %v", result, diagnostic, err)
+			}
+			continue
+		}
 		if err != nil || result.Server != "192.168.1.1:53" || result.Adapter != "Ethernet" || result.Transport != "udp" {
 			t.Fatalf("force=%t result=%+v diagnostic=%v error=%v", force, result, diagnostic, err)
 		}

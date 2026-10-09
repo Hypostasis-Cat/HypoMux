@@ -963,33 +963,32 @@ func (s *EngineService) startLocked(ctx context.Context, mode string) (snapshot 
 		}
 	} else {
 		s.recordStartStage("dns_preparing", nil)
-		var dnsResult dnsResolveResult
-		var dnsDiagnosticErr, dnsErr error
-		var dnsPool []dnsResolveResult
-		if effectiveDNSPolicy != "system" && (len(settings.DNSServers) > 1 || len(settings.DoHServers) > 0 || effectiveDNSPolicy == "custom") {
-			dnsPool, dnsErr = s.configuredTUNDNSPool(ctx, dnsEgress.Adapter)
-			if dnsErr == nil {
-				dnsResult = dnsPool[0]
-				dnsResult.Adapter = dnsEgress.Adapter.Name
-				if !settings.ForceTUNBypass {
-					_, dnsDiagnosticErr = resolveConnectivityBootstrap(ctx, dnsEgress.Adapter.Name, s.resolveConnectivityDNS)
-				}
-			}
+		useDNSPool := effectiveDNSPolicy != "system" && (len(settings.DNSServers) > 1 || len(settings.DoHServers) > 0 || effectiveDNSPolicy == "custom")
+		var prepared preparedTUNDNS
+		var dnsErr error
+		if settings.ForceTUNBypass {
+			prepared, dnsErr = s.prepareTUNDNSAdapter(ctx, dnsEgress.Adapter, true, useDNSPool)
 		} else {
-			dnsResult, dnsDiagnosticErr, dnsErr = prepareTUNDNS(ctx, dnsEgress.Adapter, settings.ForceTUNBypass, s.resolveConnectivityDNS, s.tunDNSConfiguration)
+			dnsEgress, prepared, dnsErr = prepareTUNDNSEgress(ctx, dnsEgress, selected,
+				func(probeCtx context.Context, adapter AdapterView) (preparedTUNDNS, error) {
+					return s.prepareTUNDNSAdapter(probeCtx, adapter, false, useDNSPool)
+				}, func(candidate tunDNSEgressDecision, probeErr error) {
+					if s.logs != nil {
+						s.logs.RecordEvent("tun_dns", "egress_probe", map[string]any{
+							"adapter": candidate.Adapter.Name, "adapter_id": candidate.Adapter.ID,
+							"source": candidate.Source, "verified": probeErr == nil, "error": errorText(probeErr),
+						})
+					}
+				})
 		}
 		if dnsErr != nil {
 			return rollback(fmt.Errorf("准备 TUN DNS 配置失败：%w", dnsErr))
 		}
-		if dnsDiagnosticErr != nil && s.logs != nil {
-			s.logs.RecordEvent("tun_connectivity", "dns_unverified", map[string]any{
-				"error": dnsDiagnosticErr.Error(), "message": "使用已配置的 DNS 上游继续启动",
-			})
-		}
+		dnsResult, dnsPool := prepared.Result, prepared.Pool
 		s.recordStartStage("dns_prepared", map[string]any{
 			"adapter": dnsEgress.Adapter.Name, "policy": effectiveDNSPolicy,
 			"transport": dnsResult.Transport, "server": dnsResult.Server,
-			"force_start": settings.ForceTUNBypass, "diagnostic_error": errorText(dnsDiagnosticErr),
+			"force_start": settings.ForceTUNBypass, "egress_source": dnsEgress.Source,
 		})
 		tunAddress, addressErr := availableTunIPv4Address(settings.ForceTUNBypass)
 		if addressErr != nil {
