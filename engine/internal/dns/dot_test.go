@@ -397,7 +397,90 @@ func TestDoTConcurrentQueriesRespectPoolLimitAndCancellation(t *testing.T) {
 		}
 	}
 	if f.closed.Load() != 2 {
-		t.Fatal("active TLS sockets leaked")
+		t.Fatalf("active TLS sockets still open after query completion: closed=%d, want 2", f.closed.Load())
+	}
+}
+
+type dotDelayedCloseConn struct {
+	net.Conn
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (connection *dotDelayedCloseConn) Close() error {
+	err := connection.Conn.Close()
+	connection.once.Do(func() {
+		close(connection.started)
+		<-connection.release
+	})
+	return err
+}
+
+func TestDoTCancellationWaitsForSocketClose(t *testing.T) {
+	queryStarted := make(chan struct{})
+	serverRelease := make(chan struct{})
+	defer close(serverRelease)
+	f := newDoTFixture(t, false, func([]byte) []byte {
+		close(queryStarted)
+		<-serverRelease
+		return nil
+	})
+	f.trust(t, loopbackBinding, f.endpoint)
+	closeStarted := make(chan struct{})
+	closeRelease := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(closeRelease) }) }
+	defer release()
+	originalDial := f.resolver.dial
+	f.resolver.dial = func(ctx context.Context, network, address string, binding Binding) (net.Conn, error) {
+		connection, err := originalDial(ctx, network, address, binding)
+		if err != nil {
+			return nil, err
+		}
+		return &dotDelayedCloseConn{Conn: connection, started: closeStarted, release: closeRelease}, nil
+	}
+	ctx, cancel := context.WithCancel(f.resolver.root)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := f.resolver.queryDoT(ctx, "close.example", dnsTypeA, loopbackBinding, f.endpoint)
+		done <- err
+	}()
+	select {
+	case <-queryStarted:
+	case <-time.After(time.Second):
+		t.Fatal("query did not reach peer")
+	}
+	cancel()
+	select {
+	case <-closeStarted:
+	case <-time.After(time.Second):
+		t.Fatal("cancellation did not close socket")
+	}
+	select {
+	case err := <-done:
+		t.Fatalf("query returned before socket close completed: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	pool, err := f.resolver.doTPool(loopbackBinding, f.endpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pool.slots) != 1 {
+		t.Fatal("query released pool slot before socket close completed")
+	}
+	release()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("expected cancellation, got %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("query did not finish after socket close")
+	}
+	if len(pool.slots) != 0 {
+		t.Fatal("completed query retained pool slot")
 	}
 }
 

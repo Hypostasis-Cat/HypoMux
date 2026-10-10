@@ -149,6 +149,9 @@ func (r *Resolver) queryDoT(ctx context.Context, domain string, recordType uint1
 	}
 	// One fresh retry handles servers that closed an idle connection.
 	for attempt := 0; attempt < 2; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return Result{}, 0, err
+		}
 		pool.mu.Lock()
 		if pool.closed {
 			pool.mu.Unlock()
@@ -177,10 +180,24 @@ func (r *Resolver) queryDoT(ctx context.Context, domain string, recordType uint1
 			}
 			connection = tls.Client(raw, pool.tlsConfig.Clone())
 		}
-		stop := context.AfterFunc(ctx, func() { _ = connection.Close() })
+		closed := make(chan struct{})
+		stop := context.AfterFunc(ctx, func() {
+			// Cancellation aborts the socket immediately, without a TLS
+			// close-notify write. Wait for this callback before releasing
+			// the pool slot or returning the canceled query.
+			_ = connection.NetConn().Close()
+			close(closed)
+		})
 		setContextDeadline(connection, ctx)
 		answer, err := exchangeDoT(ctx, connection, packet, queryID, recordType)
-		canReuse := stop() && ctx.Err() == nil && err == nil
+		stopped := stop()
+		if !stopped {
+			<-closed
+		}
+		if contextErr := ctx.Err(); contextErr != nil {
+			err = contextErr
+		}
+		canReuse := stopped && err == nil
 		if canReuse {
 			canReuse = connection.SetDeadline(time.Time{}) == nil
 		}
