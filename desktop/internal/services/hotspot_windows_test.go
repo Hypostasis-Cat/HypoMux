@@ -216,11 +216,17 @@ func runHotspotFunctions(t *testing.T, body string) {
 	if err := os.WriteFile(path, append([]byte{0xef, 0xbb, 0xbf}, []byte(script)...), 0600); err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// The first Windows PowerShell process can start slowly on a busy CI runner.
+	// Keep a bounded timeout without counting a cold start as a failed assertion.
+	const timeout = 60 * time.Second
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	command := exec.CommandContext(ctx, executable, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", path)
 	configureBackgroundCommand(command)
 	if output, err := command.CombinedOutput(); err != nil {
+		if ctx.Err() != nil {
+			t.Fatalf("hotspot PowerShell test exceeded %s: %v (process: %v)\n%s", timeout, ctx.Err(), err, output)
+		}
 		t.Fatalf("%v: %s", err, output)
 	}
 }
