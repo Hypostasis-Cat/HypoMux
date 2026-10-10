@@ -67,6 +67,8 @@ export function AboutPage() {
   const [checking, setChecking] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [downloadPercent, setDownloadPercent] = useState(0);
+  const [updateStage, setUpdateStage] = useState("downloading");
+  const downloadedInstaller = useRef<{ release: UpdateCheckResult["release"]; path: string } | null>(null);
   const [update, setUpdate] = useState<UpdateCheckResult | null>(null);
   const [updateDialogOpen, setUpdateDialogOpen] = useState(false);
   const updateDialogTitleRef = useRef<HTMLDivElement>(null);
@@ -121,25 +123,44 @@ export function AboutPage() {
   };
 
   const installUpdate = async () => {
-    if (!update) return;
+    if (!update || downloading) return;
     setDownloading(true);
     setDownloadPercent(0);
+    setUpdateStage("downloading");
+    let polling = true;
     const stopProgressPoll = startSerialPoll(() =>
       appServices.updater.progress().then((progress) => {
+        if (!polling) return;
+        if (progress.state === "verifying" || progress.state === "downloading") {
+          setUpdateStage(progress.state);
+        }
         if (progress.total > 0) {
           setDownloadPercent(Math.min(99, Math.floor(progress.downloaded * 100 / progress.total)));
         }
       }), 250, { immediate: true });
     try {
-      const path = await appServices.updater.download(update.release);
+      const cached = downloadedInstaller.current;
+      const sameInstaller = cached?.release.tag_name === update.release.tag_name &&
+        cached.release.installer_digest === update.release.installer_digest &&
+        cached.release.installer_size === update.release.installer_size;
+      let path = sameInstaller ? cached.path : "";
+      if (!path) {
+        downloadedInstaller.current = null;
+        path = await appServices.updater.download(update.release);
+        downloadedInstaller.current = { release: update.release, path };
+      }
+      polling = false;
+      stopProgressPoll();
       setDownloadPercent(100);
+      setUpdateStage("installing");
       await appServices.updater.installAndQuit(path);
       notify(text("下载完成", "Download complete"), t("about_update_installing"), "success");
     } catch (error) {
-      notify(text("下载安装包失败", "Installer download failed"), String(error), "error");
+      notify(text("更新未完成", "Update incomplete"), String(error), "error");
       setDownloading(false);
       setDownloadPercent(0);
     } finally {
+      polling = false;
       stopProgressPoll();
     }
   };
@@ -241,8 +262,20 @@ export function AboutPage() {
             </DialogContent>
             <DialogActions>
               <Button disabled={downloading} onClick={() => setUpdateDialogOpen(false)}>{t("about_update_later")}</Button>
+              {!downloading && downloadedInstaller.current && (
+                <Button onClick={() => {
+                  downloadedInstaller.current = null;
+                  void installUpdate();
+                }}>{text("重新下载安装包", "Download again")}</Button>
+              )}
               <Button appearance="primary" disabled={downloading} icon={downloading ? <Spinner size="tiny" /> : undefined} onClick={installUpdate}>
-                {downloading ? t("about_update_downloading", { percent: downloadPercent }) : t("about_update_now")}
+                {downloading
+                  ? updateStage === "installing"
+                    ? text("正在启动安装程序…", "Starting installer…")
+                    : updateStage === "verifying"
+                      ? text("正在验证安装包…", "Verifying installer…")
+                      : t("about_update_downloading", { percent: downloadPercent })
+                  : t("about_update_now")}
               </Button>
             </DialogActions>
           </DialogBody>

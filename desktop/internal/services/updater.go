@@ -40,6 +40,7 @@ const (
 	maxInstallerMirrorCount  = 4
 	updateMetadataTimeout    = 10 * time.Second
 	installerDownloadTimeout = 15 * time.Minute
+	installerIdleTimeout     = 30 * time.Second
 )
 
 var (
@@ -81,24 +82,26 @@ type UpdateCheckResult struct {
 }
 
 type UpdaterService struct {
-	settings          *SettingsService
-	client            *http.Client
-	manifestPublicKey ed25519.PublicKey
-	launchInstaller   func(string, int) error
-	verifyInstaller   func(string) error
-	quit              func()
-	mu                sync.RWMutex
-	progress          UpdateProgress
-	operationActive   bool
+	settings            *SettingsService
+	client              *http.Client
+	manifestPublicKey   ed25519.PublicKey
+	launchInstaller     func(string, int) error
+	verifyInstaller     func(string) error
+	downloadIdleTimeout time.Duration
+	quit                func()
+	mu                  sync.RWMutex
+	progress            UpdateProgress
+	operationActive     bool
 }
 
 func NewUpdaterService(quit ...func()) *UpdaterService {
 	service := &UpdaterService{
-		client:            &http.Client{},
-		manifestPublicKey: mustUpdateManifestPublicKey(),
-		launchInstaller:   launchInstallerAfterExit,
-		verifyInstaller:   verifyDownloadedInstallerAuthenticity,
-		progress:          UpdateProgress{State: "idle"},
+		client:              &http.Client{},
+		manifestPublicKey:   mustUpdateManifestPublicKey(),
+		launchInstaller:     launchInstallerAfterExit,
+		verifyInstaller:     verifyDownloadedInstallerAuthenticity,
+		downloadIdleTimeout: installerIdleTimeout,
+		progress:            UpdateProgress{State: "idle"},
 	}
 	if len(quit) > 0 {
 		service.quit = quit[0]
@@ -406,6 +409,7 @@ func (s *UpdaterService) Download(release ReleaseInfo) (string, error) {
 	integrityFailures := make([]string, 0, len(release.InstallerURLs))
 	for _, mirrorURL := range release.InstallerURLs {
 		_ = os.Remove(partial)
+		s.setProgress(UpdateProgress{State: "downloading", Total: release.InstallerSize, Message: updateMirrorLabel(mirrorURL)})
 		ctx, cancel := context.WithTimeout(context.Background(), installerDownloadTimeout)
 		written, integrityFailure, attemptErr := s.downloadInstallerMirror(
 			ctx, mirrorURL, partial, release.InstallerSize, expectedDigest,
@@ -451,6 +455,17 @@ func (s *UpdaterService) downloadInstallerMirror(
 	expectedSize int64,
 	expectedDigest string,
 ) (int64, bool, error) {
+	// Bound a stalled connection/body separately from the total download time.
+	// A slow but progressing transfer can still use the full download budget.
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+	idleTimeout := s.downloadIdleTimeout
+	if idleTimeout <= 0 {
+		idleTimeout = installerIdleTimeout
+	}
+	idleError := errors.New("下载源长时间无响应，已停止本次下载")
+	idle := time.AfterFunc(idleTimeout, func() { cancel(idleError) })
+	defer idle.Stop()
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, mirrorURL, nil)
 	if err != nil {
 		return 0, false, err
@@ -458,9 +473,13 @@ func (s *UpdaterService) downloadInstallerMirror(
 	request.Header.Set("User-Agent", "HypoMux-Updater")
 	response, err := s.client.Do(request)
 	if err != nil {
+		if cause := context.Cause(ctx); cause != nil {
+			return 0, false, fmt.Errorf("连接或下载失败：%w", cause)
+		}
 		return 0, false, errors.New("连接或下载失败")
 	}
 	defer response.Body.Close()
+	idle.Reset(idleTimeout)
 	if response.StatusCode != http.StatusOK {
 		return 0, false, fmt.Errorf("HTTP %d", response.StatusCode)
 	}
@@ -478,15 +497,20 @@ func (s *UpdaterService) downloadInstallerMirror(
 	writer := &updateProgressWriter{
 		writer: io.MultiWriter(stream, hash),
 		onWrite: func(written int64) {
+			idle.Reset(idleTimeout)
 			s.setProgress(UpdateProgress{
-				State: "downloading", Downloaded: written, Total: expectedSize,
+				State: "downloading", Downloaded: written, Total: expectedSize, Message: updateMirrorLabel(mirrorURL),
 			})
 		},
 	}
 	written, copyErr := io.Copy(writer, io.LimitReader(response.Body, expectedSize+1))
+	idle.Stop()
 	closeErr := stream.Close()
 	if copyErr != nil {
 		_ = os.Remove(partial)
+		if cause := context.Cause(ctx); cause != nil {
+			return written, false, fmt.Errorf("下载中断：%w", cause)
+		}
 		return written, false, fmt.Errorf("下载中断：%w", copyErr)
 	}
 	if closeErr != nil {
@@ -501,6 +525,7 @@ func (s *UpdaterService) downloadInstallerMirror(
 		_ = os.Remove(partial)
 		return written, true, errors.New("SHA-256 校验失败")
 	}
+	s.setProgress(UpdateProgress{State: "verifying", Downloaded: written, Total: expectedSize})
 	if err := s.verifyInstaller(partial); err != nil {
 		_ = os.Remove(partial)
 		return written, true, fmt.Errorf("Authenticode 验证失败：%w", err)
@@ -526,6 +551,7 @@ func (s *UpdaterService) InstallAndQuit(installerPath string) error {
 		s.endOperation()
 		return errors.New("应用退出清理尚未初始化")
 	}
+	s.setProgress(UpdateProgress{State: "installing"})
 	if err := s.launchInstaller(installerPath, os.Getpid()); err != nil {
 		s.setProgress(UpdateProgress{State: "failed", Message: err.Error()})
 		s.endOperation()

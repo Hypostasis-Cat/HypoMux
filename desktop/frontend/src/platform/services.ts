@@ -142,7 +142,7 @@ export type UpdateCheckResult = {
 };
 
 export type UpdateProgress = {
-  state: "idle" | "starting" | "downloading" | "ready" | "installing" | "failed";
+  state: "idle" | "starting" | "downloading" | "verifying" | "ready" | "installing" | "failed";
   downloaded: number;
   total: number;
   message?: string;

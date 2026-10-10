@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestInstallAndQuitUsesLifecycleCallbackAfterLauncherStarts(t *testing.T) {
@@ -444,6 +445,91 @@ func TestUpdaterDownloadFailsWhenAllMirrorsFail(t *testing.T) {
 
 	if installerPath, err := service.Download(release); err == nil || installerPath != "" {
 		t.Fatalf("all-mirror failure returned path=%q err=%v", installerPath, err)
+	}
+}
+
+func TestUpdaterStalledMirrorFallsBack(t *testing.T) {
+	for _, stage := range []string{"headers", "body"} {
+		t.Run(stage, func(t *testing.T) {
+			payload := []byte("complete signed installer")
+			release := testRelease("2.5.8", payload)
+			s := NewUpdaterService()
+			s.downloadIdleTimeout = 50 * time.Millisecond
+			attempts := 0
+			s.verifyInstaller = func(string) error { return nil }
+			s.client = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				attempts++
+				if attempts > 1 {
+					if progress := s.Progress(); progress.Downloaded != 0 {
+						t.Errorf("fallback retained previous mirror progress: %+v", progress)
+					}
+					return bytesResponse(req, http.StatusOK, payload), nil
+				}
+				if stage == "headers" {
+					<-req.Context().Done()
+					return nil, req.Context().Err()
+				}
+				response := bytesResponse(req, http.StatusOK, payload)
+				reader, writer := io.Pipe()
+				response.Body = reader
+				go func() {
+					_, _ = writer.Write(payload[:4])
+					<-req.Context().Done()
+					_ = writer.CloseWithError(req.Context().Err())
+				}()
+				return response, nil
+			})}
+			path, err := s.Download(release)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer os.RemoveAll(filepath.Dir(path))
+			contents, err := os.ReadFile(path)
+			if err != nil || string(contents) != string(payload) || attempts != 2 {
+				t.Fatalf("fallback result: attempts=%d payload=%q error=%v", attempts, contents, err)
+			}
+		})
+	}
+}
+
+func TestUpdaterIdleTimeoutAllowsProgressAndSignatureVerification(t *testing.T) {
+	payload := []byte("0123456789")
+	s := NewUpdaterService()
+	s.downloadIdleTimeout = 200 * time.Millisecond
+	s.client = clientFor(func(req *http.Request) *http.Response {
+		response := bytesResponse(req, http.StatusOK, payload)
+		reader, writer := io.Pipe()
+		response.Body = reader
+		go func() {
+			defer writer.Close()
+			for _, b := range payload {
+				select {
+				case <-req.Context().Done():
+					_ = writer.CloseWithError(req.Context().Err())
+					return
+				case <-time.After(40 * time.Millisecond):
+					if _, err := writer.Write([]byte{b}); err != nil {
+						return
+					}
+				}
+			}
+		}()
+		return response
+	})
+	s.verifyInstaller = func(string) error {
+		if p := s.Progress(); p.State != "verifying" || p.Downloaded != int64(len(payload)) {
+			t.Errorf("signature verification progress = %+v", p)
+		}
+		time.Sleep(2 * s.downloadIdleTimeout)
+		return nil
+	}
+	path, err := s.Download(testRelease("2.5.8", payload))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(filepath.Dir(path))
+	if p := s.Progress(); p.State != "ready" {
+		t.Fatalf("download was not ready: %+v", p)
 	}
 }
 
