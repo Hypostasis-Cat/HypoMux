@@ -95,6 +95,15 @@ sing-box reads them. Installed service policy failures use the additive
 selected-adapter DNS preflight used to build the sing-box upstream plan; the
 channel listeners still accept only already-resolved IP destinations.
 
+The additive `engine.start.dns.dot_servers` field accepts up to 16
+`tls://hostname[:port]` URLs. Policy `dot` requires at least one URL and uses
+certificate-verified DNS over TLS, defaulting to port 853, without plaintext
+fallback or compatibility restarts. Resolver-hostname bootstrap uses
+source-bound traditional DNS; NAT64 discovery retains network DNS.
+`dns.status` adds `dot_endpoints`,
+`dot_successes`, and `dot_failures`; successful `dns.resolve` results report
+transport `dot` and `server` as `hostname@IP:port` (IPv6 IPs are bracketed).
+
 ### Live aggregation scheduling
 
 `engine.scheduling` accepts `{weighted: boolean, adapters: Adapter[]}` while the

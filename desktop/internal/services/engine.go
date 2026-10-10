@@ -332,7 +332,7 @@ func (s *EngineService) consumeCoreEvents() {
 func (s *EngineService) handleDNSFallback(event dnsFallbackEvent) {
 	s.mu.Lock()
 	settings := s.settings.Get()
-	if s.closing || settings.Mode != "tun" || settings.DNSPolicy == "custom" || event.Policy == "custom" || s.dnsFallbackApplied || s.compatRestarting {
+	if s.closing || settings.Mode != "tun" || settings.DNSPolicy == "custom" || event.Policy == "custom" || settings.DNSPolicy == "dot" || event.Policy == "dot" || s.dnsFallbackApplied || s.compatRestarting {
 		s.mu.Unlock()
 		return
 	}
@@ -734,7 +734,7 @@ func (s *EngineService) startLocked(ctx context.Context, mode string) (snapshot 
 	}
 	effectiveStrictRoute := settings.StrictRoute && !wfpFallbackApplied
 	effectiveDNSPolicy := settings.DNSPolicy
-	if mode == "tun" && dnsFallbackApplied {
+	if mode == "tun" && dnsFallbackApplied && settings.DNSPolicy != "dot" && settings.DNSPolicy != "custom" {
 		effectiveDNSPolicy = "off"
 	}
 	logOwned := false
@@ -873,7 +873,7 @@ func (s *EngineService) startLocked(ctx context.Context, mode string) (snapshot 
 		"mode": mode, "listen_host": "127.0.0.1", "weighted": settings.Weighted, "strategy": effectiveSchedulingStrategy(settings),
 		"connect_timeout_ms": 6000,
 		"dns": map[string]any{
-			"policy": effectiveDNSPolicy, "legacy_servers": settingsDNSServers(settings), "doh_servers": settings.DoHServers,
+			"policy": effectiveDNSPolicy, "legacy_servers": settingsDNSServers(settings), "doh_servers": settings.DoHServers, "dot_servers": settings.DoTServers,
 			"cache_ttl_ms": 60000, "query_timeout_ms": 4000,
 		},
 		"adapters":                engineAdapters(selected),
@@ -963,7 +963,7 @@ func (s *EngineService) startLocked(ctx context.Context, mode string) (snapshot 
 		}
 	} else {
 		s.recordStartStage("dns_preparing", nil)
-		useDNSPool := effectiveDNSPolicy != "system" && (len(settings.DNSServers) > 1 || len(settings.DoHServers) > 0 || effectiveDNSPolicy == "custom")
+		useDNSPool := effectiveDNSPolicy != "system" && (len(settings.DNSServers) > 1 || len(settings.DoHServers) > 0 || effectiveDNSPolicy == "custom" || effectiveDNSPolicy == "dot")
 		var prepared preparedTUNDNS
 		var dnsErr error
 		if settings.ForceTUNBypass {

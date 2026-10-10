@@ -21,6 +21,7 @@ const (
 	PolicyDNSPod = "dnspod"
 	PolicyGoogle = "google"
 	PolicyCustom = "custom"
+	PolicyDoT    = "dot"
 
 	DefaultCacheTTL         = 180 * time.Second
 	DefaultQueryTimeout     = 4 * time.Second
@@ -106,6 +107,7 @@ type Config struct {
 	Policy           string
 	LegacyServers    []string
 	DoHServers       []string
+	DoTServers       []string
 	CacheTTL         time.Duration
 	QueryTimeout     time.Duration
 	MaxCacheEntries  int
@@ -138,7 +140,7 @@ func NormalizeConfig(config Config) (Config, error) {
 		config.Policy = PolicyAuto
 	}
 	switch config.Policy {
-	case PolicyAuto, PolicyOff, PolicySystem, PolicyAliDNS, PolicyDNSPod, PolicyGoogle, PolicyCustom:
+	case PolicyAuto, PolicyOff, PolicySystem, PolicyAliDNS, PolicyDNSPod, PolicyGoogle, PolicyCustom, PolicyDoT:
 	default:
 		return Config{}, fmt.Errorf("unsupported DNS policy %q", config.Policy)
 	}
@@ -169,6 +171,23 @@ func NormalizeConfig(config Config) (Config, error) {
 	config.DoHServers = dohServers
 	if config.Policy == PolicyCustom && len(dohServers) == 0 {
 		return Config{}, fmt.Errorf("custom DoH requires at least one HTTPS URL")
+	}
+	if len(config.DoTServers) > 16 {
+		return Config{}, fmt.Errorf("at most 16 DoT servers are supported")
+	}
+	var dotServers []string
+	for _, value := range config.DoTServers {
+		_, normalized, err := parseDoTURL(value)
+		if err != nil {
+			return Config{}, fmt.Errorf("custom DoT: %w", err)
+		}
+		if !contains(dotServers, normalized) {
+			dotServers = append(dotServers, normalized)
+		}
+	}
+	config.DoTServers = dotServers
+	if config.Policy == PolicyDoT && len(dotServers) == 0 {
+		return Config{}, fmt.Errorf("DoT requires at least one TLS URL")
 	}
 
 	if config.CacheTTL <= 0 {

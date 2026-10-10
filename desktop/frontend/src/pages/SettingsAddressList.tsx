@@ -34,7 +34,7 @@ export function SettingsAddressList({ values, label, addLabel, removeLabel, plac
         <div className="settings-address-controls">
           <span className="settings-address-number" aria-hidden="true">{index + 1}</span>
           <Input
-            id={`${id}-${index}`} name={`${type === "url" ? "doh" : "dns"}_server_${index + 1}`}
+            id={`${id}-${index}`} name={`${label.toLowerCase()}_server_${index + 1}`}
             type={type} value={value} placeholder={placeholder} disabled={disabled}
             autoComplete="off" spellCheck={false}
             aria-invalid={Boolean(errors[index])} aria-describedby={errors[index] ? `${id}-error-${index}` : undefined}

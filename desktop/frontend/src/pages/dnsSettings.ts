@@ -36,3 +36,17 @@ export function validDoHAddress(value: string): boolean {
     return host.length <= 253 && host.replace(/\.$/, "").split(".").every(label => label.length <= 63 && /^[a-z\d](?:[a-z\d-]*[a-z\d])?$/i.test(label));
   } catch { return false; }
 }
+
+export function validDoTAddress(value: string): boolean {
+  value = value.trim();
+  try {
+    const url = new URL(value);
+    if (!value.startsWith("tls://") || value.length > 2048 || url.username || url.password || !url.hostname || url.pathname || value.includes("?") || value.includes("#")) return false;
+    const authority = value.slice(6);
+    if (authority.endsWith(":") || authority.includes("@")) return false;
+    if (url.port && Number(url.port) < 1) return false;
+    const host = authority.startsWith("[") ? authority.slice(1, authority.indexOf("]")) : authority.split(":")[0];
+    if (host.includes(":") || /^[\d.]+$/.test(host)) return validDNSAddress(host);
+    return host.length <= 253 && host.replace(/\.$/, "").split(".").every(label => label.length <= 63 && /^[a-z\d](?:[a-z\d-]*[a-z\d])?$/i.test(label));
+  } catch { return false; }
+}

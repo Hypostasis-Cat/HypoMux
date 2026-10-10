@@ -43,7 +43,7 @@ import type { AccentPreset, AppearanceMode, MotionMode, PanelMaterial, WindowMat
 import { useI18n } from "../i18n/i18n";
 import { SettingsAddressList } from "./SettingsAddressList";
 import { SettingsNavigation, settingsCategories, useSettingsCategory } from "./SettingsNavigation";
-import { validDNSAddress, validDoHAddress } from "./dnsSettings";
+import { validDNSAddress, validDoHAddress, validDoTAddress } from "./dnsSettings";
 
 const emptySettings: CompleteAppSettings = {
   ai_enabled: true,
@@ -234,11 +234,12 @@ export function SettingsPage({
   // Manual network edits must never leak into auto-saved preference updates.
   const pageActive = usePageActive();
   const settingsRevision = useRef(0);
-  const [networkDraft, setNetworkDraft] = useState<Partial<Pick<CompleteAppSettings, "socks_port" | "http_port" | "dns_server" | "dns_servers" | "doh_servers" | "dns_policy" | "dns_egress_mode" | "dns_adapter_id">>>({});
+  const [networkDraft, setNetworkDraft] = useState<Partial<Pick<CompleteAppSettings, "socks_port" | "http_port" | "dns_server" | "dns_servers" | "doh_servers" | "dot_servers" | "dns_policy" | "dns_egress_mode" | "dns_adapter_id">>>({});
   const [networkValidationAttempted, setNetworkValidationAttempted] = useState(false);
   const networkSettings = { ...settings, ...networkDraft };
   const dnsServers = networkSettings.dns_servers ?? [networkSettings.dns_server];
   const dohServers = networkSettings.doh_servers ?? [];
+  const dotServers = networkSettings.dot_servers ?? [];
   const networkDirty = Object.entries(networkDraft).some(([key, value]) => JSON.stringify(settings[key as keyof CompleteAppSettings]) !== JSON.stringify(value));
   useEffect(() => {
     if (!networkDirty) return;
@@ -266,6 +267,8 @@ export function SettingsPage({
   const dnsErrors = dnsServers.map(value => validDNSAddress(value) ? "" : text("请输入有效的单播 IPv4 或 IPv6 地址。", "Enter a valid unicast IPv4 or IPv6 address."));
   const dohErrors = dohServers.map(value => validDoHAddress(value) ? "" : text("请输入完整 HTTPS 地址，如 https://dns.example.com/dns-query。", "Enter a full HTTPS URL, e.g. https://dns.example.com/dns-query."));
   const customDoHMissing = networkSettings.dns_policy === "custom" && dohServers.length === 0;
+  const dotErrors = dotServers.map(value => validDoTAddress(value) ? "" : text("请输入 tls://域名[:端口]，如 tls://dns.alidns.com。", "Enter tls://hostname[:port], e.g. tls://dns.alidns.com."));
+  const customDoTMissing = networkSettings.dns_policy === "dot" && dotServers.length === 0;
   const backgroundInput = useRef<HTMLInputElement>(null);
   const settingsPageRef = useRef<HTMLElement>(null);
   const adapterRuntimeRef = useRef(adapterRuntime);
@@ -397,14 +400,14 @@ export function SettingsPage({
 
   const saveNetwork = async () => {
     setNetworkValidationAttempted(true);
-    if (dnsErrors.some(Boolean) || dohErrors.some(Boolean) || customDoHMissing) {
+    if (dnsErrors.some(Boolean) || dohErrors.some(Boolean) || dotErrors.some(Boolean) || customDoHMissing || customDoTMissing) {
       requestAnimationFrame(() => {
         const root = settingsPageRef.current;
         const invalid = root?.querySelector<HTMLInputElement>('[aria-invalid="true"] input, input[aria-invalid="true"]')
-          ?? root?.querySelector<HTMLButtonElement>('.settings-custom-doh .settings-address-add');
+          ?? root?.querySelector<HTMLButtonElement>(`${customDoTMissing ? ".settings-custom-dot" : ".settings-custom-doh"} .settings-address-add`);
         invalid?.focus();
         const errorEntry = invalid?.closest('.settings-address-entry')
-          ?? root?.querySelector('.settings-custom-doh .settings-resolver-note');
+          ?? root?.querySelector(`${customDoTMissing ? ".settings-custom-dot" : ".settings-custom-doh"} .settings-resolver-note`);
         errorEntry?.scrollIntoView?.({ block: "nearest", inline: "nearest", behavior: "instant" });
       });
       return;
@@ -863,8 +866,10 @@ export function SettingsPage({
             </>}
             {category === "network" && <>
               <SettingGroup title={text("DNS 解析", "DNS resolution")}>
-                <SettingRow title={t("settings_doh_policy")} description={networkSettings.dns_policy === "custom"
-                  ? text("使用下方 DoH 列表，失败时不回退 DNS。", "Use the DoH list below without DNS fallback.")
+                <SettingRow title={text("DNS 解析策略", "DNS resolution policy")} description={networkSettings.dns_policy === "dot"
+                  ? text("使用下方 DoT 列表，校验服务器证书，失败时不回退明文 DNS。", "Use the DoT list below with certificate verification and no plaintext DNS fallback.")
+                  : networkSettings.dns_policy === "custom"
+                    ? text("使用下方 DoH 列表，失败时不回退 DNS。", "Use the DoH list below without DNS fallback.")
                   : networkSettings.dns_policy === "off"
                     ? text("使用下方 DNS 列表。", "Use the DNS list below.")
                     : networkSettings.dns_policy === "auto"
@@ -880,6 +885,7 @@ export function SettingsPage({
                       { value: "dnspod", label: t("settings_doh_dnspod") },
                       { value: "google", label: "Google DNS" },
                       { value: "custom", label: text("仅使用自定义 DoH", "Custom DoH only") },
+                      { value: "dot", label: text("仅使用自定义 DoT", "Custom DoT only") },
                     ]}
                     onChange={(value) => setNetworkDraft((current) => ({ ...current, dns_policy: value }))}
                   />
@@ -896,8 +902,8 @@ export function SettingsPage({
                       placeholder="223.5.5.5" errors={networkValidationAttempted ? dnsErrors : []}
                       onChange={values => setNetworkDraft(current => ({ ...current, dns_server: values[0], dns_servers: values }))}
                     />
-                    <div className="settings-resolver-note settings-address-hint">{networkSettings.dns_policy === "custom"
-                      ? text("用于解析 DoH 服务的域名。", "Used to resolve DoH server hostnames.")
+                    <div className="settings-resolver-note settings-address-hint">{["custom", "dot"].includes(networkSettings.dns_policy)
+                      ? text("仅用于解析加密 DNS 服务的域名；业务域名仍使用加密查询。", "Only resolves encrypted DNS server hostnames; application domains still use encrypted queries.")
                       : text("按列表顺序尝试。", "Tried in list order.")}</div>
                   </section>
                   <section className="settings-resolver-card settings-custom-doh" aria-labelledby="settings-doh-list-title">
@@ -917,6 +923,25 @@ export function SettingsPage({
                         : <span className="settings-address-hint">{!["auto", "custom"].includes(networkSettings.dns_policy)
                           ? text("当前策略不使用此列表。", "This list is inactive with the current policy.")
                           : text("支持自定义端口、路径和查询参数。", "Supports custom ports, paths, and query parameters.")}</span>}
+                    </div>
+                  </section>
+                  <section className="settings-resolver-card settings-custom-dot" aria-labelledby="settings-dot-list-title">
+                    <div className="settings-resolver-heading">
+                      <h3 id="settings-dot-list-title">DoT</h3>
+                      <span>{text("自定义 TLS 地址", "Custom TLS URLs")}</span>
+                    </div>
+                    <SettingsAddressList disabled={loading || loadFailed || saving} values={dotServers} label="DoT" type="url"
+                      addLabel={text("添加 DoT", "Add DoT")} removeLabel={text("删除 DoT", "Remove DoT")}
+                      placeholder="tls://dns.alidns.com"
+                      emptyHint={text("暂无自定义 DoT", "No custom DoT servers")}
+                      errors={networkValidationAttempted ? dotErrors : []}
+                      onChange={values => setNetworkDraft(current => ({ ...current, dot_servers: values }))} />
+                    <div className="settings-resolver-note">
+                      {networkValidationAttempted && customDoTMissing
+                        ? <span className="settings-address-error" aria-live="polite">{text("请添加 DoT 地址，或切换解析策略。", "Add a DoT URL or change the policy.")}</span>
+                        : <span className="settings-address-hint">{networkSettings.dns_policy !== "dot"
+                          ? text("选择“仅使用自定义 DoT”后生效。", "Select Custom DoT only to use this list.")
+                          : text("默认端口 853；支持域名或 IPv4 / IPv6 地址及自定义端口。", "Default port 853; supports hostnames, IPv4 / IPv6 addresses, and custom ports.")}</span>}
                     </div>
                   </section>
                 </div>

@@ -88,6 +88,7 @@ HypoMux does not sell personal data or upload telemetry by default. Requested fe
 - **Per-connection adapter scheduling**: Selects an outbound adapter for each new connection, combining source-address binding with `IP_UNICAST_IF` to pin sockets to physical links.
 - **Advanced routing rules**: Route by process, domain, IP/CIDR, aggregation, direct connection, Ethernet, Wi-Fi, or one specific adapter.
 - **Per-adapter blocked-domain handling**: Remembers domains unavailable through a particular link so later connections are not assigned to it again.
+- **Encrypted DNS**: Supports DoH and custom DoT. In Settings → Network & DNS, choose Custom DoT only, add `tls://hostname[:port]` URLs (default port 853), save, and restart aggregation. Multiple servers, IPv4/IPv6, and explicit DNS egress are supported. Server certificates are verified; failed DoT queries never downgrade to plaintext DNS. Server-hostname bootstrap uses source-bound traditional DNS; NAT64 prefix discovery on IPv6-only links still uses network DNS.
 - **Live telemetry and diagnostics**: Shows adapter throughput, connection counts, and combined speed, with packet-loss, latency, jitter, DNS, gateway, and source-binding checks.
 - **Least-privilege architecture**: The UI does not stay elevated. After a normal installation, only the independent Core service has the network-management permissions it needs.
 

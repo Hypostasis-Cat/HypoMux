@@ -5,6 +5,63 @@ import (
 	"testing"
 )
 
+func TestDoTSettingsPersistValidateAndRemainIsolated(t *testing.T) {
+	t.Setenv("HYPOMUX_DATA_DIR", t.TempDir())
+	service := NewSettingsService()
+	next := service.Get()
+	next.DNSPolicy = "dot"
+	next.DoTServers = []string{" tls://DNS.Example.com ", "tls://dns.example.com:853", "tls://[2001:db8::53]:8853"}
+	saved, err := service.UpdateFields(next, []string{"dns_policy", "dot_servers"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(saved.DoTServers, []string{"tls://dns.example.com:853", "tls://[2001:db8::53]:8853"}) {
+		t.Fatalf("not normalized: %+v", saved)
+	}
+	saved.DoTServers[0] = "tls://wrong.example"
+	reloaded := NewSettingsService().Get()
+	if !reflect.DeepEqual(service.Get(), reloaded) || reloaded.DNSPolicy != "dot" {
+		t.Fatal("DoT settings lost or mutated through Get")
+	}
+	for _, value := range []string{"", "https://dns.example", "tls://dns.example/", "tls://dns.example?", "tls://dns.example#", "tls://user@dns.example", "tls://dns.example:0", "tls://dns.example:65536", "tls://dns.example:", "tls://0.0.0.0", "tls://[fe80::1]", "tls://127.1", "tls://☃.example"} {
+		next.DoTServers = []string{value}
+		if err := validateSettings(next); err == nil {
+			t.Errorf("accepted %q", value)
+		}
+	}
+	next.DoTServers = nil
+	if err := validateSettings(next); err == nil {
+		t.Fatal("accepted empty DoT policy")
+	}
+}
+
+func TestTUNDoTUsesVerifiedTLSAndCannotDowngrade(t *testing.T) {
+	adapter := AdapterView{Name: "Ethernet", Address: "192.0.2.10", SourceIPv6: "2001:db8::10"}
+	config := tunDNSConfiguration{Policy: "dot", LegacyServers: []string{"1.1.1.1"}, DoTEndpoints: []tunDoHEndpoint{{IP: "2001:db8::53", Host: "dns.example", Port: 8853}}}
+	result, err := configuredTUNDNS(config, adapter)
+	if err != nil || result.Transport != "dot" || result.Server != "dns.example@[2001:db8::53]:8853" {
+		t.Fatalf("DoT bootstrap=%+v %v", result, err)
+	}
+	pool, err := orderTUNDNSPool(adapter, config, []dnsResolveResult{result})
+	if err != nil || len(pool) != 1 || pool[0].Transport != "dot" {
+		t.Fatalf("DoT pool acquired plaintext: %+v %v", pool, err)
+	}
+	upstream, err := buildDNSUpstreamForPolicy(adapter, result, "dot")
+	if err != nil || upstream["type"] != "tls" || upstream["server_port"] != 8853 || upstream["bind_interface"] != adapter.Name || upstream["inet6_bind_address"] != adapter.SourceIPv6 {
+		t.Fatalf("DoT config=%+v %v", upstream, err)
+	}
+	tls := upstream["tls"].(map[string]any)
+	if tls["server_name"] != "dns.example" || tls["enabled"] != true || tls["insecure"] != nil {
+		t.Fatalf("invalid TLS config: %+v", tls)
+	}
+	for _, transport := range []string{"udp", "tcp", "doh"} {
+		result.Transport = transport
+		if _, err := buildDNSUpstreamForPolicy(adapter, result, "dot"); err == nil {
+			t.Fatalf("DoT allowed %s", transport)
+		}
+	}
+}
+
 func TestCustomDNSListsPersistAndRemainIsolated(t *testing.T) {
 	t.Setenv("HYPOMUX_DATA_DIR", t.TempDir())
 	service := NewSettingsService()

@@ -19,7 +19,8 @@ func (s *EngineService) configuredTUNDNSPool(ctx context.Context, adapter Adapte
 		return nil, err
 	}
 	var result []dnsResolveResult
-	for _, endpoint := range config.DoHEndpoints {
+	endpoints, transport, defaultPort := config.encryptedEndpoints()
+	for _, endpoint := range endpoints {
 		addresses := []string{endpoint.IP}
 		if endpoint.IP == "" || (config.Policy == "dnspod" && adapter.Address == "" && adapter.SourceIPv6 != "") {
 			addresses = nil
@@ -39,12 +40,12 @@ func (s *EngineService) configuredTUNDNSPool(ctx context.Context, adapter Adapte
 		}
 		port := endpoint.Port
 		if port == 0 {
-			port = 443
+			port = defaultPort
 		}
 		for _, address := range uniqueNonEmpty(addresses) {
 			if usableTUNDNSAddress(adapter, address) {
-				upstream := dnsResolveResult{Transport: "doh", Server: endpoint.Host + "@" + net.JoinHostPort(address, fmt.Sprint(port)), DoHPath: endpoint.Path}
-				if strings.ContainsAny(endpoint.Path, "?%") {
+				upstream := dnsResolveResult{Transport: transport, Server: endpoint.Host + "@" + net.JoinHostPort(address, fmt.Sprint(port)), DoHPath: endpoint.Path}
+				if transport == "doh" && strings.ContainsAny(endpoint.Path, "?%") {
 					var relay struct {
 						Address string `json:"address"`
 					}
@@ -134,7 +135,7 @@ func buildTUNDNSPool(adapter AdapterView, options tunConfigOptions) (map[string]
 		upstream["tag"] = tag
 		servers = append(servers, upstream)
 		tags = append(tags, tag)
-		encrypted = append(encrypted, result.Transport == "doh")
+		encrypted = append(encrypted, result.Transport == "doh" || result.Transport == "dot")
 	}
 	if len(servers) == 0 {
 		return nil, fmt.Errorf("DNS 上游列表不支持当前地址族")

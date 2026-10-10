@@ -17,6 +17,7 @@ type tunDNSConfiguration struct {
 	Policy        string           `json:"policy"`
 	LegacyServers []string         `json:"legacy_servers"`
 	DoHEndpoints  []tunDoHEndpoint `json:"doh_endpoints"`
+	DoTEndpoints  []tunDoHEndpoint `json:"dot_endpoints"`
 }
 
 type tunDoHEndpoint struct {
@@ -30,14 +31,15 @@ func configuredTUNDNS(config tunDNSConfiguration, adapter AdapterView) (dnsResol
 	result := dnsResolveResult{Adapter: adapter.Name}
 	useNetworkDNS := config.Policy == "auto" && adapter.Address == "" && len(adapter.DNSServers) > 0
 	if config.Policy != "off" && config.Policy != "system" && !useNetworkDNS {
-		for _, endpoint := range config.DoHEndpoints {
+		endpoints, transport, defaultPort := config.encryptedEndpoints()
+		for _, endpoint := range endpoints {
 			ip := net.ParseIP(endpoint.IP)
 			if ip != nil && ((ip.To4() != nil && adapter.Address != "") || (ip.To4() == nil && adapter.SourceIPv6 != "")) && endpoint.Host != "" {
 				port := endpoint.Port
 				if port == 0 {
-					port = 443
+					port = defaultPort
 				}
-				result.Transport, result.Server = "doh", endpoint.Host+"@"+net.JoinHostPort(endpoint.IP, fmt.Sprint(port))
+				result.Transport, result.Server = transport, endpoint.Host+"@"+net.JoinHostPort(endpoint.IP, fmt.Sprint(port))
 				result.DoHPath = endpoint.Path
 				return result, nil
 			}
@@ -51,6 +53,13 @@ func configuredTUNDNS(config tunDNSConfiguration, adapter AdapterView) (dnsResol
 		}
 	}
 	return result, fmt.Errorf("核心未提供有效的传统 DNS 上游配置")
+}
+
+func (config tunDNSConfiguration) encryptedEndpoints() ([]tunDoHEndpoint, string, int) {
+	if config.Policy == "dot" {
+		return config.DoTEndpoints, "dot", 853
+	}
+	return config.DoHEndpoints, "doh", 443
 }
 
 // Normal startup requires a working source-bound DNS query. Only an explicit
@@ -71,7 +80,8 @@ func prepareTUNDNS(ctx context.Context, adapter AdapterView, force bool,
 	}
 	result, err = configuredTUNDNS(config, adapter)
 	needsBootstrap := config.Policy == "dnspod" && adapter.Address == "" && adapter.SourceIPv6 != ""
-	for _, endpoint := range config.DoHEndpoints {
+	endpoints, _, _ := config.encryptedEndpoints()
+	for _, endpoint := range endpoints {
 		needsBootstrap = needsBootstrap || endpoint.IP == ""
 	}
 	if err != nil && needsBootstrap {
@@ -79,7 +89,7 @@ func prepareTUNDNS(ctx context.Context, adapter AdapterView, force bool,
 		// too, including DNSPod's IPv6 path.
 		result, err = resolveConnectivityBootstrap(ctx, adapter.Name, resolve)
 		if err != nil {
-			err = fmt.Errorf("DoH 上游引导失败: %w", err)
+			err = fmt.Errorf("加密 DNS 上游引导失败: %w", err)
 		}
 	}
 	return result, diagnosticErr, err

@@ -306,6 +306,32 @@ it("disables Wi-Fi startup control when automatic acceleration is off", async ()
 
 
 describe("manual network drafts", () => {
+  it("validates and saves a custom DoT policy with multiple servers", async () => {
+    render(<SettingsPage adapterRuntime={[]} onOpenBlockedDomains={() => {}} />);
+    await openCategory("Network & DNS");
+    await screen.findByText("Settings synced");
+    fireEvent.click(screen.getByRole("combobox", { name: "DNS resolution policy" }));
+    fireEvent.click(await screen.findByRole("option", { name: "Custom DoT only" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save ports and DNS" }));
+    expect(await screen.findByText("Add a DoT URL or change the policy.")).toBeTruthy();
+    expect(mocks.update).not.toHaveBeenCalled();
+    await waitFor(() => expect(document.activeElement?.textContent).toContain("Add DoT"));
+    fireEvent.click(screen.getByRole("button", { name: "Add DoT" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "DoT 1" }), { target: { value: "tls://dns.example.com/query" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save ports and DNS" }));
+    expect(await screen.findByText(/Enter tls:\/\/hostname/)).toBeTruthy();
+    expect(mocks.update).not.toHaveBeenCalled();
+    await waitFor(() => expect(document.activeElement?.getAttribute("name")).toBe("dot_server_1"));
+    fireEvent.change(screen.getByRole("textbox", { name: "DoT 1" }), { target: { value: "tls://dns.example.com:8853" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add DoT" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "DoT 2" }), { target: { value: "tls://[2001:db8::53]" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save ports and DNS" }));
+    await waitFor(() => expect(mocks.update).toHaveBeenLastCalledWith(expect.objectContaining({ dns_policy: "dot", dot_servers: ["tls://dns.example.com:8853", "tls://[2001:db8::53]"] }), ["dns_policy", "dot_servers"]));
+    await screen.findByText("Settings synced");
+    fireEvent.click(screen.getByRole("button", { name: "Remove DoT 1" }));
+    expect((screen.getByRole("textbox", { name: "DoT 1" }) as HTMLInputElement).value).toBe("tls://[2001:db8::53]");
+  });
+
   it("adds multiple DNS and DoH servers, removes entries, and saves the complete list", async () => {
     render(<SettingsPage adapterRuntime={[]} onOpenBlockedDomains={() => {}} />);
     await openCategory("Network & DNS");

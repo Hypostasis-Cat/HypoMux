@@ -19,7 +19,7 @@ func TestMultipleTUNDNSUpstreamsPassBundledCheck(t *testing.T) {
 		{Transport: "tcp", Server: "1.1.1.1:53"},
 		{Transport: "udp", Server: "9.9.9.9:53"},
 	}
-	for _, policy := range []string{"auto", "custom", "off"} {
+	for _, policy := range []string{"auto", "custom", "off", "dot"} {
 		t.Run(policy, func(t *testing.T) {
 			upstreams := pool
 			if policy == "custom" {
@@ -27,6 +27,12 @@ func TestMultipleTUNDNSUpstreamsPassBundledCheck(t *testing.T) {
 			}
 			if policy == "off" {
 				upstreams = pool[2:]
+			}
+			if policy == "dot" {
+				upstreams = []dnsResolveResult{
+					{Transport: "dot", Server: "dns.example@192.0.2.53:8853"},
+					{Transport: "dot", Server: "dns.google@8.8.8.8:853"},
+				}
 			}
 			executable, path, _, err := writeSingBoxConfigWithOptions(
 				map[string]string{"nic_ethernet": "127.0.0.1:19001", "nic_wifi": "127.0.0.1:19002", "aggregation": "127.0.0.1:19003"},

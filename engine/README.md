@@ -113,6 +113,18 @@ On IPv6-only links it first uses adapter DNS to preserve DNS64; explicit
 providers retain strict encrypted query semantics. No ordinary proxy DNS path
 uses the Windows system resolver. TUN DNS remains owned by sing-box.
 
+`dot` is an explicit encrypted-only DNS policy. Set `dns.dot_servers` to
+1–16 `tls://hostname[:port]` URLs (IPv4 and bracketed IPv6 literals are also
+accepted; the default port is 853). TLS certificates and server names are
+verified. Connections are reused and isolated by adapter/source binding and
+endpoint, with at most two active queries per pool. A failed DoT query never
+falls back to plaintext or requests a compatibility restart. Server hostnames
+are bootstrapped through source-bound traditional DNS; application domain
+queries remain encrypted. NAT64 prefix discovery still uses network DNS.
+`dns.status` exposes `dot_endpoints`,
+`dot_successes`, and `dot_failures`. The desktop passes the same endpoint list
+to sing-box's TLS DNS upstream pool in TUN mode.
+
 IPv4 and IPv6 local faults have independent cooldowns and telemetry.
 NAT64 prefix discovery uses only the selected network DNS and RFC 7050;
 RFC 6052 synthesis supports IPv4 literal TCP/UDP and IPv4-only domains.

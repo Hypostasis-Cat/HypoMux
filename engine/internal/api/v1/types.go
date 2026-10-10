@@ -196,6 +196,7 @@ type DNSStartConfig struct {
 	Policy         string   `json:"policy"`
 	LegacyServers  []string `json:"legacy_servers"`
 	DoHServers     []string `json:"doh_servers,omitempty"`
+	DoTServers     []string `json:"dot_servers,omitempty"`
 	CacheTTLMS     int      `json:"cache_ttl_ms"`
 	QueryTimeoutMS int      `json:"query_timeout_ms"`
 }
@@ -205,6 +206,7 @@ func (c DNSStartConfig) ResolverConfig() dns.Config {
 		Policy:        c.Policy,
 		LegacyServers: append([]string(nil), c.LegacyServers...),
 		DoHServers:    append([]string(nil), c.DoHServers...),
+		DoTServers:    append([]string(nil), c.DoTServers...),
 		CacheTTL:      time.Duration(c.CacheTTLMS) * time.Millisecond,
 		QueryTimeout:  time.Duration(c.QueryTimeoutMS) * time.Millisecond,
 	}

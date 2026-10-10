@@ -53,12 +53,15 @@ type Status struct {
 	Policy             string     `json:"policy"`
 	LegacyServers      []string   `json:"legacy_servers"`
 	DoHEndpoints       []Endpoint `json:"doh_endpoints,omitempty"`
+	DoTEndpoints       []Endpoint `json:"dot_endpoints,omitempty"`
 	CacheEntries       int        `json:"cache_entries"`
 	Inflight           int        `json:"inflight"`
 	Queries            uint64     `json:"queries"`
 	CacheHits          uint64     `json:"cache_hits"`
 	DoHSuccesses       uint64     `json:"doh_successes"`
 	DoHFailures        uint64     `json:"doh_failures"`
+	DoTSuccesses       uint64     `json:"dot_successes"`
+	DoTFailures        uint64     `json:"dot_failures"`
 	LegacySuccesses    uint64     `json:"legacy_successes"`
 	LegacyFailures     uint64     `json:"legacy_failures"`
 	AutomaticFallbacks uint64     `json:"automatic_fallbacks"`
@@ -116,11 +119,16 @@ type Resolver struct {
 	dohRelays     map[dohPoolKey]net.PacketConn
 	dohClosed     bool
 	dohSequence   uint64
+	dotMu         sync.Mutex
+	dotPools      map[dohPoolKey]*dotPoolEntry
+	dotSequence   uint64
 
 	queries            atomic.Uint64
 	cacheHits          atomic.Uint64
 	dohSuccesses       atomic.Uint64
 	dohFailures        atomic.Uint64
+	dotSuccesses       atomic.Uint64
+	dotFailures        atomic.Uint64
 	legacySuccesses    atomic.Uint64
 	legacyFailures     atomic.Uint64
 	automaticFallbacks atomic.Uint64
@@ -148,6 +156,7 @@ func New(root context.Context, config Config, dial DialFunc) (*Resolver, error) 
 		fallbackEmitted: make(map[string]bool),
 	}
 	context.AfterFunc(root, resolver.closeDoHTransports)
+	context.AfterFunc(root, resolver.closeDoTPools)
 	return resolver, nil
 }
 
@@ -246,12 +255,15 @@ func (r *Resolver) Status() Status {
 		Policy:             r.config.Policy,
 		LegacyServers:      append([]string(nil), r.config.LegacyServers...),
 		DoHEndpoints:       ConfigEndpoints(r.config),
+		DoTEndpoints:       ConfigDoTEndpoints(r.config),
 		CacheEntries:       cacheEntries,
 		Inflight:           inflight,
 		Queries:            r.queries.Load(),
 		CacheHits:          r.cacheHits.Load(),
 		DoHSuccesses:       r.dohSuccesses.Load(),
 		DoHFailures:        r.dohFailures.Load(),
+		DoTSuccesses:       r.dotSuccesses.Load(),
+		DoTFailures:        r.dotFailures.Load(),
 		LegacySuccesses:    r.legacySuccesses.Load(),
 		LegacyFailures:     r.legacyFailures.Load(),
 		AutomaticFallbacks: r.automaticFallbacks.Load(),
@@ -312,6 +324,15 @@ func (r *Resolver) resolveUncached(
 	binding Binding,
 ) (Result, time.Duration, error) {
 	_, wireType, _ := normalizeRecordType(recordType)
+	if r.config.Policy == PolicyDoT {
+		result, ttl, err := r.resolveDoT(ctx, domain, wireType, binding, ConfigDoTEndpoints(r.config))
+		if err != nil {
+			r.dotFailures.Add(1)
+			return Result{}, 0, fmt.Errorf("DoT resolution failed: %w", err)
+		}
+		r.dotSuccesses.Add(1)
+		return result, ttl, nil
+	}
 	// Network-provided DNS preserves the network's DNS64 prefix on IPv6-only
 	// links. Explicit provider policies retain their encrypted-only semantics.
 	if r.config.Policy == PolicyAuto && binding.SourceIP == "" && len(binding.DNSServers) > 0 {
@@ -753,7 +774,7 @@ func (r *Resolver) recordDoHSuccess(binding Binding) {
 func (r *Resolver) recordStrictFailure(binding Binding, failure error) {
 	// An explicitly custom encrypted-only policy must never request a desktop
 	// compatibility restart that silently changes the policy to plaintext.
-	if r.config.Policy == PolicyCustom {
+	if r.config.Policy == PolicyCustom || r.config.Policy == PolicyDoT {
 		return
 	}
 	key := bindingKey(binding)

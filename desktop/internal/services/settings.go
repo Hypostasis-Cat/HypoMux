@@ -45,6 +45,7 @@ type AppSettings struct {
 	DNSServer           string                `json:"dns_server"`
 	DNSServers          []string              `json:"dns_servers,omitempty"`
 	DoHServers          []string              `json:"doh_servers,omitempty"`
+	DoTServers          []string              `json:"dot_servers,omitempty"`
 	DNSPolicy           string                `json:"dns_policy"`
 	DNSEgressMode       string                `json:"dns_egress_mode"`
 	DNSAdapterID        string                `json:"dns_adapter_id,omitempty"`
@@ -329,6 +330,8 @@ func (s *SettingsService) UpdateFields(values AppSettings, fields []string) (App
 			next.DNSServers = append([]string{}, values.DNSServers...)
 		case "doh_servers":
 			next.DoHServers = append([]string{}, values.DoHServers...)
+		case "dot_servers":
+			next.DoTServers = append([]string{}, values.DoTServers...)
 		case "dns_policy":
 			next.DNSPolicy = values.DNSPolicy
 		case "dns_egress_mode":
@@ -742,9 +745,9 @@ func validateSettings(value AppSettings) error {
 		return err
 	}
 	switch value.DNSPolicy {
-	case "auto", "off", "system", "alidns", "dnspod", "google", "custom":
+	case "auto", "off", "system", "alidns", "dnspod", "google", "custom", "dot":
 	default:
-		return fmt.Errorf("不支持的 DoH 解析策略：%s", value.DNSPolicy)
+		return fmt.Errorf("不支持的 DNS 解析策略：%s", value.DNSPolicy)
 	}
 	switch value.DNSEgressMode {
 	case DNSEgressAuto, DNSEgressSystem:
@@ -851,6 +854,9 @@ func cloneSettings(value AppSettings) AppSettings {
 	}
 	if value.DoHServers != nil {
 		result.DoHServers = append([]string{}, value.DoHServers...)
+	}
+	if value.DoTServers != nil {
+		result.DoTServers = append([]string{}, value.DoTServers...)
 	}
 	result.SelectedAdapterIDs = append([]string(nil), value.SelectedAdapterIDs...)
 	result.AdapterWeights = cloneWeights(value.AdapterWeights)

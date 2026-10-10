@@ -459,6 +459,9 @@ func buildDNSUpstreamForPolicy(
 ) (map[string]any, error) {
 	policy = normalizeTunDNSPolicy(policy)
 	transport := strings.ToLower(strings.TrimSpace(result.Transport))
+	if policy == "dot" && transport != "dot" {
+		return nil, fmt.Errorf("DoT 策略不允许使用其他 DNS 传输：%s", result.Transport)
+	}
 	if policy == "off" && (transport == "doh" || transport == "dot") {
 		return nil, fmt.Errorf("DNS 策略 off 不允许使用加密上游：%s", result.Server)
 	}
