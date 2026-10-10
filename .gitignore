@@ -20,6 +20,9 @@ Desktop.ini
 .env
 .env.*
 !.env.example
+/.tmp/
+/desktop/frontend/.test-tmp/
+/desktop/frontend/.test-temp/
 
 # Python tooling caches
 __pycache__/
