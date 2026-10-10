@@ -260,7 +260,6 @@ export function SettingsPage({
   const [migrationDialog, setMigrationDialog] = useState<"migrate" | "rollback" | null>(null);
   const [migrationDialogOpen, setMigrationDialogOpen] = useState(false);
   const [category, selectCategory] = useSettingsCategory();
-  const categoryPanelRef = useRef<HTMLDivElement>(null);
   const { settings: appearance, update: updateAppearance, persistenceError: appearancePersistenceError } = useAppearance();
   const { locale, setLocale, t } = useI18n();
   const text = (zh: string, en: string) => locale === "en" ? en : zh;
@@ -276,7 +275,7 @@ export function SettingsPage({
   adapterRuntimeRef.current = adapterRuntime;
 
   useEffect(() => {
-    categoryPanelRef.current?.scrollTo?.({ top: 0 });
+    settingsPageRef.current?.scrollTo?.({ top: 0 });
   }, [category]);
   // Serialize settings persistence and track per-field ownership: concurrent
   // saves would otherwise let an earlier response overwrite a newer optimistic
@@ -584,6 +583,9 @@ export function SettingsPage({
                 ? text("正在保存…", "Saving…")
                 : networkDirty ? text("端口与 DNS 有未保存的更改", "Unsaved port and DNS changes") : text("配置已同步", "Settings synced")}</span>
           {networkDirty && category !== "network" && <Button size="small" appearance="subtle" onClick={() => selectCategory("network")}>{text("去保存", "Review changes")}</Button>}
+          {category === "network" && <Button appearance="primary" icon={<Save20Regular />} disabled={loading || loadFailed || saving || !networkDirty} onClick={() => void saveNetwork()}>
+            {saving ? text("正在保存…", "Saving…") : text("保存端口与 DNS", "Save ports and DNS")}
+          </Button>}
           {loadFailed && <Button size="small" appearance="subtle" icon={<ArrowSync20Regular />} onClick={() => setLoadRevision(value => value + 1)}>{text("重试", "Retry")}</Button>}
         </div>
       </header>
@@ -591,7 +593,7 @@ export function SettingsPage({
       <div className="settings-workspace">
         <SettingsNavigation category={category} onSelect={selectCategory} networkDirty={networkDirty} text={text} />
         <div className="settings-category-body">
-          <div ref={categoryPanelRef} className="settings-category-scroll" role="tabpanel" id="settings-category-panel"
+          <div className="settings-category-panel" role="tabpanel" id="settings-category-panel"
             aria-labelledby={`settings-tab-${category}`} tabIndex={0}>
             <div className="settings-category-content" key={category}>
             <header className="settings-category-heading">
@@ -1113,15 +1115,6 @@ export function SettingsPage({
             </>}
             </div>
           </div>
-          {category === "network" && <footer className="settings-network-footer">
-            <div>
-              <strong>{loading ? text("正在读取…", "Loading…") : loadFailed ? text("配置未读取", "Settings unavailable") : networkDirty ? text("端口与 DNS 有未保存的更改", "Port and DNS changes pending") : text("端口与 DNS 已同步", "Ports and DNS synced")}</strong>
-              <span>{text("保存后重启聚合生效。", "Restart aggregation after saving to apply.")}</span>
-            </div>
-            <Button appearance="primary" icon={<Save20Regular />} disabled={loading || loadFailed || saving || !networkDirty} onClick={() => void saveNetwork()}>
-              {saving ? text("正在保存…", "Saving…") : text("保存端口与 DNS", "Save ports and DNS")}
-            </Button>
-          </footer>}
         </div>
       </div>
 
