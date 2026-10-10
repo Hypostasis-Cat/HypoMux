@@ -3,7 +3,18 @@ package services
 import (
 	"testing"
 	"time"
+
+	"github.com/Hypostasis-Cat/HypoMux/desktop/internal/engineclient"
 )
+
+func TestConnectionsCoreUnavailableIsNotReportedAsStopped(t *testing.T) {
+	s := &EngineService{client: engineclient.New()}
+	s.client.Close()
+	snapshot, err := s.Connections()
+	if err == nil || snapshot.Phase == "stopped" {
+		t.Fatalf("unavailable Core must return an error, not stopped: %+v, %v", snapshot, err)
+	}
+}
 
 func TestSortConnectionViewsKeepsTelemetryOrderStable(t *testing.T) {
 	started := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)

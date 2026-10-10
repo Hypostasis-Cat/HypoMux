@@ -20,6 +20,7 @@ import {
   SearchBox,
   Spinner,
   Switch,
+  useRestoreFocusTarget,
 } from "@fluentui/react-components";
 import {
   AppsListDetail24Regular,
@@ -171,6 +172,8 @@ export function ConnectionsPage({
   const { locale } = useI18n();
   const text = useCallback((zh: string, en: string) => locale === "en" ? en : zh, [locale]);
   const [snapshot, setSnapshot] = useState<ConnectionListSnapshot>(emptySnapshot);
+  const [hasSnapshot, setHasSnapshot] = useState(false);
+  const [loadError, setLoadError] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [live, setLive] = useState(true);
@@ -197,6 +200,8 @@ export function ConnectionsPage({
   const requestActive = useRef(false);
   const connectionListRef = useRef<HTMLDivElement>(null);
   const contextMenuTargetRef = useRef<HTMLSpanElement>(null);
+  const contextMenuOriginRef = useRef<HTMLElement | null>(null);
+  const restoreFocusTarget = useRestoreFocusTarget();
   const quickRuleRequest = useRef(0);
   const pendingScrollTop = useRef<number | null>(null);
   const { notify } = useAppNotifications();
@@ -227,7 +232,10 @@ export function ConnectionsPage({
       );
       pendingScrollTop.current = connectionListRef.current?.scrollTop ?? null;
       setSnapshot({ ...next, connections: next.connections ?? [] });
+      setHasSnapshot(true);
+      setLoadError(false);
     } catch (error) {
+      setLoadError(true);
       notify({
         title: textRef.current("无法读取活动连接", "Unable to load active connections"),
         message: error instanceof Error ? error.message : String(error),
@@ -516,6 +524,7 @@ export function ConnectionsPage({
           : text("未识别连接", "Unidentified connection");
     return (
       <article
+        {...restoreFocusTarget}
         className={`connection-row${contextMenu?.connection.id === connection.id ? " is-context-active" : ""}`}
         key={connection.id}
         tabIndex={0}
@@ -523,11 +532,14 @@ export function ConnectionsPage({
         title={text("右键可快速添加分流规则", "Right-click to quickly add a routing rule")}
         onContextMenu={(event) => {
           event.preventDefault();
+          contextMenuOriginRef.current = event.currentTarget;
+          event.currentTarget.focus({ preventScroll: true });
           setContextMenu({ connection, x: event.clientX, y: event.clientY });
         }}
         onKeyDown={(event) => {
           if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) return;
           event.preventDefault();
+          contextMenuOriginRef.current = event.currentTarget;
           const bounds = event.currentTarget.getBoundingClientRect();
           setContextMenu({ connection, x: bounds.left + 42, y: bounds.top + 42 });
         }}
@@ -642,17 +654,23 @@ export function ConnectionsPage({
       <GlassSurface className="connection-summary" tone="secondary">
         {preview && <Badge appearance="tint" color="warning">{text("预览 · 示例数据", "Preview · Sample data")}</Badge>}
         <span>
-          <Badge key={engineRunning ? "running" : "stopped"} className="motion-status-swap" appearance="tint" color={engineRunning ? "success" : "informative"}>
-            {engineRunning ? text("聚合运行中", "Engine running") : text("聚合未运行", "Engine stopped")}
+          <Badge key={!hasSnapshot ? "unknown" : engineRunning ? "running" : "stopped"} className="motion-status-swap" appearance="tint" color={loadError ? "warning" : engineRunning ? "success" : "informative"}>
+            {!hasSnapshot ? text("引擎状态未知", "Engine status unknown") : engineRunning ? text("聚合运行中", "Engine running") : text("聚合未运行", "Engine stopped")}
           </Badge>
         </span>
-        <span><PlugConnected20Regular /> <strong>{snapshot.connections.length}</strong> {text("条活动连接", "active")}</span>
-        <span><ArrowUpload20Regular /> <strong>{formatBytes(totals.up)}</strong> {text("上传", "uploaded")}</span>
-        <span><ArrowDownload20Regular /> <strong>{formatBytes(totals.down)}</strong> {text("下载", "downloaded")}</span>
+        <span><PlugConnected20Regular /> <strong>{hasSnapshot ? snapshot.connections.length : "—"}</strong> {text("条活动连接", "active")}</span>
+        <span><ArrowUpload20Regular /> <strong>{hasSnapshot ? formatBytes(totals.up) : "—"}</strong> {text("上传", "uploaded")}</span>
+        <span><ArrowDownload20Regular /> <strong>{hasSnapshot ? formatBytes(totals.down) : "—"}</strong> {text("下载", "downloaded")}</span>
         <small>{snapshot.sampled_at
           ? text(`采样于 ${new Date(snapshot.sampled_at).toLocaleTimeString("zh-CN", { hour12: false })}`, `Sampled ${new Date(snapshot.sampled_at).toLocaleTimeString("en-US")}`)
           : text("等待 Core 遥测", "Waiting for Core telemetry")}</small>
       </GlassSurface>
+
+      {loadError && <MessageBar intent="warning"><MessageBarBody>
+        {hasSnapshot
+          ? text("无法刷新活动连接；下方保留最近一次成功采样，数据可能已过期。点击“刷新”重试。", "Unable to refresh connections; showing the last successful sample, which may be stale. Select Refresh to retry.")
+          : text("无法读取活动连接，暂时无法确认引擎状态。点击“刷新”重试。", "Unable to load connections or confirm engine status. Select Refresh to retry.")}
+      </MessageBarBody></MessageBar>}
 
       <GlassSurface className={`connections-surface${loading || filtered.length === 0 ? " is-empty" : ""}`}>
         <div className="connection-view-toolbar">
@@ -745,9 +763,15 @@ export function ConnectionsPage({
             );
           })}
         </div>
-        <div ref={connectionListRef} className="connection-list" role="region" aria-label={text("活动连接列表", "Active connections list")} tabIndex={0}>
+        <div {...restoreFocusTarget} ref={connectionListRef} className="connection-list" role="region" aria-label={text("活动连接列表", "Active connections list")} tabIndex={0}>
           {loading ? (
             <div key="connections-loading" className="connections-empty motion-state-content"><Spinner label={text("正在读取实时连接", "Loading live connections")} /></div>
+          ) : !hasSnapshot ? (
+            <div key="connections-unavailable" className="connections-empty motion-state-content">
+              <AppsListDetail24Regular />
+              <strong>{text("活动连接暂不可用", "Active connections unavailable")}</strong>
+              <span>{text("请刷新重试；读取失败不代表引擎已停止。", "Refresh to retry; a failed read does not mean the engine has stopped.")}</span>
+            </div>
           ) : !engineRunning ? (
             <div key="connections-stopped" className="connections-empty motion-state-content">
               <AppsListDetail24Regular />
@@ -774,7 +798,14 @@ export function ConnectionsPage({
       />
       <Menu
         open={Boolean(contextMenu)}
-        onOpenChange={(_, data) => !data.open && setContextMenu(null)}
+        onOpenChange={(_, data) => {
+          if (!data.open) {
+            setContextMenu(null);
+            if (data.keyboard && !contextMenuOriginRef.current?.isConnected) {
+              connectionListRef.current?.focus({ preventScroll: true });
+            }
+          }
+        }}
         positioning={{ target: contextMenuTargetRef.current, position: "below", align: "start", strategy: "fixed", offset: 4 }}
       >
         <MenuPopover className="connection-rule-menu glass-surface" data-tone="primary">

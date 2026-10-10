@@ -234,13 +234,16 @@ export function SettingsPage({
   // Manual network edits must never leak into auto-saved preference updates.
   const pageActive = usePageActive();
   const settingsRevision = useRef(0);
-  const [networkDraft, setNetworkDraft] = useState<Partial<Pick<CompleteAppSettings, "socks_port" | "http_port" | "dns_server" | "dns_servers" | "doh_servers" | "dot_servers" | "dns_policy" | "dns_egress_mode" | "dns_adapter_id">>>({});
+  const [networkDraft, setNetworkDraft] = useState<Partial<Pick<CompleteAppSettings, "dns_server" | "dns_servers" | "doh_servers" | "dot_servers" | "dns_policy" | "dns_egress_mode" | "dns_adapter_id">> & { socks_port?: string; http_port?: string }>({});
   const [networkValidationAttempted, setNetworkValidationAttempted] = useState(false);
   const networkSettings = { ...settings, ...networkDraft };
   const dnsServers = networkSettings.dns_servers ?? [networkSettings.dns_server];
   const dohServers = networkSettings.doh_servers ?? [];
   const dotServers = networkSettings.dot_servers ?? [];
-  const networkDirty = Object.entries(networkDraft).some(([key, value]) => JSON.stringify(settings[key as keyof CompleteAppSettings]) !== JSON.stringify(value));
+  const networkDirty = Object.entries(networkDraft).some(([key, value]) =>
+    key === "socks_port" || key === "http_port"
+      ? String(settings[key]) !== value
+      : JSON.stringify(settings[key as keyof CompleteAppSettings]) !== JSON.stringify(value));
   useEffect(() => {
     if (!networkDirty) return;
     const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
@@ -263,6 +266,13 @@ export function SettingsPage({
   const { settings: appearance, update: updateAppearance, persistenceError: appearancePersistenceError } = useAppearance();
   const { locale, setLocale, t } = useI18n();
   const text = (zh: string, en: string) => locale === "en" ? en : zh;
+  const portValues = { socks_port: String(networkSettings.socks_port), http_port: String(networkSettings.http_port) };
+  const portError = (value: string) => !/^\d+$/.test(value) || Number(value) < 1 || Number(value) > 65534
+    ? text("请输入 1–65534 之间的整数端口。", "Enter an integer port between 1 and 65534.") : "";
+  const portErrors = { socks_port: portError(portValues.socks_port), http_port: portError(portValues.http_port) };
+  if (!portErrors.socks_port && !portErrors.http_port && Number(portValues.socks_port) === Number(portValues.http_port)) {
+    portErrors.http_port = text("HTTP 与 SOCKS5 端口不能相同。", "HTTP and SOCKS5 ports must be different.");
+  }
   const dnsErrors = dnsServers.map(value => validDNSAddress(value) ? "" : text("请输入有效的单播 IPv4 或 IPv6 地址。", "Enter a valid unicast IPv4 or IPv6 address."));
   const dohErrors = dohServers.map(value => validDoHAddress(value) ? "" : text("请输入完整 HTTPS 地址，如 https://dns.example.com/dns-query。", "Enter a full HTTPS URL, e.g. https://dns.example.com/dns-query."));
   const customDoHMissing = networkSettings.dns_policy === "custom" && dohServers.length === 0;
@@ -399,21 +409,27 @@ export function SettingsPage({
 
   const saveNetwork = async () => {
     setNetworkValidationAttempted(true);
-    if (dnsErrors.some(Boolean) || dohErrors.some(Boolean) || dotErrors.some(Boolean) || customDoHMissing || customDoTMissing) {
+    if (Object.values(portErrors).some(Boolean) || dnsErrors.some(Boolean) || dohErrors.some(Boolean) || dotErrors.some(Boolean) || customDoHMissing || customDoTMissing) {
       requestAnimationFrame(() => {
         const root = settingsPageRef.current;
         const invalid = root?.querySelector<HTMLInputElement>('[aria-invalid="true"] input, input[aria-invalid="true"]')
           ?? root?.querySelector<HTMLButtonElement>(`${customDoTMissing ? ".settings-custom-dot" : ".settings-custom-doh"} .settings-address-add`);
         invalid?.focus();
-        const errorEntry = invalid?.closest('.settings-address-entry')
+        const errorEntry = invalid?.closest('.settings-address-entry, .settings-port-field')
           ?? root?.querySelector(`${customDoTMissing ? ".settings-custom-dot" : ".settings-custom-doh"} .settings-resolver-note`);
         errorEntry?.scrollIntoView?.({ block: "nearest", inline: "nearest", behavior: "instant" });
       });
       return;
     }
-    const submitted = networkDraft;
+    const submittedDraft = networkDraft;
+    const { socks_port, http_port, ...resolverDraft } = submittedDraft;
+    const submitted = {
+      ...(socks_port !== undefined ? { socks_port: Number(socks_port) } : {}),
+      ...(http_port !== undefined ? { http_port: Number(http_port) } : {}),
+      ...resolverDraft,
+    };
     if (await save({ ...settings, ...submitted }, text("端口与 DNS 设置已保存，重启聚合后生效", "Proxy ports and DNS settings saved; restart aggregation to apply"), Object.keys(submitted))) {
-      setNetworkDraft(current => Object.fromEntries(Object.entries(current).filter(([key, value]) => value !== submitted[key as keyof typeof submitted])));
+      setNetworkDraft(current => Object.fromEntries(Object.entries(current).filter(([key, value]) => value !== submittedDraft[key as keyof typeof submittedDraft])));
       setNetworkValidationAttempted(false);
     }
   };
@@ -973,8 +989,17 @@ export function SettingsPage({
                   "SOCKS5 and HTTP/HTTPS listening ports, range 1–65534.",
                 )}>
                   <div className="port-controls">
-                    <label>SOCKS5 <Input autoComplete="off" disabled={loading || loadFailed} type="number" min={1} max={65534} name="socks_port" value={String(networkSettings.socks_port)} onChange={(_, data) => setNetworkDraft((current) => ({ ...current, socks_port: Number(data.value) }))} /></label>
-                    <label>HTTP <Input autoComplete="off" disabled={loading || loadFailed} type="number" min={1} max={65534} name="http_port" value={String(networkSettings.http_port)} onChange={(_, data) => setNetworkDraft((current) => ({ ...current, http_port: Number(data.value) }))} /></label>
+                    {(["socks_port", "http_port"] as const).map(key => (
+                      <div className="settings-port-field" key={key}>
+                        <label>{key === "socks_port" ? "SOCKS5" : "HTTP"}
+                          <Input autoComplete="off" disabled={loading || loadFailed} type="number" min={1} max={65534} step={1} name={key}
+                            value={portValues[key]} aria-invalid={networkValidationAttempted && Boolean(portErrors[key])}
+                            aria-describedby={networkValidationAttempted && portErrors[key] ? `${key}-error` : undefined}
+                            onChange={(_, data) => setNetworkDraft(current => ({ ...current, [key]: data.value }))} />
+                        </label>
+                        {networkValidationAttempted && portErrors[key] && <span id={`${key}-error`} className="settings-address-error">{portErrors[key]}</span>}
+                      </div>
+                    ))}
                   </div>
                 </SettingRow>
                 <SettingRow title={t("settings_system_proxy_takeover")} description={t("settings_system_proxy_takeover_hint")}>

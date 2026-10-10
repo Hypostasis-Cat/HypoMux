@@ -167,6 +167,7 @@ export function useEngineState(
   const strategyRef = useRef(strategy);
   const [phase, setPhase] = useState<EnginePhase>("stopped");
   const [snapshot, setSnapshot] = useState<EngineSnapshot>(emptySnapshot());
+  const [telemetryError, setTelemetryError] = useState("");
   const [adapters, setAdapters] = useState<AdapterView[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -185,6 +186,7 @@ export function useEngineState(
   const lastRuntimeFailure = useRef("");
   const operationActive = useRef(false);
   const snapshotEpoch = useRef(0);
+  const telemetryRequest = useRef(0);
   const transition = phase === "starting" || phase === "stopping";
   const transitionRef = useRef(transition);
   const previewRef = useRef(preview);
@@ -225,6 +227,7 @@ export function useEngineState(
       ? next.phase
       : "failed") as EnginePhase;
     setSnapshot(next);
+    setTelemetryError("");
     setPhase(nextPhase);
     if (next.mode === "proxy" || next.mode === "tun") {
       setModeState(next.mode);
@@ -242,6 +245,19 @@ export function useEngineState(
       lastRuntimeFailure.current = "";
     }
   }, []);
+
+  const refreshTelemetry = useCallback(async () => {
+    const requestEpoch = snapshotEpoch.current;
+    const requestID = ++telemetryRequest.current;
+    try {
+      const next = await withServiceTimeout(appServices.engine.snapshot(), 8_000, "读取聚合遥测 / Loading engine telemetry");
+      if (requestID === telemetryRequest.current) applySnapshot(next, false, requestEpoch);
+    } catch (error) {
+      if (mounted.current && requestID === telemetryRequest.current && requestEpoch === snapshotEpoch.current && !operationActive.current) {
+        setTelemetryError(error instanceof Error ? error.message : String(error));
+      }
+    }
+  }, [applySnapshot]);
 
   const load = useCallback(async (showError = true) => {
     if (isBrowserPreview()) {
@@ -268,13 +284,12 @@ export function useEngineState(
     // negotiation and diagnostics continue independently so a cold Core
     // process cannot hold the entire adapter list behind one spinner.
     const requestEpoch = snapshotEpoch.current;
-    const runtimeTask = Promise.all([
-      appServices.engine.snapshot(),
-      appServices.diagnostics.latest(),
-    ]).then(([nextSnapshot, latestDiagnostics]) => {
+    // Diagnostics are optional evidence: their failure must not discard a
+    // successful telemetry sample or leave the live throughput at zero.
+    void refreshTelemetry();
+    const runtimeTask = appServices.diagnostics.latest().then((latestDiagnostics) => {
       if (!mounted.current || requestEpoch !== snapshotEpoch.current) return;
       setDiagnostics(latestDiagnostics.results ?? []);
-      applySnapshot(nextSnapshot, false, requestEpoch);
     }).catch((error) => {
       if (showError) {
         onErrorRef.current(error instanceof Error ? error.message : String(error), () => void load());
@@ -305,7 +320,7 @@ export function useEngineState(
       if (mounted.current) setLoading(false);
     }
     void runtimeTask;
-  }, [applySnapshot]);
+  }, [applySnapshot, refreshTelemetry]);
 
   useEffect(() => {
     mounted.current = true;
@@ -317,9 +332,7 @@ export function useEngineState(
         previewRef.current,
         adapterSaveQueue.isPending(),
       )) {
-        const requestEpoch = snapshotEpoch.current;
-        const next = await appServices.engine.snapshot();
-        applySnapshot(next, false, requestEpoch);
+        await refreshTelemetry();
       }
     }, HOME_TELEMETRY_POLL_MS);
     const stopAdapterPoll = startSerialPoll(async () => {
@@ -341,7 +354,7 @@ export function useEngineState(
       stopSnapshotPoll();
       stopAdapterPoll();
     };
-  }, [applySnapshot, load]);
+  }, [load, refreshTelemetry]);
 
   useEffect(() => {
     const handleTakeoverChange = (event: Event) => {
@@ -594,6 +607,7 @@ export function useEngineState(
     coreElevated: snapshot.core_elevated,
     ports, systemProxyTakeover,
     totalDownload: snapshot.download_bps,
+    telemetryError, refreshTelemetry,
     totalUpload: snapshot.upload_bps,
     totalConnections: snapshot.connections,
     sessionBytes: snapshot.session_bytes,

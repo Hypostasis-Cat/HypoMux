@@ -26,6 +26,7 @@ export function NetworkAdapterItem({
   weighted,
   disabled,
   aggregating = false,
+  telemetryUnavailable = false,
   feedback,
   feedbackToken,
   onOpenConnections,
@@ -37,6 +38,7 @@ export function NetworkAdapterItem({
   weighted: boolean;
   disabled: boolean;
   aggregating?: boolean;
+  telemetryUnavailable?: boolean;
   feedback?: AdapterFeedback["status"];
   feedbackToken?: AdapterFeedback;
   onOpenConnections: () => void;
@@ -120,9 +122,9 @@ export function NetworkAdapterItem({
             onOpenConnections();
           }}
         >
-          <span><ArrowDownload20Regular /><strong>{formatRate(adapter.downloadBPS)}</strong><small>{text("下载", "Down")}</small></span>
-          <span><ArrowUpload20Regular /><strong>{formatRate(adapter.uploadBPS)}</strong><small>{text("上传", "Up")}</small></span>
-          <span><PlugConnected20Regular /><strong>{adapter.connections}</strong><small>{text("连接", "Conn")}</small></span>
+          <span><ArrowDownload20Regular /><strong>{telemetryUnavailable ? "—" : formatRate(adapter.downloadBPS)}</strong><small>{text("下载", "Down")}</small></span>
+          <span><ArrowUpload20Regular /><strong>{telemetryUnavailable ? "—" : formatRate(adapter.uploadBPS)}</strong><small>{text("上传", "Up")}</small></span>
+          <span><PlugConnected20Regular /><strong>{telemetryUnavailable ? "—" : adapter.connections}</strong><small>{text("连接", "Conn")}</small></span>
         </button>
       </Tooltip>
 

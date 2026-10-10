@@ -4903,7 +4903,9 @@ svg {
 .settings-page .setting-control > .fui-Switch { margin-right: -8px; }
 .settings-page .slider-value { width: 240px; grid-template-columns: minmax(0, 1fr) 46px; }
 .settings-page .slider-value > span { padding: 3px 6px; border-radius: 5px; background: var(--hm-row-hover); color: var(--hm-text-secondary); font-size: 12px; }
-.settings-page .port-controls { width: 240px; gap: 12px; }
+.settings-page .port-controls { width: 240px; gap: 12px; align-items: flex-start; }
+.settings-page .settings-port-field { flex: 1; min-width: 0; }
+.settings-page .settings-port-field .settings-address-error { display: block; margin-top: 6px; }
 .settings-page .port-controls label { flex: 1; min-width: 0; flex-direction: column; align-items: flex-start; gap: 6px; }
 .settings-page .port-controls .fui-Input { width: 100%; }
 .settings-page .setting-row.is-danger { border-left-width: 3px; padding-left: 13px; }

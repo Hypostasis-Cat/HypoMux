@@ -252,6 +252,23 @@ describe("HomePage adapter interactions", () => {
     expect(screen.getByText(/Local proxy ports only; Windows system proxy is unchanged/)).not.toBeNull();
   });
 
+  it("shows unavailable telemetry and retries instead of presenting zero traffic", () => {
+    const refreshTelemetry = vi.fn();
+    const state = { ...engineState(), phase: "running", telemetryError: "Core read timed out", refreshTelemetry };
+    mocks.useEngineState.mockReturnValue(state);
+    const { container, rerender } = renderPage(<HomePage />);
+    expect(screen.getByRole("alert").textContent).toContain("Live telemetry unavailable");
+    expect(screen.getByRole("alert").textContent).toContain("Core read timed out");
+    expect(screen.getByRole("article").textContent).not.toContain("1 KB/s");
+    expect(container.querySelector(".throughput-display")?.textContent).toContain("—");
+    fireEvent.click(screen.getByRole("button", { name: "Retry telemetry" }));
+    expect(refreshTelemetry).toHaveBeenCalledOnce();
+    mocks.useEngineState.mockReturnValue({ ...state, telemetryError: "" });
+    rerender(<HomePage />);
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByRole("article").textContent).toContain("1 KB/s");
+  });
+
   it("publishes adapter readiness and engine phase to the shared runtime feed", () => {
     const onAdapterRuntimeChange = vi.fn();
     const onEnginePhaseChange = vi.fn();

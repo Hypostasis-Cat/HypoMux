@@ -134,6 +134,7 @@ export function HomePage({
   return (
     <main className="home-page">
       <EngineHero
+        telemetryUnavailable={Boolean(engine.telemetryError)}
         phase={engine.phase}
         mode={engine.mode}
         selectedCount={engine.selected.length}
@@ -152,6 +153,12 @@ export function HomePage({
         onStrategyChange={engine.setStrategy}
         onToggle={engine.toggleEngine}
       />
+
+      {engine.telemetryError && <div className="hm-card" role="alert">
+        <strong>{text("实时统计暂不可用", "Live telemetry unavailable")}</strong>
+        <p>{text("无法读取核心统计，不能将当前速度或连接数判定为 0。", "Unable to read Core telemetry; current throughput and connection counts are unknown.")} {engine.telemetryError}</p>
+        <Button onClick={() => void engine.refreshTelemetry()}>{text("重试读取统计", "Retry telemetry")}</Button>
+      </div>}
 
       <section className="network-section" aria-labelledby="network-section-title">
         <div className="network-section-heading">
@@ -223,6 +230,7 @@ export function HomePage({
             <NetworkAdapterItem
               key={adapter.id}
               adapter={adapter}
+              telemetryUnavailable={Boolean(engine.telemetryError)}
               weighted={engine.weighted}
               percentage={adapter.selected ? Math.round((adapter.weight / engine.totalWeight) * 100) || 0 : 0}
               disabled={engine.transitioning || applyingAdapters}
@@ -238,6 +246,7 @@ export function HomePage({
       </section>
 
       <RuntimeStatusBar strategy={engine.strategy}
+        telemetryUnavailable={Boolean(engine.telemetryError)}
         phase={engine.phase}
         connections={engine.totalConnections}
         sessionTraffic={engine.sessionBytes > 0 ? formatBytes(engine.sessionBytes) : "—"}

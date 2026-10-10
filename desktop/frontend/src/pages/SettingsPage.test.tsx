@@ -306,6 +306,44 @@ it("disables Wi-Fi startup control when automatic acceleration is off", async ()
 
 
 describe("manual network drafts", () => {
+  it.each(["", "0", "65535", "1.5"])("keeps invalid port %s editable and blocks persistence with inline focus", async value => {
+    render(<SettingsPage adapterRuntime={[]} onOpenBlockedDomains={() => {}} />);
+    await openCategory("Network & DNS");
+    await screen.findByText("Settings synced");
+    const input = screen.getByRole("spinbutton", { name: "SOCKS5" }) as HTMLInputElement;
+    fireEvent.change(input, { target: { value } });
+    expect(input.value).toBe(value);
+    fireEvent.click(screen.getByRole("button", { name: "Save ports and DNS" }));
+    expect(await screen.findByText("Enter an integer port between 1 and 65534.")).toBeTruthy();
+    expect(input.getAttribute("aria-invalid")).toBe("true");
+    expect(input.getAttribute("aria-describedby")).toBe("socks_port-error");
+    await waitFor(() => expect(document.activeElement).toBe(input));
+    expect(mocks.update).not.toHaveBeenCalled();
+    fireEvent.change(input, { target: { value: "12345" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save ports and DNS" }));
+    await waitFor(() => expect(mocks.update).toHaveBeenCalledWith(expect.objectContaining({ socks_port: 12345 }), ["socks_port"]));
+    await screen.findByText("Settings synced");
+    expect(screen.queryByText("Enter an integer port between 1 and 65534.")).toBeNull();
+  });
+
+  it("focuses duplicate ports and keeps an empty draft out of automatic saves", async () => {
+    render(<SettingsPage adapterRuntime={[]} onOpenBlockedDomains={() => {}} />);
+    await openCategory("Network & DNS");
+    await screen.findByText("Settings synced");
+    const http = screen.getByRole("spinbutton", { name: "HTTP" });
+    fireEvent.change(http, { target: { value: "10800" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save ports and DNS" }));
+    expect(await screen.findByText("HTTP and SOCKS5 ports must be different.")).toBeTruthy();
+    await waitFor(() => expect(document.activeElement).toBe(http));
+    expect(mocks.update).not.toHaveBeenCalled();
+    fireEvent.change(http, { target: { value: "" } });
+    await openCategory("General");
+    fireEvent.click(screen.getByRole("switch", { name: "Hide virtual adapters on Home" }));
+    await waitFor(() => expect(mocks.update).toHaveBeenCalledWith(expect.objectContaining({ http_port: 10801 }), ["hide_virtual_adapters"]));
+    await openCategory("Network & DNS");
+    expect((screen.getByRole("spinbutton", { name: "HTTP" }) as HTMLInputElement).value).toBe("");
+  });
+
   it("validates and saves a custom DoT policy with multiple servers", async () => {
     render(<SettingsPage adapterRuntime={[]} onOpenBlockedDomains={() => {}} />);
     await openCategory("Network & DNS");

@@ -139,6 +139,11 @@ const adapterRuntime = [
 
 describe("ConnectionsPage interactions", () => {
   beforeEach(() => {
+    vi.stubGlobal("ResizeObserver", class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    });
     // jsdom has no layout: body bounds are zero and offsetParent is always
     // null. Tabster therefore treats the whole document as hidden and can
     // never activate a dialog through its first focusable button. Model a
@@ -178,6 +183,7 @@ describe("ConnectionsPage interactions", () => {
 
   afterEach(() => {
     cleanup();
+    vi.unstubAllGlobals();
     vi.restoreAllMocks();
     vi.clearAllMocks();
   });
@@ -196,6 +202,45 @@ describe("ConnectionsPage interactions", () => {
       expect(mocks.connections).toHaveBeenCalledTimes(2);
       view.unmount();
     } finally { vi.useRealTimers(); }
+  });
+
+  it("shows unknown status on an initial failure and recovers on refresh", async () => {
+    mocks.connections.mockRejectedValueOnce(new Error("offline"));
+    renderPage(<ConnectionsPage />);
+    expect(await screen.findByText("Active connections unavailable")).not.toBeNull();
+    expect(screen.getByText("Engine status unknown")).not.toBeNull();
+    expect(screen.queryByText("Engine stopped")).toBeNull();
+    expect(screen.queryByText("The aggregation engine is not running")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    expect(await screen.findByText("ethernet.example")).not.toBeNull();
+    expect(screen.getByText("Engine running")).not.toBeNull();
+    expect(screen.queryByText(/Unable to load connections or confirm/)).toBeNull();
+  });
+
+  it("retains the last sample with a stale warning until a successful refresh", async () => {
+    renderPage(<ConnectionsPage />);
+    await screen.findByText("ethernet.example");
+    mocks.connections.mockRejectedValueOnce(new Error("offline"));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    expect(await screen.findByText(/showing the last successful sample/)).not.toBeNull();
+    expect(screen.getByText("ethernet.example")).not.toBeNull();
+    mocks.connections.mockResolvedValue({ ...snapshot, phase: "stopped", connections: [] });
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    expect(await screen.findByText("The aggregation engine is not running")).not.toBeNull();
+    expect(screen.queryByText(/showing the last successful sample/)).toBeNull();
+    expect(screen.queryByText("ethernet.example")).toBeNull();
+  });
+
+  it("restores focus to the connection after dismissing its keyboard menu", async () => {
+    renderPage(<ConnectionsPage />);
+    const row = await screen.findByRole("article", { name: "Connection Zulu.exe" });
+    act(() => row.focus());
+    fireEvent.keyDown(row, { key: "F10", shiftKey: true });
+    const item = await screen.findByRole("menuitem", { name: /Add by process/ });
+    await waitFor(() => expect(document.activeElement).toBe(item));
+    fireEvent.keyDown(item, { key: "Escape" });
+    await waitFor(() => expect(document.activeElement).toBe(row));
+    expect(screen.queryByRole("menu")).toBeNull();
   });
 
   it("collapses same-name processes, keeps expansion on refresh, and filters individual flows", async () => {

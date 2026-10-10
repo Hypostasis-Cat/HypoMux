@@ -37,6 +37,7 @@ export function RuntimeStatusBar({
   strategy,
   coreVersion,
   preview,
+  telemetryUnavailable = false,
   onOpenConnections,
 }: {
   phase: EnginePhase;
@@ -46,6 +47,7 @@ export function RuntimeStatusBar({
   strategy?: string;
   coreVersion: string;
   preview: boolean;
+  telemetryUnavailable?: boolean;
   onOpenConnections?: () => void;
 }) {
   const { locale, t } = useI18n();
@@ -68,8 +70,8 @@ export function RuntimeStatusBar({
         label={text("核心状态", "Core status")}
         value={preview ? text("浏览器容量预览", "Browser capacity preview") : `${phaseLabel} · ${coreVersion}`}
       />
-      <StatusItem icon={<PlugConnected20Regular />} label={t("home_metric_connections")} value={connections} />
-      <StatusItem icon={<DataUsage20Regular />} label={text("会话流量", "Session traffic")} value={sessionTraffic} />
+      <StatusItem icon={<PlugConnected20Regular />} label={t("home_metric_connections")} value={telemetryUnavailable ? "—" : connections} />
+      <StatusItem icon={<DataUsage20Regular />} label={text("会话流量", "Session traffic")} value={telemetryUnavailable ? "—" : sessionTraffic} />
       <StatusItem icon={<ArrowRouting20Regular />} label={text("调度策略", "Scheduling")} value={getSchedulingStrategy(weighted, strategy).label[locale === "en" ? "en" : "zh"]} />
       <Button appearance="primary" size="small" icon={<AppsListDetail20Regular />} onClick={onOpenConnections}>
         {text("活动连接", "Connections")}

@@ -59,12 +59,14 @@ export function ThroughputDisplay({
   connections,
   history,
   active,
+  unavailable = false,
 }: {
   download: number;
   upload: number;
   connections: number;
   history: number[];
   active: boolean;
+  unavailable?: boolean;
 }) {
   const { locale, t } = useI18n();
   const chartID = useId().replace(/:/g, "");
@@ -75,14 +77,14 @@ export function ThroughputDisplay({
     <div className="throughput-display">
       <div className="throughput-label">{t("home_total_speed")}</div>
       <div className="throughput-value">
-        <strong>{download.toFixed(1)}</strong>
+        <strong>{unavailable ? "—" : download.toFixed(1)}</strong>
         <span>MB/s</span>
       </div>
       <div className="throughput-meta">
-        <span><ArrowUpload20Regular /> {upload.toFixed(1)} MB/s</span>
-        <span><PlugConnected20Regular /> {locale === "en" ? `${connections} active connections` : `${connections} 个活动连接`}</span>
+        <span><ArrowUpload20Regular /> {unavailable ? "—" : upload.toFixed(1)} MB/s</span>
+        <span><PlugConnected20Regular /> {unavailable ? (locale === "en" ? "Connection count unknown" : "连接数未知") : locale === "en" ? `${connections} active connections` : `${connections} 个活动连接`}</span>
       </div>
-      {active ? (
+      {active && !unavailable ? (
         <svg className="throughput-graph" viewBox="0 0 100 44" preserveAspectRatio="none" aria-hidden="true">
           <defs>
             <linearGradient id={fillID} x1="0" y1="0" x2="0" y2="1">
@@ -107,7 +109,7 @@ export function ThroughputDisplay({
         </svg>
       ) : (
         <div className="throughput-idle">
-          <span>{locale === "en" ? "Live throughput appears after aggregation starts" : "启动网络服务后显示实时吞吐趋势"}</span>
+          <span>{unavailable ? (locale === "en" ? "Live telemetry unavailable" : "实时统计暂不可用") : locale === "en" ? "Live throughput appears after aggregation starts" : "启动网络服务后显示实时吞吐趋势"}</span>
         </div>
       )}
     </div>
