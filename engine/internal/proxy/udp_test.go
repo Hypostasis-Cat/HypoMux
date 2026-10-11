@@ -209,6 +209,15 @@ func TestSOCKSUDPInitialSetupFailsOverWithinChannel(t *testing.T) {
 	if attempts.Load() != 2 {
 		t.Fatalf("UDP setup attempts = %d, want 2", attempts.Load())
 	}
+	server.udpPerformance.mu.Lock()
+	leaseCount := 0
+	for _, link := range server.udpPerformance.links {
+		leaseCount += len(link.leases)
+	}
+	server.udpPerformance.mu.Unlock()
+	if leaseCount != 1 {
+		t.Fatalf("UDP retries retained %d leases, want only the successful flow", leaseCount)
+	}
 	snapshot := server.Snapshot(true)
 	for _, connection := range snapshot.Connections {
 		if connection.Protocol == "socks5_udp" {

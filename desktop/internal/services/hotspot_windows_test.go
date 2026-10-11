@@ -11,7 +11,84 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf16"
+
+	"golang.org/x/sys/windows"
 )
+
+func TestHotspotWindowsCommandFitsCreateProcessLimit(t *testing.T) {
+	command, err := hotspotCommand()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var args []string
+	for _, arg := range command.Args {
+		args = append(args, windows.EscapeArg(arg))
+	}
+	if length := len(utf16.Encode([]rune(strings.Join(args, " ")))) + 1; length > 32767 {
+		t.Fatalf("hotspot command uses %d UTF-16 units; CreateProcess limit is 32767", length)
+	}
+}
+
+func TestHotspotWindowsRadioAPIProjection(t *testing.T) {
+	// Resolve the real WinRT types and generic async bridge without touching
+	// radios or creating a tethering manager. Fakes cannot catch ABI projection
+	// errors in the disconnected-radio discovery path.
+	runHotspotFunctions(t, `
+Add-Type -AssemblyName System.Runtime.WindowsRuntime
+$wifi = [Windows.Devices.WiFi.WiFiAdapter, Windows.Devices.WiFi, ContentType=WindowsRuntime]
+$listType = [System.Collections.Generic.IReadOnlyList[Windows.Devices.WiFi.WiFiAdapter]]
+$method = [System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {
+    $_.Name -eq 'AsTask' -and $_.IsGenericMethod -and $_.GetGenericArguments().Count -eq 1 -and $_.GetParameters().Count -eq 1
+} | Select-Object -First 1
+if ($null -eq $method.MakeGenericMethod($listType)) { throw 'Wi-Fi adapter async projection unavailable' }
+$type = [Windows.Networking.NetworkOperators.NetworkOperatorTetheringManager, Windows.Networking.NetworkOperators, ContentType=WindowsRuntime]
+if (@($type.GetMethods() | Where-Object { $_.Name -eq 'CreateFromConnectionProfile' -and $_.GetParameters().Count -eq 2 }).Count -eq 0) { throw 'target-adapter overload unavailable' }
+`)
+}
+
+func TestHotspotWindowsExplicitRadioSelection(t *testing.T) {
+	runHotspotFunctions(t, `
+Add-Type -TypeDefinition @'
+public static class FakeTethering {
+    public static object LastProfile;
+    public static object LastAdapter;
+    public static bool Reject;
+    public static object CreateFromConnectionProfile(object profile) { LastProfile = profile; LastAdapter = null; return "auto"; }
+    public static object CreateFromConnectionProfile(object profile, object adapter) { LastProfile = profile; LastAdapter = adapter; if (Reject) throw new System.Exception("unsupported"); return "explicit"; }
+}
+'@
+$tethering = [FakeTethering]
+$public = [PSCustomObject]@{ Name = 'TUN profile' }
+$id = [guid]'00000000-0000-0000-0000-000000000001'
+$physical = [PSCustomObject]@{ Name = 'Dedicated Wi-Fi'; InterfaceGuid = $id; InterfaceType = 71; Status = 'Disconnected' }
+$radio = [PSCustomObject]@{ NetworkAdapterId = $id }
+$script:deviceQueries = 0
+function Get-NetAdapter { param([switch]$Physical, $ErrorAction) $script:physical }
+function Get-HotspotWinRTAdapters { $script:connected }
+function Find-HotspotWiFiAdapters { $script:deviceQueries++; $script:radio }
+if ((Create-HotspotManager $public '') -ne 'auto' -or $deviceQueries -ne 0) { throw 'automatic selection queried a radio' }
+$script:connected = $radio
+if ((Create-HotspotManager $public $id.ToString()) -ne 'explicit' -or $deviceQueries -ne 0) { throw 'connected adapter lookup failed' }
+if ([FakeTethering]::LastProfile -ne $public -or [FakeTethering]::LastAdapter.NetworkAdapterId -ne $id) { throw 'changed public profile or chose the wrong radio' }
+$script:connected = $null
+if ((Create-HotspotManager $public $id.ToString()) -ne 'explicit' -or $deviceQueries -ne 1 -or $hotspotAdapter -ne 'Dedicated Wi-Fi') { throw 'disconnected dedicated radio lookup failed' }
+$physical.Status = 'Disabled'
+$failed = $false
+try { Create-HotspotManager $public $id.ToString() } catch { $failed = $true }
+if (-not $failed -or $deviceQueries -ne 1) { throw 'disabled radio accepted' }
+$physical.Status = 'Disconnected'
+$radio.NetworkAdapterId = [guid]'00000000-0000-0000-0000-000000000002'
+$failed = $false
+try { Create-HotspotManager $public $id.ToString() } catch { $failed = $true }
+if (-not $failed) { throw 'missing radio fell back to automatic' }
+$radio.NetworkAdapterId = $id
+[FakeTethering]::Reject = $true
+$failed = $false
+try { Create-HotspotManager $public $id.ToString() } catch { $failed = $true }
+if (-not $failed) { throw 'unsupported explicit radio fell back to automatic' }
+`)
+}
 
 func TestHotspotWindowsSharingVerdictAndPrivateReadiness(t *testing.T) {
 	runHotspotFunctions(t, `

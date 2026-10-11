@@ -57,6 +57,7 @@ type TelemetrySnapshot struct {
 	StartedAt         time.Time                   `json:"started_at"`
 	SampledAt         time.Time                   `json:"sampled_at"`
 	TCPProfile        string                      `json:"tcp_profile,omitempty"`
+	UDPProfile        string                      `json:"udp_profile,omitempty"`
 	Adapters          []AdapterTelemetry          `json:"adapters"`
 	Connections       []ConnectionSnapshot        `json:"active_connections,omitempty"`
 	DomainQuarantines []DomainQuarantineTelemetry `json:"domain_quarantines,omitempty"`

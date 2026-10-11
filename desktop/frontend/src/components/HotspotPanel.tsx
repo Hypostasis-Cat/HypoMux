@@ -3,7 +3,7 @@ import { Badge, Button, Dropdown, Field, Input, Option, Spinner, Switch } from "
 import { Wifi124Regular, Phone24Regular } from "@fluentui/react-icons";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n/i18n";
-import { appServices, type HotspotConfig, type HotspotStatus } from "../platform/services";
+import { appServices, type HotspotAdapter, type HotspotConfig, type HotspotStatus } from "../platform/services";
 import { hotspotDraft } from "./hotspotDraft";
 import { QRCodeSVG } from "qrcode.react";
 import { createHotspotPassword, hotspotQRPayload } from "./hotspotAccess";
@@ -32,6 +32,19 @@ export function HotspotPanel() {
   const text = (zh: string, en: string) => locale === "en" ? en : zh;
   const [config, updateConfig] = useState<HotspotConfig>(() => hotspotDraft.current ?? { ssid: "HypoMux", password: "", band: "auto" });
   const [loadingConfig, setLoadingConfig] = useState(!hotspotDraft.current);
+  const [adapters, setAdapters] = useState<HotspotAdapter[]>([]);
+  const [loadingAdapters, setLoadingAdapters] = useState(true);
+  const [adapterError, setAdapterError] = useState("");
+  const [adapterRevision, setAdapterRevision] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    setLoadingAdapters(true);
+    void appServices.engine.hotspotAdapters().then(value => {
+      if (!cancelled) { setAdapters(value ?? []); setAdapterError(""); }
+    }).catch(reason => { if (!cancelled) setAdapterError(String(reason)); })
+      .finally(() => { if (!cancelled) setLoadingAdapters(false); });
+    return () => { cancelled = true; };
+  }, [adapterRevision]);
   const setConfig = (update: (value: HotspotConfig) => HotspotConfig) => {
     const next = update(hotspotDraft.current ?? config);
     hotspotDraft.current = next;
@@ -102,6 +115,9 @@ export function HotspotPanel() {
   const active = status?.state === "running" || status?.state === "starting" || status?.state === "stopping";
   const liveConfig = sessionConfig?.id === status?.session_id ? sessionConfig?.config : undefined;
   const displayedConfig = active ? liveConfig : config;
+  const adapterID = active ? liveConfig?.adapter_id ?? status?.hotspot_adapter_id ?? "" : config.adapter_id ?? "";
+  const selectedAdapter = adapters.find(value => value.id.replace(/[{}]/g, "").toLowerCase() === adapterID.replace(/[{}]/g, "").toLowerCase());
+  const adapterLabel = adapterID ? selectedAdapter?.name || (active && status?.hotspot_adapter) || text("已保存的网卡不可用", "Saved adapter unavailable") : text("Windows 自动选择", "Windows automatic selection");
   const canShowQR = status?.state === "running" && !pollError && !changingHotspot && !!liveConfig?.password && liveConfig.ssid === status.ssid;
   const qrVisible = showQR && canShowQR;
   const settingsRef = useContentTransition(loadingConfig ? "loading" : active ? "active" : "editable");
@@ -186,7 +202,26 @@ export function HotspotPanel() {
           <Option value="auto">{text("自动", "Automatic")}</Option><Option value="5">5 GHz</Option><Option value="2.4">2.4 GHz</Option>
         </Dropdown>
       </Field>
-      <Field label={text("热点密码", "Network password")} hint={text("8–63 位英文、数字或符号", "8–63 printable ASCII characters")}>
+      <Field className="hotspot-wide-field" label={text("热点发射网卡", "Hotspot adapter")} hint={selectedAdapter?.upstream
+        ? text("此网卡也用于上游聚合，收发会共享无线资源。有空闲无线网卡时可将它专用于热点。", "This adapter also provides an aggregation uplink and shares radio resources. Choose a spare Wi-Fi adapter for a dedicated hotspot.")
+        : text("多张无线网卡时，可将一张专用于热点，减少与上游 Wi-Fi 的争用。", "With multiple Wi-Fi adapters, dedicate one to the hotspot to reduce contention with upstream Wi-Fi.")}>
+        <Dropdown className="hotspot-band-dropdown" value={adapterLabel} selectedOptions={[(selectedAdapter?.id ?? adapterID) || "auto"]} disabled={loadingConfig || loadingAdapters || pending || active}
+          onOptionSelect={(_, data) => {
+            if (!data.optionValue) return;
+            const id = data.optionValue;
+            setConfig(value => {
+              const { adapter_id: _previous, ...rest } = value;
+              return id === "auto" ? rest : { ...rest, adapter_id: id };
+            });
+          }}>
+          <Option value="auto">{text("Windows 自动选择", "Windows automatic selection")}</Option>
+          {adapterID && !selectedAdapter && <Option value={adapterID}>{adapterLabel}</Option>}
+          {adapters.map(adapter => <Option key={adapter.id} value={adapter.id} text={adapter.name} disabled={adapter.status === "Disabled" || adapter.status === "Not Present"}>{adapter.name}{adapter.upstream ? text(" · 上游聚合", " · aggregation uplink") : ""}</Option>)}
+        </Dropdown>
+        <Button size="small" appearance="subtle" disabled={loadingAdapters || pending || active} onClick={() => setAdapterRevision(value => value + 1)}>{loadingAdapters ? text("读取网卡中…", "Loading adapters…") : text("刷新网卡", "Refresh adapters")}</Button>
+        {adapterError && <p role="status">{text("无法读取网卡列表，仍可使用 Windows 自动选择。", "Adapter list unavailable. Windows automatic selection remains available.")}</p>}
+      </Field>
+      <Field className="hotspot-wide-field" label={text("热点密码", "Network password")} hint={text("8–63 位英文、数字或符号", "8–63 printable ASCII characters")}>
         <Input type={showPassword ? "text" : "password"} autoComplete="new-password" value={displayedConfig?.password ?? ""} disabled={loadingConfig || pending || active}
           onChange={(_, data) => setConfig(value => ({ ...value, password: data.value }))}
           contentAfter={<Button size="small" appearance="transparent" aria-pressed={showPassword} onClick={() => setShowPassword(value => !value)}>{showPassword ? text("隐藏", "Hide") : text("显示", "Show")}</Button>} />
@@ -226,6 +261,7 @@ export function HotspotPanel() {
     <Button className="hotspot-qr-toggle" disabled={!canShowQR} aria-pressed={qrVisible} aria-controls="hotspot-connection-content" onClick={() => setShowQR(value => !value)}>{qrVisible ? text("隐藏二维码", "Hide connection code") : text("扫码连接", "Scan to connect")}</Button>
     </aside></div>
     <details className="hotspot-error"><summary>{text("共享诊断", "Sharing diagnostics")}</summary>
+      {active && status?.hotspot_adapter && <p>{text("指定的热点发射网卡", "Selected hotspot adapter")}: {status.hotspot_adapter}</p>}
       {active && status?.configured_band && <p>{text("热点频段配置", "Configured hotspot band")}: {status.configured_band === "auto" ? text("Windows 自动选择", "Windows automatic selection") : `${status.configured_band} GHz`}{status.band_fallback ? text("（5 GHz 受限，已回退）", " (5 GHz restricted; fallback applied)") : ""}</p>}
       {active && !!status?.transmit_link_mbps && <p>{text("热点网卡报告的发送链路速率", "Hotspot adapter reported transmit link rate")}: {status.transmit_link_mbps} Mbps. {text("这是驱动报告的链路值，不代表手机实测吞吐。", "This driver-reported link value is not measured phone throughput.")}</p>}
       <p>{text("热点已开启只表示 Wi-Fi 可接入；设备数量表示 Windows 已检测到连接。出口已校验表示共享接口匹配，但不是手机互联网测速结果。", "Hotspot on means Wi-Fi is available; the device count reflects Windows connections. Verified egress confirms the sharing interfaces, not a phone internet speed test.")}</p>

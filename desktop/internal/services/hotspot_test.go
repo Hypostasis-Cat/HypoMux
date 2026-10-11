@@ -55,12 +55,21 @@ func TestHotspotConfigValidation(t *testing.T) {
 		{"short_password", HotspotConfig{SSID: "a", Password: "1234567", Band: "auto"}},
 		{"unicode_password", HotspotConfig{SSID: "a", Password: "密码12345678", Band: "auto"}},
 		{"band", HotspotConfig{SSID: "a", Password: valid.Password, Band: "6"}},
+		{"adapter_name", HotspotConfig{SSID: "a", Password: valid.Password, Band: "auto", AdapterID: "Wi-Fi"}},
+		{"adapter_script", HotspotConfig{SSID: "a", Password: valid.Password, Band: "auto", AdapterID: "'; throw 'bad"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			if validateHotspotConfig(test.config) == nil {
 				t.Fatal("invalid configuration accepted")
 			}
 		})
+	}
+	for _, id := range []string{"00000000-0000-0000-0000-000000000001", "{00000000-0000-0000-0000-000000000001}"} {
+		config := valid
+		config.AdapterID = id
+		if err := validateHotspotConfig(config); err != nil {
+			t.Fatal("valid hotspot adapter rejected", err)
+		}
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -19,12 +20,15 @@ import (
 // Credentials are passed on stdin and stored only in user-encrypted preferences,
 // never on the command line, in telemetry, or in general HypoMux settings.
 type HotspotConfig struct {
-	SSID     string `json:"ssid"`
-	Password string `json:"password"`
-	Band     string `json:"band"`
+	AdapterID string `json:"adapter_id,omitempty"`
+	SSID      string `json:"ssid"`
+	Password  string `json:"password"`
+	Band      string `json:"band"`
 }
 
 type HotspotStatus struct {
+	HotspotAdapterID      string          `json:"hotspot_adapter_id,omitempty"`
+	HotspotAdapter        string          `json:"hotspot_adapter,omitempty"`
 	SessionID             string          `json:"session_id,omitempty"`
 	ConfiguredBand        string          `json:"configured_band,omitempty"`
 	BandFallback          string          `json:"band_fallback,omitempty"`
@@ -54,7 +58,43 @@ type HotspotDevice struct {
 	Hosts []string `json:"hosts"`
 }
 
+type HotspotAdapter struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Status      string `json:"status"`
+	Upstream    bool   `json:"upstream"`
+}
+
+var hotspotAdapterGUID = regexp.MustCompile(`^(?:\{[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$`)
+
+// This list includes disconnected physical radios, allowing a dedicated AP
+// without first connecting it as an upstream. No network scan is performed.
+func (s *EngineService) HotspotAdapters() ([]HotspotAdapter, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	adapters, err := listHotspotAdapters(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if s.settings != nil {
+		selected := s.settings.Get().SelectedAdapterIDs
+		for i := range adapters {
+			for _, name := range selected {
+				if strings.EqualFold(name, adapters[i].Name) {
+					adapters[i].Upstream = true
+					break
+				}
+			}
+		}
+	}
+	return adapters, nil
+}
+
 func validateHotspotConfig(config HotspotConfig) error {
+	if config.AdapterID != "" && !hotspotAdapterGUID.MatchString(config.AdapterID) {
+		return errors.New("热点发射网卡标识无效，请重新选择网卡")
+	}
 	if !utf8.ValidString(config.SSID) || strings.TrimSpace(config.SSID) == "" || len(config.SSID) > 32 || strings.ContainsAny(config.SSID, "\x00\r\n") {
 		return errors.New("热点名称不能为空，且不能超过 32 个 UTF-8 字节或包含换行")
 	}
@@ -163,7 +203,7 @@ func launchHotspotObserved(ctx context.Context, command *exec.Cmd, config Hotspo
 		_ = output.Close()
 		return nil, err
 	}
-	h := &hotspotSession{id: rand.Text(), config: config, input: input, done: make(chan struct{}), status: HotspotStatus{State: "starting", SSID: config.SSID, Band: config.Band}}
+	h := &hotspotSession{id: rand.Text(), config: config, input: input, done: make(chan struct{}), status: HotspotStatus{State: "starting", SSID: config.SSID, Band: config.Band, HotspotAdapterID: config.AdapterID}}
 	if onCreated != nil {
 		onCreated(h)
 	}

@@ -41,12 +41,15 @@ func (s *scheduler) update(config SchedulingConfig) SchedulingConfig {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	previous := SchedulingConfig{Strategy: s.strategy, Weighted: s.weighted, Adapters: s.adapters}
-	if s.performance != nil {
-		s.performance.mu.Lock()
-		if s.strategy != config.Strategy || !s.performance.allocation.matches(config.Adapters) {
-			s.performance.allocation = adaptiveAllocation{}
+	for _, table := range []*performanceTable{s.performance, s.udpPerformance} {
+		if table == nil {
+			continue
 		}
-		s.performance.mu.Unlock()
+		table.mu.Lock()
+		if s.strategy != config.Strategy || !table.allocation.matches(config.Adapters) {
+			table.allocation = adaptiveAllocation{}
+		}
+		table.mu.Unlock()
 	}
 	s.health.mu.Lock()
 	for _, adapter := range config.Adapters {
@@ -82,5 +85,6 @@ func (s *Server) UpdateScheduling(config SchedulingConfig) (SchedulingConfig, er
 		}
 	}
 	s.performance.retain(bindings)
+	s.udpPerformance.retain(bindings)
 	return previous, nil
 }

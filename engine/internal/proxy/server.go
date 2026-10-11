@@ -18,6 +18,8 @@ type Server struct {
 	cdn              *steamCDN
 	config           Config
 	tcpTuningMode    tcpTuningMode
+	udpTuningMode    udpTuningMode
+	udpPerformance   *performanceTable
 	performance      *performanceTable
 	scheduler        *scheduler
 	schedulers       map[string]*scheduler
@@ -86,6 +88,7 @@ func New(config Config) (*Server, error) {
 	server := &Server{
 		config:        normalized,
 		tcpTuningMode: tcpTuningModeFromEnvironment(),
+		udpTuningMode: udpTuningModeFromEnvironment(),
 		scheduler:     newScheduler(normalized.Adapters, normalized.Weighted, health),
 		schedulers:    make(map[string]*scheduler, len(normalized.Channels)),
 		health:        health,
@@ -107,11 +110,14 @@ func New(config Config) (*Server, error) {
 		)
 	}
 	server.performance = newPerformanceTable()
+	server.udpPerformance = newUDPPerformanceTable()
 	server.scheduler.setLatency(newLatencyTable())
 	server.scheduler.setStrategy(normalized.Strategy)
 	server.scheduler.performance = server.performance
+	server.scheduler.udpPerformance = server.udpPerformance
 	for _, scheduler := range server.schedulers {
 		scheduler.performance = server.performance
+		scheduler.udpPerformance = server.udpPerformance
 	}
 	server.dialTCP = func(
 		ctx context.Context,
@@ -163,6 +169,8 @@ func (s *Server) Start() (Endpoints, error) {
 	go func(ctx context.Context) { defer s.wg.Done(); s.scheduler.latency.run(ctx, s.scheduler) }(s.ctx)
 	s.wg.Add(1)
 	go func(ctx context.Context) { defer s.wg.Done(); s.performance.run(ctx) }(s.ctx)
+	s.wg.Add(1)
+	go func(ctx context.Context) { defer s.wg.Done(); s.udpPerformance.run(ctx) }(s.ctx)
 
 	if len(s.config.Channels) > 0 {
 		return s.startChannelListeners()
@@ -275,6 +283,7 @@ func (s *Server) Snapshot(includeConnections bool) TelemetrySnapshot {
 	result := s.registry.Snapshot(includeConnections)
 	result.Scheduling = s.scheduler.performanceSnapshot()
 	result.TCPProfile = s.tcpProfileName()
+	result.UDPProfile = s.udpProfileName()
 	result.SteamCDN = s.cdn.snapshot()
 	health, quarantines := s.health.snapshot()
 	for index := range result.Adapters {

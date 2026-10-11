@@ -85,12 +85,16 @@ type connectionTelemetry struct {
 
 type telemetryResult struct {
 	Scheduling struct {
-		Strategy string `json:"strategy"`
+		Strategy             string `json:"strategy"`
+		EffectiveTCPStrategy string `json:"effective_tcp_strategy"`
+		UDPStrategy          string `json:"udp_strategy"`
+		UDPState             string `json:"udp_state"`
 	} `json:"scheduling"`
 	SteamCDN          SteamCDNStatus        `json:"steam_cdn"`
 	StartedAt         time.Time             `json:"started_at"`
 	SampledAt         time.Time             `json:"sampled_at"`
 	TCPProfile        string                `json:"tcp_profile,omitempty"`
+	UDPProfile        string                `json:"udp_profile,omitempty"`
 	Adapters          []adapterTelemetry    `json:"adapters"`
 	Connections       []connectionTelemetry `json:"active_connections"`
 	DomainQuarantines []struct {
@@ -530,6 +534,8 @@ func (s *EngineService) Snapshot() (EngineSnapshot, error) {
 			"rate_unit": "bytes_per_second", "strategy": snapshot.Strategy,
 			"sampled_at": snapshot.SampledAt, "hotspot": hotspotPerformanceFields(s.HotspotStatus()),
 			"tcp_profile": telemetry.TCPProfile, "download_bps": snapshot.DownloadBPS,
+			"udp_profile": telemetry.UDPProfile, "udp_strategy": telemetry.Scheduling.UDPStrategy,
+			"udp_state": telemetry.Scheduling.UDPState, "effective_tcp_strategy": telemetry.Scheduling.EffectiveTCPStrategy,
 			"upload_bps": snapshot.UploadBPS, "connections": snapshot.Connections,
 			"adapters": adapters,
 		})

@@ -4,15 +4,66 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HotspotPanel } from "./HotspotPanel";
 import { hotspotDraft } from "./hotspotDraft";
 
-const mocks = vi.hoisted(() => ({ save: vi.fn(), preferences: vi.fn(), sessionConfig: vi.fn(), status: vi.fn(), start: vi.fn(), stop: vi.fn() }));
-vi.mock("../platform/services", () => ({ appServices: { engine: { saveHotspotPreferences: mocks.save, hotspotPreferences: mocks.preferences, hotspotSessionConfig: mocks.sessionConfig, hotspotStatus: mocks.status, startHotspot: mocks.start, stopHotspot: mocks.stop } } }));
+const mocks = vi.hoisted(() => ({ adapters: vi.fn(), save: vi.fn(), preferences: vi.fn(), sessionConfig: vi.fn(), status: vi.fn(), start: vi.fn(), stop: vi.fn() }));
+vi.mock("../platform/services", () => ({ appServices: { engine: { hotspotAdapters: mocks.adapters, saveHotspotPreferences: mocks.save, hotspotPreferences: mocks.preferences, hotspotSessionConfig: mocks.sessionConfig, hotspotStatus: mocks.status, startHotspot: mocks.start, stopHotspot: mocks.stop } } }));
 vi.mock("../i18n/i18n", () => ({ useI18n: () => ({ locale: "en" }) }));
 const stopped = { state: "stopped", ssid: "", band: "auto", ready: true, sharing_verified: false, clients: 0 };
 const running = { ...stopped, state: "running", session_id: "session-one", ssid: "My hotspot", sharing_verified: true, shared_adapter: "HypoMux-Tun", clients: 2 };
-beforeEach(() => { vi.resetAllMocks(); mocks.save.mockResolvedValue(undefined); hotspotDraft.current = undefined; mocks.preferences.mockResolvedValue({ ssid: "HypoMux", password: "", band: "auto" }); mocks.sessionConfig.mockResolvedValue({ ssid: "My hotspot", password: "saved-pass", band: "auto" }); mocks.status.mockResolvedValue(stopped); mocks.start.mockResolvedValue(running); mocks.stop.mockResolvedValue(stopped); });
+beforeEach(() => { vi.resetAllMocks(); mocks.adapters.mockResolvedValue([]); mocks.save.mockResolvedValue(undefined); hotspotDraft.current = undefined; mocks.preferences.mockResolvedValue({ ssid: "HypoMux", password: "", band: "auto" }); mocks.sessionConfig.mockResolvedValue({ ssid: "My hotspot", password: "saved-pass", band: "auto" }); mocks.status.mockResolvedValue(stopped); mocks.start.mockResolvedValue(running); mocks.stop.mockResolvedValue(stopped); });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 describe("HotspotPanel", () => {
+  it("saves a dedicated radio and returns to Windows automatic selection", async () => {
+    const id = "{00000000-0000-0000-0000-000000000001}";
+    mocks.adapters.mockResolvedValue([{ id, name: "Spare Wi-Fi", description: "USB radio", status: "Disconnected", upstream: false }]);
+    render(<HotspotPanel />);
+    await screen.findByText("Hotspot is off");
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "Hotspot adapter" }).hasAttribute("disabled")).toBe(false));
+    fireEvent.click(screen.getByRole("combobox", { name: "Hotspot adapter" }));
+    fireEvent.click(await screen.findByRole("option", { name: "Spare Wi-Fi" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    await waitFor(() => expect(mocks.save).toHaveBeenCalledWith(expect.objectContaining({ adapter_id: id })));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save settings" }).hasAttribute("disabled")).toBe(false));
+    fireEvent.click(screen.getByRole("combobox", { name: "Hotspot adapter" }));
+    fireEvent.click(await screen.findByRole("option", { name: "Windows automatic selection" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    await waitFor(() => expect(mocks.save).toHaveBeenCalledTimes(2));
+    expect(mocks.save.mock.calls[1][0]).not.toHaveProperty("adapter_id");
+  });
+  it("starts with the chosen uplink radio, shows contention guidance and locks it while running", async () => {
+    const id = "{00000000-0000-0000-0000-000000000001}";
+    const config = { ssid: "My hotspot", password: "saved-pass", band: "auto", adapter_id: id };
+    mocks.preferences.mockResolvedValue(config);
+    mocks.sessionConfig.mockResolvedValue(config);
+    mocks.adapters.mockResolvedValue([{ id, name: "Wi-Fi", description: "radio", status: "Up", upstream: true }]);
+    render(<HotspotPanel />);
+    await screen.findByText("Hotspot is off");
+    await screen.findByText(/This adapter also provides an aggregation uplink/);
+    fireEvent.click(screen.getByRole("switch", { name: "Aggregation hotspot" }));
+    await screen.findByText("Hotspot is on");
+    expect(mocks.start).toHaveBeenCalledWith(config);
+    expect(screen.getByRole("combobox", { name: "Hotspot adapter" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "Refresh adapters" }).hasAttribute("disabled")).toBe(true);
+  });
+  it("preserves an unavailable saved radio until the user changes it", async () => {
+    const id = "{00000000-0000-0000-0000-000000000009}";
+    mocks.preferences.mockResolvedValue({ ssid: "HypoMux", password: "saved-pass", band: "auto", adapter_id: id });
+    render(<HotspotPanel />);
+    await screen.findByText("Hotspot is off");
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "Hotspot adapter" }).textContent).toContain("Saved adapter unavailable"));
+    fireEvent.click(screen.getByRole("switch", { name: "Aggregation hotspot" }));
+    await waitFor(() => expect(mocks.start).toHaveBeenCalledWith(expect.objectContaining({ adapter_id: id })));
+  });
+  it("keeps automatic startup available when adapter enumeration fails", async () => {
+    mocks.adapters.mockRejectedValueOnce(new Error("enumeration unavailable"));
+    render(<HotspotPanel />);
+    await screen.findByText("Adapter list unavailable. Windows automatic selection remains available.");
+    await screen.findByText("Hotspot is off");
+    expect(screen.getByRole("switch", { name: "Aggregation hotspot" }).hasAttribute("disabled")).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Refresh adapters" }));
+    await waitFor(() => expect(mocks.adapters).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.queryByText(/Adapter list unavailable/)).toBeNull());
+  });
   it.each(["My hotspot", "Unsaved name"])("uses session credentials after external startup and preserves draft %s", async (ssid) => {
     const draft = { ssid, password: "unsaved-pass", band: "5" as const };
     hotspotDraft.current = draft;

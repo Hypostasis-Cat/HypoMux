@@ -59,12 +59,13 @@ type linkPerformance struct {
 	updated           time.Time
 }
 type performanceTable struct {
-	allocation adaptiveAllocation
-	mu         sync.Mutex
-	links      map[bindingKey]*linkPerformance
-	now        func() time.Time
-	decisions  uint64
-	reasons    map[string]uint64
+	minimumTransfers int
+	allocation       adaptiveAllocation
+	mu               sync.Mutex
+	links            map[bindingKey]*linkPerformance
+	now              func() time.Time
+	decisions        uint64
+	reasons          map[string]uint64
 }
 type performanceLease struct {
 	table       *performanceTable
@@ -79,7 +80,15 @@ type performanceLease struct {
 }
 
 func newPerformanceTable() *performanceTable {
-	return &performanceTable{links: make(map[bindingKey]*linkPerformance), now: time.Now, reasons: make(map[string]uint64)}
+	return &performanceTable{minimumTransfers: 2, links: make(map[bindingKey]*linkPerformance), now: time.Now, reasons: make(map[string]uint64)}
+}
+
+func newUDPPerformanceTable() *performanceTable {
+	p := newPerformanceTable()
+	// QUIC multiplexes transfers in one flow. Keep TCP's stricter demand gate
+	// separate, while requiring sustained traffic on every UDP candidate.
+	p.minimumTransfers = 1
+	return p
 }
 func (p *performanceTable) link(a Adapter) *linkPerformance {
 	k := performanceKey(a)
@@ -207,7 +216,7 @@ func (p *performanceTable) sample() {
 			link.updated = now
 		}
 	}
-	p.allocation.observe(p.links, now)
+	p.allocation.observe(p.links, now, p.minimumTransfers)
 }
 func (p *performanceTable) run(ctx context.Context) {
 	ticker := time.NewTicker(time.Second)
@@ -223,6 +232,9 @@ func (p *performanceTable) run(ctx context.Context) {
 }
 
 type SchedulingTelemetry struct {
+	UDPState             string                    `json:"udp_state,omitempty"`
+	UDPDecisions         map[string]uint64         `json:"udp_decisions,omitempty"`
+	UDPLinks             []SchedulingLinkTelemetry `json:"udp_links,omitempty"`
 	EffectiveTCPStrategy string                    `json:"effective_tcp_strategy"`
 	Latency              []LatencyTelemetry        `json:"latency,omitempty"`
 	Strategy             string                    `json:"strategy"`
@@ -252,29 +264,48 @@ func (s *scheduler) performanceSnapshot() SchedulingTelemetry {
 	}
 	if strategy == StrategyLatency && s.latency != nil {
 		result.State = "estimating"
+		result.UDPState = "estimating"
 		result.Latency, result.Decisions = s.latency.snapshot(s.adapters)
 		return result
 	}
-	if s.performance == nil {
+	if s.performance == nil && s.udpPerformance == nil {
 		return result
 	}
-	p := s.performance
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if strategy == StrategyAdaptive && len(p.allocation.keys) > 1 {
-		result.State = p.allocation.state
-		if result.State == "adapting" {
+	if s.udpPerformance != nil {
+		result.UDPState, result.UDPDecisions, result.UDPLinks = s.udpPerformance.snapshot(s.adapters, strategy)
+		if strategy == StrategyAdaptive && result.UDPState == "adapting" {
+			result.UDPStrategy = StrategyAdaptive
+		}
+	}
+	if s.performance != nil {
+		result.State, result.Decisions, result.Links = s.performance.snapshot(s.adapters, strategy)
+		if strategy == StrategyAdaptive && result.State == "adapting" {
 			result.EffectiveTCPStrategy = StrategyAdaptive
 		}
 	}
-	for reason, count := range p.reasons {
-		result.Decisions[reason] = count
+	return result
+}
+
+func (p *performanceTable) snapshot(adapters []Adapter, strategy string) (string, map[string]uint64, []SchedulingLinkTelemetry) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	state := "legacy"
+	if strategy == StrategyAdaptive {
+		state = "warming-up"
 	}
-	for _, adapter := range s.adapters {
+	if strategy == StrategyAdaptive && len(p.allocation.keys) > 1 {
+		state = p.allocation.state
+	}
+	decisions := make(map[string]uint64, len(p.reasons))
+	for reason, count := range p.reasons {
+		decisions[reason] = count
+	}
+	links := make([]SchedulingLinkTelemetry, 0, len(adapters))
+	for _, adapter := range adapters {
 		l := p.links[performanceKey(adapter)]
 		item := SchedulingLinkTelemetry{Name: adapter.Name, SampleAgeMS: -1}
 		if strategy == StrategyAdaptive {
-			item.AllocationShare = 1 / float64(len(s.adapters))
+			item.AllocationShare = 1 / float64(len(adapters))
 			if len(p.allocation.keys) > 1 {
 				item.AllocationShare = 0
 				for index, key := range p.allocation.keys {
@@ -291,9 +322,9 @@ func (s *scheduler) performanceSnapshot() SchedulingTelemetry {
 				item.SampleAgeMS = p.now().Sub(l.updated).Milliseconds()
 			}
 		}
-		result.Links = append(result.Links, item)
+		links = append(links, item)
 	}
-	return result
+	return state, decisions, links
 }
 
 type leasedConn struct {

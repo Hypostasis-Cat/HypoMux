@@ -6003,7 +6003,7 @@ svg {
 .hotspot-section-heading > span { color: var(--hm-text-tertiary); font-size: 11px; }
 .hotspot-section-heading > svg { color: var(--hm-text-tertiary); }
 .hotspot-fields { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 16px; }
-.hotspot-fields > .fui-Field:nth-child(3) { grid-column: 1 / -1; }
+.hotspot-fields > .hotspot-wide-field { grid-column: 1 / -1; }
 .hotspot-fields > .fui-Field { min-width: 0; align-self: start; }
 .hotspot-fields .fui-Input, .hotspot-fields .hotspot-band-dropdown { box-sizing: border-box; width: 100%; min-width: 0; height: 40px; min-height: 40px; }
 .hotspot-fields .fui-Field__hint { line-height: 1.5; }

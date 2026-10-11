@@ -17,7 +17,7 @@ func TestHotspotPreferencesEncryptedRoundTrip(t *testing.T) {
 	if err != nil || config.SSID != "HypoMux" || config.Password != "" {
 		t.Fatalf("defaults: %v %v", config.SSID, err)
 	}
-	want := HotspotConfig{SSID: "Test hotspot", Password: "test-secret-123", Band: "5"}
+	want := HotspotConfig{SSID: "Test hotspot", Password: "test-secret-123", Band: "5", AdapterID: "{00000000-0000-0000-0000-000000000001}"}
 	if err := s.SaveHotspotPreferences(want); err != nil {
 		t.Fatal(err)
 	}

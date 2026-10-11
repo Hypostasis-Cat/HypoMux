@@ -35,7 +35,7 @@ type udpAssociation struct {
 	channel       string
 	scheduler     *scheduler
 	relay         *net.UDPConn
-	allowedIP     net.IP
+	allowedIP     netip.Addr
 	lockedPort    int
 	flowLimit     int
 	idleTimeout   time.Duration
@@ -53,6 +53,7 @@ type udpFlow struct {
 	adapter     Adapter
 	connection  net.Conn
 	session     *connection
+	lease       *performanceLease
 	lastActive  atomic.Int64
 	lastReply   atomic.Int64
 	closeOnce   sync.Once
@@ -85,13 +86,17 @@ func (s *Server) handleUDPAssociation(
 	if err != nil {
 		return false, fmt.Errorf("listen UDP relay: %w", err)
 	}
+	if s.shouldTuneUDP(session.channel) {
+		tuneUDPRelay(relay)
+	}
+	allowedIP, _ := netip.AddrFromSlice(peer.IP.To4())
 	association := &udpAssociation{
 		server:        s,
 		control:       client,
 		channel:       session.channel,
 		scheduler:     s.schedulers[session.channel],
 		relay:         relay,
-		allowedIP:     peer.IP.To4(),
+		allowedIP:     allowedIP,
 		lockedPort:    requestedPort,
 		flowLimit:     s.udpFlowLimit,
 		idleTimeout:   s.udpIdleTimeout,
@@ -151,7 +156,7 @@ func (a *udpAssociation) serve(controlDone <-chan struct{}) error {
 			deadline = now.Add(a.sweepInterval)
 			_ = a.relay.SetReadDeadline(deadline)
 		}
-		count, clientAddress, err := a.relay.ReadFromUDP(buffer)
+		count, clientAddress, err := a.relay.ReadFromUDPAddrPort(buffer)
 		if err != nil {
 			if errors.Is(err, net.ErrClosed) {
 				return nil
@@ -162,24 +167,24 @@ func (a *udpAssociation) serve(controlDone <-chan struct{}) error {
 			}
 			return fmt.Errorf("read UDP relay: %w", err)
 		}
-		if clientAddress == nil || !clientAddress.IP.Equal(a.allowedIP) {
+		if clientAddress.Addr().Unmap() != a.allowedIP {
 			continue
 		}
 		packet, ok := parseSOCKSUDPPacket(buffer[:count])
 		if !ok {
 			continue
 		}
-		if a.lockedPort != 0 && clientAddress.Port != a.lockedPort {
+		if a.lockedPort != 0 && int(clientAddress.Port()) != a.lockedPort {
 			continue
 		}
 		if a.lockedPort == 0 {
-			a.lockedPort = clientAddress.Port
+			a.lockedPort = int(clientAddress.Port())
 		}
 		a.forward(clientAddress, packet)
 	}
 }
 
-func (a *udpAssociation) forward(clientAddress *net.UDPAddr, packet socksUDPPacket) {
+func (a *udpAssociation) forward(clientAddress netip.AddrPort, packet socksUDPPacket) {
 	if a.scheduler != nil {
 		a.scheduler.watchLatencyAddr(packet.addr.Addr())
 	}
@@ -243,7 +248,7 @@ func (a *udpAssociation) forward(clientAddress *net.UDPAddr, packet socksUDPPack
 }
 
 func (a *udpAssociation) createFlow(
-	clientAddress *net.UDPAddr,
+	clientAddress netip.AddrPort,
 	addr netip.AddrPort,
 	firstPayload []byte,
 	skip ...string,
@@ -283,7 +288,7 @@ func (a *udpAssociation) createFlow(
 	}
 	var failures []error
 	for range attempts {
-		adapter, ok := a.scheduler.selectForTarget(excluded, target)
+		adapter, lease, ok := a.scheduler.acquireUDP(excluded, target)
 		if !ok {
 			break
 		}
@@ -294,6 +299,7 @@ func (a *udpAssociation) createFlow(
 			translated, translateErr := a.server.resolver.TranslateIPv4(translateCtx, adapterDNSBinding(adapter), targetIP)
 			stop()
 			if translateErr != nil {
+				lease.finish()
 				failures = append(failures, translateErr)
 				continue
 			}
@@ -305,6 +311,7 @@ func (a *udpAssociation) createFlow(
 			flowNetwork,
 		)
 		if err != nil {
+			lease.finish()
 			a.scheduler.health.recordFamily(adapter, flowNetwork, false)
 			if adapter.SourceIP == "" || adapter.SourceIPv6 == "" {
 				a.scheduler.MarkFailure(adapter.Name)
@@ -319,6 +326,9 @@ func (a *udpAssociation) createFlow(
 		upstream, err := a.server.dialUDP(ctx, dialer, dialTarget)
 		cancel()
 		if err == nil {
+			if a.server.shouldTuneUDP(a.channel) {
+				tuneUDPConnection(upstream)
+			}
 			var written int
 			written, err = upstream.Write(firstPayload)
 			if err == nil && written != len(firstPayload) {
@@ -326,6 +336,7 @@ func (a *udpAssociation) createFlow(
 			}
 		}
 		if err != nil {
+			lease.finish()
 			if upstream != nil {
 				_ = upstream.Close()
 			}
@@ -340,6 +351,9 @@ func (a *udpAssociation) createFlow(
 		}
 		a.scheduler.MarkSuccess(adapter.Name)
 		a.scheduler.health.recordFamily(adapter, flowNetwork, true)
+		if lease != nil {
+			lease.attach()
+		}
 		clientLabel := clientAddress.String()
 		telemetry := a.server.registry.BeginAddress(
 			"socks5_udp",
@@ -356,6 +370,7 @@ func (a *udpAssociation) createFlow(
 			adapter:     adapter,
 			connection:  upstream,
 			session:     telemetry,
+			lease:       lease,
 		}
 		flow.lastReply.Store(time.Now().UnixNano())
 		flow.touch()
@@ -368,7 +383,7 @@ func (a *udpAssociation) createFlow(
 }
 
 func (a *udpAssociation) createDirectFlow(
-	clientAddress *net.UDPAddr,
+	clientAddress netip.AddrPort,
 	addr netip.AddrPort,
 	network string,
 	firstPayload []byte,
@@ -386,6 +401,9 @@ func (a *udpAssociation) createDirectFlow(
 	cancel()
 	if err != nil {
 		return nil, fmt.Errorf("direct UDP setup: %w", err)
+	}
+	if a.server.shouldTuneUDP(a.channel) {
+		tuneUDPConnection(upstream)
 	}
 	written, err := upstream.Write(firstPayload)
 	if err == nil && written != len(firstPayload) {
@@ -431,14 +449,14 @@ func (f *udpFlow) send(payload []byte) error {
 	return nil
 }
 
-func (f *udpFlow) receiveLoop(clientAddress *net.UDPAddr) {
+func (f *udpFlow) receiveLoop(clientAddress netip.AddrPort) {
 	defer f.close()
 	packet, headerSize, ok := newSOCKSUDPReplyBuffer(f.addr)
 	if !ok {
 		return
 	}
 	// The target is immutable for this flow. Read directly after its cached
-	// SOCKS header; WriteToUDP finishes using the buffer before the next read.
+	// SOCKS header; WriteToUDPAddrPort finishes using it before the next read.
 	buffer := packet[headerSize:]
 	// Same amortisation as serve: re-arm the deadline only after it elapses.
 	deadline := time.Time{}
@@ -462,7 +480,11 @@ func (f *udpFlow) receiveLoop(clientAddress *net.UDPAddr) {
 		if count == 0 {
 			continue
 		}
-		written, err := f.association.relay.WriteToUDP(packet[:headerSize+count], clientAddress)
+		start := time.Now()
+		written, err := f.association.relay.WriteToUDPAddrPort(packet[:headerSize+count], clientAddress)
+		if f.lease != nil {
+			f.lease.link.blocked.Add(int64(time.Since(start)))
+		}
 		if err != nil {
 			return
 		}
@@ -470,6 +492,10 @@ func (f *udpFlow) receiveLoop(clientAddress *net.UDPAddr) {
 			return
 		}
 		f.association.server.registry.AddDown(f.session, uint64(count))
+		if f.lease != nil {
+			f.lease.bytes.Add(uint64(count))
+			f.lease.link.bytes.Add(uint64(count))
+		}
 		if written > 0 {
 			f.touch()
 		}
@@ -486,6 +512,7 @@ func (f *udpFlow) lastActivity() time.Time {
 
 func (f *udpFlow) close() {
 	f.closeOnce.Do(func() {
+		f.lease.finish()
 		_ = f.connection.Close()
 		f.association.mu.Lock()
 		if f.association.flows[f.addr] == f {

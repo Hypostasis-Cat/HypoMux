@@ -39,7 +39,7 @@ func (c *udpHotPathConn) Write(payload []byte) (int, error) {
 }
 
 func TestUDPExistingFlowForwardDoesNotAllocate(t *testing.T) {
-	for _, strategy := range []string{StrategyRoundRobin, StrategyLatency} {
+	for _, strategy := range []string{StrategyRoundRobin, StrategyAdaptive, StrategyLatency} {
 		for _, silent := range []bool{false, true} {
 			// Latency-first silent flows enter the comparative-probe recovery
 			// path, whose candidate selection has separate allocations.
@@ -69,7 +69,7 @@ func TestUDPExistingFlowForwardDoesNotAllocate(t *testing.T) {
 				flow.lastReply.Store(replied.UnixNano())
 				a.flows[addr] = flow
 				packet := socksUDPPacket{addr: addr, payload: []byte("datagram")}
-				allocs := testing.AllocsPerRun(1000, func() { a.forward(nil, packet) })
+				allocs := testing.AllocsPerRun(1000, func() { a.forward(netip.AddrPort{}, packet) })
 				if allocs != 0 {
 					t.Fatalf("existing-flow forwarding allocated %g times per packet", allocs)
 				}

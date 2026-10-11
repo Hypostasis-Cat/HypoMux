@@ -18,12 +18,13 @@ const mocks = vi.hoisted(() => ({
   setSteamCDNEnabled: vi.fn(),
   steamCDNStatus: vi.fn(),
   hotspotPreferences: vi.fn(),
+  hotspotAdapters: vi.fn(),
   hotspotStatus: vi.fn(),
 }));
 
 vi.mock("../platform/services", () => ({
   appServices: {
-    engine: { hotspotPreferences: mocks.hotspotPreferences, setSteamCDNEnabled: mocks.setSteamCDNEnabled, steamCDNStatus: mocks.steamCDNStatus, hotspotStatus: mocks.hotspotStatus },
+    engine: { hotspotAdapters: mocks.hotspotAdapters, hotspotPreferences: mocks.hotspotPreferences, setSteamCDNEnabled: mocks.setSteamCDNEnabled, steamCDNStatus: mocks.steamCDNStatus, hotspotStatus: mocks.hotspotStatus },
     settings: {
       get: mocks.get,
       update: mocks.update,
@@ -61,6 +62,7 @@ beforeEach(() => {
   });
   mocks.steamCDNStatus.mockResolvedValue({available: true, enabled: false, probing: 0, replacements: 0, fallbacks: 0, entries: []});
   mocks.hotspotPreferences.mockResolvedValue({ ssid: "HypoMux", password: "", band: "auto" });
+  mocks.hotspotAdapters.mockResolvedValue([]);
   mocks.hotspotStatus.mockResolvedValue({state: "stopped", ready: false, ssid: "", clients: 0, band: "auto", sharing_verified: false});
   mocks.update.mockImplementation(async (settings) => settings);
   class Observer {

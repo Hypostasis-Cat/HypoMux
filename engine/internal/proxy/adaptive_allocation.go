@@ -69,16 +69,20 @@ func (a *adaptiveAllocation) choose(candidates []Adapter, fallback Adapter, now 
 	return candidates[best]
 }
 
-func (a *adaptiveAllocation) observe(links map[bindingKey]*linkPerformance, now time.Time) {
+func (a *adaptiveAllocation) observe(links map[bindingKey]*linkPerformance, now time.Time, minimum ...int) {
 	if len(a.keys) < 2 {
 		return
 	}
 	var total float64
+	minimumTransfers := 2
+	if len(minimum) > 0 {
+		minimumTransfers = max(1, minimum[0])
+	}
 	for _, key := range a.keys {
 		l := links[key]
-		// Require multiple actually transferring streams on every candidate.
+		// TCP needs multiple streams; UDP permits a multiplexed QUIC flow.
 		// Startup, idle keep-alives and cumulative historical samples don't qualify.
-		if l == nil || l.windowTransfers < 2 || l.windowBlocked || l.windowRate <= 0 {
+		if l == nil || l.windowTransfers < minimumTransfers || l.windowBlocked || l.windowRate <= 0 {
 			a.windowSamples, a.windowTotal, a.allocations = 0, 0, 0
 			a.reference = 0
 			if now.Before(a.cooldownUntil) {
@@ -108,7 +112,7 @@ func (a *adaptiveAllocation) observe(links map[bindingKey]*linkPerformance, now 
 		a.reference = mean
 		return
 	}
-	// An unchanged set of long-lived TCP streams cannot test a new allocation.
+	// An unchanged set of long-lived flows cannot test a new allocation.
 	if arrivals < max(4, len(a.keys)) {
 		return
 	}

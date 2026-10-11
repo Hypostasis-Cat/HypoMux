@@ -31,6 +31,7 @@ $configuredBand = 'auto'
 $bandFallback = ''
 $transmitLinkMbps = 0
 $receiveLinkMbps = 0
+$hotspotAdapter = ''
 
 function Publish-State([string]$state, [string]$message, [bool]$verified) {
     $clients = 0
@@ -44,8 +45,8 @@ function Publish-State([string]$state, [string]$message, [bool]$verified) {
             $devicesAvailable = $true
         } catch { $devices = @() } # Optional UI detail must not stop networking.
     }
-    $ssid = ''; $band = 'auto'
-    if ($null -ne $config) { $ssid = [string]$config.ssid; $band = [string]$config.band }
+    $ssid = ''; $band = 'auto'; $adapterID = ''
+    if ($null -ne $config) { $ssid = [string]$config.ssid; $band = [string]$config.band; $adapterID = [string]$config.adapter_id }
     [Console]::WriteLine((@{
         state = $state; ssid = $ssid; band = $band; clients = $clients
         shared_adapter = 'HypoMux-Tun'; sharing_verified = $verified; message = $message
@@ -56,6 +57,7 @@ function Publish-State([string]$state, [string]$message, [bool]$verified) {
         diagnostics = $sharingDetail
         gateway_address = $gatewayAddress
         configured_band = $configuredBand; band_fallback = $bandFallback
+        hotspot_adapter = $hotspotAdapter; hotspot_adapter_id = $adapterID
         transmit_link_mbps = $transmitLinkMbps; receive_link_mbps = $receiveLinkMbps
         devices = $devices; devices_available = $devicesAvailable
         updated_at = [DateTime]::UtcNow.ToString('o')
@@ -78,6 +80,47 @@ function Await-Action($operation) {
     $task = $method.Invoke($null, @($operation))
     if (-not $task.Wait(15000)) { $operation.Cancel(); throw 'Windows configuration timed out' }
     $task.GetAwaiter().GetResult()
+}
+
+function Get-HotspotWinRTAdapters {
+    # Connected adapters are already available without Wi-Fi device access.
+    foreach ($hostName in $network::GetHostNames()) {
+        if ($null -ne $hostName.IPInformation -and $null -ne $hostName.IPInformation.NetworkAdapter) { $hostName.IPInformation.NetworkAdapter }
+    }
+}
+
+function Find-HotspotWiFiAdapters {
+    # A dedicated, disconnected radio has no IP host name. Enumerate devices,
+    # without requesting a scan, connection, or a change of location settings.
+    $wifi = [Windows.Devices.WiFi.WiFiAdapter, Windows.Devices.WiFi, ContentType=WindowsRuntime]
+    $listType = [System.Collections.Generic.IReadOnlyList[Windows.Devices.WiFi.WiFiAdapter]]
+    $radios = Await-Operation ($wifi::FindAllAdaptersAsync()) $listType 10000
+    foreach ($radio in $radios) { $radio.NetworkAdapter }
+}
+
+function Resolve-HotspotAdapter([string]$id) {
+    $guid = [guid]$id
+    $physical = @(Get-NetAdapter -Physical -ErrorAction Stop | Where-Object {
+        ([guid]$_.InterfaceGuid) -eq $guid -and ($_.InterfaceType -eq 71 -or $_.NdisPhysicalMedium -in @(1, 9))
+    })
+    if ($physical.Count -ne 1 -or [string]$physical[0].Status -in @('Disabled', 'Not Present')) { throw '指定的热点发射网卡不可用，请启用或重新选择无线网卡。' }
+    $script:hotspotAdapter = [string]$physical[0].Name
+    $match = @(Get-HotspotWinRTAdapters | Where-Object { $_.NetworkAdapterId -eq $guid } | Select-Object -First 1)
+    if ($match.Count -eq 0) {
+        try { $match = @(Find-HotspotWiFiAdapters | Where-Object { $_.NetworkAdapterId -eq $guid } | Select-Object -First 1) }
+        catch { throw 'Windows 无法访问指定无线网卡，请检查无线服务与 Wi-Fi 访问权限，或改用自动选择。' }
+    }
+    if ($match.Count -ne 1) { throw 'Windows 未提供指定无线网卡，请刷新列表后重新选择。' }
+    return $match[0]
+}
+
+function Create-HotspotManager($profile, [string]$id) {
+    if ([string]::IsNullOrEmpty($id)) { return $tethering::CreateFromConnectionProfile($profile) }
+    $adapter = Resolve-HotspotAdapter $id
+    # The public profile remains the GUID-verified TUN; only the private radio
+    # changes. Never silently fall back when an explicit adapter is rejected.
+    try { return $tethering::CreateFromConnectionProfile($profile, $adapter) }
+    catch { throw 'Windows 无法用指定网卡发射热点，请检查驱动的移动热点支持，或改用自动选择。' }
 }
 
 function Shared-Connections {
@@ -387,7 +430,8 @@ public static class HypoMuxHotspotLifetime {
     $phase = 'tethering capability'
     $capability = $tethering::GetTetheringCapabilityFromConnectionProfile($profile)
     if ([string]$capability -ne 'Enabled') { throw ('Tethering capability: ' + [string]$capability) }
-    $manager = $tethering::CreateFromConnectionProfile($profile)
+    $phase = 'hotspot radio selection'
+    $manager = Create-HotspotManager $profile ([string]$config.adapter_id)
     if ([string]$manager.TetheringOperationalState -ne 'Off') { throw 'An existing Windows hotspot is active; turn it off before starting HypoMux hotspot' }
     $hotspotOffConfirmed = $true
     if (@(Shared-Connections).Count -ne 0) { throw 'Internet Connection Sharing is already in use; existing sharing was preserved' }

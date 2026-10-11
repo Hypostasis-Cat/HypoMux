@@ -6,15 +6,16 @@ import (
 )
 
 type scheduler struct {
-	mu            sync.Mutex
-	adapters      []Adapter
-	strategy      string
-	performance   *performanceTable
-	latency       *latencyTable
-	weighted      bool
-	next          int
-	currentWeight map[string]int
-	health        *healthTable
+	mu             sync.Mutex
+	adapters       []Adapter
+	strategy       string
+	performance    *performanceTable
+	udpPerformance *performanceTable
+	latency        *latencyTable
+	weighted       bool
+	next           int
+	currentWeight  map[string]int
+	health         *healthTable
 
 	// latencyWatch mirrors "strategy == StrategyLatency && latency != nil" so the
 	// per-datagram path can read it without taking mu. It is republished by
@@ -155,5 +156,31 @@ func (s *scheduler) acquireTCP(excluded map[string]struct{}, domain string, targ
 		return Adapter{}, nil, false
 	}
 	adapter, lease := s.performance.acquire(candidates, s.strategy == StrategyAdaptive, fallback, s.adapters)
+	return adapter, lease, true
+}
+
+// Only new UDP flows follow changed shares. Established sockets stay bound
+// to preserve QUIC/NAT continuity, and learn from their own download replies.
+func (s *scheduler) acquireUDP(excluded map[string]struct{}, target string) (Adapter, *performanceLease, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	candidates := s.health.candidates(s.adapters, excluded, "")
+	if len(candidates) == 0 {
+		return Adapter{}, nil, false
+	}
+	var fallback Adapter
+	if s.strategy == StrategyLatency && s.latency != nil {
+		fallback = s.latency.selectAdapter(candidates, target)
+	} else {
+		var ok bool
+		fallback, ok = s.selectLocked(excluded, "")
+		if !ok {
+			return Adapter{}, nil, false
+		}
+	}
+	if s.udpPerformance == nil {
+		return fallback, nil, true
+	}
+	adapter, lease := s.udpPerformance.acquire(candidates, s.strategy == StrategyAdaptive, fallback, s.adapters)
 	return adapter, lease, true
 }

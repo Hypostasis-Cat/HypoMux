@@ -98,9 +98,12 @@ export type SteamCDNStatus = {
  entries: Array<{probe_bps?: number; probed_at?: string; admission_reason?: string; source?: string; evaluated_at?: string; switched_bytes?: number; original_bytes?: number; switched_bps?: number; switched_active?: number; transfer_failures?: number; decision_reason?: string; validated?: boolean; preferred?: boolean; total_bps?: number; active_connections?: number; successful_connections?: number; effective_bytes?: number; adapter: string; domain: string; port: string; ip: string; download_bps: number; samples: number; selections: number; cooldown_until: string; expires_at: string}>;
 };
 
-export type HotspotConfig = { ssid: string; password: string; band: "auto" | "2.4" | "5" };
+export type HotspotConfig = { ssid: string; password: string; band: "auto" | "2.4" | "5"; adapter_id?: string };
+export type HotspotAdapter = { id: string; name: string; description: string; status: string; upstream: boolean };
 export type HotspotStatus = {
   session_id?: string;
+  hotspot_adapter?: string;
+  hotspot_adapter_id?: string;
   configured_band?: string; band_fallback?: string;
   transmit_link_mbps?: number; receive_link_mbps?: number;
   devices?: Array<{ mac: string; hosts: string[] }>;
@@ -279,6 +282,7 @@ export const appServices = {
     saveSelected: (ids: string[]) => Call.ByName(engineMethod("SaveDiagnosticSelection"), ids) as Promise<AdapterView[]>,
   },
   engine: {
+    hotspotAdapters: () => Call.ByName(engineMethod("HotspotAdapters")) as Promise<HotspotAdapter[]>,
     trayStatus: () => Call.ByName(engineMethod("TrayStatus")) as Promise<{ phase: string; mode: string }>,
     saveHotspotPreferences: (config: HotspotConfig) => Call.ByName(engineMethod("SaveHotspotPreferences"), config) as Promise<void>,
     hotspotPreferences: () => Call.ByName(engineMethod("HotspotPreferences")) as Promise<HotspotConfig>,
