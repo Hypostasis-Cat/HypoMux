@@ -765,7 +765,7 @@ func replaceFileAtomically(path string, data []byte, mode os.FileMode) error {
 	if err := os.WriteFile(temporary, data, mode); err != nil {
 		return err
 	}
-	if err := os.Rename(temporary, path); err != nil {
+	if err := renameRuleSetFile(temporary, path); err != nil {
 		_ = os.Remove(temporary)
 		return err
 	}
