@@ -15,6 +15,7 @@ import {
 } from "./ConnectionsPage";
 
 const mocks = vi.hoisted(() => ({
+  locale: "en",
   connections: vi.fn(),
   routingSnapshot: vi.fn(),
   previewBatch: vi.fn(),
@@ -34,7 +35,7 @@ vi.mock("../platform/services", () => ({
 }));
 
 vi.mock("../i18n/i18n", () => ({
-  useI18n: () => ({ locale: "en" }),
+  useI18n: () => ({ locale: mocks.locale }),
 }));
 
 const NotificationTestProvider = ({ children }: PropsWithChildren) => (
@@ -139,6 +140,7 @@ const adapterRuntime = [
 
 describe("ConnectionsPage interactions", () => {
   beforeEach(() => {
+    mocks.locale = "en";
     vi.stubGlobal("ResizeObserver", class {
       observe() {}
       unobserve() {}
@@ -341,7 +343,7 @@ describe("ConnectionsPage interactions", () => {
     renderPage(<ConnectionsPage adapterRuntime={adapterRuntime} />);
     await screen.findByText("ethernet.example");
 
-    fireEvent.click(screen.getByRole("button", { name: "Sort Process ascending" }));
+    fireEvent.click(screen.getByRole("button", { name: "Sort by Process" }));
 
     const rows = screen.getAllByRole("article");
     expect(within(rows[0]).getByText("Alpha.exe")).not.toBeNull();
@@ -352,18 +354,39 @@ describe("ConnectionsPage interactions", () => {
     renderPage(<ConnectionsPage adapterRuntime={adapterRuntime} />);
     await screen.findByText("ethernet.example");
 
-    const trafficSort = screen.getByRole("button", { name: "Sort Traffic descending" });
+    const trafficSort = screen.getByRole("button", { name: "Sort by Traffic" });
     fireEvent.click(trafficSort);
 
-    expect(trafficSort.closest('[role="columnheader"]')?.getAttribute("aria-sort")).toBe("descending");
+    const sortGroup = screen.getByRole("group", { name: "Sort connections" });
+    expect(within(sortGroup).getAllByRole("button")).toHaveLength(5);
+    expect(trafficSort.getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "Sort by Process" }).getAttribute("aria-pressed")).toBe("false");
+    expect(trafficSort.getAttribute("aria-describedby")).toBe(screen.getByRole("status").id);
+    expect(screen.queryByRole("columnheader")).toBeNull();
+    expect(sortGroup.querySelector('[role="row"], [aria-sort]')).toBeNull();
     expect(screen.getByRole("status").textContent).toContain("Traffic · Descending");
 
-    fireEvent.click(screen.getByRole("button", { name: "Sort Traffic ascending" }));
+    fireEvent.click(trafficSort);
 
     const rows = screen.getAllByRole("article");
     expect(within(rows[0]).getByText("Alpha.exe")).not.toBeNull();
     expect(within(rows[1]).getByText("Zulu.exe")).not.toBeNull();
     expect(screen.getByRole("status").textContent).toContain("Traffic · Ascending");
+  });
+
+  it.each([
+    { locale: "en", search: "Search active connections", clear: "Clear search" },
+    { locale: "zh", search: "搜索活动连接", clear: "清空搜索" },
+  ])("names the search clear action in $locale and restores all results", async ({ locale, search, clear }) => {
+    mocks.locale = locale;
+    renderPage(<ConnectionsPage />);
+    await screen.findByText("ethernet.example");
+    const input = screen.getByRole("searchbox", { name: search });
+    fireEvent.change(input, { target: { value: "ethernet.example" } });
+    expect(screen.queryByText("wifi.example")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: clear }));
+    expect(input).toHaveProperty("value", "");
+    expect(screen.getByText("wifi.example")).not.toBeNull();
   });
 
   it("only offers single-NIC routing when such connections exist", async () => {

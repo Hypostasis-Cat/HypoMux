@@ -1,4 +1,6 @@
 overrides:
   "undici@>=8.0.0 <8.10.2": "8.10.2"
   "nanoid@<3.3.18": "3.3.18"
-  "pixi-live2d-display>gh-pages": "^6.3.0"
+  # The published Cubism browser bundle does not use this docs deployment CLI.
+  "pixi-live2d-display>gh-pages": "-"
+  "source-map-js@<1.2.2": "1.2.2"

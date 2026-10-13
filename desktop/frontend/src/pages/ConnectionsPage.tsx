@@ -34,7 +34,7 @@ import {
   Globe20Regular,
   PlugConnected20Regular,
 } from "@fluentui/react-icons";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { GlassSurface } from "../components/material/GlassSurface";
 import { VirtualRows, type VirtualRow } from "../components/VirtualRows";
 import { usePageActive } from "../components/shell/PageActivity";
@@ -202,6 +202,7 @@ export function ConnectionsPage({
   const contextMenuTargetRef = useRef<HTMLSpanElement>(null);
   const contextMenuOriginRef = useRef<HTMLElement | null>(null);
   const restoreFocusTarget = useRestoreFocusTarget();
+  const sortStatusId = useId();
   const quickRuleRequest = useRef(0);
   const pendingScrollTop = useRef<number | null>(null);
   const { notify } = useAppNotifications();
@@ -629,6 +630,7 @@ export function ConnectionsPage({
         <div className="connections-heading-actions">
           <SearchBox
             aria-label={text("搜索活动连接", "Search active connections")}
+            dismiss={{ "aria-label": text("清空搜索", "Clear search") }}
             autoComplete="off"
             spellCheck={false}
             value={query}
@@ -677,7 +679,7 @@ export function ConnectionsPage({
           <span className="connection-view-result">
             <Filter20Regular />
             <span>{text(`显示 ${filtered.length} / ${snapshot.connections.length}`, `Showing ${filtered.length} of ${snapshot.connections.length}`)}</span>
-            <span className="connection-sort-summary" role="status" aria-live="polite">
+            <span id={sortStatusId} className="connection-sort-summary" role="status" aria-live="polite">
               {sortSummary}
               <span aria-hidden="true">{sort.direction === "ascending" ? "↑" : "↓"}</span>
             </span>
@@ -732,7 +734,7 @@ export function ConnectionsPage({
             </label>
           </div>
         </div>
-        <div className="connection-table-head" role="row">
+        <div className="connection-table-head" role="group" aria-label={text("连接排序", "Sort connections")}>
           {columns.map((column) => {
             const direction = sort.key === column.key ? sort.direction : undefined;
             const nextDirection = direction
@@ -743,11 +745,13 @@ export function ConnectionsPage({
               `Sort ${column.label} ${nextDirection}`,
             );
             return (
-              <span key={column.key} role="columnheader" aria-sort={direction ?? "none"}>
+              <span key={column.key}>
                 <button
                   type="button"
                   className={`connection-sort-button${direction ? " is-active" : ""}`}
-                  aria-label={sortAction}
+                  aria-label={text(`按${column.label}排序`, `Sort by ${column.label}`)}
+                  aria-pressed={Boolean(direction)}
+                  aria-describedby={direction ? sortStatusId : undefined}
                   title={sortAction}
                   onClick={() => setSort({ key: column.key, direction: nextDirection })}
                 >

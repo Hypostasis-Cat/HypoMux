@@ -30,6 +30,27 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
+it.each([
+  { isComposing: true, keyCode: 13 },
+  { isComposing: false, keyCode: 229 },
+])("keeps IME candidate confirmation separate from rule submission (%j)", async (compositionKey) => {
+  renderPage();
+  await screen.findByDisplayValue("browser.exe");
+  const input = screen.getByRole("textbox", { name: "New rule match value" });
+  fireEvent.compositionStart(input);
+  fireEvent.change(input, { target: { value: "中文.exe" } });
+  fireEvent.keyDown(input, { key: "Enter", code: "Enter", ...compositionKey });
+  expect(mocks.validate).not.toHaveBeenCalled();
+  expect(input).toHaveProperty("value", "中文.exe");
+  expect(screen.queryByRole("switch", { name: "Enable rule 中文.exe" })).toBeNull();
+
+  fireEvent.compositionEnd(input, { data: "中文" });
+  fireEvent.keyDown(input, { key: "Enter", code: "Enter", isComposing: false, keyCode: 13 });
+  await screen.findByRole("switch", { name: "Enable rule 中文.exe" });
+  expect(mocks.validate).toHaveBeenCalledTimes(1);
+  expect(input).toHaveProperty("value", "");
+});
+
 it("reports a failed add validation and allows retry", async () => {
   renderPage();
   await screen.findByDisplayValue("browser.exe");

@@ -849,7 +849,11 @@ export function RoutingPage() {
             placeholder={placeholders[activeType]}
             onChange={(_, data) => setNewValue(data.value)}
             onKeyDown={(event) => {
-              if (event.key === "Enter" && newValue.trim()) void addRule();
+              if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
+              if (event.key === "Enter" && newValue.trim()) {
+                event.preventDefault();
+                void addRule();
+              }
             }}
           />
           <Dropdown
