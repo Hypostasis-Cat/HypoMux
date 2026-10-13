@@ -35,8 +35,15 @@ try {
         $_.Address.AddressFamily.ToString() -eq $family -and -not $_.Address.IsIPv6LinkLocal -and
         -not $_.Address.IsIPv6Multicast -and -not [Net.IPAddress]::IsLoopback($_.Address) -and
         -not $_.Address.ToString().StartsWith('169.254.') -and
-        $_.DuplicateAddressDetectionState -eq 'Preferred' -and $_.AddressPreferredLifetime -gt 0
-    } | Sort-Object { $_.Address.ToString() })
+        $_.DuplicateAddressDetectionState -eq 'Preferred' -and $_.AddressPreferredLifetime -gt 0 -and $_.AddressValidLifetime -gt 0
+    } | Sort-Object {
+        $priority = 0
+        if ($_.Address.AddressFamily -eq 'InterNetworkV6') {
+            if (($_.Address.GetAddressBytes()[0] -band 0xfe) -eq 0xfc) { $priority += 2 }
+            if ($_.SuffixOrigin -eq [Net.NetworkInformation.SuffixOrigin]::Random) { $priority++ }
+        }
+        $priority
+    }, { $_.Address.ToString() })
     if ($sources.Count -eq 0) { throw "The selected adapter has no preferred usable $AddressFamily source." }
     if ($TUNMTU -and $AddressFamily -ne 'IPv6') {throw 'The minimum MTU option requires IPv6.'}
     $index6 = if ($AddressFamily -eq 'IPv6') {$properties.GetIPv6Properties().Index} else {0}

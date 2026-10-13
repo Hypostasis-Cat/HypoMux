@@ -1,0 +1,572 @@
+{
+  "schema": 1,
+  "tested_at": "2026-10-13T13:11:45.907700+08:00",
+  "baseline_commit": "53d9858d772a28c7a3d5e55083daac3a1b29019e",
+  "platform": "Windows 10.0.26300.0 AMD64, Go 1.26.6",
+  "network": {
+    "adapter": "WLAN",
+    "physical_network": "dual-stack",
+    "existing_tunnel": "Mihomo",
+    "acceptance_binding": "Only the physical IPv6 source/interface is provided to IPv6 data-path tests."
+  },
+  "overall": "partial_acceptance",
+  "conclusion": "已修复临时 IPv6 地址优先导致的绑定波动。当前可执行的核心 IPv6、双栈回退及严格 TUN 检查通过；传统 DNS/WFP 在授权兼容窗口内通过并恢复 Mihomo 严格路由。完整验收仍受真实 IPv6-only/NAT64、提供方原生 IPv6 及外部测试端点条件限制。",
+  "local_engine_regression": {
+    "passed": 28,
+    "failed": 0,
+    "skipped": 3,
+    "cases": [
+      {
+        "name": "TestIPv6ICMPRealLoopback",
+        "status": "pass"
+      },
+      {
+        "name": "TestIPv6OnlyBindingAndScopedDNS",
+        "status": "pass"
+      },
+      {
+        "name": "TestNAT64RFC6052And7050",
+        "status": "pass"
+      },
+      {
+        "name": "TestIPv6DNSCacheIsolatesAddressInterfaceServersAndNAT64",
+        "status": "pass"
+      },
+      {
+        "name": "TestIPv6DNSLastWaiterCancellationClosesLookupSocket",
+        "status": "pass"
+      },
+      {
+        "name": "TestIPv6DNSRealUDPAndTCPFallback",
+        "status": "pass"
+      },
+      {
+        "name": "TestIPv6DoHRealTLSAndCacheIsolation",
+        "status": "pass"
+      },
+      {
+        "name": "TestNormalizeConfigAcceptsOptionalIPv6AndRejectsUnsafeSources",
+        "status": "pass"
+      },
+      {
+        "name": "TestDNSPodDualStackIPv6BootstrapAndIPv4WinnerCancellation",
+        "status": "pass"
+      },
+      {
+        "name": "TestIPv6OnlyNAT64DomainFallbackAndSuccessfulLoserCleanup",
+        "status": "pass"
+      },
+      {
+        "name": "TestIPv6OnlyNAT64UDPUsesOriginalReplyTarget",
+        "status": "pass"
+      },
+      {
+        "name": "TestIPv6OnlyProxyRealSOCKSTCPAndUDP",
+        "status": "pass"
+      },
+      {
+        "name": "TestDualStackConnectionFailureFallsBackAndRetriesAddresses",
+        "status": "pass"
+      },
+      {
+        "name": "TestDualStackSlowDNSDoesNotBlockOtherFamily",
+        "status": "pass"
+      },
+      {
+        "name": "TestDualStackBlackholeReservesSocketForDelayedFamily",
+        "status": "pass"
+      },
+      {
+        "name": "TestDualStackLoserIsCancelledWithoutLeakingSocket",
+        "status": "pass"
+      },
+      {
+        "name": "TestIPv6OnlyNAT64LiteralKeepsSelectedSource",
+        "status": "pass"
+      },
+      {
+        "name": "TestIPv6OnlyCannotSilentlyDialUnboundIPv4",
+        "status": "pass"
+      },
+      {
+        "name": "TestIPv6OnlyDefaultDNSPrefersAAAAAndKeepsIPv4OnlyDomains",
+        "status": "pass"
+      },
+      {
+        "name": "TestIPv6HealthFailureDoesNotPoisonIPv4OrNewAddress",
+        "status": "pass"
+      },
+      {
+        "name": "TestPublicIPv6NetworkAcceptance",
+        "status": "skip"
+      },
+      {
+        "name": "TestPublicIPv6UDPNetworkAcceptance",
+        "status": "skip"
+      },
+      {
+        "name": "TestPublicNAT64NetworkAcceptance",
+        "status": "skip"
+      },
+      {
+        "name": "TestIPv6LatencyUsesSameFamilyReferences",
+        "status": "pass"
+      },
+      {
+        "name": "TestLatencySchedulerRespectsExclusionsAndIPv6",
+        "status": "pass"
+      },
+      {
+        "name": "TestTUNTCPPoolRejectsDomainAndIPv6WithoutBoundSource",
+        "status": "pass"
+      },
+      {
+        "name": "TestTUNTCPPoolRelaysLiteralIPv6WithBoundSource",
+        "status": "pass"
+      },
+      {
+        "name": "TestSteamGlobalDualStackDiscovery",
+        "status": "pass"
+      },
+      {
+        "name": "TestSteamIPv6OnlyDiscoveryFiltersInvalidAnswers",
+        "status": "pass"
+      },
+      {
+        "name": "TestParseAndPackSOCKSUDPIPv6",
+        "status": "pass"
+      },
+      {
+        "name": "TestSOCKSUDPRelaysLiteralIPv6WithStableFlow",
+        "status": "pass"
+      }
+    ],
+    "evidence": ".go-cache-local/ipv6-20261013/engine-ipv6.jsonl"
+  },
+  "desktop_recovery_and_readonly_preflight": {
+    "passed": 7,
+    "failed": 0,
+    "skipped": 0,
+    "cases": [
+      {
+        "name": "TestDesktopIPv6ICMPRealLoopback",
+        "status": "pass"
+      },
+      {
+        "name": "TestReadOnlyWindowsDefaultDNSEgress",
+        "status": "pass"
+      },
+      {
+        "name": "TestReadOnlyNetworkRouteSnapshot",
+        "status": "pass"
+      },
+      {
+        "name": "TestRuntimeBindingRealCoreIPv6Loopback",
+        "status": "pass"
+      },
+      {
+        "name": "TestRuntimeBindingRealCoreRetryAndRejoin",
+        "status": "pass"
+      },
+      {
+        "name": "TestRuntimeBindingRealCoreRecoversStaleIPv6Source",
+        "status": "pass"
+      },
+      {
+        "name": "TestRealWindowsTunPreflightIsReadOnly",
+        "status": "pass"
+      }
+    ],
+    "evidence": ".go-cache-local/ipv6-20261013/desktop-recovery.jsonl"
+  },
+  "public_alidns_https_doh_udp_ntp": {
+    "status": "passed",
+    "tests": [
+      {
+        "evidence": [
+          "=== RUN   TestPublicIPv6NetworkAcceptance",
+          "    ipv6_network_acceptance_test.go:120: verified DoH policy=alidns transport=doh server=dns.alidns.com@[2400:3200::1]:443",
+          "    ipv6_network_acceptance_test.go:121: verified TLS peer=[2400:3200:baba::1]:443 source=[<selected-WLAN-IPv6>]:10886 adapter=WLAN",
+          "    ipv6_network_acceptance_test.go:122: verified TLS peer=[2400:3200:baba::1]:443 source=[<selected-WLAN-IPv6>]:10887 adapter=WLAN",
+          "--- PASS: TestPublicIPv6NetworkAcceptance (0.31s)"
+        ],
+        "name": "TestPublicIPv6NetworkAcceptance",
+        "status": "pass"
+      },
+      {
+        "evidence": [
+          "=== RUN   TestPublicIPv6UDPNetworkAcceptance",
+          "    ipv6_network_acceptance_test.go:159: resolved NTP IPv6 endpoint domain=ntp.tuna.tsinghua.edu.cn address=2402:f000:1:416:101:6:6:172 DNS=dns.alidns.com@[2400:3200::1]:443",
+          "    ipv6_network_acceptance_test.go:147: UDP target=[2402:f000:1:416:101:6:6:172]:123 source=[<selected-WLAN-IPv6>]:54735",
+          "    ipv6_network_acceptance_test.go:198: verified public IPv6 UDP ntp reply bytes=48 target=[2402:f000:1:416:101:6:6:172]:123",
+          "--- PASS: TestPublicIPv6UDPNetworkAcceptance (0.20s)"
+        ],
+        "name": "TestPublicIPv6UDPNetworkAcceptance",
+        "status": "pass"
+      }
+    ],
+    "evidence": ".go-cache-local/ipv6-20261013/public-alidns-ntp.json"
+  },
+  "independent_core_proxy_and_tun_pool": {
+    "status": "passed",
+    "passed_checks": 11,
+    "checks": [
+      "real_engine_ipc",
+      "source_bound_ipv6_doh",
+      "ordinary_socks_domain_tls",
+      "ordinary_socks_domain_https_payload",
+      "ordinary_socks_literal_tls",
+      "ordinary_socks_literal_https_payload",
+      "ordinary_http_connect_tls",
+      "ordinary_http_connect_https_payload",
+      "tun_pool_tcp_literal_tls",
+      "tun_pool_tcp_literal_https_payload",
+      "tun_pool_udp_ntp_and_reply_identity"
+    ],
+    "evidence": ".go-cache-local/ipv6-20261013/ipv6-public-proxy-regression-ntp.json"
+  },
+  "native_dualstack_tcp_fault_fallback": {
+    "status": "passed",
+    "cases": [
+      "blocked_tcp4",
+      "blocked_tcp6"
+    ],
+    "scope": "Actual process/source/interface-scoped WFP denial, verified alternate-family TLS and physical-family recovery after filter removal.",
+    "evidence": ".go-cache-local/ipv6-20261013/dualstack.log"
+  },
+  "strict_system_tun": {
+    "status": "passed",
+    "passed_checks": 15,
+    "checks": [
+      "elevated_real_core",
+      "ipv6_only_pool_start",
+      "strict_ipv6_tun_activate",
+      "owned_tun_ipv6_minimum_mtu",
+      "independent_system_ipv6_udp_via_selected_pool",
+      "independent_system_ipv6_tls_via_selected_pool",
+      "system_ipv6_https_payload",
+      "normal_tun_stop",
+      "normal_stop_routes_restored_and_other_tunnels_preserved",
+      "strict_tun_restart_for_owned_sidecar_crash",
+      "cleanup_after_owned_sidecar_crash",
+      "sidecar_crash_routes_restored_and_other_tunnels_preserved",
+      "ipv6_pool_restart_after_sidecar_failure",
+      "strict_tun_restart_for_owned_core_crash",
+      "core_crash_sidecar_job_terminated_and_routes_restored"
+    ],
+    "mtu": 1280,
+    "https_payload_bytes": 4194304,
+    "scope": "Independent unbound OS-routed IPv6 TCP/UDP through production-generated strict TUN; normal stop, owned sidecar crash, owned Core crash and Job cleanup.",
+    "evidence": ".go-cache-local/ipv6-20261013/system-mtu/ipv6-system-tun-acceptance.json"
+  },
+  "wfp_crash_cleanup": {
+    "status": "passed",
+    "evidence": ".go-cache-local/ipv6-20261013/wfp-dns.log"
+  },
+  "remaining_matrix": [
+    "physical IPv6-only network",
+    "real DNS64/NAT64 translation",
+    "physical sleep/wake and interface renumbering",
+    "downstream ICMPv6 Packet Too Big / PMTU",
+    "public large UDP datagrams"
+  ],
+  "runtime_binding_scope": "The desktop timer recovered deliberately stale metadata to the actual current OS binding without UI polling. This is not a physical sleep/wake or interface-renumbering test.",
+  "source_address_change": {
+    "observed": true,
+    "note": "测试期间初始临时 IPv6 地址不再属于 WLAN，导致独立 Core 首次绑定失败。保留首次报告，重新读取当前首选稳定地址后，全部 11 项 Core 数据检查通过。独立 IPC Core 不包含桌面网卡监测。",
+    "first_attempt": ".go-cache-local/ipv6-20261013/proxy-first-expired-source.json"
+  },
+  "restoration": {
+    "owned_tun_remains": false,
+    "original_processes_preserved": true,
+    "policy_routes_preserved": true,
+    "route_difference": "Start/end differences are OS Local /128 host routes for changed WLAN temporary and Teredo addresses. All policy routes match. The system test separately compared all physical/foreign-VPN routes at each stop/crash boundary.",
+    "evidence": ".go-cache-local/ipv6-20261013/restoration-comparison.json"
+  },
+  "core_sha256": "5a96d0efb3fe8baee38a581689d25b695e7acb7f5f5ad893c8fe9486bc297736",
+  "system_core_sha256": "5a96d0efb3fe8baee38a581689d25b695e7acb7f5f5ad893c8fe9486bc297736",
+  "source_changes": {
+    "behavior": "Prefer stable preferred IPv6 addresses within the same scope; global addresses still outrank ULA, and usable temporary addresses remain eligible when stable addresses are unavailable.",
+    "why": "The actual temporary WLAN address disappeared during the first test. Lexicographic selection could choose temporary addresses despite an available stable global address, causing unnecessary binding recovery and connection retirement.",
+    "files": [
+      "desktop/internal/services/adapter_metadata_windows.go",
+      "desktop/internal/services/ipv6_metadata_windows_test.go",
+      "tools/ipv6-acceptance.ps1",
+      "tools/ipv6-system-acceptance.ps1"
+    ],
+    "regression_before_fix": {
+      "name": "TestIPv6PreferredSourceKeepsStableBindingAcrossTemporaryRotation",
+      "status": "failed",
+      "message": "temporary rotation changed a usable stable binding: 2001:db8::1"
+    },
+    "regression_after_fix": {
+      "status": "passed",
+      "covers": [
+        "temporary address rotation keeps a usable stable binding",
+        "deprecated stable address falls back to temporary address",
+        "global temporary address outranks stable ULA"
+      ]
+    },
+    "targeted_tests": {
+      "passed": 18,
+      "failed": 0,
+      "skipped": 0,
+      "skipped_tests": [],
+      "evidence": ".go-cache-local/ipv6-20261013-followup/desktop-fixed-regression.jsonl"
+    },
+    "full_desktop_tests": {
+      "passed": 480,
+      "failed": 0,
+      "skipped": 18,
+      "skipped_tests": [
+        "TestNativeWiFiReadOnly",
+        "TestRealEngineHandshakeAndStoppedStatus",
+        "TestRealWindowsAdapterDiagnostic",
+        "TestRealProxyStartStopAndNetworkRestore",
+        "TestInstallerCoreUpgradeNSIS",
+        "TestInstalledDesktopExercisesTrustedServiceClientPath",
+        "TestInstallerFreshUICheckNSIS",
+        "TestInstallerWebViewFailureCannotReachPayloadNSIS",
+        "TestInstallerNativeHelperEntrypoints",
+        "TestInstallerDirectoryResolutionNSIS",
+        "TestReadOnlyWindowsDefaultDNSEgress",
+        "TestPrepareIPv6SystemAcceptanceConfig",
+        "TestManualProxyTelemetryIntegration",
+        "TestMTUWindowsReadOnlySmoke",
+        "TestReadOnlyNetworkRouteSnapshot",
+        "TestRuntimeBindingRealCoreRecoversStaleIPv6Source",
+        "TestRealWindowsTunPreflightIsReadOnly",
+        "TestVerifyDownloadedInstallerAuthenticityAcceptsOfficialSignedInstaller"
+      ],
+      "evidence": ".go-cache-local/ipv6-20261013-followup/desktop-full.jsonl"
+    },
+    "go_vet_internal_services": "passed",
+    "desktop_build": "passed",
+    "local_build": ".go-cache-local/ipv6-20261013-followup/HypoMux-fixed.exe",
+    "local_build_sha256": "dbb0a35728d01cb7ac9ea085243152ac7cce0bfcf46456634fe5072d2de26687",
+    "deployment": "Built locally; installed application has not been replaced."
+  },
+  "updated_at": "2026-10-13T13:35:29.286450+08:00",
+  "followup": {
+    "authorization": "User explicitly authorized a temporary Mihomo strict-route=false window with TUN kept enabled and restoration protection; also confirmed only the current dual-stack network is available.",
+    "source_bound_public_https_doh_udp_ntp": {
+      "status": "passed",
+      "evidence": ".go-cache-local/ipv6-20261013-followup/stable-source-public.json"
+    },
+    "traditional_ipv6_dns_and_native_wfp": {
+      "status": "passed_in_authorized_policy_window",
+      "evidence": ".go-cache-local/ipv6-20261013-followup/dns-window-result.json",
+      "restoration": {
+        "restored": true,
+        "state": {
+          "settings_verified": true,
+          "strict_route": true,
+          "tun_enabled": true
+        },
+        "errors": []
+      },
+      "final_state_evidence": ".go-cache-local/ipv6-20261013-followup/dns-window-final-policy.json",
+      "condition": "Keeping Mihomo strict-route=true intentionally restores its port-53 block. HypoMux does not delete or override the other application's policy."
+    },
+    "native_network_dns64": {
+      "status": "no_advertised_prefix_in_current_network",
+      "evidence": ".go-cache-local/ipv6-20261013-followup/ipv6-native-dns64-probe.json",
+      "observation": "The actual scoped network DNS returned a valid NOERROR/NODATA AAAA response for ipv4only.arpa and actual AAAA records for the control domain dns.alidns.com."
+    },
+    "dnspod_dualstack": {
+      "status": "passed",
+      "evidence": ".go-cache-local/ipv6-20261013-followup/dnspod-dualstack-result.json",
+      "observation": "The real Core used certificate-verified doh.pub@120.53.53.53:443 on the selected physical adapter. Both AAAA and A user-domain queries succeeded."
+    },
+    "dnspod_ipv6_only_binding": {
+      "status": "failed_provider_prerequisite",
+      "observation": "Even with the external DNS block removed, doh.pub has no AAAA answer from reachable resolvers. Direct HTTPS probes of 2402:4e00:: and 2402:4e00:1:: timed out; those documented traditional DNS addresses are not assumed to be DoH endpoints.",
+      "evidence": [
+        ".go-cache-local/ipv6-20261013-followup/dns-window-result.json",
+        ".go-cache-local/ipv6-20261013/provider-ipv6-probe.json"
+      ],
+      "provider_reference": "https://cloud.tencent.com/document/product/302/110786"
+    },
+    "strict_system_tun_after_fix": {
+      "status": "passed",
+      "checks": 15,
+      "mtu": 1280,
+      "payload_bytes": 4194304,
+      "evidence": ".go-cache-local/ipv6-20261013-followup/system-fixed-isolated/ipv6-system-tun-acceptance.json"
+    },
+    "retained_failed_system_attempt": {
+      "status": "failed_transient_teredo_route_snapshot",
+      "observation": "After the owned Core crash, unrelated Teredo policy routes temporarily disappeared beyond the existing 20-second comparison budget. Final restoration then succeeded. An isolated rerun passed all original assertions without changing comparison logic.",
+      "evidence": ".go-cache-local/ipv6-20261013-followup/system-fixed/ipv6-system-tun-acceptance.json"
+    },
+    "remaining_environment": [
+      "A physical IPv6-only network",
+      "A real network-advertised DNS64/NAT64 translation path",
+      "Controlled public IPv6 peer for large UDP and downstream PMTU",
+      "Physical sleep/wake and interface reindexing acceptance"
+    ],
+    "references": [
+      "https://wiki.metacubex.one/config/inbound/tun/#strict-route",
+      "https://learn.microsoft.com/en-us/windows/win32/fwp/filter-arbitration"
+    ],
+    "continuous_real_core_data_plane": {
+      "status": "passed",
+      "checks": [
+        {
+          "name": "native_ipv6_udp_control",
+          "status": "passed",
+          "packets_verified": 350,
+          "bytes_each_direction": 9273850,
+          "payload_sizes": [
+            8,
+            1200,
+            8192,
+            16384,
+            32768,
+            61440,
+            65485
+          ]
+        },
+        {
+          "name": "core_ipv6_udp_packet_boundaries",
+          "status": "passed",
+          "packets_verified": 350,
+          "bytes_each_direction": 9273850,
+          "payload_sizes": [
+            8,
+            1200,
+            8192,
+            16384,
+            32768,
+            61440,
+            65485
+          ]
+        },
+        {
+          "name": "eight_concurrent_ipv6_udp_associations",
+          "status": "passed",
+          "associations": [
+            {
+              "packets_verified": 100,
+              "bytes_each_direction": 3481600,
+              "payload_sizes": [
+                8192,
+                61440
+              ]
+            },
+            {
+              "packets_verified": 100,
+              "bytes_each_direction": 3481600,
+              "payload_sizes": [
+                8192,
+                61440
+              ]
+            },
+            {
+              "packets_verified": 100,
+              "bytes_each_direction": 3481600,
+              "payload_sizes": [
+                8192,
+                61440
+              ]
+            },
+            {
+              "packets_verified": 100,
+              "bytes_each_direction": 3481600,
+              "payload_sizes": [
+                8192,
+                61440
+              ]
+            },
+            {
+              "packets_verified": 100,
+              "bytes_each_direction": 3481600,
+              "payload_sizes": [
+                8192,
+                61440
+              ]
+            },
+            {
+              "packets_verified": 100,
+              "bytes_each_direction": 3481600,
+              "payload_sizes": [
+                8192,
+                61440
+              ]
+            },
+            {
+              "packets_verified": 100,
+              "bytes_each_direction": 3481600,
+              "payload_sizes": [
+                8192,
+                61440
+              ]
+            },
+            {
+              "packets_verified": 100,
+              "bytes_each_direction": 3481600,
+              "payload_sizes": [
+                8192,
+                61440
+              ]
+            }
+          ]
+        },
+        {
+          "name": "udp_source_binding_and_control_close_cleanup",
+          "status": "passed",
+          "source": "<selected-WLAN-IPv6>"
+        },
+        {
+          "name": "one_minute_public_ipv6_https",
+          "status": "passed",
+          "verified_https_dns_responses": 60,
+          "certificate_verified": true,
+          "tls_connections": 1,
+          "elapsed_seconds": 60.0,
+          "provider": "dns.alidns.com@[2400:3200::1]:443"
+        },
+        {
+          "name": "real_core_stop",
+          "status": "passed"
+        }
+      ],
+      "scope": "Independent real Core: sustained public IPv6 HTTPS and controlled same-host IPv6 UDP using the actual WLAN source address. UDP does not traverse a downstream public path and does not prove external PMTU.",
+      "core_udp_packets_verified": 1150,
+      "native_udp_control_packets_verified": 350,
+      "maximum_core_udp_payload_bytes": 65485,
+      "public_ipv6_https_duration_seconds": 60,
+      "public_ipv6_https_verified_responses": 60,
+      "evidence": ".go-cache-local/ipv6-20261013-followup/continuous-data-plane-result.json",
+      "remaining_scope": "Same-host UDP proves actual bound IPv6 socket forwarding and large-datagram correctness. Public downstream large UDP, fragmentation and ICMPv6 PMTU still require an external controlled peer."
+    }
+  },
+  "blocked_or_failed_checks_at_initial_run": [
+    {
+      "name": "public IPv6 UDP DNS and native WFP UDP/TCP DNS",
+      "status": "failed",
+      "reason": "Existing Meta / block ipv6 dns filter 88305 at ALE_AUTH_CONNECT_V6 denies port 53. Actual DNS drop events also contain the matched test permit filters 96550 and 96551. Both permits were removed on Close.",
+      "evidence": [
+        ".go-cache-local/ipv6-20261013/public-alidns-dns.json",
+        ".go-cache-local/ipv6-20261013/wfp-dns.log",
+        ".go-cache-local/ipv6-20261013/wfp-blocking-filter.json"
+      ]
+    },
+    {
+      "name": "DNSPod DoH over IPv6-only source binding",
+      "status": "failed",
+      "reason": "IPv6 bootstrap UDP/TCP DNS is blocked by the same existing port-53 policy; AliDNS fixed-address IPv6 DoH succeeds.",
+      "evidence": ".go-cache-local/ipv6-20261013/public-dnspod.json"
+    },
+    {
+      "name": "DNS64/NAT64 network acceptance",
+      "status": "blocked",
+      "reason": "Native IPv6-bound network DNS yielded no valid replies under the existing filter. This run cannot establish either presence or absence of a network DNS64 prefix; skips are not passes.",
+      "evidence": ".go-cache-local/ipv6-20261013/ipv6-native-dns64-probe.json"
+    }
+  ],
+  "published_report": {
+    "host_source_addresses": "redacted",
+    "raw_evidence": "Referenced .go-cache-local reports remain local ignored artifacts; summaries are published here."
+  }
+}

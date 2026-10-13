@@ -125,13 +125,26 @@ func adapterPlatformMetadata() map[int]adapterMetadata {
 
 func preferredIPv6Source(first *windows.IpAdapterUnicastAddress) string {
 	var preferred net.IP
+	preferredPriority := 4
 	for address := first; address != nil; address = address.Next {
 		ip := address.Address.IP()
 		if ip == nil || ip.To4() != nil || ip.IsLoopback() || ip.IsUnspecified() || ip.IsMulticast() || ip.IsLinkLocalUnicast() || address.DadState != windows.IpDadStatePreferred || address.ValidLifetime == 0 || address.PreferredLifetime == 0 {
 			continue
 		}
-		if preferred == nil || (preferred.IsPrivate() && !ip.IsPrivate()) || (preferred.IsPrivate() == ip.IsPrivate() && ip.String() < preferred.String()) {
+		// Binding the Core to a rotating privacy address needlessly retires
+		// live connections when a stable preferred address is still available.
+		// Public reachability takes precedence; temporary addresses remain a
+		// valid fallback when no stable address exists in the same scope.
+		priority := 0
+		if ip.IsPrivate() {
+			priority += 2
+		}
+		if address.SuffixOrigin == windows.IpSuffixOriginRandom {
+			priority++
+		}
+		if preferred == nil || priority < preferredPriority || (priority == preferredPriority && ip.String() < preferred.String()) {
 			preferred = ip
+			preferredPriority = priority
 		}
 	}
 	if preferred == nil {

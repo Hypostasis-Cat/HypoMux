@@ -39,8 +39,14 @@ try {
         $sources = @($properties.UnicastAddresses | Where-Object {
             $_.Address.AddressFamily -eq 'InterNetworkV6' -and -not $_.Address.IsIPv6LinkLocal -and
             -not $_.Address.IsIPv6Multicast -and -not [Net.IPAddress]::IsLoopback($_.Address) -and
-            $_.DuplicateAddressDetectionState -eq 'Preferred' -and $_.AddressPreferredLifetime -gt 0
-        } | Sort-Object { $_.Address.ToString() })
+            $_.DuplicateAddressDetectionState -eq 'Preferred' -and $_.AddressPreferredLifetime -gt 0 -and $_.AddressValidLifetime -gt 0
+        } | Sort-Object {
+            # Match the Desktop's public/stable source preference.
+            $priority = 0
+            if (($_.Address.GetAddressBytes()[0] -band 0xfe) -eq 0xfc) { $priority += 2 }
+            if ($_.SuffixOrigin -eq [Net.NetworkInformation.SuffixOrigin]::Random) { $priority++ }
+            $priority
+        }, { $_.Address.ToString() })
         if ($sources.Count -gt 0) { $chosen = $candidate; $source = $sources[0].Address.ToString(); break }
     }
     if ($null -eq $chosen) {
@@ -57,6 +63,7 @@ try {
             })
         }
         $report.adapter = $chosen.Name
+        $report.source_ipv6 = $source
         $report.address_family = 'IPv6 source forced, even on dual-stack links'
         if ($RequireNAT64 -and $servers.Count -eq 0) {
             $report.reason = 'NAT64 requires the selected network DNS over IPv6; provide -DNSServers from that network.'

@@ -42,6 +42,34 @@ func TestIPv6PreferredSourceSkipsTentativeDeprecatedAndExpired(t *testing.T) {
 	}
 }
 
+func TestIPv6PreferredSourceKeepsStableBindingAcrossTemporaryRotation(t *testing.T) {
+	makeAddress := func(ip string, suffix int32, next *windows.IpAdapterUnicastAddress) *windows.IpAdapterUnicastAddress {
+		raw := new(syscall.RawSockaddrAny)
+		socket := (*windows.RawSockaddrInet6)(unsafe.Pointer(raw))
+		socket.Family = windows.AF_INET6
+		copy(socket.Addr[:], net.ParseIP(ip).To16())
+		return &windows.IpAdapterUnicastAddress{Next: next, DadState: windows.IpDadStatePreferred,
+			SuffixOrigin: suffix, ValidLifetime: 100, PreferredLifetime: 100,
+			Address: windows.SocketAddress{Sockaddr: raw, SockaddrLength: int32(unsafe.Sizeof(windows.RawSockaddrInet6{}))}}
+	}
+	for _, temporary := range []string{"2001:db8::1", "2001:db8::2"} {
+		stable := makeAddress("2001:db8::f", windows.IpSuffixOriginLinkLayerAddress, nil)
+		first := makeAddress(temporary, windows.IpSuffixOriginRandom, stable)
+		if got := preferredIPv6Source(first); got != "2001:db8::f" {
+			t.Fatalf("temporary rotation changed a usable stable binding: %s", got)
+		}
+		stable.DadState = windows.IpDadStateDeprecated
+		if got := preferredIPv6Source(first); got != temporary {
+			t.Fatalf("temporary fallback unavailable after stable address was deprecated: %s", got)
+		}
+	}
+	private := makeAddress("fd00::1", windows.IpSuffixOriginLinkLayerAddress, nil)
+	public := makeAddress("2001:db8::1", windows.IpSuffixOriginRandom, private)
+	if got := preferredIPv6Source(public); got != "2001:db8::1" {
+		t.Fatalf("stable ULA displaced usable public IPv6: %s", got)
+	}
+}
+
 func TestIPv6OnlyGeneratedTUNConfigsPassBundledCheck(t *testing.T) {
 	t.Setenv("HYPOMUX_DATA_DIR", t.TempDir())
 	endpoints := map[string]string{"nic_ethernet": "127.0.0.1:19101", "nic_wifi": "127.0.0.1:19102", "aggregation": "127.0.0.1:19103"}
