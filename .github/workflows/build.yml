@@ -118,7 +118,19 @@ jobs:
         shell: pwsh
         run: |
           go install "github.com/wailsapp/wails/v3/cmd/wails3@${env:WAILS_VERSION}"
-          choco install nsis --yes --no-progress
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          # The community feed can return transient 504s before packaging starts.
+          for ($nsisAttempt = 1; $nsisAttempt -le 3; $nsisAttempt++) {
+            choco install nsis --yes --no-progress --execution-timeout=300
+            $nsisInstallCode = $LASTEXITCODE
+            if ($nsisInstallCode -in @(0, 3010)) { break }
+            if ($nsisAttempt -eq 3) {
+              throw "NSIS installation failed after 3 attempts (exit code $nsisInstallCode)."
+            }
+            Write-Warning "NSIS installation attempt $nsisAttempt failed (exit code $nsisInstallCode); retrying."
+            Start-Sleep -Seconds (10 * $nsisAttempt)
+          }
 
           $nsisDirectory = Join-Path ${env:ProgramFiles(x86)} 'NSIS'
           $makensis = Join-Path $nsisDirectory 'makensis.exe'
