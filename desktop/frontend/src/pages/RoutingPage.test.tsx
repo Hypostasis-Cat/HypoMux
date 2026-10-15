@@ -100,6 +100,29 @@ it("saves reject and restores the rule without marking its egress unavailable", 
   expect(screen.getByRole("switch", { name: "Enable rule app.exe" })).toHaveProperty("checked", true);
 });
 
+it("offers reject in browser preview for new, existing, and batch rules", async () => {
+  mocks.snapshot.mockRejectedValueOnce(new Error("Browser preview has no desktop bridge"));
+  renderPage();
+  const input = await screen.findByDisplayValue("application-01.exe");
+  const newEgress = screen.getByRole("combobox", { name: "New rule egress" });
+  fireEvent.click(newEgress);
+  fireEvent.click(screen.getByRole("option", { name: "routing_outbound_reject" }));
+  expect(newEgress.textContent).toContain("routing_outbound_reject");
+
+  const row = within(input.closest('[role="row"]') as HTMLElement);
+  const rowEgress = row.getByRole("combobox");
+  fireEvent.click(rowEgress);
+  expect(screen.getByRole("option", { name: "routing_outbound_reject" })).toBeTruthy();
+  fireEvent.keyDown(rowEgress, { key: "Escape" });
+
+  fireEvent.click(screen.getByRole("button", { name: /Batch add/ }));
+  const dialog = within(await screen.findByRole("dialog"));
+  const batchEgress = dialog.getByRole("combobox", { name: "Egress policy" });
+  expect(batchEgress.textContent).toContain("routing_outbound_reject");
+  fireEvent.click(batchEgress);
+  expect(screen.getByRole("option", { name: "routing_outbound_reject" })).toBeTruthy();
+});
+
 it("preserves row identity when the backend normalizes priority and casing", () => {
   const submitted = [{ id: "selected-rule", match_type: "process", value: "App.exe", outbound: "direct", priority: 70, disabled: true }];
   const saved = reconcileSavedDrafts([{ match_type: "process", value: "app.exe", outbound: "direct", priority: 2, disabled: true }], submitted);

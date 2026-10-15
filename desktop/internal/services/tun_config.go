@@ -35,6 +35,7 @@ type dnsResolveResult struct {
 }
 
 type tunConfigOptions struct {
+	DefaultOutbound string
 	ForceStart      bool
 	IPv4Address     string
 	Stack           string
@@ -86,6 +87,15 @@ func writeSingBoxConfigWithOptions(
 	strictRoute bool,
 	options tunConfigOptions,
 ) (string, string, clashAPIConfig, error) {
+	defaultOutbound, err := normalizeDefaultOutbound(options.DefaultOutbound)
+	if err != nil {
+		return "", "", clashAPIConfig{}, err
+	}
+	if strings.HasPrefix(defaultOutbound, "nic_") {
+		if _, err := loopbackPort(endpoints, defaultOutbound); err != nil {
+			return "", "", clashAPIConfig{}, fmt.Errorf("全局默认规则的网卡出口不可用：%w", err)
+		}
+	}
 	stack, err := normalizeTunStack(options.Stack)
 	if err != nil {
 		return "", "", clashAPIConfig{}, err
@@ -191,6 +201,12 @@ func writeSingBoxConfigWithOptions(
 	// the recomposed rule-set files, which hot reload applies.
 	routeRules = append(routeRules, ruleSetPlan.ExternalRouteRules...)
 	routeRules = append(routeRules, ruleSetPlan.UserRouteRules...)
+	// Reject is a terminal action, not an outbound tag. Keep it after every
+	// explicit rule so only unmatched traffic is blocked.
+	if defaultOutbound == OutboundReject {
+		routeRules = append(routeRules, map[string]any{"action": "reject"})
+		defaultOutbound = "aggregation" // Unreachable fallback required by route.final.
+	}
 	directOutbound := map[string]any{"type": "direct", "tag": "direct"}
 	if directPort, directErr := loopbackPort(endpoints, "direct"); directErr == nil {
 		directOutbound = socksOutbound("direct", directPort)
@@ -297,7 +313,7 @@ func writeSingBoxConfigWithOptions(
 		"outbounds": outbounds,
 		"route": map[string]any{
 			"auto_detect_interface": true, "default_domain_resolver": "dns-local",
-			"find_process": true, "final": "aggregation", "rules": routeRules,
+			"find_process": true, "final": defaultOutbound, "rules": routeRules,
 			"rule_set": ruleSetPlan.Definitions,
 		},
 		"experimental": map[string]any{

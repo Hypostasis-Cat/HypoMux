@@ -104,7 +104,8 @@ const browserRoutingFixture = (): RoutingSnapshot | null => {
   return {
     outbounds: [
       { id: "aggregation", label: "多网卡聚合" },
-      { id: "direct", label: "直连 / 绕过" },
+      { id: "direct", label: "直连" },
+      { id: "reject", label: "拒绝连接" },
       { id: "nic_以太网", label: "以太网" },
       { id: "nic_WLAN", label: "WLAN" },
     ],

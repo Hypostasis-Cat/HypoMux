@@ -168,6 +168,71 @@ it("loads persisted AI opt-out and exposes the switch in Chinese", async () => {
 });
 
 describe("TUN settings", () => {
+  it("defaults global routing to aggregation and auto-saves only the chosen exit", async () => {
+    render(<SettingsPage adapterRuntime={[]} onOpenBlockedDomains={() => {}} />);
+    await screen.findByText("Settings synced");
+    await openCategory("Advanced Network");
+    const control = screen.getByRole("combobox", { name: "Global default rule" });
+    expect(control.textContent).toContain("Multi-adapter aggregation (default)");
+    expect(screen.getByText(/Traffic that matches no manual rule/).textContent).toContain("next time TUN starts");
+    for (const [label, value] of [["Direct", "direct"], ["Reject connections", "reject"], ["Multi-adapter aggregation (default)", "aggregation"]]) {
+      fireEvent.click(control);
+      fireEvent.click(await screen.findByRole("option", { name: label }));
+      await waitFor(() => expect(mocks.update).toHaveBeenLastCalledWith(
+        expect.objectContaining({ default_outbound: value }), ["default_outbound"],
+      ));
+      await waitFor(() => expect((control as HTMLButtonElement).disabled).toBe(false));
+    }
+  });
+
+  it("offers active selected adapters and keeps an unavailable saved exit visible", async () => {
+    mocks.get.mockResolvedValue({ ...initial, default_outbound: "nic_old" });
+    const adapters = [
+      { id: "ready", name: "Ethernet", selected: true, operational: true },
+      { id: "disabled", name: "Disabled Wi-Fi", selected: false, operational: true },
+      { id: "offline", name: "Offline Wi-Fi", selected: true, operational: false },
+    ].map(adapter => ({
+      description: "", address: "192.0.2.10", prefix_length: 24, if_index: 1,
+      dns_servers: [], metric: 1, automatic_metric: true, weight: 1, kind: "ethernet", ...adapter,
+    }));
+    render(<SettingsPage adapterRuntime={adapters} onOpenBlockedDomains={() => {}} />);
+    await screen.findByText("Settings synced");
+    await openCategory("Advanced Network");
+    const control = screen.getByRole("combobox", { name: "Global default rule" });
+    expect(control.textContent).toContain("Unavailable adapter · old");
+    expect(screen.getByText(/The saved adapter is disabled or unavailable/)).toBeTruthy();
+    expect(mocks.update).not.toHaveBeenCalled();
+    fireEvent.click(control);
+    expect(screen.queryByRole("option", { name: /Disabled Wi-Fi|Offline Wi-Fi/ })).toBeNull();
+    fireEvent.click(await screen.findByRole("option", { name: "Adapter · Ethernet" }));
+    await waitFor(() => expect(mocks.update).toHaveBeenCalledWith(
+      expect.objectContaining({ default_outbound: "nic_ready" }), ["default_outbound"],
+    ));
+    await waitFor(() => expect(screen.queryByText(/The saved adapter is disabled or unavailable/)).toBeNull());
+  });
+
+  it("restores the saved global exit when persistence fails", async () => {
+    mocks.get.mockResolvedValue({ ...initial, default_outbound: "direct", force_tun_connectivity_bypass: false, blocked_domain_bypass: false, blocked_domain_expiry: true });
+    mocks.update.mockRejectedValue(new Error("disk full"));
+    render(<SettingsPage adapterRuntime={[]} onOpenBlockedDomains={() => {}} />);
+    await screen.findByText("Settings synced");
+    await openCategory("Advanced Network");
+    const control = screen.getByRole("combobox", { name: "Global default rule" });
+    fireEvent.click(control);
+    fireEvent.click(await screen.findByRole("option", { name: "Reject connections" }));
+    await waitFor(() => expect(mocks.notify).toHaveBeenCalledWith(expect.objectContaining({ title: "Save failed", message: "Error: disk full", intent: "error" })));
+    await waitFor(() => expect(control.textContent).toContain("Direct"));
+  });
+
+  it("shows the global rule in Chinese and loads a persisted choice", async () => {
+    mocks.locale = "zh";
+    mocks.get.mockResolvedValue({ ...initial, language: "zh", default_outbound: "reject" });
+    render(<SettingsPage adapterRuntime={[]} onOpenBlockedDomains={() => {}} />);
+    await screen.findByText("配置已同步");
+    await openCategory("高级网络");
+    expect(screen.getByRole("combobox", { name: "全局默认规则" }).textContent).toContain("拒绝连接");
+  });
+
   it("defaults to stable and persists the chosen update channel separately", async () => {
     const view = render(<SettingsPage adapterRuntime={[]} onOpenBlockedDomains={() => {}} />);
     await screen.findByText("Settings synced");

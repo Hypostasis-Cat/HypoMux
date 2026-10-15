@@ -140,6 +140,59 @@ func checkSingBoxConfig(t *testing.T, executable, configPath string) {
 	}
 }
 
+func TestDefaultOutboundGeneratedTunConfig(t *testing.T) {
+	for _, outbound := range []string{"", "aggregation", "direct", "nic_test-adapter", OutboundReject} {
+		t.Run("outbound="+outbound, func(t *testing.T) {
+			t.Setenv("HYPOMUX_DATA_DIR", t.TempDir())
+			endpoints := map[string]string{
+				"nic_ethernet": "127.0.0.1:19101", "nic_wifi": "127.0.0.1:19102",
+				"aggregation": "127.0.0.1:19103", "nic_test-adapter": "127.0.0.1:19104",
+			}
+			rules := []RoutingRule{{MatchType: MatchProcess, Value: "game.exe", Outbound: "direct"}}
+			for _, ipv6 := range []bool{true, false} {
+				executable, path, _, err := writeSingBoxConfigWithOptions(endpoints,
+					AdapterView{Name: "Ethernet", Address: "192.0.2.10"},
+					dnsResolveResult{Transport: "udp", Server: "1.1.1.1"}, rules, compatibilityPlan{}, true,
+					tunConfigOptions{DefaultOutbound: outbound, DNSPolicy: "auto", IPv4Address: "172.19.0.1/30", IPv6Available: ipv6})
+				if err != nil {
+					t.Fatal(err)
+				}
+				checkSingBoxConfig(t, executable, path)
+				data, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var config map[string]any
+				if err := json.Unmarshal(data, &config); err != nil {
+					t.Fatal(err)
+				}
+				route := config["route"].(map[string]any)
+				want, _ := normalizeDefaultOutbound(outbound)
+				if want == OutboundReject {
+					want = "aggregation"
+				}
+				if route["final"] != want {
+					t.Fatalf("final = %v, want %s", route["final"], want)
+				}
+				routeRules := route["rules"].([]any)
+				manualIndex, rejectIndex := -1, -1
+				for i, raw := range routeRules {
+					rule := raw.(map[string]any)
+					if rule["outbound"] == "direct" && rule["rule_set"] != nil {
+						manualIndex = i
+					}
+					if rule["action"] == "reject" && rule["rule_set"] == nil {
+						rejectIndex = i
+					}
+				}
+				if manualIndex < 0 || (outbound == OutboundReject && (rejectIndex != len(routeRules)-1 || rejectIndex <= manualIndex)) || (outbound != OutboundReject && rejectIndex >= 0) {
+					t.Fatalf("explicit rule=%d, terminal reject=%d, total=%d", manualIndex, rejectIndex, len(routeRules))
+				}
+			}
+		})
+	}
+}
+
 func TestTunRouteResolvesFakeIPBeforeUserCIDRRules(t *testing.T) {
 	t.Setenv("HYPOMUX_DATA_DIR", t.TempDir())
 	endpoints := map[string]string{

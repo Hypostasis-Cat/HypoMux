@@ -22,6 +22,7 @@ const (
 type AppSettings struct {
 	AIEnabled           bool                  `json:"ai_enabled"`
 	RoutingMatchOrder   []string              `json:"routing_match_order,omitempty"`
+	DefaultOutbound     string                `json:"default_outbound"`
 	SteamCDNEnabled     bool                  `json:"steam_cdn_enabled"`
 	Mode                string                `json:"mode"`
 	Language            string                `json:"language"`
@@ -64,6 +65,7 @@ type WFPCompatibilityState struct {
 func DefaultSettings() AppSettings {
 	return AppSettings{
 		AIEnabled:           true,
+		DefaultOutbound:     "aggregation",
 		Mode:                "tun",
 		Language:            "zh",
 		UpdateChannel:       "stable",
@@ -295,6 +297,8 @@ func (s *SettingsService) UpdateFields(values AppSettings, fields []string) (App
 		switch field {
 		case "ai_enabled":
 			next.AIEnabled = values.AIEnabled
+		case "default_outbound":
+			next.DefaultOutbound = values.DefaultOutbound
 		case "language":
 			next.Language = values.Language
 		case "update_channel":
@@ -359,6 +363,9 @@ func (s *SettingsService) updateLocked(next AppSettings) (AppSettings, error) {
 	}
 
 	// Keep full-replace writes from older UI bindings backward-compatible.
+	if next.DefaultOutbound == "" {
+		next.DefaultOutbound = s.settings.DefaultOutbound
+	}
 	if next.DNSEgressMode == "" {
 		next.DNSEgressMode = DNSEgressAuto
 	}
@@ -534,6 +541,10 @@ func (s *SettingsService) reload() error {
 		return fmt.Errorf("设置文件格式无效：%w", err)
 	}
 	defaults := DefaultSettings()
+	loaded.DefaultOutbound, err = normalizeDefaultOutbound(loaded.DefaultOutbound)
+	if err != nil {
+		return err
+	}
 	var storedFields map[string]json.RawMessage
 	if err := json.Unmarshal(data, &storedFields); err != nil {
 		return fmt.Errorf("设置文件格式无效：%w", err)
@@ -711,6 +722,9 @@ func (s *SettingsService) ClearWFPCompatibilityFailure() error {
 }
 
 func validateSettings(value AppSettings) error {
+	if _, err := normalizeDefaultOutbound(value.DefaultOutbound); err != nil {
+		return err
+	}
 	if value.UpdateChannel != "" && value.UpdateChannel != "stable" && value.UpdateChannel != "preview" {
 		return fmt.Errorf("不支持的更新渠道：%s", value.UpdateChannel)
 	}
@@ -797,6 +811,10 @@ func (s *SettingsService) commitLocked(next AppSettings) error {
 		return err
 	}
 	next.TUNStack = stack
+	next.DefaultOutbound, err = normalizeDefaultOutbound(next.DefaultOutbound)
+	if err != nil {
+		return err
+	}
 	if err := writeSettingsFile(s.path, next); err != nil {
 		return err
 	}

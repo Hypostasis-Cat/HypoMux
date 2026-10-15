@@ -61,6 +61,7 @@ func TestSettingsFieldUpdatePreservesConcurrentOwners(t *testing.T) {
 	current.RoutingRules = []RoutingRule{{MatchType: "process", Value: "cs2.exe", Outbound: "direct"}}
 	current.RoutingMatchOrder = []string{"ip", "domain", "process"}
 	current.SteamCDNEnabled = true
+	current.DefaultOutbound = "direct"
 	current.HTTPPort = 12345
 	if _, err := s.Update(current); err != nil {
 		t.Fatal(err)

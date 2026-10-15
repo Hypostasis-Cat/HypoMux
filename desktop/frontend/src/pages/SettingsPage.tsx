@@ -47,6 +47,7 @@ import { validDNSAddress, validDoHAddress, validDoTAddress } from "./dnsSettings
 
 const emptySettings: CompleteAppSettings = {
   ai_enabled: true,
+  default_outbound: "aggregation",
   steam_cdn_enabled: false,
   mode: "tun",
   language: "zh",
@@ -266,6 +267,20 @@ export function SettingsPage({
   const { settings: appearance, update: updateAppearance, persistenceError: appearancePersistenceError } = useAppearance();
   const { locale, setLocale, t } = useI18n();
   const text = (zh: string, en: string) => locale === "en" ? en : zh;
+  const defaultOutbound = settings.default_outbound || "aggregation";
+  const defaultOutboundOptions = [
+    { value: "aggregation", label: text("多网卡聚合（默认）", "Multi-adapter aggregation (default)") },
+    { value: "direct", label: text("直连", "Direct") },
+    { value: "reject", label: text("拒绝连接", "Reject connections") },
+    ...adapters.filter(adapter => adapter.selected && adapter.operational).map(adapter => ({
+      value: `nic_${adapter.id}`, label: text(`指定网卡 · ${adapter.name}`, `Adapter · ${adapter.name}`),
+    })),
+  ];
+  const defaultOutboundUnavailable = !defaultOutboundOptions.some(option => option.value === defaultOutbound);
+  if (defaultOutboundUnavailable) {
+    const name = adapters.find(adapter => `nic_${adapter.id}` === defaultOutbound)?.name ?? defaultOutbound.slice(4);
+    defaultOutboundOptions.push({ value: defaultOutbound, label: text(`不可用网卡 · ${name}`, `Unavailable adapter · ${name}`) });
+  }
   const portValues = { socks_port: String(networkSettings.socks_port), http_port: String(networkSettings.http_port) };
   const portError = (value: string) => !/^\d+$/.test(value) || Number(value) < 1 || Number(value) > 65534
     ? text("请输入 1–65534 之间的整数端口。", "Enter an integer port between 1 and 65534.") : "";
@@ -1040,6 +1055,18 @@ export function SettingsPage({
               </SettingGroup>
             </>}
             {category === "advanced" && <>
+              <SettingGroup title={text("全局规则", "Global routing")}>
+                <SettingRow
+                  title={text("全局默认规则", "Global default rule")}
+                  description={defaultOutboundUnavailable
+                    ? text("已保存的网卡未启用或不可用，请重新选择，否则 TUN 无法启动。", "The saved adapter is disabled or unavailable. Choose another exit before starting TUN.")
+                    : text("未命中手动分流规则或规则集的流量使用此出口。仅对 TUN 模式生效，自动保存后下次启动 TUN 应用。", "Traffic that matches no manual rule or rule set uses this exit. Applies in TUN mode the next time TUN starts; saves automatically.")}
+                >
+                  <SettingDropdown value={defaultOutbound} options={defaultOutboundOptions}
+                    disabled={loading || loadFailed || saving}
+                    onChange={value => void patchAndSave({ default_outbound: value }, text("全局默认规则已保存，下次启动 TUN 生效", "Global default rule saved; applies the next time TUN starts"))} />
+                </SettingRow>
+              </SettingGroup>
               <SettingGroup title={text("TUN 与兼容性", "TUN and compatibility")}>
                 <SettingRow
                   title={text("TUN 协议栈", "TUN stack")}

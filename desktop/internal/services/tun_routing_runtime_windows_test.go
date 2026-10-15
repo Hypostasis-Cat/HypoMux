@@ -20,15 +20,20 @@ import (
 // No TUN interface, system proxy, external DNS or destination is used.
 func TestBundledSingBoxRoutingAndHotReload(t *testing.T) {
 	cases := []struct {
-		name         string
-		compat       bool
-		rules        []RoutingRule
-		target, want string
+		name            string
+		compat          bool
+		rules           []RoutingRule
+		target, want    string
+		defaultOutbound string
 	}{
-		{"ip-domain-plain", false, []RoutingRule{{MatchType: MatchIP, Value: "203.0.113.0/24", Outbound: "nic_wifi", Priority: 2}}, "audit.example:443", "nic_wifi"},
-		{"ip-domain-compat", true, []RoutingRule{{MatchType: MatchIP, Value: "203.0.113.0/24", Outbound: "nic_wifi", Priority: 2}}, "audit.example:443", "nic_wifi"},
-		{"ip-literal-compat", true, []RoutingRule{{MatchType: MatchIP, Value: "203.0.113.0/24", Outbound: "nic_wifi", Priority: 2}}, "203.0.113.7:443", "nic_wifi"},
-		{"subdomain-specific", false, []RoutingRule{{MatchType: MatchDomain, Value: "example.com", Outbound: "nic_wifi"}, {MatchType: MatchDomain, Value: "www.example.com", Outbound: "nic_ethernet"}}, "www.example.com:443", "nic_ethernet"},
+		{"ip-domain-plain", false, []RoutingRule{{MatchType: MatchIP, Value: "203.0.113.0/24", Outbound: "nic_wifi", Priority: 2}}, "audit.example:443", "nic_wifi", ""},
+		{"ip-domain-compat", true, []RoutingRule{{MatchType: MatchIP, Value: "203.0.113.0/24", Outbound: "nic_wifi", Priority: 2}}, "audit.example:443", "nic_wifi", ""},
+		{"ip-literal-compat", true, []RoutingRule{{MatchType: MatchIP, Value: "203.0.113.0/24", Outbound: "nic_wifi", Priority: 2}}, "203.0.113.7:443", "nic_wifi", ""},
+		{"subdomain-specific", false, []RoutingRule{{MatchType: MatchDomain, Value: "example.com", Outbound: "nic_wifi"}, {MatchType: MatchDomain, Value: "www.example.com", Outbound: "nic_ethernet"}}, "www.example.com:443", "nic_ethernet", ""},
+		{"default-legacy", false, nil, "audit.example:443", "aggregation", ""},
+		{"default-direct", false, nil, "audit.example:443", "direct", "direct"},
+		{"default-nic", false, nil, "audit.example:443", "nic_wifi", "nic_wifi"},
+		{"default-reject", false, nil, "audit.example:443", OutboundReject, OutboundReject},
 	}
 	orders := [][]string{{MatchProcess, MatchDomain, MatchIP}, {MatchProcess, MatchIP, MatchDomain}, {MatchDomain, MatchProcess, MatchIP}, {MatchDomain, MatchIP, MatchProcess}, {MatchIP, MatchProcess, MatchDomain}, {MatchIP, MatchDomain, MatchProcess}}
 	destinations := map[string]string{MatchProcess: "nic_ethernet", MatchDomain: "direct", MatchIP: "nic_wifi"}
@@ -36,11 +41,12 @@ func TestBundledSingBoxRoutingAndHotReload(t *testing.T) {
 		for _, compat := range []bool{false, true} {
 			rules := rulesWithMatchOrder([]RoutingRule{{MatchType: MatchProcess, Value: filepath.Base(os.Args[0]), Outbound: "nic_ethernet"}, {MatchType: MatchDomain, Value: "audit.example", Outbound: "direct"}, {MatchType: MatchIP, Value: "203.0.113.0/24", Outbound: "nic_wifi"}}, order)
 			cases = append(cases, struct {
-				name         string
-				compat       bool
-				rules        []RoutingRule
-				target, want string
-			}{fmt.Sprintf("order-%d-compat-%v", i, compat), compat, rules, "audit.example:443", destinations[order[0]]})
+				name            string
+				compat          bool
+				rules           []RoutingRule
+				target, want    string
+				defaultOutbound string
+			}{fmt.Sprintf("order-%d-compat-%v", i, compat), compat, rules, "audit.example:443", destinations[order[0]], ""})
 		}
 	}
 	for _, tc := range cases {
@@ -51,7 +57,7 @@ func TestBundledSingBoxRoutingAndHotReload(t *testing.T) {
 			if tc.compat {
 				compat.ProcessNames = []string{filepath.Base(os.Args[0])}
 			}
-			executable, path, _, err := writeSingBoxConfigWithOptions(map[string]string{"nic_ethernet": "127.0.0.1:19101", "nic_wifi": "127.0.0.1:19102", "aggregation": "127.0.0.1:19103"}, AdapterView{}, dnsResolveResult{Transport: "udp", Server: "1.1.1.1"}, tc.rules, compat, true, tunConfigOptions{DNSPolicy: "auto"})
+			executable, path, _, err := writeSingBoxConfigWithOptions(map[string]string{"nic_ethernet": "127.0.0.1:19101", "nic_wifi": "127.0.0.1:19102", "aggregation": "127.0.0.1:19103"}, AdapterView{}, dnsResolveResult{Transport: "udp", Server: "1.1.1.1"}, tc.rules, compat, true, tunConfigOptions{DNSPolicy: "auto", DefaultOutbound: tc.defaultOutbound})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -151,6 +157,21 @@ func TestBundledSingBoxRoutingAndHotReload(t *testing.T) {
 					if conn != nil {
 						conn.Close()
 					}
+					if want == OutboundReject {
+						if dialErr == nil {
+							t.Fatal("global reject allowed unmatched traffic")
+						}
+						select {
+						case got := <-observed:
+							if !reloading || !time.Now().Before(deadline) {
+								t.Fatalf("global reject reached outbound %s", got)
+							}
+							time.Sleep(25 * time.Millisecond)
+							continue
+						case <-time.After(100 * time.Millisecond):
+							return
+						}
+					}
 					select {
 					case got := <-observed:
 						if got == want {
@@ -160,7 +181,9 @@ func TestBundledSingBoxRoutingAndHotReload(t *testing.T) {
 							t.Fatalf("target=%s selected=%s want=%s (dial=%v)", tc.target, got, want, dialErr)
 						}
 					case <-time.After(time.Second):
-						t.Fatalf("no outbound: %v", dialErr)
+						if !reloading || !time.Now().Before(deadline) {
+							t.Fatalf("no outbound: %v", dialErr)
+						}
 					}
 					// File watching is asynchronous: wait for the new generation
 					// to affect a fresh connection, without assuming a fixed delay.
@@ -168,6 +191,12 @@ func TestBundledSingBoxRoutingAndHotReload(t *testing.T) {
 				}
 			}
 			assertRoute(tc.want, false)
+			if tc.defaultOutbound != "" || tc.name == "default-legacy" {
+				if err := refreshSingBoxRuleSets([]RoutingRule{{MatchType: MatchDomain, Value: "audit.example", Outbound: "direct"}}, nil); err != nil {
+					t.Fatal(err)
+				}
+				assertRoute("direct", true)
+			}
 			if tc.name == "subdomain-specific" {
 				childDisabled := append([]RoutingRule(nil), tc.rules...)
 				childDisabled[1].Disabled = true
@@ -187,7 +216,7 @@ func TestBundledSingBoxRoutingAndHotReload(t *testing.T) {
 			if err := refreshSingBoxRuleSets(disabled, nil); err != nil {
 				t.Fatal(err)
 			}
-			wantDisabled := "aggregation"
+			wantDisabled, _ := normalizeDefaultOutbound(tc.defaultOutbound)
 			if tc.compat {
 				wantDisabled = "system-direct"
 			}

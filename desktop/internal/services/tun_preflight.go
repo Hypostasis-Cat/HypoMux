@@ -106,6 +106,7 @@ func (s *TunService) Preflight(adapterIDs []string) (TunPreflightSnapshot, error
 	for _, adapter := range available {
 		_, explicitlySelected := wanted[adapter.ID]
 		if (len(wanted) == 0 && adapter.Selected) || explicitlySelected {
+			adapter.Selected = true
 			selected = append(selected, adapter)
 		}
 	}
@@ -154,6 +155,9 @@ func (s *TunService) evaluateSelected(selected []AdapterView, reusableForStartup
 		snapshot.Issues = append(snapshot.Issues, tunBlocker(
 			"no_adapter", "未选择活动网卡", "请至少选择一张具有有效 IPv4 或 IPv6 地址的活动网卡。",
 		))
+	}
+	if err := validateDefaultOutbound(settings.DefaultOutbound, selected); err != nil {
+		snapshot.Issues = append(snapshot.Issues, tunBlocker("default_outbound_unavailable", "全局默认规则的出口不可用", err.Error()))
 	}
 	if !snapshot.EngineAvailable {
 		snapshot.Issues = append(snapshot.Issues, tunBlocker(
@@ -254,7 +258,7 @@ func (s *TunService) evaluateSelected(selected []AdapterView, reusableForStartup
 		s.startupCache = startupPreflightCache{
 			key: tunPreflightCacheKey(
 				selected, settings.StrictRoute, settings.ForceTUNBypass, rememberedWFPFailure, rememberedWFPDetail,
-			),
+			) + "\ndefault=" + settings.DefaultOutbound,
 			checkedAt: snapshot.CheckedAt,
 			snapshot:  cloneTunPreflight(snapshot),
 		}
@@ -274,7 +278,7 @@ func (s *TunService) consumeRecentPreflight(selected []AdapterView) (TunPrefligh
 	rememberedWFPFailure, rememberedWFPDetail := s.settings.rememberedWFPCompatibilityFailure()
 	key := tunPreflightCacheKey(
 		selected, settings.StrictRoute, settings.ForceTUNBypass, rememberedWFPFailure, rememberedWFPDetail,
-	)
+	) + "\ndefault=" + settings.DefaultOutbound
 	now := s.now().UTC()
 	s.mu.Lock()
 	cached := s.startupCache

@@ -713,6 +713,9 @@ func (s *EngineService) startLocked(ctx context.Context, mode string) (snapshot 
 	systemDirectEgress := tunDNSEgressDecision{}
 	if mode == "tun" {
 		sourceRules := settings.RoutingRules
+		if err = validateDefaultOutbound(settings.DefaultOutbound, selected); err != nil {
+			return EngineSnapshot{}, err
+		}
 		if validMatchOrder(settings.RoutingMatchOrder) {
 			sourceRules = rulesWithMatchOrder(sourceRules, settings.RoutingMatchOrder)
 		}
@@ -1004,6 +1007,7 @@ func (s *EngineService) startLocked(ctx context.Context, mode string) (snapshot 
 			s.logs.RecordEvent("tun_address", "selected", map[string]any{"ipv4": tunAddress})
 		}
 		configOptions := tunConfigOptions{
+			DefaultOutbound:     settings.DefaultOutbound,
 			ForceStart:          settings.ForceTUNBypass,
 			IPv4Address:         tunAddress,
 			Stack:               settings.TUNStack,
