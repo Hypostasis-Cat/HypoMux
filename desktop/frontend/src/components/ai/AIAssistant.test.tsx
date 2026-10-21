@@ -274,6 +274,28 @@ describe("AI assistant", () => {
     await screen.findByRole("alert");
     expect((screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement).value).toBe("check network");
   });
+  it("polls with the known history version and keeps history the backend omitted", async () => {
+    mocks.snapshot
+      .mockResolvedValueOnce({ running: false, revision: 0, pending: 0, entries_version: 7, entries: [{ id: "reply", role: "assistant", text: "Kept history", at: "" }] })
+      .mockResolvedValue({ running: false, revision: 0, pending: 0, entries_version: 7, entries_unchanged: true });
+    render(<AIAssistant open onOpenChange={vi.fn()} />);
+    await screen.findByText("Kept history");
+    expect(mocks.snapshot).toHaveBeenNthCalledWith(1, 0);
+    await waitFor(() => expect(mocks.snapshot).toHaveBeenCalledWith(7), { timeout: 2500 });
+    await act(async () => {});
+    expect(screen.getByText("Kept history")).toBeTruthy();
+  });
+  it("does not poll while the window is hidden and catches up when shown", async () => {
+    let hidden = true;
+    vi.spyOn(document, "hidden", "get").mockImplementation(() => hidden);
+    render(<AIAssistant open onOpenChange={vi.fn()} />);
+    await waitFor(() => expect(mocks.config).toHaveBeenCalled());
+    await act(async () => { await new Promise(done => setTimeout(done, 1200)); });
+    expect(mocks.snapshot).not.toHaveBeenCalled();
+    hidden = false;
+    await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
+    await waitFor(() => expect(mocks.snapshot).toHaveBeenCalled());
+  });
 });
 
 it("keeps the companion and its position across ordinary pages and the assistant workspace", async () => {

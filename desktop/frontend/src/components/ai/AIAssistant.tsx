@@ -78,14 +78,20 @@ export function AIAssistant({ open, onOpenChange, workspace = true, onOpenWorksp
   useEffect(() => { onStatusChange?.({ running: snapshot.running, pending: snapshot.pending }); }, [snapshot.running, snapshot.pending, onStatusChange]);
   useEffect(() => { if (open && !workspace) setView("chat"); }, [open, workspace]);
 
+  const latest = useRef<AISnapshot | null>(null);
   const refresh = useCallback(async () => {
-    const next = await aiService.snapshot();
+    const previous = latest.current;
+    const received = await aiService.snapshot(previous?.entries_version ?? 0);
+    const next = received.entries_unchanged && previous ? { ...received, entries: previous.entries } : received;
     if (startupEntries.current === null) startupEntries.current = new Set(next.entries.map(entry => entry.id));
     if (next.revision !== revision.current) {
       revision.current = next.revision;
       window.dispatchEvent(new CustomEvent("hypomux:ai-changed"));
     }
-    setSnapshot(next);
+    // An idle poll returns the same state every second; skip the re-render.
+    const same = previous && received.entries_unchanged && previous.running === next.running && previous.pending === next.pending && previous.error === next.error && previous.revision === next.revision;
+    latest.current = next;
+    if (!same) setSnapshot(next);
     return next;
   }, []);
   useEffect(() => {
@@ -93,12 +99,16 @@ export function AIAssistant({ open, onOpenChange, workspace = true, onOpenWorksp
     let disposed = false;
     let timer: ReturnType<typeof setTimeout>;
     const poll = async () => {
-      try { if (!disposed) await refresh(); } catch (e) { if (!disposed) setError(errorText(e)); }
+      clearTimeout(timer);
+      // Nothing is visible while the window is hidden in the tray; catch up on show.
+      try { if (!disposed && !document.hidden) await refresh(); } catch (e) { if (!disposed) setError(errorText(e)); }
       if (!disposed) timer = setTimeout(() => void poll(), 1000);
     };
+    const resume = () => { if (!document.hidden) void poll(); };
     void Promise.all([aiService.config(), aiService.mcpStatus()]).then(([c, m]) => { if (!disposed) { setConfig(c); setSavedConfig(c); setMcp(m); } }).catch(e => { if (!disposed) setError(errorText(e)); });
     void poll();
-    return () => { disposed = true; clearTimeout(timer); };
+    document.addEventListener("visibilitychange", resume);
+    return () => { disposed = true; clearTimeout(timer); document.removeEventListener("visibilitychange", resume); };
   }, [native, refresh]);
   useEffect(() => {
     if (open && view === "chat") { input.current?.focus({ preventScroll: true }); }

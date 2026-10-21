@@ -32,6 +32,10 @@ type AISnapshot struct {
 	Error    string    `json:"error,omitempty"`
 	Revision uint64    `json:"revision"`
 	Pending  int       `json:"pending"`
+	// EntriesVersion changes with every history mutation. SnapshotSince omits
+	// Entries and sets EntriesUnchanged when the caller already has this version.
+	EntriesVersion   uint64 `json:"entries_version"`
+	EntriesUnchanged bool   `json:"entries_unchanged,omitempty"`
 }
 type aiApproval struct{ reply chan bool }
 type AIService struct {
@@ -61,6 +65,8 @@ type AIService struct {
 func NewAIService(settings *SettingsService, adapters *AdapterService, engine *EngineService, routing *RoutingRuleService, diagnostics *DiagnosticsService, tun *TunService, logs *SupportLogStore) *AIService {
 	s := &AIService{directory: filepath.Join(settingsDirectory(), "ai"), settings: settings, adapters: adapters, engine: engine, routing: routing, diagnostics: diagnostics, tun: tun, logs: logs, approvals: map[string]aiApproval{}, complete: aiComplete}
 	s.state.Entries = []AIEntry{}
+	// Zero is the "nothing known yet" version for SnapshotSince.
+	s.state.EntriesVersion = 1
 	s.loadConfig()
 	if data, err := os.ReadFile(filepath.Join(s.directory, "history.bin")); err == nil {
 		if data, err = protectAIData(data, false); err == nil {
@@ -94,7 +100,25 @@ func (s *AIService) Snapshot() AISnapshot {
 	out.Pending = len(s.approvals)
 	return out
 }
+
+// SnapshotSince is the polling form of Snapshot: the history (up to 100 full
+// messages and tool results) is copied and sent over the bridge only when it
+// changed after entriesVersion. Zero always returns the full history.
+func (s *AIService) SnapshotSince(entriesVersion uint64) AISnapshot {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := s.state
+	out.Pending = len(s.approvals)
+	if entriesVersion != 0 && entriesVersion == s.state.EntriesVersion {
+		out.Entries = nil
+		out.EntriesUnchanged = true
+	} else {
+		out.Entries = append([]AIEntry{}, s.state.Entries...)
+	}
+	return out
+}
 func (s *AIService) persistLocked() {
+	s.state.EntriesVersion++
 	for len(s.state.Entries) > 100 {
 		remove := -1
 		for i, e := range s.state.Entries {

@@ -20,6 +20,47 @@ func testAIService(t *testing.T) *AIService {
 	return &AIService{directory: t.TempDir(), settings: &SettingsService{settings: DefaultSettings(), autostartEnabled: func() (bool, error) { return false, nil }}, approvals: map[string]aiApproval{}, complete: aiComplete, state: AISnapshot{Entries: []AIEntry{}}}
 }
 
+func TestAISnapshotSinceOmitsUnchangedHistory(t *testing.T) {
+	s := testAIService(t)
+	s.state.EntriesVersion = 1
+	if full := s.SnapshotSince(0); full.EntriesUnchanged || full.Entries == nil {
+		t.Fatalf("version 0 must return the full history: %#v", full)
+	}
+	s.addEntry(AIEntry{Role: "user", Text: "hello"})
+	first := s.SnapshotSince(1)
+	if first.EntriesUnchanged || len(first.Entries) != 1 || first.EntriesVersion == 1 {
+		t.Fatalf("a mutation must resend the history: %#v", first)
+	}
+	idle := s.SnapshotSince(first.EntriesVersion)
+	if !idle.EntriesUnchanged || idle.Entries != nil || idle.EntriesVersion != first.EntriesVersion {
+		t.Fatalf("unchanged history was resent: %#v", idle)
+	}
+	s.mu.Lock()
+	s.state.Running = true
+	s.mu.Unlock()
+	if status := s.SnapshotSince(first.EntriesVersion); !status.Running || !status.EntriesUnchanged {
+		t.Fatalf("status must still be reported without history: %#v", status)
+	}
+	id := s.addEntry(AIEntry{Role: "assistant", Text: "working"})
+	s.updateEntry(id, "completed", "done")
+	if next := s.SnapshotSince(first.EntriesVersion); next.EntriesUnchanged || len(next.Entries) != 2 || next.Entries[1].Text != "done" {
+		t.Fatalf("updated entry was not resent: %#v", next)
+	}
+	if err := s.ClearHistory(); err == nil {
+		t.Fatal("clear unexpectedly succeeded while running")
+	}
+	s.mu.Lock()
+	s.state.Running = false
+	s.mu.Unlock()
+	before := s.SnapshotSince(0).EntriesVersion
+	if err := s.ClearHistory(); err != nil {
+		t.Fatal(err)
+	}
+	if cleared := s.SnapshotSince(before); cleared.EntriesUnchanged || len(cleared.Entries) != 0 {
+		t.Fatalf("cleared history was not resent: %#v", cleared)
+	}
+}
+
 func TestAIModelDiscoveryCredentialsAndPagination(t *testing.T) {
 	for _, protocol := range []string{"openai", "anthropic"} {
 		t.Run(protocol, func(t *testing.T) {
