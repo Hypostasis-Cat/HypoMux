@@ -336,8 +336,13 @@ func TestSteamCDNProxyAndTUNRelayFallbackAndDirect(t *testing.T) {
 						if err != nil {
 							return
 						}
-						if links := s.scheduler.performanceSnapshot().Links; len(links) != 1 || links[0].Load != 1 {
-							t.Errorf("active HTTP replacement lost or duplicated scheduling load: %+v", links)
+						// Only the relayed replacement owns a scheduling lease. The
+						// observed-probe job may re-dial the original node after the
+						// framed response completes; that probe is unleased.
+						if target == "5.6.7.8:80" {
+							if links := s.scheduler.performanceSnapshot().Links; len(links) != 1 || links[0].Load != 1 {
+								t.Errorf("active HTTP replacement lost or duplicated scheduling load: %+v", links)
+							}
 						}
 						body := "GET " + r.URL.RequestURI() + " HTTP/1.1\r\nHost: " + r.Host + "\r\n\r\n"
 						_, _ = fmt.Fprintf(b, "HTTP/1.1 200 OK\r\nContent-Length: %d\r\n\r\n%s", len(body), body)
@@ -433,6 +438,11 @@ func TestSteamCDNProxyAndTUNRelayFallbackAndDirect(t *testing.T) {
 			want := 2
 			if mode == "disabled" || mode == "tun-direct" {
 				want = 1
+			}
+			// A completed HTTP response can start the background observed probe,
+			// which validates the original node with its own short-lived dial.
+			for mode == "http" && len(got) > want && got[len(got)-1] == "1.2.3.4:"+port {
+				got = got[:len(got)-1]
 			}
 			if len(got) != want {
 				t.Fatalf("targets = %v", got)
