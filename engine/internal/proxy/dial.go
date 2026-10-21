@@ -72,7 +72,7 @@ func (s *Server) dialUpstream(
 				channelScheduler.health.recordComparativeDomainFailure(failedAdapter, domain)
 			}
 			for _, failedAdapter := range timedOut {
-				channelScheduler.health.recordComparativeTimeout(failedAdapter)
+				channelScheduler.health.recordComparativeTimeout(failedAdapter, timeoutTargetKey(host, targetIP))
 			}
 			if pending != nil {
 				pending.attach()

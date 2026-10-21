@@ -358,11 +358,16 @@ func TestDialCoolsDownAdapterThatOnlyTimesOut(t *testing.T) {
 		return client, nil
 	}
 
-	for attempt := 0; dials["127.0.0.1"] < adapterTimeoutFailureThreshold; attempt++ {
-		if attempt > 4*adapterTimeoutFailureThreshold {
-			t.Fatalf("a was not retried: dials=%#v", dials)
+	targets := []string{"192.0.2.10:443", "198.51.100.10:443", "203.0.113.10:443"}
+	for attempt := 0; ; attempt++ {
+		if health, _ := server.health.snapshot(); health["a"].State == "cooldown" {
+			break
 		}
-		connection, adapter, dialErr := server.dialUpstream(context.Background(), "192.0.2.10:443", server.scheduler, true, false)
+		if attempt > 4*adapterTimeoutFailureThreshold {
+			t.Fatalf("a was not cooled down: dials=%#v", dials)
+		}
+		target := targets[attempt%len(targets)]
+		connection, adapter, dialErr := server.dialUpstream(context.Background(), target, server.scheduler, true, false)
 		if dialErr != nil {
 			t.Fatal(dialErr)
 		}
@@ -385,6 +390,64 @@ func TestDialCoolsDownAdapterThatOnlyTimesOut(t *testing.T) {
 	}
 	if dials["127.0.0.1"] != before {
 		t.Fatalf("cooling adapter still received new flows: %#v", dials)
+	}
+}
+
+func TestDialTimeoutsOnOneDestinationNetworkKeepHealth(t *testing.T) {
+	server, err := New(Config{Adapters: []Adapter{
+		{Name: "a", SourceIP: "127.0.0.1"},
+		{Name: "b", SourceIP: "127.0.0.2"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dials := 0
+	server.dialTCP = func(_ context.Context, dialer *net.Dialer, _ string) (net.Conn, error) {
+		if dialer.LocalAddr.(*net.TCPAddr).IP.String() == "127.0.0.1" {
+			dials++
+			// a cannot reach this range (blocked CDN, intranet behind b).
+			return nil, os.ErrDeadlineExceeded
+		}
+		client, peer := net.Pipe()
+		go peer.Close()
+		return client, nil
+	}
+	// Different hosts of one /24 still count as a single destination.
+	targets := []string{"192.0.2.10:443", "192.0.2.11:443", "192.0.2.12:443"}
+	for attempt := range 4 * adapterTimeoutFailureThreshold {
+		connection, _, dialErr := server.dialUpstream(context.Background(), targets[attempt%len(targets)], server.scheduler, true, false)
+		if dialErr != nil {
+			t.Fatal(dialErr)
+		}
+		_ = connection.Close()
+	}
+	if dials < adapterTimeoutFailureThreshold {
+		t.Fatalf("a was not tried enough: %d", dials)
+	}
+	health, _ := server.health.snapshot()
+	if health["a"].State != "healthy" {
+		t.Fatalf("one unreachable network cooled the whole link: %#v", health["a"])
+	}
+}
+
+func TestTimeoutTargetKeyGroupsNetworks(t *testing.T) {
+	for _, test := range []struct{ a, b string }{
+		{"192.0.2.10", "192.0.2.200"},
+		{"2001:db8:1:2::1", "2001:db8:1:ffff::9"},
+		{"Example.COM.", "example.com"},
+	} {
+		if timeoutTargetKey(test.a, net.ParseIP(test.a)) != timeoutTargetKey(test.b, net.ParseIP(test.b)) {
+			t.Fatalf("%s and %s should share a key", test.a, test.b)
+		}
+	}
+	for _, test := range []struct{ a, b string }{
+		{"192.0.2.10", "192.0.3.10"},
+		{"2001:db8:1::1", "2001:db8:2::1"},
+		{"a.example.com", "b.example.com"},
+	} {
+		if timeoutTargetKey(test.a, net.ParseIP(test.a)) == timeoutTargetKey(test.b, net.ParseIP(test.b)) {
+			t.Fatalf("%s and %s should not share a key", test.a, test.b)
+		}
 	}
 }
 
@@ -412,17 +475,20 @@ func TestDialTimeoutOnEveryAdapterKeepsHealth(t *testing.T) {
 
 func TestComparativeTimeoutEvidenceResetsOnSuccess(t *testing.T) {
 	health := newHealthTable([]Adapter{{Name: "a", SourceIP: "127.0.0.1"}})
-	for range adapterTimeoutFailureThreshold - 1 {
-		health.recordComparativeTimeout("a")
-	}
+	health.recordComparativeTimeout("a", "x")
+	health.recordComparativeTimeout("a", "y")
 	health.recordSuccess("a", "")
-	for range adapterTimeoutFailureThreshold - 1 {
-		health.recordComparativeTimeout("a")
-	}
+	// The success also forgets x, so the evidence below covers only y, then z.
+	health.recordComparativeTimeout("a", "y")
+	health.recordComparativeTimeout("a", "y")
 	if snapshot, _ := health.snapshot(); snapshot["a"].State != "healthy" {
 		t.Fatalf("interleaved success did not reset evidence: %#v", snapshot["a"])
 	}
-	health.recordComparativeTimeout("a")
+	health.recordComparativeTimeout("a", "y")
+	if snapshot, _ := health.snapshot(); snapshot["a"].State != "healthy" {
+		t.Fatalf("one destination cooled down the link: %#v", snapshot["a"])
+	}
+	health.recordComparativeTimeout("a", "z")
 	if snapshot, _ := health.snapshot(); snapshot["a"].State != "cooldown" {
 		t.Fatalf("threshold did not cool down: %#v", snapshot["a"])
 	}

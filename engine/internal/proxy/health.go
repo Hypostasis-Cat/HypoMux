@@ -20,8 +20,13 @@ const (
 )
 
 // Consecutive connect timeouts that another adapter overcame for the same flow
-// before the link itself is cooled down.
-const adapterTimeoutFailureThreshold = 3
+// before the link itself is cooled down. The timeouts must also span distinct
+// destinations: one network that only this link cannot reach (a blocked CDN
+// range, an intranet behind another NIC) is not evidence that the link is dead.
+const (
+	adapterTimeoutFailureThreshold = 3
+	adapterTimeoutTargetThreshold  = 2
+)
 
 var adapterFailureBackoff = [...]time.Duration{
 	2 * time.Second,
@@ -33,6 +38,7 @@ var adapterFailureBackoff = [...]time.Duration{
 type adapterHealth struct {
 	consecutiveFailures int
 	timeoutFailures     int
+	timeoutTargets      map[string]struct{}
 	successes           uint64
 	failures            uint64
 	lastSuccessAt       time.Time
@@ -187,8 +193,9 @@ func (h *healthTable) recordLocalFailure(name string) {
 // forwarding (Wi-Fi out of range, an expired captive portal) yields no local
 // errno, so without this it stays "healthy" and every new flow pays a full
 // connect budget on it before falling back. Timeouts seen on every adapter,
-// such as an unreachable destination, never reach this method.
-func (h *healthTable) recordComparativeTimeout(name string) {
+// such as an unreachable destination, never reach this method. target is the
+// destination key from timeoutTargetKey.
+func (h *healthTable) recordComparativeTimeout(name string, target string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	state := h.adapters[name]
@@ -196,7 +203,15 @@ func (h *healthTable) recordComparativeTimeout(name string) {
 		return
 	}
 	state.timeoutFailures++
-	if state.timeoutFailures < adapterTimeoutFailureThreshold {
+	// Only the count up to the threshold matters, so the set stays bounded.
+	if len(state.timeoutTargets) < adapterTimeoutTargetThreshold {
+		if state.timeoutTargets == nil {
+			state.timeoutTargets = make(map[string]struct{}, adapterTimeoutTargetThreshold)
+		}
+		state.timeoutTargets[target] = struct{}{}
+	}
+	if state.timeoutFailures < adapterTimeoutFailureThreshold ||
+		len(state.timeoutTargets) < adapterTimeoutTargetThreshold {
 		return
 	}
 	// Keep the counter: a half-open probe that times out again escalates the
@@ -227,6 +242,7 @@ func (h *healthTable) recordSuccess(name string, domain string) {
 	state.successes++
 	state.consecutiveFailures = 0
 	state.timeoutFailures = 0
+	state.timeoutTargets = nil
 	state.cooldownUntil = time.Time{}
 	state.lastSuccessAt = now
 	domain = normalizeDomain(domain)
@@ -372,6 +388,19 @@ func earliestCooldown(
 
 func normalizeDomain(domain string) string {
 	return strings.TrimSuffix(strings.ToLower(strings.TrimSpace(domain)), ".")
+}
+
+// timeoutTargetKey groups destinations for timeout evidence. Literal IPs are
+// folded to their /24 or /48 so that the addresses of one blocked service do
+// not count as separate destinations; domain targets use the domain itself.
+func timeoutTargetKey(host string, ip net.IP) string {
+	if ip4 := ip.To4(); ip4 != nil {
+		return ip4.Mask(net.CIDRMask(24, 32)).String() + "/24"
+	}
+	if ip != nil {
+		return ip.Mask(net.CIDRMask(48, 128)).String() + "/48"
+	}
+	return normalizeDomain(host)
 }
 
 func isConnectTimeout(err error) bool {
