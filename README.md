@@ -191,7 +191,7 @@ HypoMux 是一个透明、开源的网络工具，仅用于用户本人拥有授
 
 ## 开发与构建
 
-推荐环境：Windows 10/11、Go 1.26、Node.js 22、pnpm 10、Wails v3 CLI `v3.0.0-alpha2.119`。构建安装包还需要 NSIS；仓库根目录 `bin/` 必须包含官方运行时文件 `sing-box.exe`、`wintun.dll` 和 `libcronet.dll`。
+推荐环境：Windows 10/11、Go 1.26、Node.js 22、pnpm 10、Wails v3 CLI `v3.0.0-alpha2.119`。构建安装包还需要 NSIS；仓库根目录 `bin/` 必须包含官方运行时文件 `sing-box.exe` 和 `wintun.dll`。
 
 当前随附 sing-box **1.14.2**（保留 gVisor 支持），来源与 SHA-256 校验信息见 [运行时说明](bin/README.md)。
 

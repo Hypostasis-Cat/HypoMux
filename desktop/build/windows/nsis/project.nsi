@@ -669,7 +669,6 @@ Function ${PREFIX}StageSetupPayload
     File /oname=hypomux-engine.exe "..\..\..\bin\hypomux-engine.exe"
     File /oname=sing-box.exe "..\..\..\bin\sing-box.exe"
     File /oname=wintun.dll "..\..\..\bin\wintun.dll"
-    File /oname=libcronet.dll "..\..\..\bin\libcronet.dll"
     !endif
     StrCpy $HypoMuxSetupHelper "$PLUGINSDIR\payload\${PRODUCT_EXECUTABLE}"
     !if "${WAILS_INSTALL_SCOPE}" == "user"

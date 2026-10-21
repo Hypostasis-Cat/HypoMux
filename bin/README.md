@@ -24,6 +24,10 @@ If the core hangs or the shutdown request is canceled, forced termination still
 cleans up its process tree. That fallback (like a crash) cannot guarantee FakeIP
 cache preservation; normal shutdown should be used whenever possible.
 
+The official archive also contains `libcronet.dll`. It is not shipped: sing-box
+loads it only for the naive outbound, which HypoMux never configures, and the
+core runs normally without it. Ship it again if a naive outbound is ever added.
+
 Windows packaging copies these runtime assets into `desktop/bin`. When testing
 locally, keep that copy synchronized: runtime discovery can select it before
 the repository's `bin` directory.

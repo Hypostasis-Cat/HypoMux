@@ -202,7 +202,10 @@ func makePlan(install, payload string, p windowsPlatform) ([]Item, error) {
 	if info, e := os.Stat(items[0].Source); e != nil || info.Size() == 0 {
 		return nil, errors.New("desktop payload missing or empty")
 	}
-	for _, name := range []string{"hypomux-engine.exe", "sing-box.exe", "wintun.dll", "libcronet.dll"} {
+	// libcronet.dll is no longer shipped: only sing-box's naive outbound loads it,
+	// and HypoMux never configures one. Uninstall and old-layout cleanup still
+	// remove copies left by earlier versions.
+	for _, name := range []string{"hypomux-engine.exe", "sing-box.exe", "wintun.dll"} {
 		source := filepath.Join(payload, name)
 		if info, e := os.Stat(source); e != nil || info.Size() == 0 {
 			return nil, fmt.Errorf("required payload missing or empty: %s", name)

@@ -78,8 +78,6 @@ tasks:
         msg: "Missing official runtime asset: bin/sing-box.exe"
       - sh: 'test -f "{{.ROOT_DIR}}/../bin/wintun.dll"'
         msg: "Missing official runtime asset: bin/wintun.dll"
-      - sh: 'test -f "{{.ROOT_DIR}}/../bin/libcronet.dll"'
-        msg: "Missing official runtime asset: bin/libcronet.dll"
     cmds:
       - cmd: powershell -NoProfile -Command "New-Item -ItemType Directory -Force -Path '{{.ROOT_DIR}}\{{.BIN_DIR}}' | Out-Null"
         platforms: [windows]
@@ -90,13 +88,9 @@ tasks:
         platforms: [windows]
       - cmd: powershell -NoProfile -Command "Copy-Item -LiteralPath '{{.ROOT_DIR}}\..\bin\wintun.dll' -Destination '{{.ROOT_DIR}}\{{.BIN_DIR}}\wintun.dll' -Force"
         platforms: [windows]
-      - cmd: powershell -NoProfile -Command "Copy-Item -LiteralPath '{{.ROOT_DIR}}\..\bin\libcronet.dll' -Destination '{{.ROOT_DIR}}\{{.BIN_DIR}}\libcronet.dll' -Force"
-        platforms: [windows]
       - cmd: cp "{{.ROOT_DIR}}/../bin/sing-box.exe" "{{.ROOT_DIR}}/{{.BIN_DIR}}/sing-box.exe"
         platforms: [linux, darwin]
       - cmd: cp "{{.ROOT_DIR}}/../bin/wintun.dll" "{{.ROOT_DIR}}/{{.BIN_DIR}}/wintun.dll"
-        platforms: [linux, darwin]
-      - cmd: cp "{{.ROOT_DIR}}/../bin/libcronet.dll" "{{.ROOT_DIR}}/{{.BIN_DIR}}/libcronet.dll"
         platforms: [linux, darwin]
     env:
       GOOS: windows
