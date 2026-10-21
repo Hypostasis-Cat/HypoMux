@@ -337,6 +337,97 @@ func TestDialDoesNotLearnDomainWhenEveryAdapterFails(t *testing.T) {
 	}
 }
 
+func TestDialCoolsDownAdapterThatOnlyTimesOut(t *testing.T) {
+	server, err := New(Config{Adapters: []Adapter{
+		{Name: "a", SourceIP: "127.0.0.1"},
+		{Name: "b", SourceIP: "127.0.0.2"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dials := map[string]int{}
+	server.dialTCP = func(_ context.Context, dialer *net.Dialer, _ string) (net.Conn, error) {
+		source := dialer.LocalAddr.(*net.TCPAddr).IP.String()
+		dials[source]++
+		if source == "127.0.0.1" {
+			// The address is still assigned, so no local errno is reported.
+			return nil, os.ErrDeadlineExceeded
+		}
+		client, peer := net.Pipe()
+		go peer.Close()
+		return client, nil
+	}
+
+	for attempt := 0; dials["127.0.0.1"] < adapterTimeoutFailureThreshold; attempt++ {
+		if attempt > 4*adapterTimeoutFailureThreshold {
+			t.Fatalf("a was not retried: dials=%#v", dials)
+		}
+		connection, adapter, dialErr := server.dialUpstream(context.Background(), "192.0.2.10:443", server.scheduler, true, false)
+		if dialErr != nil {
+			t.Fatal(dialErr)
+		}
+		_ = connection.Close()
+		if adapter.Name != "b" {
+			t.Fatalf("fallback adapter = %q", adapter.Name)
+		}
+	}
+	health, _ := server.health.snapshot()
+	if health["a"].State != "cooldown" || health["b"].State != "healthy" {
+		t.Fatalf("dead link was not cooled down: %#v", health)
+	}
+	before := dials["127.0.0.1"]
+	for range 3 {
+		connection, _, dialErr := server.dialUpstream(context.Background(), "192.0.2.10:443", server.scheduler, true, false)
+		if dialErr != nil {
+			t.Fatal(dialErr)
+		}
+		_ = connection.Close()
+	}
+	if dials["127.0.0.1"] != before {
+		t.Fatalf("cooling adapter still received new flows: %#v", dials)
+	}
+}
+
+func TestDialTimeoutOnEveryAdapterKeepsHealth(t *testing.T) {
+	server, err := New(Config{Adapters: []Adapter{
+		{Name: "a", SourceIP: "127.0.0.1"},
+		{Name: "b", SourceIP: "127.0.0.2"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.dialTCP = func(context.Context, *net.Dialer, string) (net.Conn, error) {
+		return nil, os.ErrDeadlineExceeded
+	}
+	for range 4 * adapterTimeoutFailureThreshold {
+		if _, _, err := server.dialUpstream(context.Background(), "192.0.2.10:443", server.scheduler, true, false); err == nil {
+			t.Fatal("unreachable destination unexpectedly succeeded")
+		}
+	}
+	health, _ := server.health.snapshot()
+	if health["a"].State != "healthy" || health["b"].State != "healthy" {
+		t.Fatalf("unreachable destination cooled adapters: %#v", health)
+	}
+}
+
+func TestComparativeTimeoutEvidenceResetsOnSuccess(t *testing.T) {
+	health := newHealthTable([]Adapter{{Name: "a", SourceIP: "127.0.0.1"}})
+	for range adapterTimeoutFailureThreshold - 1 {
+		health.recordComparativeTimeout("a")
+	}
+	health.recordSuccess("a", "")
+	for range adapterTimeoutFailureThreshold - 1 {
+		health.recordComparativeTimeout("a")
+	}
+	if snapshot, _ := health.snapshot(); snapshot["a"].State != "healthy" {
+		t.Fatalf("interleaved success did not reset evidence: %#v", snapshot["a"])
+	}
+	health.recordComparativeTimeout("a")
+	if snapshot, _ := health.snapshot(); snapshot["a"].State != "cooldown" {
+		t.Fatalf("threshold did not cool down: %#v", snapshot["a"])
+	}
+}
+
 func TestServerSnapshotPublishesAdaptiveHealth(t *testing.T) {
 	server, err := New(Config{
 		Adapters: []Adapter{{Name: "a", SourceIP: "127.0.0.1"}},

@@ -47,6 +47,7 @@ func (s *Server) dialUpstream(
 		domain = normalizeDomain(host)
 	}
 	var comparativeFailures []string
+	var timedOut []string
 	var pending *performanceLease
 	defer func() {
 		if pending != nil {
@@ -70,6 +71,9 @@ func (s *Server) dialUpstream(
 			for _, failedAdapter := range comparativeFailures {
 				channelScheduler.health.recordComparativeDomainFailure(failedAdapter, domain)
 			}
+			for _, failedAdapter := range timedOut {
+				channelScheduler.health.recordComparativeTimeout(failedAdapter)
+			}
 			if pending != nil {
 				pending.attach()
 				connection = &leasedConn{Conn: connection, lease: pending}
@@ -81,6 +85,11 @@ func (s *Server) dialUpstream(
 			channelScheduler.MarkFailure(adapter.Name)
 		} else if domain != "" {
 			comparativeFailures = append(comparativeFailures, adapter.Name)
+		}
+		// Literal-IP flows (TUN) carry no domain, so a dead-but-addressed link
+		// is only detectable by comparing it with the adapter that succeeds.
+		if ctx.Err() == nil && isConnectTimeout(err) {
+			timedOut = append(timedOut, adapter.Name)
 		}
 		failures = append(failures, fmt.Errorf("%s connect: %w", adapter.Name, err))
 	}

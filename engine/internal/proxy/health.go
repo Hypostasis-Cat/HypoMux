@@ -1,7 +1,9 @@
 package proxy
 
 import (
+	"context"
 	"errors"
+	"net"
 	"sort"
 	"strings"
 	"sync"
@@ -17,6 +19,10 @@ const (
 	domainQuarantineTTL    = 30 * time.Minute
 )
 
+// Consecutive connect timeouts that another adapter overcame for the same flow
+// before the link itself is cooled down.
+const adapterTimeoutFailureThreshold = 3
+
 var adapterFailureBackoff = [...]time.Duration{
 	2 * time.Second,
 	5 * time.Second,
@@ -26,6 +32,7 @@ var adapterFailureBackoff = [...]time.Duration{
 
 type adapterHealth struct {
 	consecutiveFailures int
+	timeoutFailures     int
 	successes           uint64
 	failures            uint64
 	lastSuccessAt       time.Time
@@ -172,6 +179,32 @@ func (h *healthTable) recordLocalFailure(name string) {
 	if state == nil {
 		return
 	}
+	h.coolDownLocked(state)
+}
+
+// recordComparativeTimeout counts a connect timeout on name that another
+// adapter overcame for the same flow. A link that keeps its address but stops
+// forwarding (Wi-Fi out of range, an expired captive portal) yields no local
+// errno, so without this it stays "healthy" and every new flow pays a full
+// connect budget on it before falling back. Timeouts seen on every adapter,
+// such as an unreachable destination, never reach this method.
+func (h *healthTable) recordComparativeTimeout(name string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	state := h.adapters[name]
+	if state == nil {
+		return
+	}
+	state.timeoutFailures++
+	if state.timeoutFailures < adapterTimeoutFailureThreshold {
+		return
+	}
+	// Keep the counter: a half-open probe that times out again escalates the
+	// backoff immediately, while any success resets it.
+	h.coolDownLocked(state)
+}
+
+func (h *healthTable) coolDownLocked(state *adapterHealth) {
 	now := h.now().UTC()
 	state.failures++
 	state.consecutiveFailures++
@@ -193,6 +226,7 @@ func (h *healthTable) recordSuccess(name string, domain string) {
 	now := h.now().UTC()
 	state.successes++
 	state.consecutiveFailures = 0
+	state.timeoutFailures = 0
 	state.cooldownUntil = time.Time{}
 	state.lastSuccessAt = now
 	domain = normalizeDomain(domain)
@@ -338,6 +372,11 @@ func earliestCooldown(
 
 func normalizeDomain(domain string) string {
 	return strings.TrimSuffix(strings.ToLower(strings.TrimSpace(domain)), ".")
+}
+
+func isConnectTimeout(err error) bool {
+	var networkError net.Error
+	return errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &networkError) && networkError.Timeout())
 }
 
 func isLocalConnectFailure(err error) bool {
