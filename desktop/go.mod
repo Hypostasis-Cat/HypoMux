@@ -2,7 +2,7 @@ module github.com/Hypostasis-Cat/HypoMux/desktop
 
 go 1.26.0
 
-toolchain go1.26.9
+toolchain go1.26.10
 
 require (
 	github.com/Microsoft/go-winio v0.6.2
