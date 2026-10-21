@@ -668,7 +668,7 @@ export function ConnectionsPage({
           : text("等待 Core 遥测", "Waiting for Core telemetry")}</small>
       </GlassSurface>
 
-      {loadError && <MessageBar intent="warning"><MessageBarBody>
+      {loadError && <MessageBar className="connections-load-error" intent="warning"><MessageBarBody>
         {hasSnapshot
           ? text("无法刷新活动连接；下方保留最近一次成功采样，数据可能已过期。点击“刷新”重试。", "Unable to refresh connections; showing the last successful sample, which may be stale. Select Refresh to retry.")
           : text("无法读取活动连接，暂时无法确认引擎状态。点击“刷新”重试。", "Unable to load connections or confirm engine status. Select Refresh to retry.")}

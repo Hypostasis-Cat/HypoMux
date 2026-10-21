@@ -4064,6 +4064,12 @@ svg {
   grid-template-rows: auto auto minmax(0, 1fr);
 }
 
+/* The load warning sits between the summary and the table; keep the flexible
+   row on the table so the warning does not stretch to fill the page. */
+.connections-page:has(> .connections-load-error) {
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+}
+
 .connections-heading-actions {
   min-width: min(460px, 48%);
 }
