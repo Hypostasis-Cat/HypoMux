@@ -76,7 +76,9 @@ func (s *AdapterService) List() ([]AdapterView, error) {
 						prefixLength = ones
 					}
 				}
-			} else if !ip.IsLinkLocalUnicast() && !ip.IsMulticast() && ipv6 == "" {
+			} else if !ip.IsLinkLocalUnicast() && !ip.IsMulticast() && !ip.IsPrivate() && ipv6 == "" {
+				// Without platform metadata there is no IPv6 gateway to prove that
+				// a unique local address (fc00::/7) reaches the Internet.
 				ipv6 = ip.String()
 			}
 		}
