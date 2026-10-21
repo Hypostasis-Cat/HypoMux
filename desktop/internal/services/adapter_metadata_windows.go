@@ -61,7 +61,6 @@ func adapterPlatformMetadata() map[int]adapterMetadata {
 			IPv6Metric:     int(current.Ipv6Metric),
 			IPv6AutoMetric: true,
 		}
-		details.PreferredIPv6 = preferredIPv6Source(current.FirstUnicastAddress)
 		for gateway := current.FirstGatewayAddress; gateway != nil; gateway = gateway.Next {
 			if ip := gateway.Address.IP(); ip != nil {
 				if ipv4 := ip.To4(); ipv4 != nil && !ipv4.IsUnspecified() {
@@ -79,6 +78,9 @@ func adapterPlatformMetadata() map[int]adapterMetadata {
 				break
 			}
 		}
+		// The IPv6 source is chosen after the gateway so that a ULA-only link
+		// without an IPv6 default route is not mistaken for IPv6 egress.
+		details.PreferredIPv6 = preferredIPv6Source(current.FirstUnicastAddress, details.IPv6Gateway != "")
 		seenDNS := make(map[string]struct{})
 		for server := current.FirstDnsServerAddress; server != nil; server = server.Next {
 			ip := server.Address.IP()
@@ -123,12 +125,20 @@ func adapterPlatformMetadata() map[int]adapterMetadata {
 	return result
 }
 
-func preferredIPv6Source(first *windows.IpAdapterUnicastAddress) string {
+func preferredIPv6Source(first *windows.IpAdapterUnicastAddress, hasIPv6Gateway bool) string {
 	var preferred net.IP
 	preferredPriority := 4
 	for address := first; address != nil; address = address.Next {
 		ip := address.Address.IP()
 		if ip == nil || ip.To4() != nil || ip.IsLoopback() || ip.IsUnspecified() || ip.IsMulticast() || ip.IsLinkLocalUnicast() || address.DadState != windows.IpDadStatePreferred || address.ValidLifetime == 0 || address.PreferredLifetime == 0 {
+			continue
+		}
+		// A unique local address (fc00::/7) only reaches the Internet through a
+		// router that advertises an IPv6 default route (NAT66/NPTv6). Routers
+		// that hand out a ULA prefix without IPv6 uplink leave Windows with no
+		// ::/0 on this interface, so every bound dial fails with WSAENETUNREACH
+		// and the adapter is wrongly reported as IPv6-capable.
+		if ip.IsPrivate() && !hasIPv6Gateway {
 			continue
 		}
 		// Binding the Core to a rotating privacy address needlessly retires

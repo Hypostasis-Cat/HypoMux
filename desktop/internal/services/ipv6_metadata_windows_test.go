@@ -32,12 +32,12 @@ func TestIPv6PreferredSourceSkipsTentativeDeprecatedAndExpired(t *testing.T) {
 		copy(socket.Addr[:], net.ParseIP(fixture.address).To16())
 		first = &windows.IpAdapterUnicastAddress{Next: first, DadState: fixture.state, ValidLifetime: fixture.lifetime, PreferredLifetime: fixture.lifetime, Address: windows.SocketAddress{Sockaddr: raw, SockaddrLength: int32(unsafe.Sizeof(windows.RawSockaddrInet6{}))}}
 	}
-	if got := preferredIPv6Source(first); got != "2001:db8::5" {
+	if got := preferredIPv6Source(first, true); got != "2001:db8::5" {
 		t.Fatalf("preferred=%s", got)
 	}
 	first.Next = nil
 	first.DadState = windows.IpDadStateDeprecated
-	if got := preferredIPv6Source(first); got != "" {
+	if got := preferredIPv6Source(first, true); got != "" {
 		t.Fatalf("deprecated source=%s", got)
 	}
 }
@@ -55,18 +55,41 @@ func TestIPv6PreferredSourceKeepsStableBindingAcrossTemporaryRotation(t *testing
 	for _, temporary := range []string{"2001:db8::1", "2001:db8::2"} {
 		stable := makeAddress("2001:db8::f", windows.IpSuffixOriginLinkLayerAddress, nil)
 		first := makeAddress(temporary, windows.IpSuffixOriginRandom, stable)
-		if got := preferredIPv6Source(first); got != "2001:db8::f" {
+		if got := preferredIPv6Source(first, true); got != "2001:db8::f" {
 			t.Fatalf("temporary rotation changed a usable stable binding: %s", got)
 		}
 		stable.DadState = windows.IpDadStateDeprecated
-		if got := preferredIPv6Source(first); got != temporary {
+		if got := preferredIPv6Source(first, true); got != temporary {
 			t.Fatalf("temporary fallback unavailable after stable address was deprecated: %s", got)
 		}
 	}
 	private := makeAddress("fd00::1", windows.IpSuffixOriginLinkLayerAddress, nil)
 	public := makeAddress("2001:db8::1", windows.IpSuffixOriginRandom, private)
-	if got := preferredIPv6Source(public); got != "2001:db8::1" {
+	if got := preferredIPv6Source(public, true); got != "2001:db8::1" {
 		t.Fatalf("stable ULA displaced usable public IPv6: %s", got)
+	}
+}
+
+func TestIPv6PreferredSourceIgnoresULAWithoutIPv6Gateway(t *testing.T) {
+	makeAddress := func(ip string, next *windows.IpAdapterUnicastAddress) *windows.IpAdapterUnicastAddress {
+		raw := new(syscall.RawSockaddrAny)
+		socket := (*windows.RawSockaddrInet6)(unsafe.Pointer(raw))
+		socket.Family = windows.AF_INET6
+		copy(socket.Addr[:], net.ParseIP(ip).To16())
+		return &windows.IpAdapterUnicastAddress{Next: next, DadState: windows.IpDadStatePreferred,
+			SuffixOrigin: windows.IpSuffixOriginLinkLayerAddress, ValidLifetime: 100, PreferredLifetime: 100,
+			Address: windows.SocketAddress{Sockaddr: raw, SockaddrLength: int32(unsafe.Sizeof(windows.RawSockaddrInet6{}))}}
+	}
+	ula := makeAddress("fd07:64c3:380b:0:6:adcd:64df:499f", nil)
+	if got := preferredIPv6Source(ula, false); got != "" {
+		t.Fatalf("ULA-only link without an IPv6 gateway was treated as IPv6 egress: %s", got)
+	}
+	if got := preferredIPv6Source(ula, true); got != "fd07:64c3:380b:0:6:adcd:64df:499f" {
+		t.Fatalf("ULA behind an IPv6 gateway (NAT66) must remain usable: %s", got)
+	}
+	public := makeAddress("2001:db8::1", makeAddress("fd00::1", nil))
+	if got := preferredIPv6Source(public, false); got != "2001:db8::1" {
+		t.Fatalf("global IPv6 must not depend on gateway discovery: %s", got)
 	}
 }
 
