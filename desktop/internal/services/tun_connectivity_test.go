@@ -459,3 +459,31 @@ func stubTUNDataPathProbe(t *testing.T, ok bool) {
 	}
 	t.Cleanup(func() { tunDataPathProbe = original })
 }
+
+func TestRejectDefaultOutboundDiscountsOnlyTUNDataPath(t *testing.T) {
+	failing := tunConnectivityReport{Checks: []tunConnectivityCheck{
+		{Stage: "dns_bootstrap", OK: true},
+		{Stage: "aggregation_data", OK: true},
+		{Stage: "tun_data_path", Error: "curl: connection refused"},
+	}}
+	if _, err := discountRejectedTUNDataPath(failing, failing.failure(), "aggregation"); err == nil {
+		t.Fatal("a data-path failure must still be reported when unmatched traffic is not rejected")
+	}
+	report, err := discountRejectedTUNDataPath(failing, failing.failure(), OutboundReject)
+	if err != nil {
+		t.Fatalf("global reject made the expected data-path refusal a connectivity failure: %v", err)
+	}
+	if check := report.Checks[2]; !check.OK || check.Error != "" || check.Detail == "" {
+		t.Fatalf("data-path check was not marked as skipped: %+v", check)
+	}
+	if failing.Checks[2].OK {
+		t.Fatal("the original report was mutated")
+	}
+	broken := tunConnectivityReport{Checks: []tunConnectivityCheck{
+		{Stage: "aggregation_data", Error: "socks unreachable"},
+		{Stage: "tun_data_path", Error: "curl: connection refused"},
+	}}
+	if _, err := discountRejectedTUNDataPath(broken, broken.failure(), OutboundReject); err == nil {
+		t.Fatal("global reject must not hide a broken aggregation channel")
+	}
+}

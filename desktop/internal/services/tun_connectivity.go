@@ -188,6 +188,26 @@ func probeTUNConnectivityThroughChannels(
 	return report, report.failure()
 }
 
+// The data-path probe is an ordinary unmatched application flow. When the
+// global default rule rejects unmatched traffic, its failure is the configured
+// policy working, not a broken tunnel, so it must not raise a connectivity
+// notice on every watchdog cycle. The aggregation and DNS checks still apply.
+func discountRejectedTUNDataPath(report tunConnectivityReport, err error, defaultOutbound string) (tunConnectivityReport, error) {
+	if err == nil || strings.TrimSpace(defaultOutbound) != OutboundReject {
+		return report, err
+	}
+	checks := append([]tunConnectivityCheck(nil), report.Checks...)
+	for index := range checks {
+		if checks[index].Stage == "tun_data_path" && !checks[index].OK {
+			checks[index].OK = true
+			checks[index].Detail = "skipped: global default rule rejects unmatched traffic"
+			checks[index].Error = ""
+		}
+	}
+	report = tunConnectivityReport{Checks: checks}
+	return report, report.failure()
+}
+
 type connectivityDNSResolver func(context.Context, string, string) (dnsResolveResult, error)
 
 func resolveConnectivityBootstrap(ctx context.Context, adapter string, resolve connectivityDNSResolver) (dnsResolveResult, error) {

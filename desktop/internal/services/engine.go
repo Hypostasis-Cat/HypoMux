@@ -213,6 +213,7 @@ type EngineService struct {
 	clashAPI               clashAPIConfig
 	tunAggregationEndpoint string
 	tunDNSBootstrap        dnsResolveResult
+	tunDefaultOutbound     string
 	closing                bool
 }
 
@@ -562,11 +563,13 @@ func (s *EngineService) Snapshot() (EngineSnapshot, error) {
 		s.mu.Lock()
 		aggregationEndpoint := s.tunAggregationEndpoint
 		dnsBootstrap := s.tunDNSBootstrap
+		defaultOutbound := s.tunDefaultOutbound
 		s.mu.Unlock()
 		var tunReport tunConnectivityReport
 		var tunErr error
 		if aggregationEndpoint != "" {
 			tunReport, tunErr = probeTUNConnectivityThroughChannels(probeContext, aggregationEndpoint, dnsBootstrap, s.resolveConnectivityDNS)
+			tunReport, tunErr = discountRejectedTUNDataPath(tunReport, tunErr, defaultOutbound)
 		} else {
 			tunErr = errors.New("aggregation channel endpoint is unavailable")
 			tunReport = tunConnectivityReport{Checks: []tunConnectivityCheck{{
@@ -954,6 +957,7 @@ func (s *EngineService) startLocked(ctx context.Context, mode string) (snapshot 
 		s.clashAPI = clashAPIConfig{}
 		s.tunAggregationEndpoint = ""
 		s.tunDNSBootstrap = dnsResolveResult{}
+		s.tunDefaultOutbound = ""
 		s.mu.Unlock()
 		if len(cleanupFailures) > 0 {
 			cause = fmt.Errorf("%w；启动失败后的网络回滚不完整：%v", cause, errors.Join(cleanupFailures...))
@@ -1108,6 +1112,7 @@ func (s *EngineService) startLocked(ctx context.Context, mode string) (snapshot 
 		s.clashAPI = clashAPI
 		s.tunAggregationEndpoint = started.Endpoints.Channels["aggregation"]
 		s.tunDNSBootstrap = dnsResult
+		s.tunDefaultOutbound = settings.DefaultOutbound
 		s.mu.Unlock()
 		s.recordTUNNetworkEnvironment(true)
 		if effectiveStrictRoute {
@@ -1118,6 +1123,7 @@ func (s *EngineService) startLocked(ctx context.Context, mode string) (snapshot 
 			validationReport, validationErr := probeTUNConnectivityThroughChannels(
 				ctx, started.Endpoints.Channels["aggregation"], dnsResult, s.resolveConnectivityDNS,
 			)
+			validationReport, validationErr = discountRejectedTUNDataPath(validationReport, validationErr, settings.DefaultOutbound)
 			s.recordTUNConnectivityOutcome(validationErr)
 			event := "startup_validated"
 			if validationErr != nil {
@@ -1265,6 +1271,7 @@ func (s *EngineService) stopLocked(ctx context.Context) (EngineSnapshot, error) 
 	s.clashAPI = clashAPIConfig{}
 	s.tunAggregationEndpoint = ""
 	s.tunDNSBootstrap = dnsResolveResult{}
+	s.tunDefaultOutbound = ""
 	// An automatic restart owns a recovery intent until startup succeeds.
 	// Keep it across cleanup/start failures; explicit Stop cancels it first.
 	if s.runtimeBindingRecovery == nil || !s.runtimeBindingEnabled {
