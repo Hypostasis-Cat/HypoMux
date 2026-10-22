@@ -510,3 +510,29 @@ func TestHotspotWindowsRejectsMissingTUNWithoutMutation(t *testing.T) {
 		t.Fatal("preflight must exit cleanly", h.snapshot())
 	}
 }
+
+func TestHotspotWindowsIdleTimeoutIsDisabledAndRestored(t *testing.T) {
+	runHotspotFunctions(t, `
+class FakeApi { static [bool]$Present = $true; static [bool] IsMethodPresent([string]$type, [string]$name) { return [FakeApi]::Present } }
+class FakeTethering {
+ static [bool]$Enabled = $true; static [int]$Disabled = 0; static [int]$Restored = 0
+ static [bool] IsNoConnectionsTimeoutEnabled() { return [FakeTethering]::Enabled }
+ static [void] DisableNoConnectionsTimeout() { [FakeTethering]::Disabled++; [FakeTethering]::Enabled = $false }
+ static [void] EnableNoConnectionsTimeout() { [FakeTethering]::Restored++; [FakeTethering]::Enabled = $true }
+}
+$apiInformation = [FakeApi]; $tethering = [FakeTethering]
+$attempted = $false; $configured = $false
+Disable-IdleTimeout
+if ($idleTimeout -ne 'disabled' -or -not $restoreIdleTimeout -or [FakeTethering]::Disabled -ne 1) { throw 'idle timeout not disabled' }
+if ((Get-SystemOffMessage) -like '*节能*') { throw 'power saving blamed after it was disabled' }
+Complete-HotspotCleanup
+if ($idleTimeout -ne 'restored' -or $restoreIdleTimeout -or [FakeTethering]::Restored -ne 1 -or $cleanupFailed) { throw 'idle timeout not restored' }
+[FakeTethering]::Enabled = $false
+Disable-IdleTimeout
+Complete-HotspotCleanup
+if ($idleTimeout -ne 'already_disabled' -or [FakeTethering]::Restored -ne 1) { throw 'user power saving choice changed' }
+[FakeApi]::Present = $false
+Disable-IdleTimeout
+if ($idleTimeout -ne 'unsupported' -or (Get-SystemOffMessage) -notlike '*节能*') { throw 'unsupported system lacks power saving hint' }
+`)
+}

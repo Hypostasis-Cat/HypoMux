@@ -176,6 +176,7 @@ type telemetrySample struct {
 
 type EngineService struct {
 	hotspot                *hotspotSession
+	hotspotStart           *hotspotStart
 	mu                     sync.Mutex
 	lifecycleGate          chan struct{}
 	transitionPhase        string
@@ -1212,6 +1213,7 @@ func (s *EngineService) clearTransition(expected string) {
 
 func (s *EngineService) Stop() (EngineSnapshot, error) {
 	s.cancelRuntimeBindingRefresh()
+	s.cancelHotspotStart()
 	ctx, cancel := context.WithTimeout(context.Background(), 75*time.Second)
 	defer cancel()
 	if err := s.acquireLifecycle(ctx); err != nil {

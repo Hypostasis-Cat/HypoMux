@@ -42,3 +42,23 @@ it("allows stopping an active hotspot when TUN readiness is lost", async () => {
   fireEvent.click(screen.getByRole("switch"));
   await waitFor(() => expect(mocks.stop).toHaveBeenCalledOnce());
 });
+it("cancels a pending start without reporting an error", async () => {
+  let rejectStart!: (reason: Error) => void;
+  mocks.start.mockReturnValue(new Promise((_, reject) => { rejectStart = reject; }));
+  mocks.stop.mockImplementation(async () => { rejectStart(new Error("已取消开启热点")); return off; });
+  render(<HotspotQuickControl onConfigure={mocks.configure} />);
+  await screen.findByText("Hotspot is off");
+  fireEvent.click(screen.getByRole("switch"));
+  await waitFor(() => expect(mocks.start).toHaveBeenCalledOnce());
+  const toggle = screen.getByRole("switch");
+  expect(toggle.hasAttribute("disabled")).toBe(false);
+  fireEvent.click(toggle);
+  await screen.findByText("Hotspot is off");
+  expect(mocks.stop).toHaveBeenCalledOnce();
+  expect(screen.queryByText("Hotspot needs attention")).toBeNull();
+});
+it("explains a hotspot Windows turned off", async () => {
+  mocks.status.mockResolvedValue({ ...off, stop_reason: "windows_off", message: "Windows turned it off" });
+  render(<HotspotQuickControl onConfigure={mocks.configure} />);
+  await screen.findByText("Windows turned off the hotspot");
+});

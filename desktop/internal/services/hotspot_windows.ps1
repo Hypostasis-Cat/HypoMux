@@ -32,6 +32,9 @@ $bandFallback = ''
 $transmitLinkMbps = 0
 $receiveLinkMbps = 0
 $hotspotAdapter = ''
+$idleTimeout = ''
+$restoreIdleTimeout = $false
+$stopReason = ''
 
 function Publish-State([string]$state, [string]$message, [bool]$verified) {
     $clients = 0
@@ -60,6 +63,7 @@ function Publish-State([string]$state, [string]$message, [bool]$verified) {
         hotspot_adapter = $hotspotAdapter; hotspot_adapter_id = $adapterID
         transmit_link_mbps = $transmitLinkMbps; receive_link_mbps = $receiveLinkMbps
         devices = $devices; devices_available = $devicesAvailable
+        idle_timeout = $idleTimeout; stop_reason = $stopReason
         updated_at = [DateTime]::UtcNow.ToString('o')
     } | ConvertTo-Json -Depth 5 -Compress))
 }
@@ -371,6 +375,23 @@ function Start-ConfiguredHotspot($desired, [string]$requested, [bool]$available)
     if ([string]$result.Status -ne 'Success') { throw (Get-StartFailure ([string]$result.Status) $script:configuredBand) }
 }
 
+function Disable-IdleTimeout {
+    # Windows turns an AP without clients off after about five minutes. Best
+    # effort: this system-wide setting is restored during cleanup.
+    try {
+        if (-not $apiInformation::IsMethodPresent('Windows.Networking.NetworkOperators.NetworkOperatorTetheringManager', 'DisableNoConnectionsTimeout')) { $script:idleTimeout = 'unsupported'; return }
+        if (-not $tethering::IsNoConnectionsTimeoutEnabled()) { $script:idleTimeout = 'already_disabled'; return }
+        $tethering::DisableNoConnectionsTimeout()
+        $script:restoreIdleTimeout = $true
+        $script:idleTimeout = 'disabled'
+    } catch { $script:idleTimeout = 'error' }
+}
+
+function Get-SystemOffMessage {
+    if ($idleTimeout -in @('disabled', 'already_disabled')) { return 'Windows 已关闭移动热点（可能在系统设置中被关闭、Wi-Fi 被关闭或电脑进入睡眠）。聚合仍在运行，可重新开启热点。' }
+    return 'Windows 已关闭移动热点，常见原因是一段时间没有设备连接时系统自动省电关闭。聚合仍在运行，可重新开启热点；也可在 Windows 移动热点设置中关闭“节能”。'
+}
+
 function Stop-OwnedHotspot {
     # Transitional/off states can lag behind a failed Start/Stop result.
     $deadline = [DateTime]::UtcNow.AddSeconds(5)
@@ -401,6 +422,11 @@ function Complete-HotspotCleanup {
     if ($configured -and $null -ne $original -and $hotspotOffConfirmed -eq $true) {
         try { Await-Action ($manager.ConfigureAccessPointAsync($original)); $script:configurationRestored = $true }
         catch { $script:cleanupFailed = $true; $script:cleanupError += ' 原热点配置未能恢复，请在 Windows 设置中检查名称、密码和频段。'; $script:failure += ' Original hotspot configuration could not be restored.' }
+    }
+    # Restoring power saving cannot affect a stopped AP; report without failing.
+    if ($restoreIdleTimeout) {
+        try { $tethering::EnableNoConnectionsTimeout(); $script:restoreIdleTimeout = $false; $script:idleTimeout = 'restored' }
+        catch { $script:idleTimeout = 'restore_failed'; $script:cleanupError += ' 未能恢复 Windows 移动热点的“节能”设置，请在系统设置中检查。' }
     }
 }
 
@@ -446,6 +472,7 @@ public static class HypoMuxHotspotLifetime {
     $phase = 'network baseline'
     Save-NetworkBaseline
     $phase = 'access point configuration'
+    Disable-IdleTimeout
     Start-ConfiguredHotspot $desired ([string]$config.band) $bandAvailable
     $phase = 'shared egress verification'
     $networkReady = $false
@@ -465,7 +492,8 @@ public static class HypoMuxHotspotLifetime {
     $phase = 'hotspot monitoring'
     $networkFailures = 0
     while (-not $stopSignal.Wait(3000)) {
-        if ([string]$manager.TetheringOperationalState -eq 'Off') { break }
+        # Not requested by HypoMux: power saving, Settings, radio off or sleep.
+        if ([string]$manager.TetheringOperationalState -eq 'Off') { $stopReason = 'windows_off'; break }
         $publicReady = Test-PublicNetwork $publicID
         if (-not $publicReady -and -not $networkQueryFailed) { throw 'HypoMux TUN stopped; hotspot is being closed' }
         $privateReady = $false
@@ -493,5 +521,6 @@ public static class HypoMuxHotspotLifetime {
 } finally {
     Complete-HotspotCleanup
     if ($failure -ne '') { Publish-State 'failed' $failure $false }
+    elseif ($stopReason -eq 'windows_off') { Publish-State 'stopped' (Get-SystemOffMessage) $false }
     else { Publish-State 'stopped' '' $false }
 }

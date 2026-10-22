@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"os/exec"
@@ -335,5 +336,68 @@ func TestHotspotWorkerCrashClearsVerifiedState(t *testing.T) {
 	status := h.snapshot()
 	if status.State != "failed" || status.SharingVerified || status.Message == "" {
 		t.Fatal(status)
+	}
+}
+
+func TestHotspotStartCancelRollsBackPendingWorker(t *testing.T) {
+	command := exec.Command(os.Args[0], "-test.run=^TestHotspotWorkerProcess$")
+	command.Env = append(os.Environ(), "HYPOMUX_HOTSPOT_TEST_WORKER=unverified")
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(300*time.Millisecond, cancel)
+	h, err := launchHotspot(ctx, command, HotspotConfig{SSID: "test", Password: "safe-'$`password", Band: "auto"})
+	if !errors.Is(err, errHotspotStartCanceled) {
+		t.Fatalf("cancel reported as %v", err)
+	}
+	select {
+	case <-h.done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("canceled worker did not exit")
+	}
+	if status := h.snapshot(); status.State != "stopped" || status.SharingVerified {
+		t.Fatal(status)
+	}
+}
+
+func TestHotspotStopCancelsStartWaitingForLifecycle(t *testing.T) {
+	s := &EngineService{lifecycleGate: make(chan struct{}, 1)}
+	s.lifecycleGate <- struct{}{}
+	result := make(chan error, 1)
+	go func() {
+		_, err := s.StartHotspot(HotspotConfig{SSID: "HypoMux", Password: "password123", Band: "auto"})
+		result <- err
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		s.mu.Lock()
+		registered := s.hotspotStart != nil
+		s.mu.Unlock()
+		if registered {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("start was not registered for cancellation")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	s.cancelHotspotStart()
+	select {
+	case err := <-result:
+		if !errors.Is(err, errHotspotStartCanceled) {
+			t.Fatalf("cancel reported as %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("stop did not cancel a start blocked on the lifecycle gate")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.hotspotStart != nil {
+		t.Fatal("finished start remained cancelable")
+	}
+}
+
+func TestHotspotSystemOffIsLogged(t *testing.T) {
+	fields := hotspotPerformanceFields(HotspotStatus{State: "stopped", StopReason: "windows_off", IdleTimeout: "disabled"})
+	if fields["stop_reason"] != "windows_off" || fields["idle_timeout"] != "disabled" {
+		t.Fatal(fields)
 	}
 }

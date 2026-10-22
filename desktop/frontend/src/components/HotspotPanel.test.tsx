@@ -284,4 +284,21 @@ describe("HotspotPanel", () => {
     fireEvent.change(screen.getByLabelText("Network name"), { target: { value: "网".repeat(11) } });
     expect(screen.getByRole("switch", { name: "Aggregation hotspot" }).hasAttribute("disabled")).toBe(true);
   });
+  it("cancels a pending start from the switch and explains Windows shutdowns", async () => {
+    mocks.preferences.mockResolvedValue({ ssid: "My hotspot", password: "saved-pass", band: "auto" });
+    let rejectStart!: (reason: Error) => void;
+    mocks.start.mockReturnValue(new Promise((_, reject) => { rejectStart = reject; }));
+    mocks.stop.mockImplementation(async () => { rejectStart(new Error("已取消开启热点")); return { ...stopped, stop_reason: "windows_off", message: "Windows closed the idle hotspot" }; });
+    render(<HotspotPanel />);
+    await screen.findByText("Hotspot is off");
+    await waitFor(() => expect(screen.getByRole("switch").hasAttribute("disabled")).toBe(false));
+    fireEvent.click(screen.getByRole("switch"));
+    await waitFor(() => expect(mocks.start).toHaveBeenCalledOnce());
+    expect(screen.getByRole("switch").hasAttribute("disabled")).toBe(false);
+    fireEvent.click(screen.getByRole("switch"));
+    await screen.findByText("Windows turned off the hotspot");
+    expect(mocks.stop).toHaveBeenCalledOnce();
+    expect(screen.getAllByText("Windows closed the idle hotspot").some(node => node.classList.contains("hotspot-notice"))).toBe(true);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
 });

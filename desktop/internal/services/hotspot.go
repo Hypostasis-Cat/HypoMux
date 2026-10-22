@@ -51,7 +51,16 @@ type HotspotStatus struct {
 	Message               string          `json:"message,omitempty"`
 	Diagnostics           string          `json:"diagnostics,omitempty"`
 	GatewayAddress        string          `json:"gateway_address,omitempty"`
+	// IdleTimeout reports Windows' no-client power saving handling;
+	// StopReason "windows_off" marks a hotspot Windows turned off by itself.
+	IdleTimeout string `json:"idle_timeout,omitempty"`
+	StopReason  string `json:"stop_reason,omitempty"`
 }
+
+var errHotspotStartCanceled = errors.New("已取消开启热点")
+
+// hotspotStart lets a stop request cancel a startup that holds lifecycleGate.
+type hotspotStart struct{ cancel context.CancelFunc }
 
 type HotspotDevice struct {
 	MAC   string   `json:"mac"`
@@ -147,7 +156,7 @@ func (s *EngineService) HotspotSessionConfig(sessionID string) (HotspotConfig, e
 	return h.config, nil
 }
 
-func (h *hotspotSession) stop(ctx context.Context) error {
+func (h *hotspotSession) requestStop() {
 	h.stopOnce.Do(func() {
 		h.mu.Lock()
 		h.stopRequested = true
@@ -158,6 +167,10 @@ func (h *hotspotSession) stop(ctx context.Context) error {
 		h.mu.Unlock()
 		_ = h.input.Close()
 	})
+}
+
+func (h *hotspotSession) stop(ctx context.Context) error {
+	h.requestStop()
 	select {
 	case <-h.done:
 		if status := h.snapshot(); !status.CleanupComplete {
@@ -291,6 +304,11 @@ func launchHotspotObserved(ctx context.Context, command *exec.Cmd, config Hotspo
 		}
 		return h, errors.New(message)
 	case <-ctx.Done():
+		if errors.Is(ctx.Err(), context.Canceled) {
+			// A user stop: the worker rolls back and later statuses read stopping.
+			h.requestStop()
+			return h, errHotspotStartCanceled
+		}
 		_ = input.Close()
 		return h, errors.New("启动热点超时，正在撤销共享；请稍后检查状态")
 	}
@@ -320,11 +338,41 @@ func (s *EngineService) StartHotspot(config HotspotConfig) (HotspotStatus, error
 	// and bounded broker inspection retries to finish within their deadlines.
 	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Second)
 	defer cancel()
+	start := &hotspotStart{cancel: cancel}
+	s.mu.Lock()
+	s.hotspotStart = start
+	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		if s.hotspotStart == start {
+			s.hotspotStart = nil
+		}
+		s.mu.Unlock()
+	}()
+	status, err := s.startWithLifecycle(ctx, config)
+	if err != nil && errors.Is(ctx.Err(), context.Canceled) {
+		err = errHotspotStartCanceled
+	}
+	return status, err
+}
+
+func (s *EngineService) startWithLifecycle(ctx context.Context, config HotspotConfig) (HotspotStatus, error) {
 	if err := s.acquireLifecycle(ctx); err != nil {
 		return s.HotspotStatus(), err
 	}
 	defer s.releaseLifecycle()
 	return s.startHotspotLocked(ctx, config)
+}
+
+// cancelHotspotStart must run before waiting for lifecycleGate: an in-flight
+// StartHotspot holds that gate for up to its full startup budget.
+func (s *EngineService) cancelHotspotStart() {
+	s.mu.Lock()
+	start := s.hotspotStart
+	s.mu.Unlock()
+	if start != nil {
+		start.cancel()
+	}
 }
 
 func (s *EngineService) startHotspotLocked(ctx context.Context, config HotspotConfig) (HotspotStatus, error) {
@@ -406,6 +454,7 @@ func hotspotPerformanceFields(status HotspotStatus) map[string]any {
 		"configured_band": status.ConfiguredBand, "band_fallback": status.BandFallback,
 		"clients": status.Clients, "sharing_verified": status.SharingVerified,
 		"transmit_link_mbps": status.TransmitLinkMbps, "receive_link_mbps": status.ReceiveLinkMbps,
+		"idle_timeout": status.IdleTimeout, "stop_reason": status.StopReason,
 	}
 }
 
@@ -420,6 +469,7 @@ func (s *EngineService) stopHotspot(ctx context.Context) error {
 }
 
 func (s *EngineService) StopHotspot() (HotspotStatus, error) {
+	s.cancelHotspotStart()
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 	if err := s.acquireLifecycle(ctx); err != nil {

@@ -52,6 +52,22 @@ API 依据：[Windows TetheringWiFiBand](https://learn.microsoft.com/en-us/uwp/a
 
 自动验证：桌面 `go test ./...`；前端 `pnpm run build`；`pnpm exec vitest run src/components/HotspotPanel.test.tsx src/pages/SettingsPage.test.tsx`。
 
+## 2026-10-11 性能优化
+
+- `HotspotConfig.adapter_id` 为可选的物理无线网卡 GUID；省略时沿用 Windows 自动选择。`HotspotAdapters` 只读枚举物理无线网卡，包括未连接的备用网卡，并标记首页选择的上游。手动选择后使用 `CreateFromConnectionProfile(TUNProfile, NetworkAdapter)`；公共接口仍是原 GUID 校验过的 TUN。网卡缺失、禁用、访问失败或驱动不支持时明确拒绝，不暗中换卡。旧加密配置无需迁移，运行中不能修改发射网卡。
+- SOCKS UDP 收包及回包使用 `netip.AddrPort` / `ReadFromUDPAddrPort` / `WriteToUDPAddrPort`，消除客户端地址的逐包堆分配。现有源 IP、端口锁定、IPv6、流上限和流绑定语义保留。
+- 自适应速度策略用独立的 UDP 性能表，只采集成功转发给客户端的下载负载，不将 UDP 训练结果混入 TCP。每秒采样，仍保留 15 秒预热、五个有效窗口、新流数量门槛、最低份额、5 个百分点调整上限和吞吐下降冷却；一条已有 QUIC 流不会被拆分或重新分配。
+- 默认只为多网卡聚合 UDP 套接字请求突发缓冲：每个 association 的中继收发各 1 MiB，每条上游 UDP 流收发各 256 KiB。设置为 best effort，不因系统拒绝缓冲选项而中断连接。显式单网卡和 direct 保持系统默认。`HYPOMUX_UDP_TUNING=off/auto/force` 可用于开发对照，必须设置在启动 Core 的进程环境中；TCP 保留原 `HYPOMUX_TCP_TUNING` 行为。
+- Core 遥测新增 `udp_profile` 与独立 UDP 策略/状态/份额；桌面性能日志保存 UDP profile、有效 TCP/UDP 策略与 UDP 状态，不加入密码或设备身份。
+
+自动回归覆盖协议反馈隔离、空闲与无回复回退、受限候选、绑定变化、UDP lease 回收、旧策略序列、配置加密保存、网卡选择失败与前端保存/启停。`BenchmarkUDPRelayAddressRead` 对比真实环回套接字的两个收包 API：本机 Windows/amd64 测得旧 API 每包 52 B、2 次分配，新 API 为 0 B、0 次分配。该基准含发送和收包系统调用，不代表无线吞吐；运行时间波动不用于宣布手机提速。
+
+复现：在 `engine` 运行 `go test ./internal/proxy -run '^$' -bench BenchmarkUDPRelayAddressRead -benchmem -count=3`。实机需分开比较：相同源和连接数下的电脑 TUN、自动发射热点、专用备用网卡热点；分别测试 TCP 多连接与 UDP/QUIC，同一时段只运行一个测试，记录持续吞吐、错误、频段、信号与调度策略。比较缓冲 profile 时重启对应 Core 并确认日志中的 profile；不要将重启前后改变的上游、信号或下载源视为代码收益。当前未完成这轮改动的手机实机吞吐验收。
+
+API 参考：[指定私有发射网卡](https://learn.microsoft.com/en-us/uwp/api/windows.networking.networkoperators.networkoperatortetheringmanager.createfromconnectionprofile)、[Wi-Fi 设备枚举](https://learn.microsoft.com/en-us/uwp/api/windows.devices.wifi.wifiadapter.findalladaptersasync)。未连接的网卡通过 WinRT 枚举设备访问，可能受 Windows Wi-Fi 访问权限影响；不扫描附近网络或修改位置权限。
+
+本轮验证：前端 60 个测试文件、415 项测试、TypeScript 检查与生产构建通过；Core 和桌面 Go 全量回归在跳过本机受限的 6 项原有 IPv6 专项后通过，Go 静态检查通过。跳过的是 Core 的 IPv6 ICMP、DNS UDP/TCP、DoH TLS、DNSPod IPv6 winner，以及桌面的 IPv6 ICMP、Core IPv6 环回恢复；首次运行与单独复查均出现系统访问拒绝、超时或 ICMP unavailable，用户确认当前无 IPv6。代理包全量回归没有跳过测试。真实 WinRT 类型投影和只读设备枚举通过，没有开启真实热点。Race 检测未运行：本机 CGO_ENABLED=0 且无 C 编译器；不将普通回归视作 race 检测结果。手机实机吞吐仍待对照。
+
 ## 完整版使用体验（测试分支）
 
 - 工具箱卡片提供快捷开关与实时设备数量；使用已保存配置启动，没有密码时进入详情设置。
@@ -89,3 +105,12 @@ API 依据：[Windows TetheringWiFiBand](https://learn.microsoft.com/en-us/uwp/a
 | 长时间视频、下载、游戏与 UDP/QUIC、IPv6 | 无持续掉线；记录网卡、系统版本及失败组合 | 待实机 |
 
 已报告的手机多网卡吞吐测试保持有效，但在上述项目完成前保留实验性标记。候选开发完成不等于所有设备兼容性验收完成。
+
+## 2026-10-22 系统自动关闭与启动取消
+
+- Windows 移动热点默认开启“节能”：一段时间没有设备连接会自动关闭热点。启动前若 `NetworkOperatorTetheringManager.IsNoConnectionsTimeoutEnabled()` 为真，工作进程调用 `DisableNoConnectionsTimeout()`，并在清理时调用 `EnableNoConnectionsTimeout()` 恢复；用户原本已关闭节能时不做修改，也不会在退出时开启。API 不存在（运行时检测）或调用失败时继续开启热点，只在 `idle_timeout` 记录 `unsupported` / `error`。这是系统级设置，工作进程被强制结束或断电时可能停留在已关闭状态，需要在 Windows 移动热点设置中检查“节能”。
+- 运行中检测到 Windows 将热点关闭（非 HypoMux 请求）时，状态为 `stopped` 并带 `stop_reason=windows_off` 与说明：节能已禁用时提示系统设置、Wi-Fi 开关或睡眠等原因，否则提示节能自动关闭。聚合不受影响，可直接重新开启。原热点配置照常恢复。
+- 启动最长占用 150 秒生命周期锁。现在关闭热点、停止聚合和退出客户端会先取消正在进行的启动：工作进程收到 stdin 关闭后按原有路径撤销热点和共享，再由关闭操作等待清理结果。等待生命周期锁或检查前置条件阶段被取消时不会创建热点会话。前端在启动中允许关闭开关一次，用于取消；取消不显示为错误。
+- 支持日志的 `hotspot/status_changed` 新增 `idle_timeout` 与 `stop_reason`；复制诊断同样包含这两项。
+
+自动回归：取消挂起中的工作进程后状态为 stopped；关闭请求可取消等待生命周期锁的启动；节能禁用、恢复、用户已关闭节能和旧系统不支持四种路径；前端启动中取消与系统关闭提示。真实 WinRT 节能 API 仅在本机（Windows 26300）做过只读方法存在性检查，未在测试中修改系统设置；空闲 5 分钟不自动关闭、旧版 Windows 10 行为及取消时序仍需实机验证。热点脚本通过命令行传入，当前约 28.7K/32.7K UTF-16 单位，后续扩展需注意余量。
