@@ -600,21 +600,25 @@ func (s *Server) relayTransfers(client net.Conn, upstream net.Conn, session *con
 		pooled, buffer := acquireTCPRelayBuffer()
 		defer releaseTCPRelayBuffer(pooled)
 		sampleAt := time.Now()
+		sampleIdle := session.cdnObserver.idleTime(sampleAt)
 		var sampleBytes uint64
 		effectiveRecorded := false
 		var transferBytes uint64
 		var blocked time.Duration
 		var clientWriteFailed bool
 		observe := func() {
+			now := time.Now()
+			idle := session.cdnObserver.idleTime(now)
 			if session.cdnKey.domain != "" {
-				if blocked < time.Since(sampleAt)/2 {
-					s.cdn.observe(session.cdnKey, session.cdnGeneration, sampleBytes, time.Since(sampleAt))
-				} else {
+				elapsed := steamActiveElapsed(sampleAt, now, sampleIdle, idle)
+				if elapsed > 0 && blocked < elapsed/2 {
+					s.cdn.observe(session.cdnKey, session.cdnGeneration, sampleBytes, elapsed)
+				} else if elapsed > 0 {
 					s.cdn.note(session.cdnGeneration, session.cdnKey.domain, session.cdnKey.adapter, session.cdnKey.ip, "client_backpressure")
 				}
 				blocked = 0
 			}
-			sampleAt, sampleBytes = time.Now(), 0
+			sampleAt, sampleIdle, sampleBytes = now, idle, 0
 		}
 		defer observe()
 		var writer io.Writer = client
@@ -640,7 +644,10 @@ func (s *Server) relayTransfers(client net.Conn, upstream net.Conn, session *con
 						s.cdn.mu.Unlock()
 						effectiveRecorded = true
 					}
-					if time.Since(sampleAt) >= time.Second {
+					// Close a sample after one second of transfer; a mostly idle
+					// keep-alive connection still reports within five seconds.
+					if now := time.Now(); now.Sub(sampleAt) >= time.Second &&
+						(now.Sub(sampleAt) >= 5*time.Second || steamActiveElapsed(sampleAt, now, sampleIdle, session.cdnObserver.idleTime(now)) >= time.Second) {
 						observe()
 					}
 				}

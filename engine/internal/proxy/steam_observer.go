@@ -112,6 +112,10 @@ type steamHTTPObserver struct {
 	total       int64
 	timer       *time.Timer
 	stopped     bool
+	// Keep-alive time with no request or response outstanding. It is not CDN
+	// evidence: a fast node finishing early would otherwise score as slow.
+	idleTotal time.Duration
+	idleFrom  time.Time
 }
 
 // The parser observes bytes at the forwarding boundary. It never waits for bytes,
@@ -223,7 +227,7 @@ func (s *Server) newSteamObserver(session *connection) *steamHTTPObserver {
 		return nil
 	}
 	c.observers++
-	o := &steamHTTPObserver{s: s, session: session}
+	o := &steamHTTPObserver{s: s, session: session, idleFrom: time.Now()}
 	for _, a := range s.scheduler.snapshot().Adapters {
 		if a.Name == session.cdnKey.adapter {
 			o.adapter = a
@@ -271,6 +275,8 @@ func (o *steamHTTPObserver) stopLocked() {
 		return
 	}
 	o.stopped = true
+	// Freeze idle time: without framing, later gaps cannot be classified.
+	o.markBusyLocked(time.Now())
 	if o.stopContext != nil {
 		o.stopContext()
 	}
@@ -286,6 +292,27 @@ func (o *steamHTTPObserver) stopLocked() {
 	o.s.cdn.observers--
 	o.s.cdn.mu.Unlock()
 }
+func (o *steamHTTPObserver) markBusyLocked(now time.Time) {
+	if !o.idleFrom.IsZero() {
+		o.idleTotal += now.Sub(o.idleFrom)
+		o.idleFrom = time.Time{}
+	}
+}
+
+// idleTime is the total time no request or response was outstanding. A nil
+// observer (HTTPS or unsupported framing) reports none.
+func (o *steamHTTPObserver) idleTime(now time.Time) time.Duration {
+	if o == nil {
+		return 0
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.idleFrom.IsZero() {
+		return o.idleTotal
+	}
+	return o.idleTotal + now.Sub(o.idleFrom)
+}
+
 func (o *steamHTTPObserver) close() {
 	if o == nil {
 		return
@@ -333,6 +360,7 @@ func (o *steamHTTPObserver) feed(up bool, p []byte) {
 			o.note(reason)
 			// Keep only method and URI metadata, never cookies or application headers.
 			o.pending = append(o.pending, steamObservedRequest{req: &http.Request{Method: r.Method}, uri: uri, at: time.Now()})
+			o.markBusyLocked(time.Now())
 			return r.ContentLength, len(r.TransferEncoding) > 0, true
 		}, func([]byte) {}, func() {})
 	} else {
@@ -410,7 +438,13 @@ func (o *steamHTTPObserver) feed(up bool, p []byte) {
 				o.current.uri = ""
 				o.prefix = nil
 			}
-		}, func() { o.current = nil; o.prefix = nil })
+		}, func() {
+			o.current = nil
+			o.prefix = nil
+			if len(o.pending) == 0 {
+				o.idleFrom = time.Now()
+			}
+		})
 	}
 	if !ok {
 		o.note("http_observer_unsupported")

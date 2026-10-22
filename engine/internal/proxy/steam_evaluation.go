@@ -26,6 +26,12 @@ func resetSteamPerformance(e *SteamCDNEntry) {
 	e.slowSampleEligible = false
 }
 
+// steamActiveElapsed excludes keep-alive idle time observed during a sample.
+// Time waiting for a response (TTFB) and stalls mid-response still count.
+func steamActiveElapsed(start, now time.Time, idleAtStart, idleNow time.Duration) time.Duration {
+	return max(0, now.Sub(start)-(idleNow-idleAtStart))
+}
+
 func (c *steamCDN) saveLoadLocked(e *SteamCDNEntry) {
 	if e.loadSamples == nil {
 		e.loadSamples = make(map[int]steamLoadSample)
