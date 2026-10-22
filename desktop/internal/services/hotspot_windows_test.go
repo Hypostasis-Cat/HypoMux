@@ -536,3 +536,40 @@ Disable-IdleTimeout
 if ($idleTimeout -ne 'unsupported' -or (Get-SystemOffMessage) -notlike '*节能*') { throw 'unsupported system lacks power saving hint' }
 `)
 }
+
+func TestHotspotWindowsMonitoringSharesAndThrottlesNetworkQueries(t *testing.T) {
+	runHotspotFunctions(t, `
+$publicID = [guid]'00000000-0000-0000-0000-000000000001'
+$privateID = [guid]'00000000-0000-0000-0000-000000000002'
+$queries = 0; $tunState = 'Up'
+function Get-NetAdapter { param([switch]$IncludeHidden) $script:queries++; [PSCustomObject]@{ InterfaceGuid = $publicID; Status = $tunState } }
+function Test-PrivateNetwork { $null = @(Read-NetAdapters); $true }
+if (-not (Test-HotspotNetwork $publicID) -or $queries -ne 1) { throw 'full check did not share one adapter query' }
+if ($shareAdapters -or $null -ne $adapterSnapshot) { throw 'adapter snapshot outlived the full check' }
+$null = @(Read-NetAdapters)
+if ($queries -ne 2) { throw 'query outside a full check reused a stale snapshot' }
+$tunState = 'Disconnected'
+$rejected = $false
+try { Test-HotspotNetwork $publicID } catch { $rejected = $true }
+if (-not $rejected -or $shareAdapters) { throw 'stopped TUN not rejected by full check' }
+$live = $true
+function Test-InterfacesUp { param($ids) if ($ids.Count -ne 2 -or $ids[1] -ne $privateID) { throw 'liveness ids' }; $live }
+$nextNetworkCheck = [DateTime]::UtcNow.AddSeconds(10)
+if (Test-NetworkDue $publicID) { throw 'healthy interfaces queried CIM before the interval' }
+$live = $false
+if (-not (Test-NetworkDue $publicID)) { throw 'liveness failure did not bring the full check forward' }
+$live = $true; $nextNetworkCheck = [DateTime]::UtcNow.AddSeconds(-1)
+if (-not (Test-NetworkDue $publicID)) { throw 'periodic full check skipped' }
+`)
+}
+
+func TestHotspotWindowsInterfaceLivenessProbe(t *testing.T) {
+	runHotspotFunctions(t, `
+if (Test-InterfacesUp @([guid]::NewGuid())) { throw 'unknown interface reported up' }
+$upIDs = @([System.Net.NetworkInformation.NetworkInterface]::GetAllNetworkInterfaces() | Where-Object { [string]$_.OperationalStatus -eq 'Up' -and $_.Id -match '^\{' } | ForEach-Object { [guid]$_.Id })
+if ($upIDs.Count -gt 0) {
+ if (-not (Test-InterfacesUp @($upIDs[0]))) { throw 'live interface reported down' }
+ if (Test-InterfacesUp @($upIDs[0], [guid]::NewGuid())) { throw 'one missing interface accepted' }
+}
+`)
+}

@@ -35,6 +35,9 @@ $hotspotAdapter = ''
 $idleTimeout = ''
 $restoreIdleTimeout = $false
 $stopReason = ''
+$shareAdapters = $false
+$adapterSnapshot = $null
+$nextNetworkCheck = [DateTime]::MinValue
 
 function Publish-State([string]$state, [string]$message, [bool]$verified) {
     $clients = 0
@@ -167,8 +170,25 @@ function Test-Sharing([guid]$publicID) {
     return Get-SharingVerdict $shared $publicID
 }
 
+function Read-NetAdapters {
+    # One full monitoring check shares a single CIM adapter query.
+    if ($shareAdapters -and $null -ne $adapterSnapshot) { return $adapterSnapshot }
+    $adapters = @(Get-NetAdapter -IncludeHidden -ErrorAction Stop)
+    if ($shareAdapters) { $script:adapterSnapshot = $adapters }
+    return $adapters
+}
+
+function Test-InterfacesUp([guid[]]$ids) {
+    # Cheap liveness probe between full checks. It can only bring the next
+    # full check forward; it never stops the hotspot by itself.
+    try { $up = @([System.Net.NetworkInformation.NetworkInterface]::GetAllNetworkInterfaces() | Where-Object { [string]$_.OperationalStatus -eq 'Up' } | ForEach-Object { [guid]$_.Id }) }
+    catch { return $false }
+    foreach ($id in $ids) { if ($id -notin $up) { return $false } }
+    return $true
+}
+
 function Read-WirelessNetwork {
-    $adapters = @(Get-NetAdapter -IncludeHidden -ErrorAction Stop | Where-Object {
+    $adapters = @(Read-NetAdapters | Where-Object {
         $_.InterfaceDescription -like '*Wi-Fi Direct*' -or $_.InterfaceType -eq 71 -or $_.NdisPhysicalMedium -in @(1, 9)
     })
     $uplinks = @(Get-NetRoute -AddressFamily IPv4 -ErrorAction Stop | Where-Object { $_.DestinationPrefix -eq '0.0.0.0/0' } | ForEach-Object { $_.InterfaceIndex })
@@ -231,13 +251,27 @@ function Test-PrivateNetwork {
 
 function Test-PublicNetwork([guid]$publicID) {
     $script:networkQueryFailed = $false
-    try { $alive = @(Get-NetAdapter -IncludeHidden -ErrorAction Stop | Where-Object { [guid]$_.InterfaceGuid -eq $publicID -and $_.Status -eq 'Up' }) }
+    try { $alive = @(Read-NetAdapters | Where-Object { [guid]$_.InterfaceGuid -eq $publicID -and $_.Status -eq 'Up' }) }
     catch {
         $script:networkQueryFailed = $true
         $script:privateNetworkDetail = 'public_query_error=' + $_.Exception.Message
         return $false
     }
     return ($alive.Count -eq 1)
+}
+
+function Test-NetworkDue([guid]$publicID) {
+    # Routes and addresses (CIM) every 10 s, or at once if liveness looks wrong.
+    return ([DateTime]::UtcNow -ge $script:nextNetworkCheck -or -not (Test-InterfacesUp @($publicID, $script:privateID)))
+}
+
+function Test-HotspotNetwork([guid]$publicID) {
+    $script:shareAdapters = $true; $script:adapterSnapshot = $null
+    try {
+        $publicReady = Test-PublicNetwork $publicID
+        if (-not $publicReady -and -not $script:networkQueryFailed) { throw 'HypoMux TUN stopped; hotspot is being closed' }
+        return ($publicReady -and (Test-PrivateNetwork))
+    } finally { $script:shareAdapters = $false; $script:adapterSnapshot = $null }
 }
 
 function Update-SharingCheck([guid]$publicID) {
@@ -491,24 +525,24 @@ public static class HypoMuxHotspotLifetime {
     Publish-Running $verdict
     $phase = 'hotspot monitoring'
     $networkFailures = 0
+    $nextNetworkCheck = [DateTime]::UtcNow.AddSeconds(10)
     while (-not $stopSignal.Wait(3000)) {
         # Not requested by HypoMux: power saving, Settings, radio off or sleep.
         if ([string]$manager.TetheringOperationalState -eq 'Off') { $stopReason = 'windows_off'; break }
-        $publicReady = Test-PublicNetwork $publicID
-        if (-not $publicReady -and -not $networkQueryFailed) { throw 'HypoMux TUN stopped; hotspot is being closed' }
-        $privateReady = $false
-        if ($publicReady) { $privateReady = Test-PrivateNetwork }
-        if (-not $privateReady) {
-            if (-not $networkQueryFailed) { throw '热点网卡或 IPv4 网关已失效，正在关闭热点。' }
-            $networkFailures++
-            $sharingDetail = $privateNetworkDetail
-            if ($networkFailures -ge 3) { throw '连续三次无法读取热点网络状态，正在关闭热点。' }
-            $verdict = 'query_error'
-            $nextSharingCheck = [DateTime]::MinValue
-            Publish-Running $verdict
-            continue
+        if (Test-NetworkDue $publicID) {
+            if (-not (Test-HotspotNetwork $publicID)) {
+                if (-not $networkQueryFailed) { throw '热点网卡或 IPv4 网关已失效，正在关闭热点。' }
+                $networkFailures++
+                $sharingDetail = $privateNetworkDetail
+                if ($networkFailures -ge 3) { throw '连续三次无法读取热点网络状态，正在关闭热点。' }
+                $verdict = 'query_error'
+                $nextSharingCheck = [DateTime]::MinValue
+                Publish-Running $verdict
+                continue
+            }
+            $networkFailures = 0
+            $nextNetworkCheck = [DateTime]::UtcNow.AddSeconds(10)
         }
-        $networkFailures = 0
         if ([DateTime]::UtcNow -ge $nextSharingCheck) { $verdict = Update-SharingCheck $publicID }
         Publish-Running $verdict
     }
