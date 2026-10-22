@@ -50,6 +50,12 @@ function NotificationVisualFixture() {
       });
       return;
     }
+    if (fixture === "queue") {
+      notify({ title: "网卡已重新扫描", message: "发现 2 张可用网卡。", intent: "info", timeout: 0, dedupeKey: "visual-qa:queue-info" });
+      notify({ title: "规则已保存", message: "分流规则已立即生效。", intent: "success", timeout: 0, dedupeKey: "visual-qa:queue-success" });
+      notify({ title: "WLAN 信号较弱", message: "该链路的权重已临时降低。", intent: "warning", timeout: 0, dedupeKey: "visual-qa:queue-warning" });
+      return;
+    }
     notify({
       title: "操作未完成",
       message: "stage=tun_data_path endpoint=http://www.msftconnecttest.com/connecttest.txt, outbound=windows-tun: curl: (28) Resolving timed out after 4007 milliseconds",

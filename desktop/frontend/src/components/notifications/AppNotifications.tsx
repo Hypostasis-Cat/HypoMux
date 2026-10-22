@@ -60,9 +60,15 @@ type AppNotificationContextValue = {
   detailsOpen: boolean;
   setDetailsOpen: (open: boolean | ((current: boolean) => boolean)) => void;
   setInteractionPaused: (paused: boolean) => void;
+  /** True while the active notification's auto-dismiss countdown is on hold. */
+  countdownPaused: boolean;
 };
 
 const AppNotificationContext = createContext<AppNotificationContextValue | null>(null);
+
+// Keep in sync with the island's leave animation in app.css.
+const ISLAND_EXIT_MS = 300;
+const DETAILS_EXIT_MS = 200;
 
 const notificationIcon = (intent: NotificationIntent): ReactNode => {
   if (intent === "success") return <CheckmarkCircle20Regular />;
@@ -144,6 +150,7 @@ export function AppNotificationProvider({ children }: PropsWithChildren) {
     };
   }, [active, detailsOpen, dismiss, documentHidden, interactionPaused]);
 
+  const countdownPaused = interactionPaused || detailsOpen || documentHidden;
   const value = useMemo(() => ({
     notify,
     dismiss,
@@ -152,7 +159,8 @@ export function AppNotificationProvider({ children }: PropsWithChildren) {
     detailsOpen,
     setDetailsOpen,
     setInteractionPaused,
-  }), [clear, detailsOpen, dismiss, notifications, notify]);
+    countdownPaused,
+  }), [clear, countdownPaused, detailsOpen, dismiss, notifications, notify]);
 
   return (
     <AppNotificationContext.Provider value={value}>
@@ -176,11 +184,30 @@ function AppNotificationViewport({
   wallpaperBackground?: string;
 }) {
   const { locale } = useI18n();
-  const { notifications, detailsOpen, setDetailsOpen, setInteractionPaused, dismiss, clear } = context;
+  const { notifications, detailsOpen, setDetailsOpen, setInteractionPaused, dismiss, clear, countdownPaused } = context;
   const active = notifications[0];
   const [rendered, setRendered] = useState<AppNotification | undefined>(active);
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
+  const [detailsMounted, setDetailsMounted] = useState(false);
+  // Alternating pulse classes restart the squash animation whenever the
+  // visible island swaps or merges content without remounting the region.
+  const [pulse, setPulse] = useState<0 | 1 | 2>(0);
+  const previousActive = useRef<AppNotification | undefined>(active);
+
+  useEffect(() => {
+    const previous = previousActive.current;
+    previousActive.current = active;
+    if (!active) { setPulse(0); return; }
+    if (previous && previous !== active) setPulse((current) => (current === 1 ? 2 : 1));
+  }, [active]);
+
+  useEffect(() => {
+    if (detailsOpen) { setDetailsMounted(true); return; }
+    if (!detailsMounted) return;
+    const timer = window.setTimeout(() => setDetailsMounted(false), DETAILS_EXIT_MS);
+    return () => window.clearTimeout(timer);
+  }, [detailsMounted, detailsOpen]);
 
   useEffect(() => {
     setInteractionPaused(Boolean(active) && (hovered || focused));
@@ -197,7 +224,7 @@ function AppNotificationViewport({
       return;
     }
     if (!rendered) return;
-    const timer = window.setTimeout(() => setRendered(undefined), 240);
+    const timer = window.setTimeout(() => setRendered(undefined), ISLAND_EXIT_MS);
     return () => window.clearTimeout(timer);
   }, [active, rendered]);
 
@@ -207,9 +234,20 @@ function AppNotificationViewport({
   const islandStyle = wallpaperBackground
     ? { "--hm-wallpaper-background": wallpaperBackground } as CSSProperties
     : undefined;
+  const contentKey = `${shown.id}:${shown.occurrences}`;
+  const stackDepth = Math.min(notifications.length - 1, 2);
+  const showDetails = Boolean(shown.detail) && (detailsOpen || detailsMounted);
+  const regionClasses = [
+    "global-notification-region",
+    `is-${shown.intent}`,
+    detailsOpen && "is-expanded",
+    isLeaving && "is-leaving",
+    pulse > 0 && `is-pulse-${pulse === 1 ? "a" : "b"}`,
+    stackDepth > 0 && `has-stack-${stackDepth}`,
+  ].filter(Boolean).join(" ");
   return (
     <section
-      className={`global-notification-region is-${shown.intent}${detailsOpen ? " is-expanded" : ""}${isLeaving ? " is-leaving" : ""}`}
+      className={regionClasses}
       style={islandStyle}
       role={shown.intent === "error" ? "alert" : "status"}
       aria-live={shown.intent === "error" ? "assertive" : "polite"}
@@ -227,12 +265,22 @@ function AppNotificationViewport({
         else dismiss(shown.id);
       }}
     >
+      <span className="global-notification-stack" aria-hidden="true"><span /><span /></span>
       <span className="global-notification-frost" aria-hidden="true" />
       <div className="global-notification-bar">
-        <span className="global-notification-icon" aria-hidden="true">
+        <span key={`icon:${contentKey}`} className="global-notification-icon" aria-hidden="true">
+          {shown.timeout > 0 && !isLeaving && (
+            <svg
+              className={`global-notification-countdown${countdownPaused ? " is-paused" : ""}`}
+              style={{ "--hm-island-timeout": `${shown.timeout}ms` } as CSSProperties}
+              viewBox="0 0 36 36"
+            >
+              <circle cx="18" cy="18" r="16.5" pathLength={100} />
+            </svg>
+          )}
           {notificationIcon(shown.intent)}
         </span>
-        <div className="global-notification-copy">
+        <div key={`copy:${contentKey}`} className="global-notification-copy">
           <strong>{shown.title}</strong>
           {shown.summary && <span>{shown.summary}</span>}
         </div>
@@ -242,7 +290,7 @@ function AppNotificationViewport({
           </span>
         )}
         {shown.occurrences > 1 && (
-          <span className="global-notification-count" title={locale === "en" ? "Repeated notifications" : "重复通知"}>
+          <span key={shown.occurrences} className="global-notification-count" title={locale === "en" ? "Repeated notifications" : "重复通知"}>
             ×{shown.occurrences}
           </span>
         )}
@@ -283,14 +331,18 @@ function AppNotificationViewport({
           onClick={() => dismiss(shown.id)}
         />
       </div>
-      {detailsOpen && shown.detail && (
-        <div id="notification-details" className="global-notification-details">
-          <pre>{shown.detail}</pre>
-          {notifications.length > 1 && (
-            <Button className="global-notification-button" appearance="subtle" size="small" onClick={clear}>
-              {locale === "en" ? "Clear all" : "清除全部"}
-            </Button>
-          )}
+      {showDetails && (
+        <div id="notification-details" className={`global-notification-details${detailsOpen ? "" : " is-closing"}`}>
+          <div className="global-notification-details-clip">
+            <div className="global-notification-details-content">
+              <pre>{shown.detail}</pre>
+              {notifications.length > 1 && (
+                <Button className="global-notification-button" appearance="subtle" size="small" onClick={clear}>
+                  {locale === "en" ? "Clear all" : "清除全部"}
+                </Button>
+              )}
+            </div>
+          </div>
         </div>
       )}
     </section>

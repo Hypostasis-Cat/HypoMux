@@ -89,7 +89,9 @@ describe("AppNotificationCenter", () => {
     fireEvent.click(screen.getByRole("button", { name: "Dismiss notification" }));
 
     expect(screen.getByRole("alert").classList.contains("is-leaving")).toBe(true);
-    act(() => vi.advanceTimersByTime(240));
+    act(() => vi.advanceTimersByTime(299));
+    expect(screen.getByRole("alert")).toBeTruthy();
+    act(() => vi.advanceTimersByTime(1));
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
@@ -151,5 +153,48 @@ describe("AppNotificationCenter", () => {
     act(() => vi.advanceTimersByTime(1000));
     expect(screen.getByRole("status").classList.contains("is-leaving")).toBe(true);
     hidden.mockRestore();
+  });
+
+  it("lets details collapse before unmounting them", () => {
+    vi.useFakeTimers();
+    render(<AppNotificationProvider><AppNotificationCenter /><NotificationTrigger /></AppNotificationProvider>);
+    fireEvent.click(screen.getByRole("button", { name: "Trigger error" }));
+    fireEvent.click(screen.getByRole("button", { name: "Details" }));
+    fireEvent.click(screen.getByRole("button", { name: "Hide" }));
+
+    const details = document.getElementById("notification-details");
+    expect(details?.classList.contains("is-closing")).toBe(true);
+    expect(screen.getByRole("alert").classList.contains("is-expanded")).toBe(false);
+    act(() => vi.advanceTimersByTime(200));
+    expect(document.getElementById("notification-details")).toBeNull();
+  });
+
+  it("traces the auto-dismiss countdown and pauses it with the timer", () => {
+    renderTimed();
+    const ring = document.querySelector<SVGElement>(".global-notification-countdown");
+    expect(ring?.style.getPropertyValue("--hm-island-timeout")).toBe("1000ms");
+    expect(ring?.classList.contains("is-paused")).toBe(false);
+    fireEvent.pointerEnter(screen.getByRole("status"));
+    expect(document.querySelector(".global-notification-countdown")?.classList.contains("is-paused")).toBe(true);
+  });
+
+  it("omits the countdown for notifications that wait for the user", () => {
+    renderTimed(true);
+    expect(document.querySelector(".global-notification-countdown")).toBeNull();
+  });
+
+  it("stacks queued notices and pulses when the visible content changes", () => {
+    renderTimed();
+    const region = screen.getByRole("status");
+    expect(region.className).not.toMatch(/is-pulse|has-stack/);
+
+    fireEvent.click(screen.getByRole("button", { name: "Save B" }));
+    expect(region.classList.contains("has-stack-1")).toBe(true);
+    expect(region.classList.contains("is-pulse-a")).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss notification" }));
+    expect(region.textContent).toContain("Saved A");
+    expect(region.classList.contains("has-stack-1")).toBe(false);
+    expect(region.classList.contains("is-pulse-b")).toBe(true);
   });
 });

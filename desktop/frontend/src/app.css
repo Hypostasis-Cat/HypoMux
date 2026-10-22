@@ -633,9 +633,20 @@ svg {
   scrollbar-color: color-mix(in srgb, var(--hm-text-tertiary) 34%, transparent) transparent;
 }
 
+/*
+ * Notification island. Motion is built from two springs (generated from a
+ * damped harmonic oscillator and expressed with linear()):
+ *   --hm-island-spring  morphs size (ζ≈0.68, ~5% overshoot)
+ *   --hm-island-pop     scales small parts (ζ≈0.48, livelier settle)
+ * The region never animates filter/opacity on its frost layer so WebView2
+ * keeps the backdrop sample stable while the shape changes.
+ */
 .global-notification-region {
   --hm-island-surface: rgba(17, 19, 24, 0.7);
+  --hm-island-stack: rgba(30, 33, 40, 0.78);
+  --hm-island-stack-edge: rgba(255, 255, 255, 0.12);
   --hm-island-highlight: rgba(255, 255, 255, 0.1);
+  --hm-island-sheen: rgba(255, 255, 255, 0.06);
   --hm-island-border: rgba(255, 255, 255, 0.15);
   --hm-island-text: rgba(255, 255, 255, 0.96);
   --hm-island-muted: rgba(255, 255, 255, 0.64);
@@ -643,47 +654,78 @@ svg {
   --hm-island-control: rgba(255, 255, 255, 0.08);
   --hm-island-control-hover: rgba(255, 255, 255, 0.14);
   --hm-island-divider: rgba(255, 255, 255, 0.11);
-  --hm-island-shadow: rgba(0, 0, 0, 0.3);
+  --hm-island-shadow: rgba(0, 0, 0, 0.34);
+  --hm-island-tint: #65a9ff;
+  --hm-island-tint-fill: 17%;
+  --hm-island-glow: 26%;
+  --hm-island-radius: 23px;
+  --hm-island-seed: 46px;
+  --hm-island-spring: linear(0, 0.0283, 0.1004, 0.1997, 0.313, 0.4302, 0.5439, 0.649, 0.7423, 0.8224, 0.8887, 0.9418, 0.9825, 1.0124, 1.0329, 1.0457, 1.0524, 1.0543, 1.0527, 1.0488, 1.0434, 1.0373, 1.0309, 1.0247, 1.019, 1.014, 1.0096, 1.006, 1);
+  --hm-island-pop: linear(0, 0.0565, 0.1974, 0.3831, 0.5809, 0.766, 0.9224, 1.0417, 1.1219, 1.1658, 1.1792, 1.1696, 1.1447, 1.1115, 1.0761, 1.0428, 1.0146, 0.993, 0.9784, 0.9704, 0.9679, 0.9695, 0.9739, 0.9798, 0.9862, 0.9922, 0.9973, 1.0012, 1);
+  --hm-island-pulse: none;
+  --hm-island-bloom: none;
   position: fixed;
   z-index: var(--hm-z-toast);
   top: 14px;
   inset-inline: 0;
+  /* No max-width: the stretch spring must be free to overshoot its target. */
   width: min(520px, calc(100% - 280px));
   min-width: 250px;
-  max-width: 520px;
   margin-inline: auto;
-  padding: 5px 7px;
-  overflow: hidden;
-  border: 1px solid var(--hm-island-border);
-  border-radius: 22px;
+  padding: 6px 7px 6px 6px;
+  isolation: isolate;
+  border-radius: var(--hm-island-radius);
   color: var(--hm-island-text);
   background: transparent;
   box-shadow:
-    0 14px 38px var(--hm-island-shadow),
-    0 3px 10px color-mix(in srgb, var(--hm-island-shadow) 48%, transparent),
-    inset 0 1px 0 var(--hm-island-highlight);
+    0 22px 48px -14px var(--hm-island-shadow),
+    0 4px 12px -2px color-mix(in srgb, var(--hm-island-shadow) 55%, transparent),
+    0 14px 34px -18px color-mix(in srgb, var(--hm-island-tint) var(--hm-island-glow), transparent);
   --wails-draggable: no-drag;
   transform-origin: top center;
-  animation: dynamic-island-arrive var(--hm-motion-enter) var(--hm-motion-ease-out) both;
+  animation:
+    dynamic-island-drop 440ms var(--hm-island-pop) both,
+    dynamic-island-stretch 640ms var(--hm-island-spring) both,
+    var(--hm-island-pulse),
+    var(--hm-island-bloom);
   transition:
-    border-color var(--hm-motion-fast) var(--hm-motion-ease-out),
+    border-radius var(--hm-motion-normal) var(--hm-motion-ease-out),
     box-shadow var(--hm-motion-normal) var(--hm-motion-ease-out);
 }
 
+.global-notification-region.is-expanded {
+  --hm-island-radius: 20px;
+  --hm-island-bloom: dynamic-island-bloom 520ms var(--hm-motion-ease-out);
+}
+
+.global-notification-region.is-pulse-a {
+  --hm-island-pulse: dynamic-island-pulse-a 460ms var(--hm-motion-ease-out);
+}
+
+.global-notification-region.is-pulse-b {
+  --hm-island-pulse: dynamic-island-pulse-b 460ms var(--hm-motion-ease-out);
+}
+
 .global-notification-region.is-leaving {
-  animation: dynamic-island-leave var(--hm-motion-exit) var(--hm-motion-ease-in-out) both;
+  animation: dynamic-island-leave 300ms cubic-bezier(0.5, 0, 0.3, 1) both;
   pointer-events: none;
 }
+
+.global-notification-region.is-error { --hm-island-tint: #ff6961; --hm-island-glow: 34%; }
+.global-notification-region.is-warning { --hm-island-tint: #ffd15c; }
+.global-notification-region.is-success { --hm-island-tint: #63e68b; }
 
 .global-notification-frost {
   position: absolute;
   z-index: 0;
   inset: 0;
   overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--hm-island-tint) 14%, var(--hm-island-border));
   border-radius: inherit;
   background: var(--hm-island-surface);
-  backdrop-filter: blur(28px) saturate(155%);
-  -webkit-backdrop-filter: blur(28px) saturate(155%);
+  box-shadow: inset 0 1px 0 var(--hm-island-highlight);
+  backdrop-filter: blur(28px) saturate(160%);
+  -webkit-backdrop-filter: blur(28px) saturate(160%);
   pointer-events: none;
 }
 
@@ -717,18 +759,65 @@ svg {
   display: block;
 }
 
+/* Intent-tinted light pooling behind the icon, plus a soft top sheen. */
 .global-notification-frost::after {
   position: absolute;
   inset: 0;
   background:
+    radial-gradient(140px 70px at 22px 23px, color-mix(in srgb, var(--hm-island-tint) var(--hm-island-glow), transparent), transparent 70%),
+    linear-gradient(180deg, var(--hm-island-sheen), transparent 46px),
     radial-gradient(circle at 18% -55%, var(--hm-island-highlight), transparent 48%),
     var(--hm-island-surface);
   content: "";
+  transition: background var(--hm-motion-normal) var(--hm-motion-ease-out);
+}
+
+/* Queued notices peek out beneath the island as a physical stack. */
+.global-notification-stack {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+.global-notification-stack > span {
+  position: absolute;
+  inset: 0;
+  border: 1px solid var(--hm-island-stack-edge);
+  border-radius: inherit;
+  background: var(--hm-island-stack);
+  box-shadow: 0 8px 18px -10px var(--hm-island-shadow);
+  opacity: 0;
+  transform: translateY(0) scale(1);
+  transform-origin: bottom center;
+  transition:
+    opacity 220ms var(--hm-motion-ease-out),
+    transform 560ms var(--hm-island-spring);
+}
+
+.global-notification-region.has-stack-1 .global-notification-stack > :first-child,
+.global-notification-region.has-stack-2 .global-notification-stack > :first-child {
+  opacity: 0.82;
+  transform: translateY(7px) scale(0.94);
+}
+
+.global-notification-region.has-stack-2 .global-notification-stack > :last-child {
+  opacity: 0.5;
+  transform: translateY(13px) scale(0.88);
+}
+
+.global-notification-region.is-leaving .global-notification-stack > span {
+  opacity: 0;
+  transform: translateY(0) scale(0.9);
 }
 
 [data-appearance="light"] .global-notification-region {
   --hm-island-surface: rgba(247, 249, 253, 0.68);
+  --hm-island-stack: rgba(229, 233, 241, 0.92);
+  --hm-island-stack-edge: rgba(31, 35, 45, 0.09);
   --hm-island-highlight: rgba(255, 255, 255, 0.82);
+  --hm-island-sheen: rgba(255, 255, 255, 0.5);
   --hm-island-border: rgba(255, 255, 255, 0.86);
   --hm-island-text: rgba(18, 20, 26, 0.94);
   --hm-island-muted: rgba(28, 31, 39, 0.61);
@@ -736,32 +825,15 @@ svg {
   --hm-island-control: rgba(31, 35, 45, 0.07);
   --hm-island-control-hover: rgba(31, 35, 45, 0.12);
   --hm-island-divider: rgba(31, 35, 45, 0.1);
-  --hm-island-shadow: rgba(38, 42, 54, 0.18);
+  --hm-island-shadow: rgba(38, 42, 54, 0.2);
+  --hm-island-tint: #1769aa;
+  --hm-island-tint-fill: 11%;
+  --hm-island-glow: 14%;
 }
 
-[data-appearance="light"] .global-notification-icon {
-  color: #1769aa;
-  background: rgba(23, 105, 170, 0.11);
-  box-shadow: inset 0 0 0 1px rgba(23, 105, 170, 0.14);
-}
-
-[data-appearance="light"] .global-notification-region.is-error .global-notification-icon {
-  color: #c42b1c;
-  background: rgba(196, 43, 28, 0.1);
-  box-shadow: inset 0 0 0 1px rgba(196, 43, 28, 0.14);
-}
-
-[data-appearance="light"] .global-notification-region.is-warning .global-notification-icon {
-  color: #8a5a00;
-  background: rgba(160, 104, 0, 0.11);
-  box-shadow: inset 0 0 0 1px rgba(138, 90, 0, 0.14);
-}
-
-[data-appearance="light"] .global-notification-region.is-success .global-notification-icon {
-  color: #147d3f;
-  background: rgba(20, 125, 63, 0.1);
-  box-shadow: inset 0 0 0 1px rgba(20, 125, 63, 0.14);
-}
+[data-appearance="light"] .global-notification-region.is-error { --hm-island-tint: #c42b1c; --hm-island-glow: 18%; }
+[data-appearance="light"] .global-notification-region.is-warning { --hm-island-tint: #8a5a00; }
+[data-appearance="light"] .global-notification-region.is-success { --hm-island-tint: #147d3f; }
 
 [data-appearance="dark"] .global-notification-region {
   --hm-island-surface: rgba(15, 17, 22, 0.7);
@@ -775,36 +847,89 @@ svg {
   min-width: 0;
   align-items: center;
   gap: 7px;
+  /* Clip while the island is narrower than its content, but leave room for focus rings. */
+  overflow: clip;
+  overflow-clip-margin: 4px;
+}
+
+.global-notification-bar > * {
+  animation: dynamic-island-content-in 380ms var(--hm-motion-ease-out) 150ms backwards;
+}
+
+.global-notification-bar > :nth-child(2) { animation-delay: 190ms; }
+.global-notification-bar > :nth-child(n + 3) { animation-delay: 240ms; }
+
+/* Swapped or merged content arrives sooner: the island is already open. */
+.global-notification-region:is(.is-pulse-a, .is-pulse-b) .global-notification-bar > :is(.global-notification-icon, .global-notification-copy) {
+  animation-delay: 40ms;
+}
+
+.global-notification-region.is-leaving .global-notification-bar > *,
+.global-notification-region.is-leaving .global-notification-details {
+  animation: dynamic-island-content-out 140ms var(--hm-motion-ease-in-out) both;
 }
 
 .global-notification-icon {
+  position: relative;
   display: grid;
-  width: 28px;
-  height: 28px;
-  flex: 0 0 28px;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
   place-items: center;
   border-radius: 50%;
-  color: #65a9ff;
-  background: rgba(56, 139, 253, 0.17);
-  box-shadow: inset 0 0 0 1px rgba(101, 169, 255, 0.2);
+  color: var(--hm-island-tint);
+  background: color-mix(in srgb, var(--hm-island-tint) var(--hm-island-tint-fill), transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--hm-island-tint) 22%, transparent);
 }
 
-.global-notification-region.is-error .global-notification-icon {
-  color: #ff6961;
-  background: rgba(255, 69, 58, 0.18);
-  box-shadow: inset 0 0 0 1px rgba(255, 105, 97, 0.2);
+.global-notification-icon > svg:not(.global-notification-countdown) {
+  transform-origin: var(--hm-island-icon-origin, 50% 50%);
+  animation: var(--hm-island-icon-motion);
 }
 
-.global-notification-region.is-warning .global-notification-icon {
-  color: #ffd15c;
-  background: rgba(255, 184, 0, 0.17);
-  box-shadow: inset 0 0 0 1px rgba(255, 209, 92, 0.2);
+/* Each intent gets its own small gesture after the icon pops in. */
+.global-notification-region {
+  --hm-island-icon-motion: dynamic-island-icon-pop 560ms var(--hm-island-pop) 160ms backwards;
 }
 
-.global-notification-region.is-success .global-notification-icon {
-  color: #63e68b;
-  background: rgba(48, 209, 88, 0.17);
-  box-shadow: inset 0 0 0 1px rgba(99, 230, 139, 0.2);
+.global-notification-region.is-error {
+  --hm-island-icon-motion:
+    dynamic-island-icon-pop 560ms var(--hm-island-pop) 160ms backwards,
+    dynamic-island-icon-shake 420ms var(--hm-motion-ease-in-out) 520ms;
+}
+
+.global-notification-region.is-warning {
+  --hm-island-icon-origin: 50% 20%;
+  --hm-island-icon-motion:
+    dynamic-island-icon-pop 560ms var(--hm-island-pop) 160ms backwards,
+    dynamic-island-icon-swing 620ms var(--hm-motion-ease-out) 480ms;
+}
+
+/* Auto-dismiss countdown traced around the icon; it pauses with the timer. */
+.global-notification-countdown {
+  position: absolute;
+  top: -3px;
+  left: -3px;
+  width: 36px;
+  height: 36px;
+  overflow: visible;
+  pointer-events: none;
+  transform: rotate(-90deg);
+}
+
+.global-notification-countdown circle {
+  fill: none;
+  stroke: currentColor;
+  stroke-dasharray: 100;
+  stroke-linecap: round;
+  stroke-width: 1.5;
+  opacity: 0.72;
+  animation: dynamic-island-countdown var(--hm-island-timeout) linear both;
+}
+
+.global-notification-countdown.is-paused circle {
+  animation-play-state: paused;
+  opacity: 0.38;
 }
 
 .global-notification-copy {
@@ -845,6 +970,16 @@ svg {
   white-space: nowrap;
 }
 
+.global-notification-count {
+  color: var(--hm-island-text);
+  background: color-mix(in srgb, var(--hm-island-tint) var(--hm-island-tint-fill), var(--hm-island-control));
+  font-variant-numeric: tabular-nums;
+}
+
+.global-notification-bar > .global-notification-count {
+  animation: dynamic-island-badge 520ms var(--hm-island-pop) 60ms backwards;
+}
+
 .global-notification-code {
   color: var(--hm-island-meta);
   font-family: Consolas, "Cascadia Mono", monospace;
@@ -855,6 +990,10 @@ svg {
   min-width: 26px;
   color: var(--hm-island-meta);
   background: transparent;
+  transition:
+    color var(--hm-motion-fast) var(--hm-motion-ease-out),
+    background var(--hm-motion-fast) var(--hm-motion-ease-out),
+    transform 380ms var(--hm-island-pop);
 }
 
 .global-notification-button.fui-Button:hover {
@@ -862,29 +1001,55 @@ svg {
   background: var(--hm-island-control-hover);
 }
 
+.global-notification-button.fui-Button:active {
+  transform: scale(0.92);
+  transition-duration: var(--hm-motion-fast), var(--hm-motion-fast), 90ms;
+}
+
 .global-notification-action.fui-Button {
-  padding-inline: 9px;
-  border: 1px solid var(--hm-island-divider);
+  padding-inline: 10px;
+  border: 1px solid color-mix(in srgb, var(--hm-island-tint) 26%, var(--hm-island-divider));
+  border-radius: 999px;
   color: var(--hm-island-text);
-  background: var(--hm-island-control);
+  background: color-mix(in srgb, var(--hm-island-tint) 12%, var(--hm-island-control));
+}
+
+.global-notification-action.fui-Button:hover {
+  background: color-mix(in srgb, var(--hm-island-tint) 20%, var(--hm-island-control-hover));
 }
 
 .global-notification-dismiss.fui-Button {
   flex: 0 0 auto;
+  border-radius: 999px;
 }
 
+/* Details unfold through a 0fr → 1fr grid row so the height can spring. */
 .global-notification-details {
   position: relative;
   z-index: 1;
+  display: grid;
+  grid-template-rows: 1fr;
+  animation: dynamic-island-details-open 520ms var(--hm-island-spring) both;
+}
+
+.global-notification-details.is-closing {
+  animation: dynamic-island-details-close 200ms var(--hm-motion-ease-in-out) both;
+}
+
+.global-notification-details-clip {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.global-notification-details-content {
   display: flex;
   min-width: 0;
-  max-height: 170px;
-  margin: 5px 3px 3px 35px;
+  margin: 5px 3px 3px 37px;
   padding: 9px 2px 2px;
   align-items: flex-start;
   gap: 8px;
   border-top: 1px solid var(--hm-island-divider);
-  animation: dynamic-island-details 240ms var(--hm-motion-ease-out) both;
+  animation: dynamic-island-details-content 360ms var(--hm-motion-ease-out) 80ms backwards;
 }
 
 .global-notification-details pre {
@@ -915,32 +1080,178 @@ svg {
   }
 }
 
-@keyframes dynamic-island-arrive {
-  0% {
+/* The seed is a small droplet that falls into place… */
+@keyframes dynamic-island-drop {
+  from {
     opacity: 0;
-    transform: translateY(-6px) scale(0.98);
+    transform: translateY(-16px) scale(0.55);
   }
-  100% {
+  to {
     opacity: 1;
     transform: translateY(0) scale(1);
   }
 }
 
+/* …then stretches sideways into the full island; `to` is the computed width. */
+@keyframes dynamic-island-stretch {
+  0%, 12% {
+    width: var(--hm-island-seed);
+    min-width: var(--hm-island-seed);
+  }
+}
+
 @keyframes dynamic-island-leave {
-  from { opacity: 1; transform: translateY(0) scale(1); }
-  to { opacity: 0; transform: translateY(-4px) scale(0.98); }
+  0%, 30% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  100% {
+    width: var(--hm-island-seed);
+    min-width: var(--hm-island-seed);
+    opacity: 0;
+    transform: translateY(-10px) scale(0.6);
+  }
 }
 
-@keyframes dynamic-island-details {
-  from { opacity: 0; transform: translateY(-5px); }
-  to { opacity: 1; transform: translateY(0); }
+@keyframes dynamic-island-pulse-a {
+  0% { transform: scale(1); }
+  28% { transform: scale(1.022, 0.93); }
+  62% { transform: scale(0.994, 1.018); }
+  100% { transform: scale(1); }
 }
 
-[data-motion="reduced"] .global-notification-region,
-[data-motion="off"] .global-notification-region,
-[data-motion="reduced"] .global-notification-details,
-[data-motion="off"] .global-notification-details {
+@keyframes dynamic-island-pulse-b {
+  0% { transform: scale(1); }
+  28% { transform: scale(1.022, 0.93); }
+  62% { transform: scale(0.994, 1.018); }
+  100% { transform: scale(1); }
+}
+
+@keyframes dynamic-island-bloom {
+  0% { transform: scale(1); }
+  30% { transform: scale(1.018, 0.985); }
+  65% { transform: scale(0.996, 1.006); }
+  100% { transform: scale(1); }
+}
+
+@keyframes dynamic-island-content-in {
+  from {
+    opacity: 0;
+    filter: blur(5px);
+    transform: translateY(5px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: none;
+  }
+}
+
+@keyframes dynamic-island-content-out {
+  to {
+    opacity: 0;
+    filter: blur(4px);
+    transform: scale(0.94);
+  }
+}
+
+@keyframes dynamic-island-icon-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.3) rotate(-24deg);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) rotate(0);
+  }
+}
+
+@keyframes dynamic-island-icon-shake {
+  0%, 100% { translate: 0; }
+  20% { translate: -2.5px; }
+  40% { translate: 2px; }
+  60% { translate: -1.5px; }
+  80% { translate: 1px; }
+}
+
+@keyframes dynamic-island-icon-swing {
+  0%, 100% { rotate: 0deg; }
+  25% { rotate: 14deg; }
+  50% { rotate: -9deg; }
+  75% { rotate: 4deg; }
+}
+
+@keyframes dynamic-island-countdown {
+  from { stroke-dashoffset: 0; }
+  to { stroke-dashoffset: 100; }
+}
+
+@keyframes dynamic-island-badge {
+  from {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes dynamic-island-details-open {
+  from {
+    grid-template-rows: 0fr;
+    opacity: 0;
+  }
+}
+
+@keyframes dynamic-island-details-close {
+  to {
+    grid-template-rows: 0fr;
+    opacity: 0;
+  }
+}
+
+@keyframes dynamic-island-details-content {
+  from {
+    opacity: 0;
+    filter: blur(3px);
+    transform: translateY(-6px);
+  }
+}
+
+/*
+ * Reduced motion: no morphing, bouncing or travelling — the island simply
+ * appears in its final shape. The countdown ring is decorative timing, so it
+ * is hidden rather than snapped to an empty state.
+ */
+[data-motion="reduced"] :is(.global-notification-region, .global-notification-details, .global-notification-details-content, .global-notification-bar > *, .global-notification-icon > svg),
+[data-motion="off"] :is(.global-notification-region, .global-notification-details, .global-notification-details-content, .global-notification-bar > *, .global-notification-icon > svg) {
   animation: none;
+}
+
+[data-motion="reduced"] .global-notification-countdown,
+[data-motion="off"] .global-notification-countdown {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :is(.global-notification-region, .global-notification-details, .global-notification-details-content, .global-notification-bar > *, .global-notification-icon > svg) {
+    animation: none;
+  }
+
+  .global-notification-region.is-leaving {
+    opacity: 0;
+    transition: opacity 120ms linear !important;
+  }
+
+  .global-notification-countdown {
+    display: none;
+  }
+
+  .global-notification-stack > span,
+  .global-notification-button.fui-Button {
+    transition: none;
+  }
 }
 
 .page-transition-layer {
