@@ -311,13 +311,13 @@ Function RemoveLegacyAutostartTask
     ; v2.2.0 used a highest-privilege logon task. Remove the exact
     ; application-owned task on every install/upgrade instead of relying on
     ; the legacy uninstaller registration still being intact.
-    nsExec::ExecToStack '"$SYSDIR\schtasks.exe" /Delete /TN "\HypoMuxAutoStart" /F'
+    nsExec::ExecToStack /TIMEOUT=15000 '"$SYSDIR\schtasks.exe" /Delete /TN "\HypoMuxAutoStart" /F'
     Pop $0
     Pop $1
 FunctionEnd
 
 Function un.RemoveLegacyAutostartTask
-    nsExec::ExecToStack '"$SYSDIR\schtasks.exe" /Delete /TN "\HypoMuxAutoStart" /F'
+    nsExec::ExecToStack /TIMEOUT=15000 '"$SYSDIR\schtasks.exe" /Delete /TN "\HypoMuxAutoStart" /F'
     Pop $0
     Pop $1
 FunctionEnd
@@ -378,7 +378,7 @@ Function StopCoreServiceForUpgrade
         Call RollbackSetupTransaction
     Abort "$(CoreServiceStopFailed) $0"
     ${EndIf}
-    nsExec::Exec '"$SYSDIR\sc.exe" config "${HYPOMUX_CORE_SERVICE}" start= disabled'
+    nsExec::Exec /TIMEOUT=15000 '"$SYSDIR\sc.exe" config "${HYPOMUX_CORE_SERVICE}" start= disabled'
     Pop $0
     ${If} $0 != 0
         Call RollbackSetupTransaction
@@ -387,7 +387,7 @@ Function StopCoreServiceForUpgrade
 
     ; sc.exe only submits the stop request. Waiting is kept in a separate
     ; bounded process so a deadlocked legacy service cannot freeze Setup.
-    nsExec::Exec '"$SYSDIR\sc.exe" stop "${HYPOMUX_CORE_SERVICE}"'
+    nsExec::Exec /TIMEOUT=15000 '"$SYSDIR\sc.exe" stop "${HYPOMUX_CORE_SERVICE}"'
     Pop $0
     nsExec::ExecToStack /TIMEOUT=30000 '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "try { (Get-Service -Name ${HYPOMUX_CORE_SERVICE} -ErrorAction Stop).WaitForStatus([System.ServiceProcess.ServiceControllerStatus]::Stopped, [TimeSpan]::FromSeconds(20)); exit 0 } catch { [Console]::Error.WriteLine($$_.Exception.Message); exit 2 }"'
     Pop $0
@@ -398,7 +398,7 @@ Function StopCoreServiceForUpgrade
     DetailPrint "$(CoreServiceForceStopping)"
     ; Old releases could deadlock in synchronous ConnectNamedPipe. Terminate
     ; only the process hosting HypoMuxCore; automatic restart is already off.
-    nsExec::Exec '"$SYSDIR\taskkill.exe" /F /FI "SERVICES eq ${HYPOMUX_CORE_SERVICE}"'
+    nsExec::Exec /TIMEOUT=15000 '"$SYSDIR\taskkill.exe" /F /FI "SERVICES eq ${HYPOMUX_CORE_SERVICE}"'
     Pop $0
     ; Killing the process is asynchronous with SCM state updates. Wait for a
     ; bounded stopped state instead of one fixed sleep and a CIM snapshot.
@@ -430,7 +430,7 @@ Function DetermineInstallPathChange
     InitPluginsDir
     SetOutPath "$PLUGINSDIR"
     File /oname=compare-install-directories.ps1 "compare-install-directories.ps1"
-    nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\compare-install-directories.ps1" -PreviousPath "$HypoMuxPreviousInstallDir" -RequestedPath "$INSTDIR"'
+    nsExec::ExecToStack /TIMEOUT=30000 '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\compare-install-directories.ps1" -PreviousPath "$HypoMuxPreviousInstallDir" -RequestedPath "$INSTDIR"'
     Pop $0
     Pop $1
     ${If} $0 == 0
@@ -545,7 +545,7 @@ Function RecoverLegacyV22Network
         InitPluginsDir
         SetOutPath "$PLUGINSDIR"
         File /oname=legacy-v22-recover.ps1 "legacy-v22-recover.ps1"
-        nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\legacy-v22-recover.ps1" -InstallRoot "$PROGRAMFILES64\HypoMux" -DataRoot "$PROFILE\.hypomux"'
+        nsExec::ExecToStack /TIMEOUT=120000 '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\legacy-v22-recover.ps1" -InstallRoot "$PROGRAMFILES64\HypoMux" -DataRoot "$PROFILE\.hypomux"'
         Pop $0
         Pop $1
         ${If} $0 != 0
@@ -562,7 +562,7 @@ Function RecoverWailsInstallations
     ; release. Python v2.2.0 never shipped it, so the legacy UI can never be
     ; accidentally relaunched with an unsupported recovery argument.
     IfFileExists "$INSTDIR\bin\hypomux-engine.exe" 0 nestedWailsRecovery
-        nsExec::ExecToStack '"$INSTDIR\bin\hypomux-engine.exe" recover'
+        nsExec::ExecToStack /TIMEOUT=60000 '"$INSTDIR\bin\hypomux-engine.exe" recover'
         Pop $0
         Pop $1
         ${If} $0 != 0
@@ -571,7 +571,7 @@ Function RecoverWailsInstallations
     Abort "$(WailsNetworkRecoverFailed)"
         ${EndIf}
         IfFileExists "$INSTDIR\${PRODUCT_EXECUTABLE}" 0 nestedWailsRecovery
-            nsExec::ExecToStack '"$INSTDIR\${PRODUCT_EXECUTABLE}" --recover-network'
+            nsExec::ExecToStack /TIMEOUT=60000 '"$INSTDIR\${PRODUCT_EXECUTABLE}" --recover-network'
             Pop $0
             Pop $1
             ${If} $0 != 0
@@ -585,7 +585,7 @@ Function RecoverWailsInstallations
         ; Recover the short-lived duplicated Company/Product layout shipped by
         ; earlier migration builds before its uninstaller removes that tree.
         IfFileExists "$PROGRAMFILES64\HypoMux\HypoMux\bin\hypomux-engine.exe" 0 wailsRecoveryDone
-            nsExec::ExecToStack '"$PROGRAMFILES64\HypoMux\HypoMux\bin\hypomux-engine.exe" recover'
+            nsExec::ExecToStack /TIMEOUT=60000 '"$PROGRAMFILES64\HypoMux\HypoMux\bin\hypomux-engine.exe" recover'
             Pop $0
             Pop $1
             ${If} $0 != 0
@@ -594,7 +594,7 @@ Function RecoverWailsInstallations
     Abort "$(WailsNetworkRecoverFailed)"
             ${EndIf}
             IfFileExists "$PROGRAMFILES64\HypoMux\HypoMux\${PRODUCT_EXECUTABLE}" 0 wailsRecoveryDone
-                nsExec::ExecToStack '"$PROGRAMFILES64\HypoMux\HypoMux\${PRODUCT_EXECUTABLE}" --recover-network'
+                nsExec::ExecToStack /TIMEOUT=60000 '"$PROGRAMFILES64\HypoMux\HypoMux\${PRODUCT_EXECUTABLE}" --recover-network'
                 Pop $0
                 Pop $1
                 ${If} $0 != 0
@@ -615,7 +615,7 @@ Function RecoverPreviousWailsInstallation
     ; Otherwise killing its UI can leave WinINet proxy state behind while all
     ; later recovery probes incorrectly inspect only the new, empty directory.
     IfFileExists "$HypoMuxPreviousInstallDir\bin\hypomux-engine.exe" 0 previousWailsRecoveryDone
-        nsExec::ExecToStack '"$HypoMuxPreviousInstallDir\bin\hypomux-engine.exe" recover'
+        nsExec::ExecToStack /TIMEOUT=60000 '"$HypoMuxPreviousInstallDir\bin\hypomux-engine.exe" recover'
         Pop $0
         Pop $1
         ${If} $0 != 0
@@ -624,7 +624,7 @@ Function RecoverPreviousWailsInstallation
     Abort "$(WailsNetworkRecoverFailed)"
         ${EndIf}
         IfFileExists "$HypoMuxPreviousInstallDir\${PRODUCT_EXECUTABLE}" 0 previousWailsRecoveryDone
-            nsExec::ExecToStack '"$HypoMuxPreviousInstallDir\${PRODUCT_EXECUTABLE}" --recover-network'
+            nsExec::ExecToStack /TIMEOUT=60000 '"$HypoMuxPreviousInstallDir\${PRODUCT_EXECUTABLE}" --recover-network'
             Pop $0
             Pop $1
             ${If} $0 != 0
@@ -683,6 +683,8 @@ FunctionEnd
 
 Function LogSetupFailure
     Push $2
+    ; A stale error flag from an earlier command must not suppress the log.
+    ClearErrors
     FileOpen $2 "$HypoMuxSetupLog" a
     IfErrors setupLogDone
     FileWriteUTF16LE $2 "Stage: $HypoMuxSetupOperation; result: $0$\r$\n$1$\r$\n"
@@ -742,7 +744,7 @@ FunctionEnd
 
 Function EnsureWebViewRuntime
     StrCpy $HypoMuxSetupOperation "webview-runtime"
-    nsExec::ExecToStack '"$HypoMuxSetupHelper" --webview-check ${WAILS_INSTALL_SCOPE}'
+    nsExec::ExecToStack /TIMEOUT=30000 '"$HypoMuxSetupHelper" --webview-check ${WAILS_INSTALL_SCOPE}'
     Pop $0
     Pop $1
     ${If} $0 == 0
@@ -759,7 +761,7 @@ Function EnsureWebViewRuntime
     ${AndIf} $0 != 3010
         Goto webviewFailed
     ${EndIf}
-    nsExec::ExecToStack '"$HypoMuxSetupHelper" --webview-check ${WAILS_INSTALL_SCOPE}'
+    nsExec::ExecToStack /TIMEOUT=30000 '"$HypoMuxSetupHelper" --webview-check ${WAILS_INSTALL_SCOPE}'
     Pop $0
     Pop $1
     ${If} $0 == 0
@@ -874,7 +876,7 @@ Section "uninstall"
 
     ; Stop the ordinary-permission UI first, then recover the current user's
     ; proxy snapshot and the machine-owned TUN state before files disappear.
-    nsExec::Exec '"$SYSDIR\taskkill.exe" /IM "${PRODUCT_EXECUTABLE}" /T /F'
+    nsExec::Exec /TIMEOUT=15000 '"$SYSDIR\taskkill.exe" /IM "${PRODUCT_EXECUTABLE}" /T /F'
     Pop $0
     !if "${WAILS_INSTALL_SCOPE}" != "user"
         SetRegView 64
@@ -886,7 +888,7 @@ Section "uninstall"
         IfFileExists "$INSTDIR\bin\hypomux-engine.exe" 0 serviceRemoveRaw
             StrCpy $2 "$INSTDIR\bin\hypomux-engine.exe"
         serviceRemoveInvoke:
-            nsExec::ExecToStack '"$2" remove-service'
+            nsExec::ExecToStack /TIMEOUT=60000 '"$2" remove-service'
             Pop $0
             Pop $1
             ${If} $0 != 0
@@ -897,12 +899,12 @@ Section "uninstall"
         serviceRemoveRaw:
             ; If security software removed both Core copies, remove the exact
             ; application-owned service registration without depending on them.
-            nsExec::Exec '"$SYSDIR\sc.exe" query "${HYPOMUX_CORE_SERVICE}"'
+            nsExec::Exec /TIMEOUT=15000 '"$SYSDIR\sc.exe" query "${HYPOMUX_CORE_SERVICE}"'
             Pop $0
             ${If} $0 == 0
-                nsExec::Exec '"$SYSDIR\sc.exe" stop "${HYPOMUX_CORE_SERVICE}"'
+                nsExec::Exec /TIMEOUT=15000 '"$SYSDIR\sc.exe" stop "${HYPOMUX_CORE_SERVICE}"'
                 Pop $1
-                nsExec::Exec '"$SYSDIR\sc.exe" delete "${HYPOMUX_CORE_SERVICE}"'
+                nsExec::Exec /TIMEOUT=15000 '"$SYSDIR\sc.exe" delete "${HYPOMUX_CORE_SERVICE}"'
                 Pop $0
                 ${If} $0 != 0
                 ${AndIf} $0 != 1060
@@ -923,10 +925,14 @@ Section "uninstall"
         Delete "$APPDATA\HypoMuxCoreRuntime\tun-config-*.json"
         RMDir "$APPDATA\HypoMuxCoreRuntime"
     !endif
-    IfFileExists "$INSTDIR\bin\hypomux-engine.exe" 0 +2
-        nsExec::ExecToLog '"$INSTDIR\bin\hypomux-engine.exe" recover'
-    IfFileExists "$INSTDIR\${PRODUCT_EXECUTABLE}" 0 +2
-        nsExec::ExecToLog '"$INSTDIR\${PRODUCT_EXECUTABLE}" --recover-network'
+    ; Plug-in calls expand to several instructions, so use labels rather than
+    ; relative jumps around them.
+    IfFileExists "$INSTDIR\bin\hypomux-engine.exe" 0 unCoreRecoverDone
+        nsExec::ExecToLog /TIMEOUT=60000 '"$INSTDIR\bin\hypomux-engine.exe" recover'
+    unCoreRecoverDone:
+    IfFileExists "$INSTDIR\${PRODUCT_EXECUTABLE}" 0 unNetworkRecoverDone
+        nsExec::ExecToLog /TIMEOUT=60000 '"$INSTDIR\${PRODUCT_EXECUTABLE}" --recover-network'
+    unNetworkRecoverDone:
 
     ; Device-local settings under %USERPROFILE%\.hypomux are deliberately retained
     ; for reinstall/rollback. Autostart, WebView data and installed files are
@@ -934,9 +940,13 @@ Section "uninstall"
     DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "HypoMux"
 
     ; Remove the optional, user-approved NAT detection UDP reply rule.
-    nsExec::ExecToLog '"$SYSDIR\netsh.exe" advfirewall firewall delete rule name="HypoMux NAT Type Detection" program="$INSTDIR\${PRODUCT_EXECUTABLE}"'
+    nsExec::ExecToLog /TIMEOUT=15000 '"$SYSDIR\netsh.exe" advfirewall firewall delete rule name="HypoMux NAT Type Detection" program="$INSTDIR\${PRODUCT_EXECUTABLE}"'
 
-    RMDir /r "$AppData\${PRODUCT_EXECUTABLE}" # Remove the WebView2 DataPath
+    ; Wails keeps WebView2 data in the invoking user's roaming AppData, not in
+    ; the machine-wide folder selected by wails.setShellContext.
+    SetShellVarContext current
+    RMDir /r "$APPDATA\${PRODUCT_EXECUTABLE}"
+    !insertmacro wails.setShellContext
 
     Delete "$SMPROGRAMS\${INFO_PRODUCTNAME}.lnk"
     Delete "$DESKTOP\${INFO_PRODUCTNAME}.lnk"
