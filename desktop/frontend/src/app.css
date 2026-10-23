@@ -1506,8 +1506,64 @@ svg {
   font-size: var(--fontSizeBase200);
 }
 
+/* Proxy/TUN switch: a segmented control — one neutral track, the selected
+ * option lifts as a surface "thumb". The page's only solid accent stays on
+ * the start button below. Fluent's underline indicators are hidden by
+ * clearing their stroke tokens, so the tab focus ring is untouched. */
 .mode-tabs {
+  --colorCompoundBrandStroke: transparent;
+  --colorCompoundBrandStrokeHover: transparent;
+  --colorCompoundBrandStrokePressed: transparent;
+  --colorNeutralStroke1Hover: transparent;
+  --colorNeutralStroke1Pressed: transparent;
+  --colorNeutralForegroundDisabled: var(--hm-text-tertiary);
   width: fit-content;
+  padding: 2px;
+  gap: 2px;
+  border: 1px solid color-mix(in srgb, var(--hm-outer-border) 70%, transparent);
+  border-radius: var(--borderRadiusXLarge);
+  background: color-mix(in srgb, var(--hm-text-primary) 5%, transparent);
+}
+
+.mode-tabs .fui-Tab {
+  min-height: 28px;
+  padding: 4px 12px;
+  border-radius: var(--borderRadiusLarge);
+  color: var(--hm-text-secondary);
+  transition: background-color var(--hm-motion-fast) var(--hm-motion-ease-out),
+    box-shadow var(--hm-motion-fast) var(--hm-motion-ease-out),
+    color var(--hm-motion-fast) var(--hm-motion-ease-out);
+}
+
+.mode-tabs .fui-Tab:not([aria-selected="true"]):not(:disabled):hover {
+  color: var(--hm-text-primary);
+  background: color-mix(in srgb, var(--hm-text-primary) 5%, transparent);
+}
+
+.mode-tabs .fui-Tab[aria-selected="true"] {
+  color: var(--hm-text-primary);
+  background: var(--colorNeutralBackground1);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--hm-outer-border) 80%, transparent), var(--shadow2);
+}
+
+.mode-tabs .fui-Tab[aria-selected="true"] .fui-Tab__icon {
+  color: var(--hm-accent-strong);
+}
+
+[data-appearance="dark"] .mode-tabs .fui-Tab[aria-selected="true"] {
+  background: var(--colorNeutralBackground1Hover);
+}
+
+/* While the service runs the mode is locked: keep the choice legible, just quieter. */
+.mode-tabs .fui-Tab:disabled[aria-selected="true"] {
+  color: var(--hm-text-secondary);
+}
+
+@media (forced-colors: active) {
+  .mode-tabs .fui-Tab[aria-selected="true"] {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
 }
 
 .engine-mode-note {

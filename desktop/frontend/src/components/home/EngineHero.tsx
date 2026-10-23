@@ -97,7 +97,6 @@ export function EngineHero({
         </div>
         <TabList
           className="mode-tabs"
-          appearance="filled-circular"
           selectedValue={mode}
           onTabSelect={(_, data) => onModeChange(data.value as EngineMode)}
           size="small"
