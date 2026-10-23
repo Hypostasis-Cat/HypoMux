@@ -93,8 +93,6 @@ export function EngineHero({
           </div>
           <p className="engine-summary">
             {text(`${selectedCount} 张网卡参与调度`, `${selectedCount} NIC(s) selected`)}
-            <span aria-hidden="true">·</span>
-            {telemetryUnavailable ? text("连接数未知", "Connection count unknown") : text(`${connections} 个连接`, `${connections} connection(s)`)}
           </p>
         </div>
         <TabList

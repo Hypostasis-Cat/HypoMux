@@ -1453,7 +1453,7 @@ svg {
   display: flex;
   width: 100%;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   flex-wrap: wrap;
   margin-bottom: 12px;
   gap: 6px 12px;
@@ -1502,8 +1502,8 @@ svg {
   margin: 0;
   align-items: center;
   gap: 8px;
-  color: var(--hm-text-secondary);
-  font-size: var(--fontSizeBase300);
+  color: var(--hm-text-tertiary);
+  font-size: var(--fontSizeBase200);
 }
 
 .mode-tabs {
@@ -2124,7 +2124,7 @@ svg {
   min-height: 68px;
   align-items: center;
   padding: 10px 16px;
-  grid-template-columns: repeat(4, minmax(0, 1fr)) auto;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
   gap: 16px;
 }
 
@@ -2580,7 +2580,7 @@ svg {
 }
 
 :lang(en) .runtime-status {
-  grid-template-columns: minmax(0, 1.1fr) repeat(2, minmax(0, 0.85fr)) minmax(0, 1.2fr) auto;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
   gap: 12px;
 }
 
@@ -6130,15 +6130,10 @@ svg {
 }
 .tools-page .tool-card { padding: clamp(16px, 2.5vw, 28px); }
 .tool-view { display: grid; align-content: start; gap: 12px; min-width: 0; }
-.toolbox-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-auto-rows: 1fr; gap: 16px; }
-@media (max-width: 900px) {
-  .toolbox-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-}
-@media (max-width: 600px) {
-  .toolbox-grid { grid-template-columns: minmax(0, 1fr); }
-}
+/* Tiles share the row, so two tools fill it instead of leaving an empty third column. */
+.toolbox-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); grid-auto-rows: 1fr; gap: 16px; }
 /* Hotspot layout follows the user-selected accent and appearance. */
-.hotspot-view { gap: 20px; }
+.hotspot-view { gap: 12px; }
 .hotspot-panel { display: flex; flex-direction: column; gap: 16px; min-width: 0; padding-bottom: 16px; }
 .hotspot-panel p { margin: 0; line-height: 1.65; }
 .hotspot-control { display: flex; align-items: center; gap: 24px; padding: 20px 24px; border: 1px solid var(--hm-outer-border); border-radius: var(--hm-radius); background: linear-gradient(115deg, var(--hm-accent-soft), transparent 75%), rgba(var(--hm-surface-rgb), var(--hm-panel-opacity)); }
