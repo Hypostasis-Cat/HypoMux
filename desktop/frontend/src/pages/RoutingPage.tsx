@@ -49,6 +49,7 @@ import {
 import { appServices, type RoutingBatchPreview, type RoutingRule, type RoutingSnapshot, type RunningProcess } from "../platform/services";
 import { GlassSurface } from "../components/material/GlassSurface";
 import { RuleSetsPanel } from "../components/RuleSetsPanel";
+import { PageHeader } from "../components/shell/PageHeader";
 import { useI18n } from "../i18n/i18n";
 import { isDesktopRuntime } from "../platform/runtime";
 import { LatestSaveQueue } from "../platform/latestSaveQueue";
@@ -758,13 +759,11 @@ export function RoutingPage() {
 
   return (
     <main className={`routing-page${ruleView === "sets" ? " routing-page-sets" : ""}`}>
-      <header className="routing-page-heading">
-        <div>
-          <span className="section-kicker">{t("routing_title")}</span>
-          <h1>{text("决定每类流量从哪条链路离开", "Choose the exit path for each type of traffic")}</h1>
-          <p>{t("routing_hint")}</p>
-        </div>
-        {ruleView === "manual" && <div className="routing-save-state">
+      <PageHeader
+        kicker={t("routing_title")}
+        title={text("决定每类流量从哪条链路离开", "Choose the exit path for each type of traffic")}
+        description={t("routing_hint")}
+        actions={ruleView === "manual" && <div className="routing-save-state">
           <Button disabled={saving || loading} onClick={() => {
             if (!pendingSave || window.confirm(text("重新载入会丢弃当前未保存的规则编辑，是否继续？", "Reloading discards unsaved rule edits. Continue?"))) void load();
           }}>{text("重新载入", "Reload")}</Button>
@@ -779,7 +778,7 @@ export function RoutingPage() {
             {text("保存更改", "Save changes")}
           </Button>
         </div>}
-      </header>
+      />
       <TabList aria-label={text("规则管理", "Rule management")} selectedValue={ruleView} onTabSelect={(_, data) => setRuleView(data.value as "manual" | "sets")}>
         <Tab value="manual">{text("手动规则", "Manual rules")}</Tab>
         <Tab value="sets">{text("规则集订阅", "Rule set subscriptions")}</Tab>

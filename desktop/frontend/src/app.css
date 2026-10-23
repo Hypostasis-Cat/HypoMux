@@ -2209,29 +2209,6 @@ svg {
   gap: calc(12px * var(--hm-density-space));
 }
 
-.routing-page-heading {
-  display: flex;
-  min-width: 0;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 24px;
-  padding: 0 4px;
-}
-
-.routing-page-heading h1 {
-  margin: 3px 0 4px;
-  font-size: var(--fontSizeBase600);
-  font-weight: var(--fontWeightSemibold);
-  line-height: 1.3;
-  letter-spacing: -0.025em;
-}
-
-.routing-page-heading p {
-  margin: 0;
-  color: var(--hm-text-tertiary);
-  font-size: var(--fontSizeBase200);
-}
-
 .routing-save-state {
   display: flex;
   flex: 0 0 auto;
@@ -3230,31 +3207,6 @@ svg {
 @keyframes health-view-enter {
   from { left: 8px; }
   to { left: 0; }
-}
-
-.health-heading,
-.connections-heading {
-  display: flex;
-  min-width: 0;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 24px;
-  padding: 0 4px;
-}
-
-.health-heading h1,
-.connections-heading h1 {
-  margin: 3px 0 4px;
-  font-size: var(--fontSizeBase600);
-  font-weight: var(--fontWeightSemibold);
-  letter-spacing: -0.025em;
-}
-
-.health-heading p,
-.connections-heading p {
-  margin: 0;
-  color: var(--hm-text-tertiary);
-  font-size: var(--fontSizeBase200);
 }
 
 .health-heading-actions,
@@ -5141,10 +5093,21 @@ svg {
 
 .page-heading {
   display: flex;
-  margin: 0 2px 16px;
+  min-width: 0;
+  margin: 0 0 12px;
+  padding: 0 4px;
   align-items: flex-end;
   justify-content: space-between;
   gap: 24px;
+}
+
+/* Grid pages already space their rows; the heading adds no margin of its own. */
+:is(.routing-page, .health-page, .connections-page, .tool-view) > .page-heading {
+  margin-bottom: 0;
+}
+
+.page-heading-copy {
+  min-width: 0;
 }
 
 .page-heading h1 {
@@ -5188,19 +5151,6 @@ svg {
   scrollbar-width: thin;
   scrollbar-gutter: stable;
   scroll-padding-block: 16px;
-}
-
-.settings-page > .page-heading {
-  flex: none;
-  flex-wrap: nowrap;
-  align-items: center;
-  margin-bottom: 12px;
-}
-
-.settings-page > .page-heading h1 {
-  font-size: var(--fontSizeBase600);
-  line-height: 1.3;
-  font-weight: var(--fontWeightSemibold);
 }
 
 .settings-page .setting-row {
@@ -5667,7 +5617,6 @@ svg {
 }
 
 @media (max-width: 700px) {
-  .settings-page > .page-heading { flex-wrap: wrap; gap: 8px; }
   .settings-save-feedback { flex-wrap: wrap; justify-content: flex-start; }
   .settings-page .setting-row,
   .settings-page .setting-row:has(.settings-theme-options) { grid-template-columns: minmax(0, 1fr); gap: 10px; }
@@ -6287,7 +6236,7 @@ svg {
   }
 }
 .tools-page .tool-card { padding: clamp(16px, 2.5vw, 28px); }
-.tool-view { display: grid; align-content: start; gap: 24px; min-width: 0; }
+.tool-view { display: grid; align-content: start; gap: 12px; min-width: 0; }
 .toolbox-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-auto-rows: 1fr; gap: 16px; }
 @media (max-width: 900px) {
   .toolbox-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -6297,7 +6246,6 @@ svg {
 }
 /* Hotspot layout follows the user-selected accent and appearance. */
 .hotspot-view { gap: 18px; }
-.hotspot-view .page-heading { margin-bottom: 0; }
 .hotspot-panel { display: flex; flex-direction: column; gap: 16px; min-width: 0; padding-bottom: 16px; }
 .hotspot-panel p { margin: 0; line-height: 1.65; }
 .hotspot-control { display: flex; align-items: center; gap: 22px; padding: 20px 24px; border: 1px solid var(--hm-outer-border); border-radius: var(--hm-radius); background: linear-gradient(115deg, var(--hm-accent-soft), transparent 75%), rgba(var(--hm-surface-rgb), var(--hm-panel-opacity)); }
@@ -6441,8 +6389,6 @@ svg {
 .routing-actions .fui-SearchBox { width: clamp(160px, 22vw, 260px); min-width: 0; }
 .routing-add-row > .fui-Dropdown, .routing-add-row > .fui-Input { min-width: 0; }
 @media (max-width: 1000px) {
-  .routing-page-heading { align-items: flex-start; gap: 12px; }
-  .routing-page-heading h1 { font-size: var(--fontSizeBase500); }
   .routing-save-state { flex-direction: column; align-items: flex-end; }
   .routing-add-row { grid-template-columns: minmax(120px, 1fr) minmax(130px, 180px) auto auto; }
   .routing-process-button { grid-column: 1 / -1; justify-self: start; }

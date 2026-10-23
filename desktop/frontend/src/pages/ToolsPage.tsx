@@ -6,6 +6,7 @@ import { GlassSurface } from "../components/material/GlassSurface";
 import { SteamCDNPanel } from "../components/SteamCDNPanel";
 import { HotspotPanel } from "../components/HotspotPanel";
 import { HotspotQuickControl } from "../components/HotspotQuickControl";
+import { PageHeader } from "../components/shell/PageHeader";
 import { useAppNotifications } from "../components/notifications/AppNotifications";
 import { useI18n } from "../i18n/i18n";
 import { appServices, type SteamCDNStatus } from "../platform/services";
@@ -98,18 +99,22 @@ export function ToolsPage() {
 
   return <main className="tools-page">
     {detail === "hotspot" ? <div key="hotspot" className="tool-view hotspot-view page-transition-layer is-entering">
-      <header className="page-heading"><div>
-        <Button appearance="subtle" icon={<ArrowLeft20Regular />} onClick={() => navigate(false)}>{text("返回工具箱", "Back to toolbox")}</Button>
-        <h1 ref={titleRef} tabIndex={-1}>{text("聚合热点", "Aggregation hotspot")}</h1>
-        <p>{text("把电脑的聚合网络分享给手机，连接 Wi-Fi 即可使用。", "Share your aggregated connection with your phone over Wi-Fi.")}</p>
-      </div></header>
+      <PageHeader
+        leading={<Button appearance="subtle" icon={<ArrowLeft20Regular />} onClick={() => navigate(false)}>{text("返回工具箱", "Back to toolbox")}</Button>}
+        title={text("聚合热点", "Aggregation hotspot")}
+        titleRef={titleRef}
+        titleFocusable
+        description={text("把电脑的聚合网络分享给手机，连接 Wi-Fi 即可使用。", "Share your aggregated connection with your phone over Wi-Fi.")}
+      />
       <HotspotPanel />
     </div> : detail ? <div key="detail" className="tool-view page-transition-layer is-entering">
-      <header className="page-heading"><div>
-        <Button appearance="subtle" icon={<ArrowLeft20Regular />} onClick={() => navigate(false)}>{text("返回工具箱", "Back to toolbox")}</Button>
-        <h1 ref={titleRef} tabIndex={-1}>{name}</h1>
-        <p>{text("查看下载表现、候选节点与诊断。开关作用于新连接。", "Inspect downloads, candidate nodes and diagnostics. Changes apply to new connections.")}</p>
-      </div></header>
+      <PageHeader
+        leading={<Button appearance="subtle" icon={<ArrowLeft20Regular />} onClick={() => navigate(false)}>{text("返回工具箱", "Back to toolbox")}</Button>}
+        title={name}
+        titleRef={titleRef}
+        titleFocusable
+        description={text("查看下载表现、候选节点与诊断。开关作用于新连接。", "Inspect downloads, candidate nodes and diagnostics. Changes apply to new connections.")}
+      />
       <GlassSurface className="tool-card steam-tool-card" aria-label={name}>
         <header className="tool-card-heading">
           <span className="tool-icon" aria-hidden="true"><Games24Regular /></span>
@@ -119,11 +124,11 @@ export function ToolsPage() {
         {loadError || <SteamCDNPanel enabled={enabled} saving={loading || saving} />}
       </GlassSurface>
     </div> : <div key="overview" className={`tool-view${navigated.current ? " page-transition-layer is-entering" : ""}`} data-direction="backward">
-      <header className="page-heading"><div>
-        <span className="section-kicker">HypoMux / {text("工具", "Tools")}</span>
-        <h1>{text("工具箱", "Toolbox")}</h1>
-        <p>{text("按需开启，让网络更适合你的应用。", "Optional tools for the apps you use.")}</p>
-      </div></header>
+      <PageHeader
+        kicker={text("按需启用的网络增强", "Optional network add-ons")}
+        title={text("工具箱", "Toolbox")}
+        description={text("按需开启，让网络更适合你的应用。", "Optional tools for the apps you use.")}
+      />
       <div className="toolbox-grid">
         <GlassSurface className="toolbox-tile" aria-labelledby="steam-tool-title">
           <button ref={entryRef} className="toolbox-tile-open" aria-label={text("查看 Steam 下载优选详情", "View Steam download optimization details")} onClick={() => navigate("steam")}>

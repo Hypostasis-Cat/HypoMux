@@ -21,6 +21,7 @@ import {
 } from "@fluentui/react-icons";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { GlassSurface } from "../components/material/GlassSurface";
+import { PageHeader } from "../components/shell/PageHeader";
 import {
   appServices,
   type AdapterView,
@@ -396,21 +397,21 @@ export function HealthPage({
 
   return (
     <main className="health-page">
-      <header className="health-heading">
-        <div key={healthView} className="health-heading-copy">
-          <span className="section-kicker">{healthView === "link"
-            ? text("逐接口真实出口验证", "Per-interface exit verification")
-            : healthView === "mtu" ? text("IPv4 路径探测", "IPv4 path probing") : text("UDP 映射与过滤行为", "UDP mapping and filtering behavior")}</span>
-          <h1>{healthView === "link" ? text("网络体检", "Network diagnostics") : healthView === "mtu" ? text("MTU 检测", "MTU detection") : text("NAT 类型检测", "NAT type detection")}</h1>
-          <p>{healthView === "link" ? text(
-            "分网卡验证 TCP 与 TLS；ICMP 未回应率仅针对探测目标，不等于实际业务丢包。",
-            "Verify TCP and TLS per adapter. ICMP non-response applies only to the probe target, not application traffic.",
-          ) : healthView === "mtu" ? text("检测所选网卡到目标地址的推荐 MTU，并按需应用或恢复。", "Detect a recommended MTU for an adapter and target, then apply or restore it.") : text(
-            "使用 RFC 5780 分析所选出口的 UDP 映射与过滤行为，并给出经典 NAT 类型。",
-            "Analyze UDP mapping and filtering behavior over the selected egress using RFC 5780.",
-          )}</p>
-        </div>
-        <div key={`actions-${healthView}`} className="health-heading-actions health-heading-actions-enter">
+      <PageHeader
+        copyKey={healthView}
+        copyClassName="health-heading-copy"
+        kicker={healthView === "link"
+          ? text("逐接口真实出口验证", "Per-interface exit verification")
+          : healthView === "mtu" ? text("IPv4 路径探测", "IPv4 path probing") : text("UDP 映射与过滤行为", "UDP mapping and filtering behavior")}
+        title={healthView === "link" ? text("网络体检", "Network diagnostics") : healthView === "mtu" ? text("MTU 检测", "MTU detection") : text("NAT 类型检测", "NAT type detection")}
+        description={healthView === "link" ? text(
+          "分网卡验证 TCP 与 TLS；ICMP 未回应率仅针对探测目标，不等于实际业务丢包。",
+          "Verify TCP and TLS per adapter. ICMP non-response applies only to the probe target, not application traffic.",
+        ) : healthView === "mtu" ? text("检测所选网卡到目标地址的推荐 MTU，并按需应用或恢复。", "Detect a recommended MTU for an adapter and target, then apply or restore it.") : text(
+          "使用 RFC 5780 分析所选出口的 UDP 映射与过滤行为，并给出经典 NAT 类型。",
+          "Analyze UDP mapping and filtering behavior over the selected egress using RFC 5780.",
+        )}
+        actions={<div key={`actions-${healthView}`} className="health-heading-actions health-heading-actions-enter">
           {healthView === "mtu" ? <span>IPv4 · ICMP DF</span> : healthView === "nat" ? <span>RFC 5780 · UDP</span> : <span>{text("目标", "Target")} {snapshot.target_ip || "223.5.5.5"}</span>}
           {healthView === "link" && (running ? (
             <Button appearance="secondary" icon={<Stop20Regular />} onClick={cancel}>{text("取消体检", "Cancel")}</Button>
@@ -424,8 +425,8 @@ export function HealthPage({
               {text("开始体检", "Start diagnostics")}
             </Button>
           ))}
-        </div>
-      </header>
+        </div>}
+      />
 
       <nav className="health-subnav" aria-label={text("网络体检页面", "Network diagnostic pages")}>
         <TabList
