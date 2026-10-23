@@ -633,7 +633,7 @@ func TestFrontendFreshInstallAppearanceDefaults(t *testing.T) {
 	}
 	preset := string(presetData)
 	for _, required := range []string{
-		`schemaVersion: 2`,
+		`schemaVersion: 3`,
 		`presetId: "windows-mica"`,
 		`mode: "system"`,
 		`material: "mica"`,
@@ -683,7 +683,7 @@ func TestFrontendFreshInstallAppearanceDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(storeData), `return { ...value, schemaVersion: 2 }`) {
+	if !strings.Contains(string(storeData), `return { ...value, ...(radius === undefined ? {} : { radius }), schemaVersion: 3 }`) {
 		t.Fatal("legacy appearance settings are not migrated without overwriting the selected preset")
 	}
 }
