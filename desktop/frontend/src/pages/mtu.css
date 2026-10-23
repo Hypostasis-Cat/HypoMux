@@ -13,13 +13,13 @@
 .mtu-panel h2 { margin: 6px 0 0; font-size: var(--fontSizeBase500); font-weight: var(--fontWeightSemibold); line-height: 1.35; }
 .mtu-eyebrow { color: var(--hm-text-tertiary); font-size: var(--fontSizeBase200); }
 .mtu-panel p { margin: 0; font-size: var(--fontSizeBase200); line-height: 1.65; color: var(--hm-text-secondary); overflow-wrap: anywhere; }
-.mtu-panel .mtu-description { margin-top: 14px; }
+.mtu-panel .mtu-description { margin-top: 16px; }
 .mtu-fields { display: grid; gap: 20px; margin: 24px 0; }
 .mtu-fields .fui-Dropdown, .mtu-fields .fui-Input { width: 100%; min-width: 0; min-height: 36px; }
 .mtu-adapter-dropdown .fui-Dropdown__button { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mtu-adapter-listbox { padding: 6px; border-radius: var(--borderRadius2XLarge); }
 .mtu-adapter-listbox .fui-Option { min-height: 52px; padding: 8px 10px; border-radius: var(--borderRadiusXLarge); }
-.mtu-adapter-option { display: grid; min-width: 0; gap: 3px; }
+.mtu-adapter-option { display: grid; min-width: 0; gap: 4px; }
 .mtu-adapter-option strong { font-size: var(--fontSizeBase300); font-weight: var(--fontWeightSemibold); overflow-wrap: anywhere; }
 .mtu-adapter-option small { font-size: var(--fontSizeBase200); color: var(--hm-text-tertiary); font-variant-numeric: tabular-nums; }
 .mtu-fields .fui-Field__hint { font-size: var(--fontSizeBase200); color: var(--hm-text-tertiary); margin-top: 6px; }
@@ -35,10 +35,10 @@
 .mtu-result-copy .mtu-result-path { margin-bottom: 6px; font-size: var(--fontSizeBase200); color: var(--hm-text-tertiary); }
 .mtu-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
 .mtu-actions .fui-Button { min-height: 36px; }
-.mtu-progress { margin-top: 14px; min-height: 36px; font-size: var(--fontSizeBase200); line-height: 1.6; color: var(--hm-text-tertiary); }
+.mtu-progress { margin-top: 16px; min-height: 36px; font-size: var(--fontSizeBase200); line-height: 1.6; color: var(--hm-text-tertiary); }
 .mtu-progress .fui-Spinner { justify-content: flex-start; }
 .mtu-progress .fui-Spinner__label { font-size: var(--fontSizeBase200); color: var(--hm-text-secondary); }
-.mtu-panel .mtu-notice { padding: 10px 12px; margin-bottom: 14px; border-radius: var(--borderRadiusXLarge); background: var(--hm-surface-secondary-fill); font-size: var(--fontSizeBase200); }
+.mtu-panel .mtu-notice { padding: 10px 12px; margin-bottom: 16px; border-radius: var(--borderRadiusXLarge); background: var(--hm-surface-secondary-fill); font-size: var(--fontSizeBase200); }
 .mtu-panel .mtu-error { color: var(--hm-danger); background: color-mix(in srgb, var(--hm-danger) 8%, var(--hm-surface-fill)); }
 .mtu-panel .mtu-success { color: var(--hm-success); background: color-mix(in srgb, var(--hm-success) 8%, var(--hm-surface-fill)); }
 .mtu-panel .mtu-change-note { margin-top: 16px; color: var(--hm-text-tertiary); font-size: var(--fontSizeBase200); }
