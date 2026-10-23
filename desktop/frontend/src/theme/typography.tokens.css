@@ -8,4 +8,9 @@
   --hm-font-control: 14px;
   --hm-font-title: 20px;
   --hm-font-speed: clamp(36px, 4.4vw, 54px);
+  /* Single-line UI text uses Fluent's var(--lineHeight*) paired with its font size.
+   * Wrapping CJK copy needs more air than Fluent's Latin-tuned ramp; display
+   * numerals sit tighter. */
+  --hm-line-height-reading: 1.6;
+  --hm-line-height-display: 1.1;
 }

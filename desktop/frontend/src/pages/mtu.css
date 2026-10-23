@@ -10,9 +10,9 @@
 }
 .mtu-panel { min-width: 0; padding: 24px; }
 .mtu-panel-heading { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }
-.mtu-panel h2 { margin: 6px 0 0; font-size: var(--fontSizeBase500); font-weight: var(--fontWeightSemibold); line-height: 1.35; }
+.mtu-panel h2 { margin: 6px 0 0; font-size: var(--fontSizeBase500); font-weight: var(--fontWeightSemibold); line-height: var(--lineHeightBase500); }
 .mtu-eyebrow { color: var(--hm-text-tertiary); font-size: var(--fontSizeBase200); }
-.mtu-panel p { margin: 0; font-size: var(--fontSizeBase200); line-height: 1.65; color: var(--hm-text-secondary); overflow-wrap: anywhere; }
+.mtu-panel p { margin: 0; font-size: var(--fontSizeBase200); line-height: var(--hm-line-height-reading); color: var(--hm-text-secondary); overflow-wrap: anywhere; }
 .mtu-panel .mtu-description { margin-top: 16px; }
 .mtu-fields { display: grid; gap: 20px; margin: 24px 0; }
 .mtu-fields .fui-Dropdown, .mtu-fields .fui-Input { width: 100%; min-width: 0; min-height: 36px; }
@@ -24,7 +24,8 @@
 .mtu-adapter-option small { font-size: var(--fontSizeBase200); color: var(--hm-text-tertiary); font-variant-numeric: tabular-nums; }
 .mtu-fields .fui-Field__hint { font-size: var(--fontSizeBase200); color: var(--hm-text-tertiary); margin-top: 6px; }
 .mtu-recommendation { display: flex; align-items: baseline; gap: 10px; padding: 24px 0 20px; color: var(--hm-text-tertiary); }
-.mtu-recommendation strong { font-size: 52px; line-height: 1.1; font-weight: var(--fontWeightSemibold); letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
+/* stylelint-disable-next-line declaration-property-value-disallowed-list -- display numeral between Fluent's Hero900 (40px) and Hero1000 (68px) */
+.mtu-recommendation strong { font-size: 52px; line-height: var(--hm-line-height-display); font-weight: var(--fontWeightSemibold); letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
 .mtu-recommendation.has-result strong { color: var(--hm-accent-strong); }
 .mtu-recommendation span { font-size: var(--fontSizeBase300); }
 .mtu-values { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; padding: 16px 0; border-block: 1px solid var(--hm-outer-border); }
@@ -35,7 +36,7 @@
 .mtu-result-copy .mtu-result-path { margin-bottom: 6px; font-size: var(--fontSizeBase200); color: var(--hm-text-tertiary); }
 .mtu-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
 .mtu-actions .fui-Button { min-height: 36px; }
-.mtu-progress { margin-top: 16px; min-height: 36px; font-size: var(--fontSizeBase200); line-height: 1.6; color: var(--hm-text-tertiary); }
+.mtu-progress { margin-top: 16px; min-height: 36px; font-size: var(--fontSizeBase200); line-height: var(--hm-line-height-reading); color: var(--hm-text-tertiary); }
 .mtu-progress .fui-Spinner { justify-content: flex-start; }
 .mtu-progress .fui-Spinner__label { font-size: var(--fontSizeBase200); color: var(--hm-text-secondary); }
 .mtu-panel .mtu-notice { padding: 10px 12px; margin-bottom: 16px; border-radius: var(--borderRadiusXLarge); background: var(--hm-surface-secondary-fill); font-size: var(--fontSizeBase200); }

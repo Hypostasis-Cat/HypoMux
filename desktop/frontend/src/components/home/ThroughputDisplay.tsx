@@ -73,8 +73,9 @@ export function ThroughputDisplay({
   const { areaPath, linePath } = createThroughputChart(history);
   const fillID = `${chartID}-throughput-fill`;
   const lineID = `${chartID}-throughput-line`;
+  const live = active && !unavailable;
   return (
-    <div className="throughput-display">
+    <div className={live ? "throughput-display" : "throughput-display is-idle"}>
       <div className="throughput-label">{t("home_total_speed")}</div>
       <div className="throughput-value">
         <strong>{unavailable ? "—" : download.toFixed(1)}</strong>
@@ -84,7 +85,7 @@ export function ThroughputDisplay({
         <span><ArrowUpload20Regular /> {unavailable ? "—" : upload.toFixed(1)} MB/s</span>
         <span><PlugConnected20Regular /> {unavailable ? (locale === "en" ? "Connection count unknown" : "连接数未知") : locale === "en" ? `${connections} active connections` : `${connections} 个活动连接`}</span>
       </div>
-      {active && !unavailable ? (
+      {live ? (
         <svg className="throughput-graph" viewBox="0 0 100 44" preserveAspectRatio="none" aria-hidden="true">
           <defs>
             <linearGradient id={fillID} x1="0" y1="0" x2="0" y2="1">
@@ -109,7 +110,17 @@ export function ThroughputDisplay({
         </svg>
       ) : (
         <div className="throughput-idle">
-          <span>{unavailable ? (locale === "en" ? "Live telemetry unavailable" : "实时统计暂不可用") : locale === "en" ? "Live throughput appears after aggregation starts" : "启动网络服务后显示实时吞吐趋势"}</span>
+          {/* The empty chart frame previews where live throughput will draw. */}
+          <svg className="throughput-idle-grid" viewBox="0 0 100 44" preserveAspectRatio="none" aria-hidden="true">
+            <g className="throughput-grid">
+              <line x1="0" x2="100" y1="13" y2="13" />
+              <line x1="0" x2="100" y1="27" y2="27" />
+              <line x1="0" x2="100" y1="41" y2="41" />
+            </g>
+          </svg>
+          <p>{unavailable
+            ? (locale === "en" ? "Live telemetry unavailable" : "实时统计暂不可用")
+            : locale === "en" ? "Start the network service to see live throughput here" : "启动网络服务后，这里会显示实时吞吐"}</p>
         </div>
       )}
     </div>
