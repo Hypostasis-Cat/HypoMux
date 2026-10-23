@@ -1,4 +1,4 @@
-import { Button, Dialog, DialogActions, DialogBody, DialogContent, DialogSurface, DialogTitle, Dropdown, Field, Input, Option, Spinner } from "@fluentui/react-components";
+import { Badge, Button, Dialog, DialogActions, DialogBody, DialogContent, DialogSurface, DialogTitle, Dropdown, Field, Input, Option, Spinner } from "@fluentui/react-components";
 import { useEffect, useRef, useState } from "react";
 import { GlassSurface } from "../components/material/GlassSurface";
 import { appServices, type AdapterView, type MTUInfo, type MTUResult } from "../platform/services";
@@ -74,7 +74,7 @@ export function MTUDetectionPage({ adapters, enginePhase, loading, preview, text
     <GlassSurface className="mtu-panel mtu-setup">
       <div className="mtu-panel-heading">
         <div><span className="mtu-eyebrow">{text("01 · 检测路径", "01 · Network path")}</span><h2>{text("选择网卡与目标", "Choose adapter and target")}</h2></div>
-        <span className="mtu-tag">IPv4</span>
+        <Badge appearance="tint" color="informative">IPv4</Badge>
       </div>
       <p className="mtu-description">{text("检测这条网络路径可通过的数据包大小，检测本身不会修改网卡设置。", "Find the packet size supported by this path. Testing does not change adapter settings.")}</p>
       <div className="mtu-fields">
@@ -114,7 +114,7 @@ export function MTUDetectionPage({ adapters, enginePhase, loading, preview, text
     <GlassSurface className="mtu-panel mtu-result">
       <div className="mtu-panel-heading">
         <div><span className="mtu-eyebrow">{text("02 · 检测结果", "02 · Test result")}</span><h2>{text("推荐 MTU", "Recommended MTU")}</h2></div>
-        <span className="mtu-tag">{busy === "detect" ? text("检测中", "Testing") : result ? text("检测完成", "Complete") : error ? text("未获得结果", "No result") : text("等待检测", "Awaiting test")}</span>
+        <Badge appearance="tint" color={busy === "detect" ? "brand" : result ? "success" : error ? "warning" : "informative"}>{busy === "detect" ? text("检测中", "Testing") : result ? text("检测完成", "Complete") : error ? text("未获得结果", "No result") : text("等待检测", "Awaiting test")}</Badge>
       </div>
       <div className={`mtu-recommendation${result ? " has-result" : ""}`}>
         <strong>{result?.recommended ?? "—"}</strong><span>{text("字节", "bytes")}</span>

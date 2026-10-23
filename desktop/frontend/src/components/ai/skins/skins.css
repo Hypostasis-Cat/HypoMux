@@ -11,7 +11,7 @@
 .ai-workspace .mux-library { padding: 20px; border-radius: var(--borderRadius3XLarge); }
 .ai-workspace .mux-preview-stage { background: radial-gradient(ellipse at 50% 65%, color-mix(in srgb, var(--hm-accent) 14%, transparent), transparent 70%), radial-gradient(circle, color-mix(in srgb, var(--hm-text-tertiary) 20%, transparent) 1px, transparent 1px); background-size: auto, 18px 18px; border-bottom: 1px solid var(--hm-outer-border); }
 .ai-workspace .mux-skin-card { background: var(--hm-row-fill); border-color: var(--hm-outer-border); }
-.ai-workspace .mux-skin-card[data-selected="true"] { border-color: var(--hm-accent); background: var(--hm-selected-fill); }
+.ai-workspace .mux-skin-card[data-selected="true"] { border-color: var(--hm-selected-border); background: var(--hm-selected-fill); }
 .ai-workspace .mux-card-art { background: radial-gradient(ellipse at center, color-mix(in srgb, var(--hm-accent) 8%, transparent), transparent 75%); }
 .ai-workspace .mux-stage-state, .ai-workspace .mux-preview-dialogue { background: var(--hm-row-fill); border-color: var(--hm-outer-border); }
 .mux-preview-panel { border: 1px solid var(--colorNeutralStroke2); border-radius: var(--borderRadius3XLarge); overflow: hidden; background: var(--colorNeutralBackground1); box-shadow: 0 4px 20px #192c4810; }

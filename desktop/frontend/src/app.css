@@ -1466,12 +1466,6 @@ svg {
   gap: 12px;
 }
 
-.engine-state-badge {
-  color: var(--hm-text-primary) !important;
-  border-color: var(--hm-outer-border) !important;
-  background: color-mix(in srgb, var(--hm-row-hover) 68%, transparent) !important;
-}
-
 .state-dot {
   display: inline-block;
   width: 7px;
@@ -1514,10 +1508,6 @@ svg {
 
 .mode-tabs {
   width: fit-content;
-  padding: 3px;
-  border: 1px solid color-mix(in srgb, var(--hm-outer-border) 86%, transparent);
-  border-radius: var(--borderRadiusXLarge);
-  background: color-mix(in srgb, var(--hm-row-hover) 58%, transparent);
 }
 
 .engine-mode-note {
@@ -1853,7 +1843,7 @@ svg {
 
 .network-adapter.is-selected {
   background: var(--hm-selected-fill);
-  border-color: color-mix(in srgb, var(--hm-accent) 24%, var(--hm-outer-border));
+  border-color: var(--hm-selected-border);
   box-shadow: inset 0 1px 0 var(--hm-inner-highlight);
 }
 
@@ -2047,14 +2037,6 @@ svg {
 
 .health-badge {
   white-space: nowrap;
-  color: var(--hm-text-secondary) !important;
-  background: color-mix(in srgb, var(--hm-success) 10%, transparent) !important;
-  border-color: color-mix(in srgb, var(--hm-success) 18%, transparent) !important;
-}
-
-.health-warning {
-  background: color-mix(in srgb, var(--hm-warning) 11%, transparent) !important;
-  border-color: color-mix(in srgb, var(--hm-warning) 18%, transparent) !important;
 }
 
 .adapter-weight {
@@ -3147,35 +3129,14 @@ svg {
   grid-template-rows: auto auto minmax(0, 1fr);
 }
 
-.health-subnav {
+/* Page-level section tabs: Fluent's default TabList over a full-width divider. */
+.page-tabs {
   display: flex;
-  min-height: 34px;
+  min-width: 0;
   padding: 0 4px;
-  align-items: center;
+  overflow-x: auto;
   border-bottom: 1px solid var(--hm-outer-border);
-}
-
-.health-subnav .fui-TabList {
-  gap: 6px;
-}
-
-.health-subnav .fui-Tab {
-  min-width: 104px;
-  padding: 4px 12px 9px;
-  color: var(--hm-text-secondary);
-  font-size: var(--fontSizeBase200);
-  font-weight: var(--fontWeightSemibold);
-  transition: color var(--hm-motion-fast) var(--hm-motion-ease-out),
-    background var(--hm-motion-fast) var(--hm-motion-ease-out),
-    transform var(--hm-motion-fast) var(--hm-motion-ease-out);
-}
-
-.health-subnav .fui-Tab:not(:disabled):active {
-  transform: translateY(1px) scale(0.97);
-}
-
-.health-subnav .fui-Tab[aria-selected="true"] {
-  color: var(--hm-text-primary);
+  scrollbar-width: thin;
 }
 
 .health-link-page {
@@ -3298,8 +3259,8 @@ svg {
 }
 
 .health-adapter-choice.is-selected {
-  border-color: color-mix(in srgb, var(--hm-accent) 24%, var(--hm-outer-border));
-  background: color-mix(in srgb, var(--hm-accent-soft) 72%, transparent);
+  border-color: var(--hm-selected-border);
+  background: var(--hm-selected-fill);
 }
 
 .health-adapter-choice > span:nth-child(2) {
@@ -3903,8 +3864,8 @@ svg {
 }
 
 .nat-server-row.is-selected {
-  border-color: color-mix(in srgb, var(--hm-accent) 30%, var(--hm-outer-border));
-  background: color-mix(in srgb, var(--hm-accent-soft) 66%, transparent);
+  border-color: var(--hm-selected-border);
+  background: var(--hm-selected-fill);
 }
 
 .nat-server-row > button {
@@ -5199,7 +5160,7 @@ svg {
 .settings-theme-option .fui-Tab__content { display: flex; width: 100%; flex-direction: column; gap: 7px; align-items: center; font-size: var(--fontSizeBase200); font-weight: var(--fontWeightMedium); }
 .settings-theme-option::before, .settings-theme-option::after { display: none; }
 .settings-theme-option.settings-theme-option:hover { background: var(--hm-row-hover); border-color: var(--hm-control-border-hover); }
-.settings-theme-option.settings-theme-option[aria-selected="true"] { border-color: var(--hm-accent); background: var(--hm-accent-soft); }
+.settings-theme-option.settings-theme-option[aria-selected="true"] { border-color: var(--hm-selected-border); background: var(--hm-selected-fill); }
 .settings-theme-preview { display: grid; width: 86px; height: 51px; grid-template-columns: 17px minmax(0, 1fr); gap: 6px; padding: 7px; border: 1px solid #00000012; border-radius: var(--borderRadiusLarge); background: #f1f3f7; }
 .settings-theme-preview > i { border-radius: var(--borderRadiusMedium); background: color-mix(in srgb, var(--hm-accent) 22%, #e2e5ee); }
 .settings-theme-preview > span { display: grid; align-content: start; gap: 4px; }
@@ -5217,7 +5178,6 @@ svg {
 .settings-page .background-preset-card { padding: 6px 6px 10px; gap: 4px; border-radius: var(--borderRadiusXLarge); }
 .settings-page .background-preset-card strong { font-size: var(--fontSizeBase200); font-weight: var(--fontWeightSemibold); }
 .settings-page .background-preset-card small { font-size: var(--fontSizeBase200); line-height: 1.5; }
-.settings-page .background-preset-card[aria-pressed="true"] { box-shadow: 0 0 0 1px color-mix(in srgb, var(--hm-accent) 35%, transparent); }
 .settings-page .background-preset-card[aria-pressed="true"]::after { width: 18px; height: 18px; font-size: var(--fontSizeBase200); top: 11px; right: 11px; }
 .settings-page .accent-swatch { width: 24px; height: 24px; flex: none; }
 .settings-page .accent-swatch:focus-visible { outline: 2px solid var(--hm-focus-ring); outline-offset: 3px; }
@@ -5232,77 +5192,13 @@ svg {
 
 .settings-navigation {
   flex: none;
-  min-width: 0;
-  max-width: 100%;
-  width: fit-content;
-  margin: 0 2px;
-  padding: 4px;
-  overflow-x: auto;
-  border: 1px solid var(--hm-outer-border);
-  border-radius: var(--borderRadius2XLarge);
-  background: rgba(var(--hm-surface-rgb), .52);
-  scrollbar-width: thin;
 }
 
-.settings-category-tabs { position: relative; isolation: isolate; gap: 3px; flex-wrap: nowrap; }
-
-.settings-category-indicator {
-  position: absolute;
-  z-index: -1;
-  inset: 0 auto 0 0;
-  width: 100px;
-  border-radius: var(--borderRadiusXLarge);
-  background: var(--hm-accent-soft);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--hm-accent) 16%, transparent);
-  opacity: 0;
-  transform-origin: left center;
-  pointer-events: none;
-  transition: transform 360ms cubic-bezier(.22, 1, .36, 1), opacity 160ms ease-out;
-}
-
-.settings-category-tabs[data-indicator-ready="true"] .settings-category-indicator { opacity: 1; }
-.settings-category-tabs[data-indicator-ready="true"] .settings-category-tab[aria-selected="true"] {
-  background: transparent;
-  box-shadow: none;
-}
+.settings-category-tabs { flex-wrap: nowrap; }
 
 .settings-category-tab {
-  position: relative;
   flex: none;
-  min-height: 36px;
-  justify-content: center;
-  padding: 7px 14px;
-  gap: 7px;
-  border-radius: var(--borderRadiusXLarge);
-  color: var(--hm-text-secondary);
-  touch-action: manipulation;
 }
-
-.settings-category-tab::before,
-.settings-category-tab::after { display: none; }
-
-.settings-category-tab:hover {
-  color: var(--hm-text-primary);
-  background: var(--hm-row-hover);
-}
-
-.settings-category-tab[aria-selected="true"] {
-  color: var(--hm-accent);
-  background: var(--hm-accent-soft);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--hm-accent) 16%, transparent);
-}
-
-.settings-category-tab:focus-visible {
-  outline: 2px solid var(--hm-focus-ring);
-  outline-offset: -2px;
-}
-
-.settings-category-tab .fui-Tab__icon { font-size: var(--fontSizeBase500); }
-
-.settings-category-tab .fui-Tab__icon {
-  transition: transform 240ms cubic-bezier(.22, 1, .36, 1);
-}
-.settings-category-tab:active .fui-Tab__icon { transform: scale(.9); }
 
 .settings-category-label {
   display: flex;
@@ -5394,11 +5290,9 @@ svg {
 .settings-page .settings-address-entry { animation: settings-content-enter 220ms ease-out both; }
 
 /* Preference changes cancel ongoing entrances; navigation stays immediate. */
-:is([data-motion="reduced"], [data-motion="off"]) .settings-category-indicator { transition: none !important; }
 :is([data-motion="reduced"], [data-motion="off"]) .settings-page :is(.settings-category-heading, .settings-group, .settings-address-entry) { animation: none; }
 :is([data-motion="reduced"], [data-motion="off"]) .settings-page :is(.settings-theme-option, .background-preset-card, .accent-swatch, .fui-Tab__icon) { transform: none !important; }
 @media (prefers-reduced-motion: reduce) {
-  .settings-category-indicator { transition: none !important; }
   .settings-page :is(.settings-category-heading, .settings-group, .settings-address-entry) { animation: none; }
   .settings-page :is(.settings-theme-option, .background-preset-card, .accent-swatch, .fui-Tab__icon) { transform: none !important; }
 }
@@ -5414,7 +5308,6 @@ svg {
 .settings-page .settings-section { padding: 0; }
 
 @media (max-width: 1040px) {
-  .settings-category-tab { padding-inline: 10px; }
   .settings-page .setting-row { gap: 24px; }
 }
 
@@ -6463,7 +6356,7 @@ svg {
 .background-preset-card strong { padding: 0 5px; font-size: var(--fontSizeBase300); }
 .background-preset-card small { padding: 0 5px; font-size: var(--fontSizeBase200); color: var(--hm-text-secondary); line-height: 1.5; }
 .background-preset-card:hover { border-color: var(--hm-accent); }
-.background-preset-card[aria-pressed="true"] { border-color: var(--hm-accent); box-shadow: 0 0 0 1px var(--hm-accent); }
+.background-preset-card[aria-pressed="true"] { border-color: var(--hm-selected-border); background: var(--hm-selected-fill); }
 .background-preset-card:focus-visible { outline: 2px solid var(--hm-accent); outline-offset: 3px; }
 @media (max-width: 1040px) { .background-preset-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 

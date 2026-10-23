@@ -30,7 +30,7 @@ export function AppearancePreview({ onToast }: { onToast: () => void }) {
             <span className="section-kicker">主玻璃表面</span>
             <h2>聚合引擎</h2>
           </div>
-          <Badge appearance="outline"><i className="state-dot" />运行中</Badge>
+          <Badge appearance="tint" color="success"><i className="state-dot" />运行中</Badge>
         </div>
         <strong className="preview-speed">32.1 <small>MB/s</small></strong>
         <TabList defaultSelectedValue="proxy" size="small">

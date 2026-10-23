@@ -428,7 +428,7 @@ export function HealthPage({
         </div>}
       />
 
-      <nav className="health-subnav" aria-label={text("网络体检页面", "Network diagnostic pages")}>
+      <nav className="health-subnav page-tabs" aria-label={text("网络体检页面", "Network diagnostic pages")}>
         <TabList
           selectedValue={healthView}
           onTabSelect={(_, data) => setHealthView(data.value as "link" | "nat" | "mtu")}

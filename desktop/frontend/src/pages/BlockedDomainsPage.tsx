@@ -98,7 +98,7 @@ export function BlockedDomainsPage({ onBack }: { onBack: () => void }) {
       <GlassSurface className="blocked-domains-surface">
         <div className="blocked-toolbar">
           <div>
-            <Badge appearance="outline" color={snapshot.enabled ? "success" : "subtle"}>
+            <Badge appearance="tint" color={snapshot.enabled ? "success" : "informative"}>
               {snapshot.enabled
                 ? text("自动分流清单已启用", "Auto-bypass list enabled")
                 : text("自动分流清单已暂停", "Auto-bypass list paused")}

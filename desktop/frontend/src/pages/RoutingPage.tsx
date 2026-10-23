@@ -779,7 +779,7 @@ export function RoutingPage() {
           </Button>
         </div>}
       />
-      <TabList aria-label={text("规则管理", "Rule management")} selectedValue={ruleView} onTabSelect={(_, data) => setRuleView(data.value as "manual" | "sets")}>
+      <TabList className="page-tabs" aria-label={text("规则管理", "Rule management")} selectedValue={ruleView} onTabSelect={(_, data) => setRuleView(data.value as "manual" | "sets")}>
         <Tab value="manual">{text("手动规则", "Manual rules")}</Tab>
         <Tab value="sets">{text("规则集订阅", "Rule set subscriptions")}</Tab>
       </TabList>

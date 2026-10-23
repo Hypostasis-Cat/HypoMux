@@ -76,13 +76,17 @@ export function EngineHero({
         : phase === "failed"
           ? text("启动失败", "Failed")
           : text("未运行", "Not running");
+  const phaseColor = phase === "running" ? "success"
+    : phase === "failed" ? "danger"
+      : phase === "degraded" || phase === "starting" ? "warning"
+        : "informative";
   return (
     <GlassSurface className={`engine-hero phase-${phase}`} aria-label={t("home_engine_control")}>
       <div className="engine-copy">
         <div className="engine-heading">
           <div className="engine-state">
             <span className="section-kicker">{t("home_engine_title")}</span>
-            <Badge key={phase} className="engine-state-badge motion-status-swap" appearance="outline">
+            <Badge key={phase} className="engine-state-badge motion-status-swap" appearance="tint" color={phaseColor}>
               <i className="state-dot" />
               {phaseLabel}
             </Badge>
@@ -95,6 +99,7 @@ export function EngineHero({
         </div>
         <TabList
           className="mode-tabs"
+          appearance="filled-circular"
           selectedValue={mode}
           onTabSelect={(_, data) => onModeChange(data.value as EngineMode)}
           size="small"

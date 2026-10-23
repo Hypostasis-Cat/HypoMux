@@ -12,7 +12,6 @@
 .mtu-panel-heading { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }
 .mtu-panel h2 { margin: 6px 0 0; font-size: var(--fontSizeBase500); font-weight: var(--fontWeightSemibold); line-height: 1.35; }
 .mtu-eyebrow { color: var(--hm-text-tertiary); font-size: var(--fontSizeBase200); }
-.mtu-tag { flex-shrink: 0; border: 1px solid var(--hm-outer-border); border-radius: var(--borderRadiusCircular); padding: 4px 10px; font-size: var(--fontSizeBase200); color: var(--hm-text-secondary); background: var(--hm-surface-secondary-fill); }
 .mtu-panel p { margin: 0; font-size: var(--fontSizeBase200); line-height: 1.65; color: var(--hm-text-secondary); overflow-wrap: anywhere; }
 .mtu-panel .mtu-description { margin-top: 14px; }
 .mtu-fields { display: grid; gap: 20px; margin: 24px 0; }
