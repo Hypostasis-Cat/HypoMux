@@ -1710,21 +1710,30 @@ svg {
   font-size: var(--fontSizeBase200);
 }
 
-.throughput-idle::before {
+.throughput-idle-grid {
   position: absolute;
-  right: 0;
-  bottom: 7px;
-  left: 0;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--hm-accent) 42%, transparent) 12%, color-mix(in srgb, var(--hm-accent) 42%, transparent) 88%, transparent);
-  content: "";
+  inset: 0;
+  width: 100%;
+  height: 100%;
 }
 
-.throughput-idle > span {
-  padding: 6px 10px;
-  border: 1px solid color-mix(in srgb, var(--hm-outer-border) 74%, transparent);
-  border-radius: var(--borderRadiusCircular);
-  background: color-mix(in srgb, var(--hm-row-hover) 55%, transparent);
+.throughput-idle-grid line {
+  stroke: color-mix(in srgb, var(--hm-text-tertiary) 34%, transparent);
+}
+
+.throughput-idle-grid line:last-child {
+  stroke: color-mix(in srgb, var(--hm-text-tertiary) 46%, transparent);
+}
+
+.throughput-idle > p {
+  position: relative;
+  margin: 0;
+}
+
+/* Before the service starts the zero reading recedes, so the start button
+ * is the card's focal point; size and position stay put to avoid a jump. */
+.throughput-display.is-idle .throughput-value strong {
+  color: var(--hm-text-tertiary);
 }
 
 .throughput-line {
