@@ -34,12 +34,15 @@ const clamp = (value: number, minimum: number, maximum: number) =>
 const migrateAppearance = (value: Partial<AppearanceSettings>): Partial<AppearanceSettings> => {
   // Schema version 2: no forced migration to avoid breaking user preferences
   // Users who prefer fluent-solid should keep their choice
-  return { ...value, schemaVersion: 2 };
+  // Schema version 3: the 10px radius was the stored default, not a choice
+  // (the radius control is development-only); follow Fluent's 8px card radius.
+  const radius = (value.schemaVersion ?? 0) < 3 && value.radius === 10 ? 8 : value.radius;
+  return { ...value, ...(radius === undefined ? {} : { radius }), schemaVersion: 3 };
 };
 
 const normaliseAppearance = (value: AppearanceSettings): AppearanceSettings => ({
   ...value,
-  schemaVersion: 2,
+  schemaVersion: 3,
   builtinBackground: value.builtinBackground === "soft-bloom" ? "soft-bloom" : "soft-dots",
   material: value.material === "solid" ? "solid" : "mica",
   panelMaterial: value.panelMaterial === "solid" ? "solid" : "blur",
