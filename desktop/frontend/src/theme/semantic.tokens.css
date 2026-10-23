@@ -8,6 +8,10 @@
   --hm-warning: #96601b;
   --hm-danger: #bd414e;
   --hm-focus-ring: color-mix(in srgb, var(--hm-accent) 68%, transparent);
+  /* Windows 11 caption close button. */
+  --hm-caption-close: #c42b1c;
+  --hm-caption-close-pressed: #a4262c;
+  --hm-caption-close-text: #ffffff;
 }
 
 [data-appearance="light"] {

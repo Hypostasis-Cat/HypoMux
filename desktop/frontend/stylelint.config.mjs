@@ -22,11 +22,20 @@ export default {
         "/^border(?:-(?:top|bottom|start|end)-(?:left|right|start|end))?-radius$/": [/^(?!.*calc\().*\d+px/],
         "/^(?:padding|margin)(?:-(?:top|right|bottom|left|inline|block)(?:-(?:start|end))?)?$/": [offRampSpacing],
         "/^(?:gap|row-gap|column-gap)$/": [offRampSpacing],
+        // Literal colors belong in custom properties (token definitions), never in declarations.
+        "/^(?!--)/": [/#[0-9a-f]{3,8}\b/i, /rgba?\(\s*\d/i, /hsla?\(\s*\d/i],
       },
       {
         message: (property, value) =>
-          `"${property}: ${value}" bypasses the design tokens. Use the Fluent token (var(--fontSize*), var(--fontWeight*), var(--lineHeight*), var(--borderRadius*)), var(--hm-line-height-reading|display), or a value on the spacing ramp ${SPACING_RAMP.join("/")}px.`,
+          `"${property}: ${value}" bypasses the design tokens. Use the Fluent token (var(--fontSize*), var(--fontWeight*), var(--lineHeight*), var(--borderRadius*)), var(--hm-line-height-reading|display), a color token, or a value on the spacing ramp ${SPACING_RAMP.join("/")}px.`,
       },
     ],
   },
+  overrides: [
+    {
+      // Theme token files define the palette itself.
+      files: ["src/theme/*.tokens.css"],
+      rules: { "declaration-property-value-disallowed-list": null },
+    },
+  ],
 };

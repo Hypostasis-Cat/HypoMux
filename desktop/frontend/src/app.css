@@ -175,8 +175,8 @@ svg {
     transparent 74%
   );
   -webkit-mask:
-    linear-gradient(#000 0 0) content-box,
-    linear-gradient(#000 0 0);
+    linear-gradient(black 0 0) content-box,
+    linear-gradient(black 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
   pointer-events: none;
@@ -205,8 +205,8 @@ svg {
     drop-shadow(0 0 9px var(--hm-card-glow-near))
     drop-shadow(0 0 20px var(--hm-card-glow-far));
   -webkit-mask:
-    linear-gradient(#000 0 0) content-box,
-    linear-gradient(#000 0 0);
+    linear-gradient(black 0 0) content-box,
+    linear-gradient(black 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
   pointer-events: none;
@@ -267,25 +267,8 @@ svg {
   backdrop-filter: saturate(92%);
 }
 
-[data-appearance="light"][data-background-source="local"] .wallpaper-overlay {
-  background:
-    linear-gradient(
-      105deg,
-      rgba(218, 227, 234, 0.12),
-      rgba(240, 244, 246, 0.03) 48%,
-      rgba(221, 229, 236, 0.08)
-    );
-  backdrop-filter: saturate(95%) contrast(99%);
-}
-
-[data-appearance="dark"][data-background-source="local"] .wallpaper-overlay {
-  background:
-    linear-gradient(
-      105deg,
-      rgba(18, 23, 28, 0.12),
-      rgba(8, 12, 16, 0.03) 48%,
-      rgba(15, 20, 25, 0.08)
-    );
+[data-background-source="local"] .wallpaper-overlay {
+  background: var(--hm-local-wallpaper-veil);
   backdrop-filter: saturate(95%) contrast(99%);
 }
 
@@ -356,22 +339,8 @@ svg {
   --hm-navigation-surface: rgba(var(--hm-surface-secondary-rgb), 0.32);
 }
 
-[data-appearance="light"][data-background-source="local"] .app-shell {
-  background: linear-gradient(
-    110deg,
-    rgba(222, 230, 236, 0.08),
-    rgba(241, 244, 246, 0.02) 52%,
-    rgba(225, 232, 238, 0.05)
-  );
-}
-
-[data-appearance="dark"][data-background-source="local"] .app-shell {
-  background: linear-gradient(
-    110deg,
-    rgba(22, 28, 33, 0.08),
-    rgba(12, 16, 20, 0.02) 52%,
-    rgba(18, 24, 29, 0.05)
-  );
+[data-background-source="local"] .app-shell {
+  background: var(--hm-local-shell-veil);
 }
 
 .titlebar {
@@ -457,14 +426,14 @@ svg {
 }
 
 .window-close:hover {
-  color: #fff !important;
-  background: #c42b1c !important;
+  color: var(--hm-caption-close-text) !important;
+  background: var(--hm-caption-close) !important;
   transform: scale(1);
 }
 
 .window-close:active {
-  color: #fff !important;
-  background: #a4262c !important;
+  color: var(--hm-caption-close-text) !important;
+  background: var(--hm-caption-close-pressed) !important;
   transform: scale(0.94);
 }
 
@@ -1493,8 +1462,8 @@ svg {
 }
 
 .phase-failed .state-dot {
-  background: var(--hm-danger, #c42b1c);
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--hm-danger, #c42b1c) 15%, transparent);
+  background: var(--hm-danger);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--hm-danger) 15%, transparent);
 }
 
 .engine-summary {
@@ -2343,7 +2312,7 @@ svg {
 
 .routing-rulesets-error {
   overflow: hidden;
-  color: var(--hm-danger, #c50f1f);
+  color: var(--hm-danger);
   font-size: var(--fontSizeBase200);
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2509,8 +2478,8 @@ svg {
 }
 
 .routing-row.has-error {
-  background: color-mix(in srgb, var(--colorPaletteRedBackground1, #fdf3f4) 42%, transparent) !important;
-  box-shadow: inset 3px 0 color-mix(in srgb, var(--colorPaletteRedBorder2, #d13438) 74%, transparent);
+  background: color-mix(in srgb, var(--colorPaletteRedBackground1) 42%, transparent) !important;
+  box-shadow: inset 3px 0 color-mix(in srgb, var(--colorPaletteRedBorder2) 74%, transparent);
 }
 
 .routing-cell-input {
@@ -2735,7 +2704,7 @@ svg {
 }
 
 .routing-rule-status.is-valid > svg {
-  color: var(--colorPaletteGreenForeground1, #107c10);
+  color: var(--colorPaletteGreenForeground1);
 }
 
 .routing-rule-status.is-validating {
@@ -2744,9 +2713,9 @@ svg {
 }
 
 .routing-rule-status.is-error {
-  border-color: color-mix(in srgb, var(--colorPaletteRedBorder2, #d13438) 30%, var(--hm-outer-border));
-  color: var(--colorPaletteRedForeground1, #bc2f32);
-  background: color-mix(in srgb, var(--colorPaletteRedBackground1, #fdf3f4) 48%, transparent);
+  border-color: color-mix(in srgb, var(--colorPaletteRedBorder2) 30%, var(--hm-outer-border));
+  color: var(--colorPaletteRedForeground1);
+  background: color-mix(in srgb, var(--colorPaletteRedBackground1) 48%, transparent);
 }
 
 .routing-empty {
@@ -2863,7 +2832,7 @@ svg {
 }
 
 .routing-batch-editor-heading > small.is-over-limit {
-  color: var(--colorPaletteRedForeground1, #bc2f32);
+  color: var(--colorPaletteRedForeground1);
 }
 
 .routing-batch-editor .fui-Textarea {
@@ -2949,7 +2918,7 @@ svg {
 }
 
 .routing-batch-issue.is-invalid span {
-  color: var(--colorPaletteRedForeground1, #bc2f32);
+  color: var(--colorPaletteRedForeground1);
 }
 
 .routing-batch-actions {
@@ -2968,7 +2937,7 @@ svg {
   max-width: 660px;
   border: 1px solid var(--hm-outer-border);
   background: rgba(var(--hm-surface-rgb), 0.98);
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.28);
+  box-shadow: var(--shadow64);
 }
 
 .tun-preflight-title {
@@ -2982,7 +2951,7 @@ svg {
 }
 
 .tun-preflight-title.is-blocked > svg {
-  color: var(--colorPaletteRedForeground1, #bc2f32);
+  color: var(--colorPaletteRedForeground1);
 }
 
 .tun-preflight-content {
@@ -3052,8 +3021,8 @@ svg {
   grid-template-columns: 22px minmax(0, 1fr);
   gap: 10px;
   padding: 10px 12px;
-  border-inline-start: 3px solid var(--colorPaletteYellowBorderActive, #d39300);
-  background: color-mix(in srgb, var(--colorPaletteYellowBackground1, #fff4ce) 34%, transparent);
+  border-inline-start: 3px solid var(--colorPaletteYellowBorderActive);
+  background: color-mix(in srgb, var(--colorPaletteYellowBackground1) 34%, transparent);
   animation: motion-content-rise var(--hm-motion-normal) var(--hm-motion-ease-out) backwards;
 }
 
@@ -3062,8 +3031,8 @@ svg {
 .tun-preflight-issue:nth-child(n + 4) { animation-delay: 95ms; }
 
 .tun-preflight-issue.is-blocker {
-  border-inline-start-color: var(--colorPaletteRedBorderActive, #c50f1f);
-  background: color-mix(in srgb, var(--colorPaletteRedBackground1, #fdf3f4) 46%, transparent);
+  border-inline-start-color: var(--colorPaletteRedBorderActive);
+  background: color-mix(in srgb, var(--colorPaletteRedBackground1) 46%, transparent);
 }
 
 .tun-preflight-issue.is-info {
@@ -3073,11 +3042,11 @@ svg {
 
 .tun-preflight-issue-icon {
   padding-top: 1px;
-  color: var(--colorPaletteDarkOrangeForeground1, #da3b01);
+  color: var(--colorPaletteDarkOrangeForeground1);
 }
 
 .tun-preflight-issue.is-blocker .tun-preflight-issue-icon {
-  color: var(--colorPaletteRedForeground1, #bc2f32);
+  color: var(--colorPaletteRedForeground1);
 }
 
 .tun-preflight-issue.is-info .tun-preflight-issue-icon {
@@ -5226,16 +5195,29 @@ svg {
 .settings-theme-option::before, .settings-theme-option::after { display: none; }
 .settings-theme-option.settings-theme-option:hover { background: var(--hm-row-hover); border-color: var(--hm-control-border-hover); }
 .settings-theme-option.settings-theme-option[aria-selected="true"] { border-color: var(--hm-selected-border); background: var(--hm-selected-fill); }
-.settings-theme-preview { display: grid; width: 86px; height: 51px; grid-template-columns: 17px minmax(0, 1fr); gap: 6px; padding: 8px; border: 1px solid #00000012; border-radius: var(--borderRadiusLarge); background: #f1f3f7; }
-.settings-theme-preview > i { border-radius: var(--borderRadiusMedium); background: color-mix(in srgb, var(--hm-accent) 22%, #e2e5ee); }
+/* Miniature light/dark windows: they depict fixed themes, so they keep their own palette. */
+.settings-theme-preview {
+  --preview-light-surface: #f1f3f7;
+  --preview-light-border: #00000012;
+  --preview-light-nav: #e2e5ee;
+  --preview-light-line: #ffffff;
+  --preview-light-title: #959eae;
+  --preview-dark-surface: #252a35;
+  --preview-dark-border: #ffffff18;
+  --preview-dark-nav: #343b49;
+  --preview-dark-line: #414a5b;
+  --preview-system-line: #8c96a8;
+}
+.settings-theme-preview { display: grid; width: 86px; height: 51px; grid-template-columns: 17px minmax(0, 1fr); gap: 6px; padding: 8px; border: 1px solid var(--preview-light-border); border-radius: var(--borderRadiusLarge); background: var(--preview-light-surface); }
+.settings-theme-preview > i { border-radius: var(--borderRadiusMedium); background: color-mix(in srgb, var(--hm-accent) 22%, var(--preview-light-nav)); }
 .settings-theme-preview > span { display: grid; align-content: start; gap: 4px; }
-.settings-theme-preview > span > i { display: block; height: 7px; border-radius: var(--borderRadiusSmall); background: #fff; }
-.settings-theme-preview > span > i:first-child { width: 60%; background: #959eae; height: 4px; margin-bottom: 2px; }
-.settings-theme-preview.is-dark { background: #252a35; border-color: #ffffff18; }
-.settings-theme-preview.is-dark > span > i { background: #414a5b; }
-.settings-theme-preview.is-dark > i { background: color-mix(in srgb, var(--hm-accent) 30%, #343b49); }
-.settings-theme-preview.is-system { background: linear-gradient(90deg, #f1f3f7 50%, #252a35 50%); }
-.settings-theme-preview.is-system > span > i { background: #8c96a8; }
+.settings-theme-preview > span > i { display: block; height: 7px; border-radius: var(--borderRadiusSmall); background: var(--preview-light-line); }
+.settings-theme-preview > span > i:first-child { width: 60%; background: var(--preview-light-title); height: 4px; margin-bottom: 2px; }
+.settings-theme-preview.is-dark { background: var(--preview-dark-surface); border-color: var(--preview-dark-border); }
+.settings-theme-preview.is-dark > span > i { background: var(--preview-dark-line); }
+.settings-theme-preview.is-dark > i { background: color-mix(in srgb, var(--hm-accent) 30%, var(--preview-dark-nav)); }
+.settings-theme-preview.is-system { background: linear-gradient(90deg, var(--preview-light-surface) 50%, var(--preview-dark-surface) 50%); }
+.settings-theme-preview.is-system > span > i { background: var(--preview-system-line); }
 
 .settings-page .setting-row:has(.background-preset-picker) { grid-template-columns: minmax(0, 1fr); gap: 16px; }
 .settings-page .background-preset-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
@@ -6446,7 +6428,7 @@ svg {
 .background-custom-tile { position: relative; display: grid; min-width: 0; }
 .background-custom-tile > .background-preset-card { width: 100%; height: 100%; }
 .background-custom-actions { position: absolute; top: 12px; left: 12px; display: flex; gap: 4px; }
-.background-custom-actions .fui-Button { min-width: 28px; width: 28px; height: 28px; padding: 4px; background: var(--colorNeutralBackground1); box-shadow: 0 1px 5px #0002; }
+.background-custom-actions .fui-Button { min-width: 28px; width: 28px; height: 28px; padding: 4px; background: var(--colorNeutralBackground1); box-shadow: var(--shadow4); }
 
 @media (max-width: 1040px) {
   .page-heading { flex-wrap: wrap; gap: 12px; align-items: flex-start; }

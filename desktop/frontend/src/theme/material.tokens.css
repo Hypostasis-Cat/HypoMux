@@ -54,6 +54,13 @@
   --hm-shadow-colour: 25, 40, 51;
   --hm-card-glow-edge-opacity: 0.94;
   --hm-card-glow-halo-opacity: 0.66;
+  --hm-local-wallpaper-veil: linear-gradient(105deg, rgba(218, 227, 234, 0.12), rgba(240, 244, 246, 0.03) 48%, rgba(221, 229, 236, 0.08));
+  --hm-local-shell-veil: linear-gradient(110deg, rgba(222, 230, 236, 0.08), rgba(241, 244, 246, 0.02) 52%, rgba(225, 232, 238, 0.05));
+}
+
+[data-appearance="dark"][data-background-source="local"] {
+  --hm-local-wallpaper-veil: linear-gradient(105deg, rgba(18, 23, 28, 0.12), rgba(8, 12, 16, 0.03) 48%, rgba(15, 20, 25, 0.08));
+  --hm-local-shell-veil: linear-gradient(110deg, rgba(22, 28, 33, 0.08), rgba(12, 16, 20, 0.02) 52%, rgba(18, 24, 29, 0.05));
 }
 
 [data-appearance="dark"] {
