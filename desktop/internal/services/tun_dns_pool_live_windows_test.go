@@ -233,12 +233,25 @@ func poolDNSAnswer(wire []byte) []byte {
 	return result
 }
 
+// poolTestPort returns a loopback port that is bindable for both TCP and UDP.
+// sing-box's direct inbound listens on both protocols, and Windows reserves
+// excluded port ranges per protocol, so a free TCP port can still fail the
+// UDP bind with "access forbidden".
 func poolTestPort(t *testing.T) int {
 	t.Helper()
-	listener, err := net.Listen("tcp4", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
+	for range 20 {
+		listener, err := net.Listen("tcp4", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		port := listener.Addr().(*net.TCPAddr).Port
+		packet, err := net.ListenPacket("udp4", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+		listener.Close()
+		if err == nil {
+			packet.Close()
+			return port
+		}
 	}
-	defer listener.Close()
-	return listener.Addr().(*net.TCPAddr).Port
+	t.Fatal("no loopback port is bindable for both TCP and UDP")
+	return 0
 }

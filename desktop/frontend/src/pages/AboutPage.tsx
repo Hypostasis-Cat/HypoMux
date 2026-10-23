@@ -18,6 +18,7 @@ import {
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { GlassSurface } from "../components/material/GlassSurface";
+import { PageHeader } from "../components/shell/PageHeader";
 import { useAppNotifications } from "../components/notifications/AppNotifications";
 import { desktopPlatform } from "../platform/desktop";
 import { appServices, type UpdateCheckResult } from "../platform/services";
@@ -167,13 +168,11 @@ export function AboutPage() {
 
   return (
     <main className="about-page">
-      <header className="page-heading">
-        <div>
-          <span className="section-kicker">{text("开源多链路加速器", "Open-source multi-link accelerator")}</span>
-          <h1>{text("关于 HypoMux", "About HypoMux")}</h1>
-          <p>{t("about_intro")}</p>
-        </div>
-      </header>
+      <PageHeader
+        kicker={text("开源多链路加速器", "Open-source multi-link accelerator")}
+        title={text("关于 HypoMux", "About HypoMux")}
+        description={t("about_intro")}
+      />
 
       <div className="about-layout">
         <GlassSurface className="about-product">

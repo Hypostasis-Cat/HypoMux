@@ -98,7 +98,7 @@ export function AppearanceLab() {
               <option value="solid">Solid</option>
             </Select>
           </label>
-          <Badge appearance="outline" color={nativeResult.fallback ? "warning" : "success"}>
+          <Badge appearance="tint" color={nativeResult.fallback ? "warning" : "success"}>
             {nativeResult.fallback ? "Web 材质回退" : "Windows 原生材质已应用"}
           </Badge>
         </section>
@@ -131,6 +131,7 @@ export function AppearanceLab() {
               ref={fileInput}
               className="visually-hidden"
               type="file"
+              tabIndex={-1}
               accept="image/*"
               onChange={async (event) => {
                 const file = event.target.files?.[0];

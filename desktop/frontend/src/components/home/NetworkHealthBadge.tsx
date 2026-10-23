@@ -27,10 +27,15 @@ export function NetworkHealthBadge({ health }: { health: AdapterHealth }) {
       : health === "probing" || health === "idle"
         ? <Clock16Regular />
         : <CheckmarkCircle16Filled />;
+  const color = health === "healthy" ? "success"
+    : health === "failed" ? "danger"
+      : health === "unstable" || health === "cooldown" ? "warning"
+        : "informative";
   return (
     <Badge
-      className={`health-badge health-${health}`}
+      className="health-badge"
       appearance="tint"
+      color={color}
       icon={icon}
     >
       {labels[health]}

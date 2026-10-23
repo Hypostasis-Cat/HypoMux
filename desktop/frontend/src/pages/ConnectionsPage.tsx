@@ -38,6 +38,7 @@ import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useSta
 import { GlassSurface } from "../components/material/GlassSurface";
 import { VirtualRows, type VirtualRow } from "../components/VirtualRows";
 import { usePageActive } from "../components/shell/PageActivity";
+import { PageHeader } from "../components/shell/PageHeader";
 import { useAppNotifications } from "../components/notifications/AppNotifications";
 import { useI18n } from "../i18n/i18n";
 import {
@@ -618,16 +619,14 @@ export function ConnectionsPage({
 
   return (
     <main className="connections-page">
-      <header className="connections-heading">
-        <div>
-          <span className="section-kicker">{text("当前加速会话的实时网络流", "Live network flows in this acceleration session")}</span>
-          <h1>{text("活动连接", "Active connections")}</h1>
-          <p>{text(
-            "按进程查看目标域名、远端 IP、实际出口网卡、分流策略与会话流量。",
-            "Inspect destination domains, remote IPs, actual egress adapters, routing policy, and session traffic by process.",
-          )}</p>
-        </div>
-        <div className="connections-heading-actions">
+      <PageHeader
+        kicker={text("当前加速会话的实时网络流", "Live network flows in this acceleration session")}
+        title={text("活动连接", "Active connections")}
+        description={text(
+          "按进程查看目标域名、远端 IP、实际出口网卡、分流策略与会话流量。",
+          "Inspect destination domains, remote IPs, actual egress adapters, routing policy, and session traffic by process.",
+        )}
+        actions={<div className="connections-heading-actions">
           <SearchBox
             aria-label={text("搜索活动连接", "Search active connections")}
             dismiss={{ "aria-label": text("清空搜索", "Clear search") }}
@@ -650,8 +649,8 @@ export function ConnectionsPage({
           >
             {text("刷新", "Refresh")}
           </Button>
-        </div>
-      </header>
+        </div>}
+      />
 
       <GlassSurface className="connection-summary" tone="secondary">
         {preview && <Badge appearance="tint" color="warning">{text("预览 · 示例数据", "Preview · Sample data")}</Badge>}
@@ -711,7 +710,6 @@ export function ConnectionsPage({
             <label>
               <span>{text("出口策略", "Egress")}</span>
               <Dropdown
-                appearance="filled-darker"
                 size="small"
                 positioning={{ position: "below", align: "end", pinned: true, strategy: "fixed", offset: 4 }}
                 aria-label={text("按出口策略筛选", "Filter by egress policy")}
@@ -863,7 +861,6 @@ export function ConnectionsPage({
                   <label className="quick-rule-field">
                     <span>{text("出口策略", "Egress policy")}</span>
                     <Dropdown
-                      appearance="filled-darker"
                       value={outboundLabel(quickRuleOutbound)}
                       selectedOptions={quickRuleOutbound ? [quickRuleOutbound] : []}
                       disabled={quickRuleLoading || quickRuleSaving}

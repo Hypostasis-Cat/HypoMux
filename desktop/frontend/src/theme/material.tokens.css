@@ -133,6 +133,8 @@
   --hm-surface-secondary-fill: rgba(var(--hm-surface-secondary-rgb), var(--hm-content-opacity));
   --hm-row-fill: rgba(var(--hm-surface-rgb), var(--hm-row-opacity));
   --hm-selected-fill: color-mix(in srgb, var(--hm-accent) 9%, var(--hm-row-fill));
+  /* One selected-card treatment everywhere: this border plus --hm-selected-fill. */
+  --hm-selected-border: color-mix(in srgb, var(--hm-accent) 55%, var(--hm-outer-border));
 }
 [data-background-source="system"], [data-background-source="solid"] {
   --hm-content-opacity: max(0.9, var(--hm-panel-opacity));

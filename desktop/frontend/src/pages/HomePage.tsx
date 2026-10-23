@@ -245,12 +245,10 @@ export function HomePage({
         </div>
       </section>
 
-      <RuntimeStatusBar strategy={engine.strategy}
+      <RuntimeStatusBar
         telemetryUnavailable={Boolean(engine.telemetryError)}
         phase={engine.phase}
-        connections={engine.totalConnections}
         sessionTraffic={engine.sessionBytes > 0 ? formatBytes(engine.sessionBytes) : "—"}
-        weighted={engine.weighted}
         coreVersion={engine.coreVersion}
         preview={engine.preview}
         onOpenConnections={() => onNavigate?.("connections")}

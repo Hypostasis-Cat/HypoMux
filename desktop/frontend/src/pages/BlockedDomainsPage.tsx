@@ -22,6 +22,7 @@ import { appServices, type BlockedDomainSnapshot } from "../platform/services";
 import { useI18n } from "../i18n/i18n";
 import { startSerialPoll } from "../platform/serialPoll";
 import { usePageActive } from "../components/shell/PageActivity";
+import { PageHeader } from "../components/shell/PageHeader";
 
 const emptySnapshot: BlockedDomainSnapshot = { enabled: false, use_expiry: true, entries: [] };
 
@@ -88,19 +89,16 @@ export function BlockedDomainsPage({ onBack }: { onBack: () => void }) {
 
   return (
     <main className="blocked-domains-page">
-      <header className="page-heading">
-        <div>
-          <span className="section-kicker">Per-adapter isolation</span>
-          <h1>{t("blocked_title")}</h1>
-          <p>{t("blocked_hint")}</p>
-        </div>
-        <Button appearance="subtle" icon={<ArrowLeft20Regular />} onClick={onBack}>{text("返回设置", "Back to settings")}</Button>
-      </header>
+      <PageHeader
+        leading={<Button appearance="subtle" icon={<ArrowLeft20Regular />} onClick={onBack}>{text("返回设置", "Back to settings")}</Button>}
+        title={t("blocked_title")}
+        description={t("blocked_hint")}
+      />
 
       <GlassSurface className="blocked-domains-surface">
         <div className="blocked-toolbar">
           <div>
-            <Badge appearance="outline" color={snapshot.enabled ? "success" : "subtle"}>
+            <Badge appearance="tint" color={snapshot.enabled ? "success" : "informative"}>
               {snapshot.enabled
                 ? text("自动分流清单已启用", "Auto-bypass list enabled")
                 : text("自动分流清单已暂停", "Auto-bypass list paused")}

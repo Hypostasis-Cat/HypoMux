@@ -27,17 +27,15 @@
   --colorNeutralStroke1: var(--hm-control-border);
   --colorNeutralStroke1Hover: var(--hm-control-border-hover);
   --colorNeutralStroke1Pressed: var(--hm-accent);
-  --colorNeutralStrokeAccessible: var(--hm-control-border);
-  --colorNeutralStrokeAccessibleHover: var(--hm-control-border-hover);
-  --colorNeutralStrokeAccessiblePressed: var(--hm-accent);
   --colorNeutralBackgroundDisabled: color-mix(in srgb, var(--hm-text-primary) 4%, transparent);
   --colorNeutralStrokeDisabled: var(--hm-outer-border);
   --borderRadiusMedium: var(--hm-control-radius);
 }
 
 /* Keep form controls neutral on three sides; Fluent's accessible bottom
- * stroke and animated focus underline retain the theme accent. This avoids a
- * saturated ring around the whole field while preserving a clear focus cue. */
+ * stroke (WCAG 1.4.11, ≥3:1) and animated focus underline stay untouched.
+ * This avoids a saturated ring around the whole field while preserving a
+ * perceivable field boundary and a clear focus cue. */
 .fui-Dropdown,
 .fui-Combobox,
 .fui-Input,
@@ -46,7 +44,6 @@
 .fui-Select,
 .fui-SpinButton {
   --colorNeutralStroke1Pressed: var(--hm-control-border-hover);
-  --colorNeutralStrokeAccessiblePressed: var(--hm-control-border-hover);
 }
 
 .fui-Dropdown:focus-visible,

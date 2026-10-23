@@ -1,6 +1,6 @@
 import { Tab, TabList } from "@fluentui/react-components";
 import { Bot20Regular, Document20Regular, Globe20Regular, PaintBrush20Regular, Settings20Regular, Shield20Regular } from "@fluentui/react-icons";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 const categories = ["general", "appearance", "network", "ai", "advanced", "configuration"] as const;
 export type SettingsCategory = typeof categories[number];
@@ -45,34 +45,10 @@ export function SettingsNavigation({ category, onSelect, networkDirty, text }: {
   networkDirty: boolean;
   text: Translate;
 }) {
-  const tabsRef = useRef<HTMLDivElement>(null);
-  const [indicator, setIndicator] = useState<{ left: number; width: number } | null>(null);
-  const languageKey = text("常规", "General");
-
-  useLayoutEffect(() => {
-    const tabs = tabsRef.current;
-    if (!tabs) return;
-    const update = () => {
-      const selected = tabs.querySelector<HTMLElement>('[aria-selected="true"]');
-      if (!selected?.offsetWidth) return;
-      const next = { left: selected.offsetLeft, width: selected.offsetWidth };
-      setIndicator(previous => previous?.left === next.left && previous.width === next.width ? previous : next);
-    };
-    update();
-    const observer = new ResizeObserver(update);
-    observer.observe(tabs);
-    tabs.querySelectorAll('[role="tab"]').forEach(tab => observer.observe(tab));
-    return () => observer.disconnect();
-  }, [category, languageKey]);
-
   return (
-    <nav className="settings-navigation" aria-label={text("设置分类", "Settings categories")}>
-      <TabList ref={tabsRef} selectedValue={category} aria-label={text("设置分类", "Settings categories")}
-        data-indicator-ready={indicator !== null}
+    <nav className="settings-navigation page-tabs" aria-label={text("设置分类", "Settings categories")}>
+      <TabList selectedValue={category} aria-label={text("设置分类", "Settings categories")}
         className="settings-category-tabs" onTabSelect={(_, data) => onSelect(data.value as SettingsCategory)}>
-        <span className="settings-category-indicator" aria-hidden="true" style={indicator ? {
-          transform: `translate3d(${indicator.left}px, 0, 0) scaleX(${indicator.width / 100})`,
-        } : undefined} />
         {settingsCategories(text).map(item => (
           <Tab key={item.id} value={item.id} id={`settings-tab-${item.id}`} aria-controls="settings-category-panel"
             aria-label={item.label} icon={item.icon} className="settings-category-tab">

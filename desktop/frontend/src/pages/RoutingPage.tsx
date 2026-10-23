@@ -49,6 +49,7 @@ import {
 import { appServices, type RoutingBatchPreview, type RoutingRule, type RoutingSnapshot, type RunningProcess } from "../platform/services";
 import { GlassSurface } from "../components/material/GlassSurface";
 import { RuleSetsPanel } from "../components/RuleSetsPanel";
+import { PageHeader } from "../components/shell/PageHeader";
 import { useI18n } from "../i18n/i18n";
 import { isDesktopRuntime } from "../platform/runtime";
 import { LatestSaveQueue } from "../platform/latestSaveQueue";
@@ -758,13 +759,11 @@ export function RoutingPage() {
 
   return (
     <main className={`routing-page${ruleView === "sets" ? " routing-page-sets" : ""}`}>
-      <header className="routing-page-heading">
-        <div>
-          <span className="section-kicker">{t("routing_title")}</span>
-          <h1>{text("决定每类流量从哪条链路离开", "Choose the exit path for each type of traffic")}</h1>
-          <p>{t("routing_hint")}</p>
-        </div>
-        {ruleView === "manual" && <div className="routing-save-state">
+      <PageHeader
+        kicker={t("routing_title")}
+        title={text("决定每类流量从哪条链路离开", "Choose the exit path for each type of traffic")}
+        description={t("routing_hint")}
+        actions={ruleView === "manual" && <div className="routing-save-state">
           <Button disabled={saving || loading} onClick={() => {
             if (!pendingSave || window.confirm(text("重新载入会丢弃当前未保存的规则编辑，是否继续？", "Reloading discards unsaved rule edits. Continue?"))) void load();
           }}>{text("重新载入", "Reload")}</Button>
@@ -779,8 +778,8 @@ export function RoutingPage() {
             {text("保存更改", "Save changes")}
           </Button>
         </div>}
-      </header>
-      <TabList aria-label={text("规则管理", "Rule management")} selectedValue={ruleView} onTabSelect={(_, data) => setRuleView(data.value as "manual" | "sets")}>
+      />
+      <TabList className="page-tabs" aria-label={text("规则管理", "Rule management")} selectedValue={ruleView} onTabSelect={(_, data) => setRuleView(data.value as "manual" | "sets")}>
         <Tab value="manual">{text("手动规则", "Manual rules")}</Tab>
         <Tab value="sets">{text("规则集订阅", "Rule set subscriptions")}</Tab>
       </TabList>
@@ -826,7 +825,7 @@ export function RoutingPage() {
         </TabList>
         <div className="routing-order-control">
           <span id="routing-order-label">{text("匹配顺序", "Match order")}</span>
-          <Dropdown aria-labelledby="routing-order-label" aria-describedby="routing-order-hint" size="small"
+          <Dropdown aria-labelledby="routing-order-label" aria-describedby="routing-order-hint"
             value={matchOrder.split(",").map((kind) => kind === "ip" ? "IP" : kind === "domain" ? text("域名", "Domain") : text("进程", "Process")).join(" → ")}
             selectedOptions={[matchOrder]} disabled={loading || saving || batchApplying}
             onOptionSelect={(_, data) => {
@@ -945,7 +944,10 @@ export function RoutingPage() {
                   className={`routing-row${selected.has(rowId) ? " is-selected" : ""}${item.error ? " has-error" : ""}${item.disabled ? " is-disabled" : ""}`}
                   selectionCell={{ checkboxIndicator: { "aria-label": text(`选择 ${item.value}`, `Select ${item.value}`) } }}
                 >
-                  {({ renderCell }) => <DataGridCell>{renderCell(item)}</DataGridCell>}
+                  {({ renderCell, columnId }) => (
+                    // Control cells hand focus straight to their labelled switch, input or dropdown.
+                    <DataGridCell focusMode={columnId === "status" ? "cell" : "none"}>{renderCell(item)}</DataGridCell>
+                  )}
                 </DataGridRow>
               )}
             </DataGridBody>
@@ -1035,7 +1037,6 @@ export function RoutingPage() {
                 <label>
                   <span>{text("规则类型", "Rule type")}</span>
                   <Dropdown
-                    appearance="filled-darker"
                     value={matchLabels[batchType]}
                     selectedOptions={[batchType]}
                     onOptionSelect={(_, data) => {
@@ -1052,7 +1053,6 @@ export function RoutingPage() {
                 <label>
                   <span>{text("出口策略", "Egress policy")}</span>
                   <Dropdown
-                    appearance="filled-darker"
                     value={outboundLabel(batchOutbound)}
                     selectedOptions={[batchOutbound]}
                     onOptionSelect={(_, data) => {
@@ -1077,7 +1077,6 @@ export function RoutingPage() {
                 </span>
                 <Textarea
                   autoFocus
-                  appearance="filled-darker"
                   resize="vertical"
                   value={batchText}
                   placeholder={batchType === "domain"

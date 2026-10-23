@@ -2,7 +2,8 @@
   --hm-accent: #1677d2;
   --hm-accent-soft: color-mix(in srgb, var(--hm-accent) 14%, transparent);
   --hm-accent-muted: color-mix(in srgb, var(--hm-accent) 28%, transparent);
-  --hm-accent-strong: color-mix(in srgb, var(--hm-accent) 86%, white);
+  /* Text-safe accent: darker than the accent in light mode, lighter in dark mode. */
+  --hm-accent-strong: color-mix(in srgb, var(--hm-accent) 80%, black);
   --hm-success: #237b59;
   --hm-warning: #96601b;
   --hm-danger: #bd414e;

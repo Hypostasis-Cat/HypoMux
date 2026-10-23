@@ -1,10 +1,7 @@
-import { getSchedulingStrategy } from "./schedulingStrategies";
 import { Button } from "@fluentui/react-components";
 import {
   AppsListDetail20Regular,
-  ArrowRouting20Regular,
   DataUsage20Regular,
-  PlugConnected20Regular,
   ShieldCheckmark20Regular,
 } from "@fluentui/react-icons";
 import type { EnginePhase } from "../../state/useEngineState";
@@ -31,26 +28,20 @@ const StatusItem = ({
 
 export function RuntimeStatusBar({
   phase,
-  connections,
   sessionTraffic,
-  weighted,
-  strategy,
   coreVersion,
   preview,
   telemetryUnavailable = false,
   onOpenConnections,
 }: {
   phase: EnginePhase;
-  connections: number;
   sessionTraffic: string;
-  weighted: boolean;
-  strategy?: string;
   coreVersion: string;
   preview: boolean;
   telemetryUnavailable?: boolean;
   onOpenConnections?: () => void;
 }) {
-  const { locale, t } = useI18n();
+  const { locale } = useI18n();
   const text = (zh: string, en: string) => locale === "en" ? en : zh;
   const phaseLabel = phase === "running"
     ? text("运行中", "Running")
@@ -70,9 +61,7 @@ export function RuntimeStatusBar({
         label={text("核心状态", "Core status")}
         value={preview ? text("浏览器容量预览", "Browser capacity preview") : `${phaseLabel} · ${coreVersion}`}
       />
-      <StatusItem icon={<PlugConnected20Regular />} label={t("home_metric_connections")} value={telemetryUnavailable ? "—" : connections} />
       <StatusItem icon={<DataUsage20Regular />} label={text("会话流量", "Session traffic")} value={telemetryUnavailable ? "—" : sessionTraffic} />
-      <StatusItem icon={<ArrowRouting20Regular />} label={text("调度策略", "Scheduling")} value={getSchedulingStrategy(weighted, strategy).label[locale === "en" ? "en" : "zh"]} />
       <Button appearance="primary" size="small" icon={<AppsListDetail20Regular />} onClick={onOpenConnections}>
         {text("活动连接", "Connections")}
       </Button>

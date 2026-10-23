@@ -28,6 +28,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 import { GlassSurface } from "../components/material/GlassSurface";
 import { savePreferences, useSkins } from "../components/ai/skins/store";
 import { useAppNotifications } from "../components/notifications/AppNotifications";
+import { PageHeader } from "../components/shell/PageHeader";
 import { desktopPlatform } from "../platform/desktop";
 import { appServices, type AdapterView, type CompleteAppSettings, type ConfigMigrationStatus } from "../platform/services";
 import { SettingsSaveQueue, type SaveOutcome } from "../platform/settingsQueue";
@@ -597,15 +598,14 @@ export function SettingsPage({
 
   return (
     <main ref={settingsPageRef} className="settings-page" aria-busy={loading || saving}>
-      <header className="page-heading">
-        <div>
-          <h1>{t("settings_title")}</h1>
-          <p>{text(
-            "调整应用偏好，让 HypoMux 更合你的习惯。",
-            "Make HypoMux work the way you like.",
-          )}</p>
-        </div>
-        <div className="settings-save-feedback">
+      <PageHeader
+        kicker={text("偏好、外观与网络配置", "Preferences, appearance and network")}
+        title={t("settings_title")}
+        description={text(
+          "调整应用偏好，让 HypoMux 更合你的习惯。",
+          "Make HypoMux work the way you like.",
+        )}
+        actions={<div className="settings-save-feedback">
           <span key={loading ? "loading" : loadFailed ? "error" : saving ? "saving" : networkDirty ? "dirty" : "synced"} className="save-state motion-inline-swap" data-error={loadFailed || undefined} role="status" aria-live="polite">{loading
             ? text("正在读取…", "Loading…")
             : loadFailed
@@ -618,8 +618,8 @@ export function SettingsPage({
             {saving ? text("正在保存…", "Saving…") : text("保存端口与 DNS", "Save ports and DNS")}
           </Button>}
           {loadFailed && <Button size="small" appearance="subtle" icon={<ArrowSync20Regular />} onClick={() => setLoadRevision(value => value + 1)}>{text("重试", "Retry")}</Button>}
-        </div>
-      </header>
+        </div>}
+      />
 
       <div className="settings-workspace">
         <SettingsNavigation category={category} onSelect={selectCategory} networkDirty={networkDirty} text={text} />
@@ -794,6 +794,7 @@ export function SettingsPage({
                       ref={backgroundInput}
                       className="visually-hidden"
                       type="file"
+                      tabIndex={-1}
                       aria-label={t("settings_background_image_choose")}
                       accept=".png,.jpg,.jpeg,.bmp,.webp,image/png,image/jpeg,image/bmp,image/webp"
                       onChange={async (event) => {

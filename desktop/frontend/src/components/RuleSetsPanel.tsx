@@ -279,7 +279,7 @@ export function RuleSetsPanel({
               </div>
       {selected?.id === set.id && <section id={contentID} ref={contentPanel} className="ruleset-content" aria-label={text("规则集内容", "Rule set contents")}>
         <div className="ruleset-content-heading"><div><p>{text("已下载并解析的条目；实际出口还受手动规则和优先级影响。", "Downloaded entries; manual rules and priorities also affect routing.")}</p></div>
-          <Badge appearance="outline">{selected.disabled ? t("rulesets_disabled") : text("已启用", "Enabled")}</Badge>
+          <Badge appearance="tint" color={selected.disabled ? "informative" : "success"}>{selected.disabled ? t("rulesets_disabled") : text("已启用", "Enabled")}</Badge>
         </div>
         <div className="ruleset-content-tools">
           <SearchBox aria-label={text("搜索规则集内容", "Search rule set contents")} placeholder={text("搜索域名或 IP", "Search domains or IPs")} value={query} onChange={(_, data) => { setQuery(data.value); setPage(0); }} />
