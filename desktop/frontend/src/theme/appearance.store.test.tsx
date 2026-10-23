@@ -32,6 +32,16 @@ it("previews slider changes immediately but coalesces saves without rebuilding t
   expect(mocks.save).toHaveBeenCalledTimes(1);
   expect(mocks.save).toHaveBeenCalledWith(expect.objectContaining({ panelOpacity: 70, panelBlur: 24 }));
 });
+it("moves the stored legacy 10px radius default to Fluent's 8px card radius", async () => {
+  mocks.load.mockResolvedValue({ schemaVersion: 2, radius: 10 });
+  await act(async () => { render(<AppearanceProvider><Probe /></AppearanceProvider>); });
+  expect(appearance.settings.radius).toBe(8);
+  expect(appearance.settings.schemaVersion).toBe(3);
+  cleanup();
+  mocks.load.mockResolvedValue({ schemaVersion: 3, radius: 10 });
+  await act(async () => { render(<AppearanceProvider><Probe /></AppearanceProvider>); });
+  expect(appearance.settings.radius).toBe(10);
+});
 it("flushes the most recent pending appearance when leaving the document", async () => {
   await act(async () => { render(<AppearanceProvider><Probe /></AppearanceProvider>); });
   act(() => appearance.update({ panelOpacity: 61 }));

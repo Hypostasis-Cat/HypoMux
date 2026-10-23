@@ -53,15 +53,16 @@
 
   /* ========================================
    * Border Radius Scale
-   * Base: 10px (from --hm-radius)
+   * Mirrors Fluent 2 borderRadius tokens. :root sits outside FluentProvider,
+   * so the values are literal; component CSS uses var(--borderRadius*).
    * ======================================== */
-  --hm-radius-xs: 4px;
-  --hm-radius-sm: 6px;
-  --hm-radius-md: 8px;
-  --hm-radius-base: 10px;
-  --hm-radius-lg: 12px;
-  --hm-radius-xl: 16px;
-  --hm-radius-2xl: 20px;
+  --hm-radius-xs: 4px;   /* borderRadiusMedium */
+  --hm-radius-sm: 6px;   /* borderRadiusLarge */
+  --hm-radius-md: 8px;   /* borderRadiusXLarge */
+  --hm-radius-base: 8px; /* borderRadiusXLarge */
+  --hm-radius-lg: 12px;  /* borderRadius2XLarge */
+  --hm-radius-xl: 16px;  /* borderRadius3XLarge */
+  --hm-radius-2xl: 24px; /* borderRadius4XLarge */
   --hm-radius-full: 9999px;
 
   /* Legacy compatibility */

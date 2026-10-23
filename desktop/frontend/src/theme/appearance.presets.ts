@@ -10,7 +10,7 @@ export const accentColours: Record<Exclude<AccentPreset, "custom">, string> = {
 };
 
 const baseSettings: AppearanceSettings = {
-  schemaVersion: 2,
+  schemaVersion: 3,
   presetId: "windows-mica",
   mode: "system",
   material: "mica",
@@ -34,7 +34,7 @@ const baseSettings: AppearanceSettings = {
   borderBrightness: 52,
   shadowStrength: 24,
   density: "standard",
-  radius: 10,
+  radius: 8,
   motion: "standard",
 };
 

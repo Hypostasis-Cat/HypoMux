@@ -2,9 +2,10 @@
   font-family: "Segoe UI Variable", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
+  /* Fluent 2 type ramp: Caption1, Body1, Body1, Subtitle1. */
   --hm-font-caption: 12px;
-  --hm-font-body: 13px;
+  --hm-font-body: 14px;
   --hm-font-control: 14px;
-  --hm-font-title: 18px;
+  --hm-font-title: 20px;
   --hm-font-speed: clamp(36px, 4.4vw, 54px);
 }
