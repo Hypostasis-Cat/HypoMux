@@ -2,8 +2,8 @@
 .mux-wardrobe * { box-sizing: border-box; }
 .mux-wardrobe-heading { display: flex; justify-content: space-between; align-items: center; gap: 20px; }
 .mux-eyebrow { font-size: var(--fontSizeBase200); font-weight: var(--fontWeightBold); letter-spacing: 1.8px; color: var(--hm-text-tertiary); }
-.mux-wardrobe .mux-wardrobe-heading h2 { font-size: var(--fontSizeHero700); line-height: 1.3; letter-spacing: -.7px; margin: 6px 0 8px; }
-.mux-wardrobe-heading p { font-size: var(--fontSizeBase300); line-height: 1.7; }
+.mux-wardrobe .mux-wardrobe-heading h2 { font-size: var(--fontSizeHero700); line-height: var(--lineHeightHero700); letter-spacing: -.7px; margin: 6px 0 8px; }
+.mux-wardrobe-heading p { font-size: var(--fontSizeBase300); line-height: var(--hm-line-height-reading); }
 .mux-header-actions { display: flex; gap: 10px; flex-shrink: 0; }
 .mux-header-actions .fui-Button { border-radius: var(--borderRadiusXLarge); min-height: 36px; }
 .mux-wardrobe-layout { display: grid; grid-template-columns: minmax(280px, 350px) minmax(0, 1fr); gap: 24px; align-items: start; }
@@ -28,7 +28,7 @@
 .mux-preview-body { padding: 20px; }
 .mux-preview-identity { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 16px; }
 .mux-preview-identity > div { min-width: 0; }
-.mux-wardrobe .mux-preview-identity h3 { font-size: var(--fontSizeBase400); line-height: 1.4; margin: 0 0 4px; overflow-wrap: anywhere; }
+.mux-wardrobe .mux-preview-identity h3 { font-size: var(--fontSizeBase400); line-height: var(--lineHeightBase400); margin: 0 0 4px; overflow-wrap: anywhere; }
 .mux-wardrobe .mux-preview-identity p { font-size: var(--fontSizeBase200); overflow-wrap: anywhere; }
 .mux-active-label, .mux-draft-label { display: inline-flex; align-items: center; flex-shrink: 0; gap: 4px; font-size: var(--fontSizeBase200); border-radius: var(--borderRadiusLarge); padding: 4px 6px; }
 .mux-active-label { color: var(--colorBrandForeground1); background: var(--colorBrandBackground2); }
@@ -41,7 +41,7 @@
 .mux-state-dot-thinking { border-radius: var(--borderRadiusSmall); transform: rotate(45deg); }
 .mux-state-dot-waiting { background: transparent; border: 1px solid currentColor; width: 6px; height: 6px; }
 .mux-state-dot-replying { width: 7px; border-radius: var(--borderRadiusSmall); }
-.mux-wardrobe .mux-state-note { min-height: 30px; font-size: var(--fontSizeBase200); line-height: 1.6; margin-top: 8px; color: var(--hm-text-tertiary); }
+.mux-wardrobe .mux-state-note { min-height: 30px; font-size: var(--fontSizeBase200); line-height: var(--hm-line-height-reading); margin-top: 8px; color: var(--hm-text-tertiary); }
 .mux-preferences { border-top: 1px solid var(--colorNeutralStroke2); padding-top: 10px; }
 .mux-size-label { display: flex; align-items: center; justify-content: space-between; width: 100%; font-size: var(--fontSizeBase200); }
 .mux-size-label output { font-size: var(--fontSizeBase200); font-variant-numeric: tabular-nums; color: var(--hm-text-secondary); }
@@ -56,7 +56,7 @@
 .mux-wardrobe .mux-section-heading h3 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: var(--fontSizeBase400); }
 .mux-count { font-size: var(--fontSizeBase200); font-weight: var(--fontWeightMedium); color: var(--hm-text-secondary); padding: 2px 6px; background: var(--colorNeutralBackground3); border-radius: var(--borderRadiusLarge); }
 .mux-local-label { display: flex; align-items: center; gap: 6px; font-size: var(--fontSizeBase200); color: var(--hm-text-tertiary); white-space: nowrap; }
-.mux-wardrobe .mux-library-hint { font-size: var(--fontSizeBase200); line-height: 1.7; margin: 8px 0 16px; }
+.mux-wardrobe .mux-library-hint { font-size: var(--fontSizeBase200); line-height: var(--hm-line-height-reading); margin: 8px 0 16px; }
 .mux-library { border-radius: var(--borderRadius2XLarge); transition: background 120ms; }
 .mux-library[data-drag-over="true"] { outline: 2px dashed var(--colorBrandStroke1); outline-offset: 8px; background: var(--colorBrandBackground2); }
 .mux-skin-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(138px, 1fr)); gap: 12px; }
@@ -77,13 +77,13 @@
 .mux-creator-guide { display: flex; align-items: flex-start; gap: 12px; padding: 16px; background: var(--colorNeutralBackground2); border: 1px solid var(--colorNeutralStroke2); border-radius: var(--borderRadius2XLarge); }
 .mux-guide-icon { display: grid; place-items: center; width: 32px; height: 32px; flex-shrink: 0; border-radius: var(--borderRadiusXLarge); background: var(--colorNeutralBackground1); color: var(--hm-text-secondary); }
 .mux-wardrobe .mux-creator-guide h3 { font-size: var(--fontSizeBase200); margin: 0 0 6px; }
-.mux-wardrobe .mux-creator-guide p { font-size: var(--fontSizeBase200); line-height: 1.8; }
+.mux-wardrobe .mux-creator-guide p { font-size: var(--fontSizeBase200); line-height: var(--hm-line-height-reading); }
 .mux-resource-links { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 10px; }
 .mux-resource-links a { color: var(--colorBrandForeground1); font-size: var(--fontSizeBase200); text-decoration: none; }
 .mux-resource-links a:hover { text-decoration: underline; text-underline-offset: 3px; }
-.mux-wardrobe .mux-storage-note { font-size: var(--fontSizeBase200); line-height: 1.8; color: var(--hm-text-tertiary); }
+.mux-wardrobe .mux-storage-note { font-size: var(--fontSizeBase200); line-height: var(--hm-line-height-reading); color: var(--hm-text-tertiary); }
 .mux-candidate { padding: 20px; border: 1px solid var(--colorBrandStroke2); border-radius: var(--borderRadius2XLarge); display: grid; gap: 16px; background: var(--colorNeutralBackground1); }
-.mux-wardrobe .mux-candidate p { font-size: var(--fontSizeBase200); line-height: 1.7; }
+.mux-wardrobe .mux-candidate p { font-size: var(--fontSizeBase200); line-height: var(--hm-line-height-reading); }
 .mux-creator-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .mux-anchor-options { border-top: 1px solid var(--colorNeutralStroke2); padding-top: 12px; }
 .mux-anchor-options summary { font-size: var(--fontSizeBase200); cursor: pointer; }
@@ -93,7 +93,7 @@
 .mux-notice { border: 1px solid var(--colorBrandStroke2); border-radius: var(--borderRadiusXLarge); padding: 10px 16px; font-size: var(--fontSizeBase200); display: flex; align-items: center; gap: 8px; color: var(--colorBrandForeground1); background: var(--colorBrandBackground2); }
 .mux-notice-error { color: var(--colorPaletteRedForeground1); background: var(--colorPaletteRedBackground1); border-color: var(--colorPaletteRedBorder1); }
 .mux-delete-confirm { margin-top: 12px; padding: 12px; background: var(--colorNeutralBackground2); border-radius: var(--borderRadiusXLarge); }
-.mux-wardrobe .mux-delete-confirm p { font-size: var(--fontSizeBase200); line-height: 1.7; margin-bottom: 8px; }
+.mux-wardrobe .mux-delete-confirm p { font-size: var(--fontSizeBase200); line-height: var(--hm-line-height-reading); margin-bottom: 8px; }
 .mux-skin-character { display: block; width: 100%; max-width: 100%; max-height: 100%; background-repeat: no-repeat; pointer-events: none; }
 .mux-live2d { display: block; position: relative; width: 100%; max-height: 100%; pointer-events: none; }
 .mux-preview-stage[data-live2d="true"] { height: 310px; }

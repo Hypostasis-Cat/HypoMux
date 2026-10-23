@@ -17,13 +17,15 @@ export default {
       {
         "font-size": [/^\d+(?:\.\d+)?px$/],
         "font-weight": [/^(?:\d+|bold|bolder|lighter|normal)$/],
+        // Fluent var(--lineHeight*) for UI text, var(--hm-line-height-reading|display) otherwise.
+        "line-height": [/^(?!var\(|1$|normal$|inherit$)/],
         "/^border(?:-(?:top|bottom|start|end)-(?:left|right|start|end))?-radius$/": [/^(?!.*calc\().*\d+px/],
         "/^(?:padding|margin)(?:-(?:top|right|bottom|left|inline|block)(?:-(?:start|end))?)?$/": [offRampSpacing],
         "/^(?:gap|row-gap|column-gap)$/": [offRampSpacing],
       },
       {
         message: (property, value) =>
-          `"${property}: ${value}" bypasses the design tokens. Use the Fluent token (var(--fontSize*), var(--fontWeight*), var(--borderRadius*)) or a value on the spacing ramp ${SPACING_RAMP.join("/")}px.`,
+          `"${property}: ${value}" bypasses the design tokens. Use the Fluent token (var(--fontSize*), var(--fontWeight*), var(--lineHeight*), var(--borderRadius*)), var(--hm-line-height-reading|display), or a value on the spacing ramp ${SPACING_RAMP.join("/")}px.`,
       },
     ],
   },
