@@ -1,0 +1,30 @@
+// Guards the Fluent 2 design tokens adopted across the desktop UI: type, weight,
+// corner radius and spacing must come from the shared scales, not ad-hoc values.
+// Intentional exceptions carry a `stylelint-disable-next-line` comment with a reason.
+
+/** Fluent 2 spacing ramp (XXS 2 … XXXL 32) plus larger multiples of 4. */
+const SPACING_RAMP = [0, 1, 2, 4, 6, 8, 10, 12, 16, 20, 24, 28, 32, 36, 40, 44, 48, 56, 64, 72, 80, 96];
+
+// A one- or two-digit px value that is not on the ramp; calc()/clamp()/min()/max()
+// expressions are left alone because they derive from tokens.
+const offRampSpacing = new RegExp(
+  String.raw`^(?!.*(?:calc|clamp|min|max)\().*(?<![\w.])(?!(?:${SPACING_RAMP.join("|")})px\b)\d{1,2}(?:\.\d+)?px`,
+);
+
+export default {
+  rules: {
+    "declaration-property-value-disallowed-list": [
+      {
+        "font-size": [/^\d+(?:\.\d+)?px$/],
+        "font-weight": [/^(?:\d+|bold|bolder|lighter|normal)$/],
+        "/^border(?:-(?:top|bottom|start|end)-(?:left|right|start|end))?-radius$/": [/^(?!.*calc\().*\d+px/],
+        "/^(?:padding|margin)(?:-(?:top|right|bottom|left|inline|block)(?:-(?:start|end))?)?$/": [offRampSpacing],
+        "/^(?:gap|row-gap|column-gap)$/": [offRampSpacing],
+      },
+      {
+        message: (property, value) =>
+          `"${property}: ${value}" bypasses the design tokens. Use the Fluent token (var(--fontSize*), var(--fontWeight*), var(--borderRadius*)) or a value on the spacing ramp ${SPACING_RAMP.join("/")}px.`,
+      },
+    ],
+  },
+};

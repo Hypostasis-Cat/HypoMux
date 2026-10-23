@@ -24,6 +24,7 @@
 .mtu-adapter-option small { font-size: var(--fontSizeBase200); color: var(--hm-text-tertiary); font-variant-numeric: tabular-nums; }
 .mtu-fields .fui-Field__hint { font-size: var(--fontSizeBase200); color: var(--hm-text-tertiary); margin-top: 6px; }
 .mtu-recommendation { display: flex; align-items: baseline; gap: 10px; padding: 24px 0 20px; color: var(--hm-text-tertiary); }
+/* stylelint-disable-next-line declaration-property-value-disallowed-list -- display numeral between Fluent's Hero900 (40px) and Hero1000 (68px) */
 .mtu-recommendation strong { font-size: 52px; line-height: 1.1; font-weight: var(--fontWeightSemibold); letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
 .mtu-recommendation.has-result strong { color: var(--hm-accent-strong); }
 .mtu-recommendation span { font-size: var(--fontSizeBase300); }

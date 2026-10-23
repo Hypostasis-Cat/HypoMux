@@ -153,6 +153,10 @@ jobs:
         shell: pwsh
         run: wails3 generate bindings -clean=true -ts -i
 
+      - name: Lint frontend styles
+        shell: pwsh
+        run: pnpm --dir desktop/frontend lint:css
+
       - name: Run frontend tests
         shell: pwsh
         run: pnpm --dir desktop/frontend test
