@@ -136,7 +136,7 @@ export function ToolsPage() {
           <div className="toolbox-tile-status" role={error ? "alert" : "status"}>
             <span className="toolbox-state-dot" data-active={enabled && !!status?.enabled && !statusError} />
             <Tooltip content={error || stateText} relationship={error ? "description" : "label"}>
-              <span className="toolbox-status-text" tabIndex={0}>{stateText}</span>
+              <span className="toolbox-status-text" tabIndex={error ? 0 : undefined}>{stateText}</span>
             </Tooltip>
             {error && <Button size="small" appearance="subtle" onClick={() => setRevision(value => value + 1)}>{text("重试", "Retry")}</Button>}
           </div>

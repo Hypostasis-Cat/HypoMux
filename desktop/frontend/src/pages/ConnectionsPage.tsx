@@ -711,7 +711,6 @@ export function ConnectionsPage({
             <label>
               <span>{text("出口策略", "Egress")}</span>
               <Dropdown
-                appearance="filled-darker"
                 size="small"
                 positioning={{ position: "below", align: "end", pinned: true, strategy: "fixed", offset: 4 }}
                 aria-label={text("按出口策略筛选", "Filter by egress policy")}
@@ -863,7 +862,6 @@ export function ConnectionsPage({
                   <label className="quick-rule-field">
                     <span>{text("出口策略", "Egress policy")}</span>
                     <Dropdown
-                      appearance="filled-darker"
                       value={outboundLabel(quickRuleOutbound)}
                       selectedOptions={quickRuleOutbound ? [quickRuleOutbound] : []}
                       disabled={quickRuleLoading || quickRuleSaving}

@@ -826,7 +826,7 @@ export function RoutingPage() {
         </TabList>
         <div className="routing-order-control">
           <span id="routing-order-label">{text("匹配顺序", "Match order")}</span>
-          <Dropdown aria-labelledby="routing-order-label" aria-describedby="routing-order-hint" size="small"
+          <Dropdown aria-labelledby="routing-order-label" aria-describedby="routing-order-hint"
             value={matchOrder.split(",").map((kind) => kind === "ip" ? "IP" : kind === "domain" ? text("域名", "Domain") : text("进程", "Process")).join(" → ")}
             selectedOptions={[matchOrder]} disabled={loading || saving || batchApplying}
             onOptionSelect={(_, data) => {
@@ -945,7 +945,10 @@ export function RoutingPage() {
                   className={`routing-row${selected.has(rowId) ? " is-selected" : ""}${item.error ? " has-error" : ""}${item.disabled ? " is-disabled" : ""}`}
                   selectionCell={{ checkboxIndicator: { "aria-label": text(`选择 ${item.value}`, `Select ${item.value}`) } }}
                 >
-                  {({ renderCell }) => <DataGridCell>{renderCell(item)}</DataGridCell>}
+                  {({ renderCell, columnId }) => (
+                    // Control cells hand focus straight to their labelled switch, input or dropdown.
+                    <DataGridCell focusMode={columnId === "status" ? "cell" : "none"}>{renderCell(item)}</DataGridCell>
+                  )}
                 </DataGridRow>
               )}
             </DataGridBody>
@@ -1035,7 +1038,6 @@ export function RoutingPage() {
                 <label>
                   <span>{text("规则类型", "Rule type")}</span>
                   <Dropdown
-                    appearance="filled-darker"
                     value={matchLabels[batchType]}
                     selectedOptions={[batchType]}
                     onOptionSelect={(_, data) => {
@@ -1052,7 +1054,6 @@ export function RoutingPage() {
                 <label>
                   <span>{text("出口策略", "Egress policy")}</span>
                   <Dropdown
-                    appearance="filled-darker"
                     value={outboundLabel(batchOutbound)}
                     selectedOptions={[batchOutbound]}
                     onOptionSelect={(_, data) => {
@@ -1077,7 +1078,6 @@ export function RoutingPage() {
                 </span>
                 <Textarea
                   autoFocus
-                  appearance="filled-darker"
                   resize="vertical"
                   value={batchText}
                   placeholder={batchType === "domain"

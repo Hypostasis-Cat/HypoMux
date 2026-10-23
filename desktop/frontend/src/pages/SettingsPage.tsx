@@ -794,6 +794,7 @@ export function SettingsPage({
                       ref={backgroundInput}
                       className="visually-hidden"
                       type="file"
+                      tabIndex={-1}
                       aria-label={t("settings_background_image_choose")}
                       accept=".png,.jpg,.jpeg,.bmp,.webp,image/png,image/jpeg,image/bmp,image/webp"
                       onChange={async (event) => {

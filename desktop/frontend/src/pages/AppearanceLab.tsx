@@ -131,6 +131,7 @@ export function AppearanceLab() {
               ref={fileInput}
               className="visually-hidden"
               type="file"
+              tabIndex={-1}
               accept="image/*"
               onChange={async (event) => {
                 const file = event.target.files?.[0];
