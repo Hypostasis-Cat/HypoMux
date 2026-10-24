@@ -1252,14 +1252,14 @@ svg {
 }
 
 .page-transition-layer.is-entering {
-  --hm-page-enter-offset: 14px;
+  --hm-page-enter-offset: 10px;
   /*
    * Backdrop-filter descendants cannot live below an animated opacity or
    * transform layer without WebView2 rebuilding their background snapshot.
    * Animate the layout offset instead: it preserves the slide while keeping
    * every glass surface in the stable root compositor layer.
    */
-  animation: page-content-in var(--hm-spring-gentle-duration) var(--hm-spring-gentle);
+  animation: page-content-in var(--hm-spring-smooth-duration) var(--hm-spring-smooth);
 }
 
 /* A nested tool view already travels with the entering page. */
@@ -1273,7 +1273,7 @@ svg {
 }
 
 .page-transition-layer.is-entering[data-direction="backward"] {
-  --hm-page-enter-offset: -14px;
+  --hm-page-enter-offset: -10px;
 }
 
 @keyframes page-content-in {

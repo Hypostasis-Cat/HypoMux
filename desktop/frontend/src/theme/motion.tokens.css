@@ -24,7 +24,8 @@
   --hm-motion-instant: 100ms;
   --hm-motion-fast: 220ms;
   --hm-motion-normal: var(--hm-spring-snappy-duration);
-  --hm-motion-page: var(--hm-spring-gentle-duration);
+  /* Pages switch on the smooth spring: the gentle one read as sluggish for navigation. */
+  --hm-motion-page: var(--hm-spring-smooth-duration);
   --hm-motion-enter: var(--hm-spring-smooth-duration);
   --hm-motion-exit: 150ms;
   --hm-motion-background: 400ms;
