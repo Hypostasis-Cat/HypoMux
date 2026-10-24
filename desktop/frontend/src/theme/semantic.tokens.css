@@ -8,6 +8,8 @@
   --hm-warning: #96601b;
   --hm-danger: #bd414e;
   --hm-focus-ring: color-mix(in srgb, var(--hm-accent) 68%, transparent);
+  /* Soft violet halo behind the launch mark, taken from the icon's gradient. */
+  --hm-launch-glow: rgba(164, 128, 236, 0.16);
   /* Windows 11 caption close button. */
   --hm-caption-close: #c42b1c;
   --hm-caption-close-pressed: #a4262c;
