@@ -1,17 +1,41 @@
+/* HypoMux motion language: three springs instead of fixed durations.
+ * The same springs drive Motion in JS (src/theme/motion.ts); CSS gets them as
+ * linear() samples of the identical physics (Motion's visualDuration/bounce
+ * mapping, mass 1), so CSS transitions and JS animations share one feel.
+ * Durations are settle times; the curves are front-loaded, so they read as
+ * the visual durations 180/340/480ms. Regenerate both together. */
 :root {
+  /* snappy · visualDuration 0.18, bounce 0 — press, toggles, hover, state swaps */
+  --hm-spring-snappy: linear(0, 0.053, 0.163, 0.291, 0.416, 0.528, 0.625, 0.705, 0.771, 0.823, 0.864, 0.896, 0.921, 0.94, 0.954, 0.966, 0.974, 0.981, 0.985, 0.989, 0.992, 0.994, 0.995, 0.997, 0.997, 0.998, 0.999, 1);
+  --hm-spring-snappy-duration: 336ms;
+  /* smooth · visualDuration 0.34, bounce 0.12 — indicators moving, expand/collapse, rows */
+  --hm-spring-smooth: linear(0, 0.035, 0.115, 0.218, 0.328, 0.437, 0.537, 0.627, 0.704, 0.769, 0.823, 0.867, 0.902, 0.929, 0.95, 0.966, 0.977, 0.986, 0.992, 0.996, 0.999, 1.001, 1.002, 1.002, 1.002, 1.002, 1.002, 1.002, 1);
+  --hm-spring-smooth-duration: 520ms;
+  /* gentle · visualDuration 0.48, bounce 0.06 — pages, large surfaces, numbers */
+  --hm-spring-gentle: linear(0, 0.03, 0.102, 0.194, 0.293, 0.392, 0.485, 0.57, 0.645, 0.71, 0.765, 0.811, 0.849, 0.881, 0.907, 0.927, 0.944, 0.957, 0.967, 0.975, 0.981, 0.986, 0.99, 0.993, 0.995, 0.996, 0.997, 0.998, 1);
+  --hm-spring-gentle-duration: 676ms;
+  /* release · visualDuration 0.34, bounce 0.35 — a pressed control springing back (peaks 6.6% past rest) */
+  --hm-spring-release: linear(0, 0.061, 0.199, 0.371, 0.545, 0.701, 0.83, 0.927, 0.995, 1.037, 1.059, 1.066, 1.064, 1.055, 1.044, 1.032, 1.022, 1.013, 1.006, 1.001, 0.998, 0.996, 0.996, 0.996, 0.996, 0.997, 0.998, 0.998, 1);
+  --hm-spring-release-duration: 685ms;
+  /* Exits leave quickly and accelerate away (Fluent curveAccelerateMin). */
+  --hm-ease-exit: cubic-bezier(0.8, 0, 0.78, 1);
+
+  /* Semantic tokens used across components, now backed by the springs. */
   --hm-motion-instant: 100ms;
-  --hm-motion-fast: 150ms;
-  --hm-motion-normal: 250ms;
-  --hm-motion-page: 280ms;
-  --hm-motion-enter: 280ms;
-  --hm-motion-exit: 180ms;
+  --hm-motion-fast: 220ms;
+  --hm-motion-normal: var(--hm-spring-snappy-duration);
+  --hm-motion-page: var(--hm-spring-gentle-duration);
+  --hm-motion-enter: var(--hm-spring-smooth-duration);
+  --hm-motion-exit: 150ms;
   --hm-motion-background: 400ms;
-  --hm-motion-ease: cubic-bezier(0.25, 0.1, 0.25, 1);
-  --hm-motion-ease-out: cubic-bezier(0, 0, 0.2, 1);
-  --hm-motion-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
-  --hm-motion-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
-  --hm-motion-rise-distance: 4px;
-  --hm-motion-row-distance: 7px;
+  --hm-motion-ease: cubic-bezier(0.33, 0, 0.67, 1);
+  --hm-motion-ease-out: var(--hm-spring-snappy);
+  --hm-motion-ease-in-out: cubic-bezier(0.8, 0, 0.2, 1);
+  --hm-motion-spring: var(--hm-spring-smooth);
+  /* Sibling entrances step by this delay so a list arrives row by row. */
+  --hm-motion-stagger: 35ms;
+  --hm-motion-rise-distance: 6px;
+  --hm-motion-row-distance: 8px;
 }
 
 [data-motion="reduced"] {

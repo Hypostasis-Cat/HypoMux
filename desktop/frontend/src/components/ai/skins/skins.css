@@ -75,10 +75,10 @@
 .mux-count { font-size: var(--fontSizeBase200); font-weight: var(--fontWeightMedium); color: var(--hm-text-secondary); padding: 2px 6px; background: var(--colorNeutralBackground3); border-radius: var(--borderRadiusLarge); }
 .mux-local-label { display: flex; align-items: center; gap: 6px; font-size: var(--fontSizeBase200); color: var(--hm-text-tertiary); white-space: nowrap; }
 .mux-wardrobe .mux-library-hint { font-size: var(--fontSizeBase200); line-height: var(--hm-line-height-reading); margin: 8px 0 16px; }
-.mux-library { border-radius: var(--borderRadius2XLarge); transition: background 120ms; }
+.mux-library { border-radius: var(--borderRadius2XLarge); transition: background var(--hm-motion-instant); }
 .mux-library[data-drag-over="true"] { outline: 2px dashed var(--colorBrandStroke1); outline-offset: 8px; background: var(--colorBrandBackground2); }
 .mux-skin-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(138px, 1fr)); gap: 12px; }
-.mux-skin-card { display: flex; flex-direction: column; min-width: 0; padding: 0; overflow: hidden; text-align: left; border: 1px solid var(--colorNeutralStroke2); border-radius: var(--borderRadius2XLarge); background: var(--colorNeutralBackground1); color: inherit; cursor: pointer; font: inherit; transition: border-color 120ms, box-shadow 120ms; }
+.mux-skin-card { display: flex; flex-direction: column; min-width: 0; padding: 0; overflow: hidden; text-align: left; border: 1px solid var(--colorNeutralStroke2); border-radius: var(--borderRadius2XLarge); background: var(--colorNeutralBackground1); color: inherit; cursor: pointer; font: inherit; transition: border-color var(--hm-motion-instant), box-shadow var(--hm-motion-instant); }
 .mux-skin-card:hover { border-color: var(--colorBrandStroke2); box-shadow: 0 4px 12px color-mix(in srgb, var(--mux-preview-panel-shadow) 6%, transparent); }
 .mux-skin-card[data-selected="true"] { border-color: var(--colorBrandStroke1); box-shadow: 0 0 0 1px var(--colorBrandStroke1); }
 .mux-card-art { width: 100%; height: 130px; display: flex; align-items: center; justify-content: center; position: relative; background: radial-gradient(ellipse at center, color-mix(in srgb, var(--mux-card-art-background) 6%, transparent), transparent 75%), var(--colorNeutralBackground2); }
@@ -120,12 +120,12 @@
 .mux-live2d-loading { display: flex; width: 100%; height: 100%; min-height: 40px; align-items: center; justify-content: center; color: var(--hm-text-tertiary); font-size: var(--fontSizeBase500); letter-spacing: 4px; }
 .mux-live2d-error { position: absolute; bottom: 0; left: 0; right: 0; font-size: var(--fontSizeBase200); text-align: center; background: var(--colorNeutralBackground1); color: var(--colorPaletteRedForeground1); }
 .mux-skin-character[data-skin-motion] { transform-origin: 50% 75%; }
-.mux-skin-character[data-skin-motion="idle"] { animation: mux-skin-float 4s ease-in-out infinite; }
-.mux-skin-character[data-skin-motion="thinking"] { animation: mux-skin-think 2.8s ease-in-out infinite; }
-.mux-skin-character[data-skin-motion="waiting"] { animation: mux-skin-wait 2s ease-in-out infinite; }
-.mux-skin-character[data-skin-motion="replying"] { animation: mux-skin-reply 800ms ease-in-out, mux-skin-float 4s 800ms ease-in-out infinite; }
-.mux-skin-character[data-skin-motion="hover"] { animation: mux-skin-greet 1.2s ease-in-out, mux-skin-float 4s 1.2s ease-in-out infinite; }
-.mux-skin-character[data-skin-motion="dragging"] { animation: mux-skin-drag 1.4s ease-in-out infinite; }
+.mux-skin-character[data-skin-motion="idle"] { animation: mux-skin-float 4s var(--hm-motion-ease-in-out) infinite; }
+.mux-skin-character[data-skin-motion="thinking"] { animation: mux-skin-think 2.8s var(--hm-motion-ease-in-out) infinite; }
+.mux-skin-character[data-skin-motion="waiting"] { animation: mux-skin-wait 2s var(--hm-motion-ease-in-out) infinite; }
+.mux-skin-character[data-skin-motion="replying"] { animation: mux-skin-reply 800ms var(--hm-motion-ease-in-out), mux-skin-float 4s 800ms var(--hm-motion-ease-in-out) infinite; }
+.mux-skin-character[data-skin-motion="hover"] { animation: mux-skin-greet 1.2s var(--hm-motion-ease-in-out), mux-skin-float 4s 1.2s var(--hm-motion-ease-in-out) infinite; }
+.mux-skin-character[data-skin-motion="dragging"] { animation: mux-skin-drag 1.4s var(--hm-motion-ease-in-out) infinite; }
 @keyframes mux-skin-float { 0%, 100% { transform: translateY(2px) rotate(-1deg); } 50% { transform: translateY(-5px) rotate(1deg); } }
 @keyframes mux-skin-think { 0%, 100% { transform: translateY(0) rotate(-4deg); } 50% { transform: translateY(-3px) rotate(4deg); } }
 @keyframes mux-skin-wait { 0%, 100% { transform: translateY(1px); } 50% { transform: translateY(-4px) rotate(-2deg); } }
