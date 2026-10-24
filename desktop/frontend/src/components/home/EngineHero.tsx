@@ -1,4 +1,5 @@
-import { useId } from "react";
+import { useId, useLayoutEffect, useRef, useState } from "react";
+import * as m from "motion/react-m";
 import { getSchedulingStrategy, schedulingStrategies } from "./schedulingStrategies";
 import { Badge, Button, Spinner, Dropdown, Option, Tab, TabList, Tooltip } from "@fluentui/react-components";
 import {
@@ -11,6 +12,7 @@ import type { EngineMode, EnginePhase } from "../../state/useEngineState";
 import { GlassSurface } from "../material/GlassSurface";
 import { ThroughputDisplay } from "./ThroughputDisplay";
 import { useI18n } from "../../i18n/i18n";
+import { springs } from "../../theme/motion";
 
 export function EngineHero({
   phase,
@@ -57,6 +59,24 @@ export function EngineHero({
   const strategyHintId = useId();
   const strategy = getSchedulingStrategy(weighted, selectedStrategy);
   const language = locale === "en" ? "en" : "zh";
+  const modeTabsRef = useRef<HTMLDivElement>(null);
+  const [modeThumb, setModeThumb] = useState<{ x: number; width: number } | null>(null);
+  // The segmented thumb travels to the selected option instead of each option
+  // swapping its own background; it is re-measured when labels change width.
+  useLayoutEffect(() => {
+    const list = modeTabsRef.current;
+    if (!list) return;
+    const measure = () => {
+      const tab = list.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]');
+      if (!tab?.offsetWidth) return;
+      setModeThumb(previous => previous?.x === tab.offsetLeft && previous.width === tab.offsetWidth ? previous : { x: tab.offsetLeft, width: tab.offsetWidth });
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(list);
+    return () => observer.disconnect();
+  }, [mode, locale]);
   const active = phase === "running" || phase === "degraded" || phase === "starting";
   const actionLabel = phase === "starting"
     ? text("正在启动", "Starting")
@@ -96,12 +116,22 @@ export function EngineHero({
           </p>
         </div>
         <TabList
+          ref={modeTabsRef}
           className="mode-tabs"
           selectedValue={mode}
           onTabSelect={(_, data) => onModeChange(data.value as EngineMode)}
           size="small"
           disabled={transitioning || phase === "running" || phase === "degraded"}
         >
+          {modeThumb && (
+            <m.span
+              className="mode-thumb"
+              aria-hidden="true"
+              initial={false}
+              animate={{ x: modeThumb.x, width: modeThumb.width }}
+              transition={springs.smooth}
+            />
+          )}
           <Tab value="proxy" icon={<PlugConnected20Regular />}>{t("mode_proxy")}</Tab>
           <Tab value="tun" icon={<Navigation20Regular />}>{text("TUN 模式", "TUN mode")}</Tab>
         </TabList>

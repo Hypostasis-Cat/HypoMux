@@ -14,6 +14,7 @@ import { HomePage } from "./pages/HomePage";
 import { advanceConnectionsNavigation } from "./pages/connectionNavigation";
 import type { EnginePhase, HomeAdapter } from "./state/useEngineState";
 import { AppearanceProvider, useAppearance } from "./theme/appearance.store";
+import { MotionProvider } from "./theme/MotionProvider";
 import { LanguageProvider, useI18n } from "./i18n/i18n";
 import { desktopPlatform } from "./platform/desktop";
 import { resolveWallpaperBackground } from "./theme/wallpaper";
@@ -186,7 +187,9 @@ export default function App() {
   return (
     <LanguageProvider>
       <AppearanceProvider>
-        <HypoMuxWindow />
+        <MotionProvider>
+          <HypoMuxWindow />
+        </MotionProvider>
       </AppearanceProvider>
     </LanguageProvider>
   );
