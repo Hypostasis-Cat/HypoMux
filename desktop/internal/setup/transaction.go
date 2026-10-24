@@ -53,6 +53,24 @@ type Transaction struct {
 	AfterReplace func(int) error
 }
 
+// Bounded so a genuinely running sidecar still fails well inside the NSIS
+// helper timeout instead of hanging the installer.
+var (
+	lockRetryWindow   = 20 * time.Second
+	lockRetryInterval = 250 * time.Millisecond
+)
+
+func retryTransientLock(op func() error) error {
+	deadline := time.Now().Add(lockRetryWindow)
+	for {
+		err := op()
+		if err == nil || !isTransientLock(err) || !time.Now().Before(deadline) {
+			return err
+		}
+		time.Sleep(lockRetryInterval)
+	}
+}
+
 func hashFile(path string) (string, error) {
 	f, e := os.Open(path)
 	if e != nil {
@@ -269,10 +287,20 @@ func (t *Transaction) Apply() error {
 		return err
 	}
 	var targets []string
-	for _, e := range j.Items {
-		if e.Staged != "" {
-			targets = append(targets, e.Target)
+	unchanged := make([]bool, len(j.Items))
+	for i, e := range j.Items {
+		if e.Staged == "" {
+			continue
 		}
+		// Sidecars are often byte-identical between releases. Rewriting them
+		// only adds a lock window; Commit still verifies the final hash.
+		if e.Existed && e.OldHash == e.Hash {
+			if h, he := hashFile(e.Target); he == nil && h == e.Hash {
+				unchanged[i] = true
+				continue
+			}
+		}
+		targets = append(targets, e.Target)
 	}
 	// A locked sidecar must fail before even the desktop/Core are replaced.
 	if err = t.Platform.PreflightTargets(targets); err != nil {
@@ -288,7 +316,12 @@ func (t *Transaction) Apply() error {
 		if err = t.Platform.PrepareTarget(e.Target); err != nil {
 			return err
 		}
-		if err = copyFile(filepath.Join(t.Root, e.Staged), e.Target); err != nil {
+		if unchanged[i] {
+			t.log("unchanged " + e.Target)
+			continue
+		}
+		staged := filepath.Join(t.Root, e.Staged)
+		if err = retryTransientLock(func() error { return copyFile(staged, e.Target) }); err != nil {
 			return fmt.Errorf("replace %s: %w", e.Target, err)
 		}
 		// PrepareTarget also applies the protected service-file ACL after creation.

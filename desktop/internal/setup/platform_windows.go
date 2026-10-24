@@ -264,15 +264,18 @@ func (p windowsPlatform) PreflightTargets(paths []string) error {
 		}
 		// Open for writing without truncating or creating anything. In
 		// particular, detect a still-mapped sing-box before changing any bytes.
-		f, err := os.OpenFile(path, os.O_WRONLY, 0)
+		err := retryTransientLock(func() error {
+			f, err := os.OpenFile(path, os.O_WRONLY, 0)
+			if err != nil {
+				return err
+			}
+			return f.Close()
+		})
 		if errors.Is(err, os.ErrNotExist) {
 			continue
 		}
 		if err != nil {
 			return fmt.Errorf("%s is not replaceable: %w", path, err)
-		}
-		if err = f.Close(); err != nil {
-			return err
 		}
 	}
 	return nil

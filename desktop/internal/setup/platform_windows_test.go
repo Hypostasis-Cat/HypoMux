@@ -8,9 +8,86 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
+func shortLockRetry(t *testing.T, window time.Duration) {
+	t.Helper()
+	oldWindow, oldInterval := lockRetryWindow, lockRetryInterval
+	lockRetryWindow, lockRetryInterval = window, 20*time.Millisecond
+	t.Cleanup(func() { lockRetryWindow, lockRetryInterval = oldWindow, oldInterval })
+}
+
+func lockForRead(t *testing.T, path string) windows.Handle {
+	t.Helper()
+	wide, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handle, err := windows.CreateFile(wide, windows.GENERIC_READ, windows.FILE_SHARE_READ, nil, windows.OPEN_EXISTING, windows.FILE_ATTRIBUTE_NORMAL, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return handle
+}
+
+func sidecarFixture(t *testing.T, sidecarContent string) (*Transaction, []Item, *fakePlatform) {
+	t.Helper()
+	tx, items, fake := fixture(t)
+	fake.preflight = (windowsPlatform{}).PreflightTargets
+	items[1].Target = filepath.Join(filepath.Dir(items[0].Target), "hypomux-engine.exe")
+	mustWrite(t, items[1].Target, "old engine")
+	items[2].Target = filepath.Join(filepath.Dir(items[0].Target), "sing-box.exe")
+	mustWrite(t, items[2].Target, sidecarContent)
+	return tx, items, fake
+}
+
+func TestWindowsTransientSidecarLockIsRetried(t *testing.T) {
+	// The v2.8.1 upgrade failed on a sing-box that was free again seconds
+	// later: a scanner reopening a just-probed executable must not roll back.
+	shortLockRetry(t, 10*time.Second)
+	tx, items, _ := sidecarFixture(t, "old sidecar")
+	if err := tx.Begin(items); err != nil {
+		t.Fatal(err)
+	}
+	handle := lockForRead(t, items[2].Target)
+	released := make(chan struct{})
+	go func() {
+		time.Sleep(400 * time.Millisecond)
+		windows.CloseHandle(handle)
+		close(released)
+	}()
+	if err := tx.Apply(); err != nil {
+		t.Fatal(err)
+	}
+	<-released
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	mustText(t, items[2].Target, "new new.dll")
+}
+
+func TestWindowsUnchangedSidecarIsNotRewritten(t *testing.T) {
+	shortLockRetry(t, 300*time.Millisecond)
+	tx, items, _ := sidecarFixture(t, "new new.dll")
+	if err := tx.Begin(items); err != nil {
+		t.Fatal(err)
+	}
+	// A persistent reader of an identical sidecar cannot block the upgrade.
+	handle := lockForRead(t, items[2].Target)
+	defer windows.CloseHandle(handle)
+	if err := tx.Apply(); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	mustText(t, items[0].Target, "new hypomux.exe")
+	mustText(t, items[2].Target, "new new.dll")
+}
+
 func TestWindowsPreflightLockedSidecarDoesNotReplaceEarlierFiles(t *testing.T) {
+	shortLockRetry(t, 300*time.Millisecond)
 	tx, items, fake := fixture(t)
 	// The third payload represents the protected sing-box that remained mapped
 	// in the failed v2.7.0 upgrade. Earlier targets must stay byte-identical.
