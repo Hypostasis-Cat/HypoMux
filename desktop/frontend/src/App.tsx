@@ -9,6 +9,7 @@ import "./app.css";
 import "./theme/controls.css";
 import { WallpaperLayer } from "./components/material/WallpaperLayer";
 import { AppShell } from "./components/shell/AppShell";
+import { LaunchOverlay } from "./components/shell/LaunchOverlay";
 import type { AppPage } from "./components/shell/CompactNavigation";
 import { HomePage } from "./pages/HomePage";
 import { advanceConnectionsNavigation } from "./pages/connectionNavigation";
@@ -88,6 +89,8 @@ function HypoMuxWindow() {
   const [connectionAdapters, setConnectionAdapters] = useState<HomeAdapter[] | undefined>(undefined);
   const [enginePhase, setEnginePhase] = useState<EnginePhase | undefined>(undefined);
   const [startupRevealed, setStartupRevealed] = useState(false);
+  // The launch handoff slides the first page in, like a navigation would.
+  const [launchEntered, setLaunchEntered] = useState(false);
   const { fluentTheme, settings } = useAppearance();
   const pageOrder: AppPage[] = [
     "home",
@@ -132,14 +135,14 @@ function HypoMuxWindow() {
     <FluentProvider theme={fluentTheme} className="hypomux-provider">
       <AppNotificationProvider>
         {import.meta.env.DEV && <NotificationVisualFixture />}
-        <div className={`startup-reveal${startupRevealed ? " is-ready" : ""}`} aria-hidden="true" />
+        <LaunchOverlay ready={startupRevealed} onEnter={() => setLaunchEntered(true)} />
         <WallpaperLayer />
         <AppNotificationCenter wallpaperBackground={resolveWallpaperBackground(settings)} />
         <AppShell
           page={page}
           onPageChange={navigate}
           pageDirection={pageDirection}
-          animatePage={navigationRevision > 0}
+          animatePage={navigationRevision > 0 || launchEntered}
           persistentPage="home"
           persistentChildren={(
             <HomePage

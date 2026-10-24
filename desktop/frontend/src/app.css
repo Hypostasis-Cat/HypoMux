@@ -69,19 +69,32 @@ html.window-closing #root > .hypomux-provider {
   pointer-events: none;
 }
 
-.startup-reveal {
+/* Launch overlay (LaunchOverlay.tsx): covers the first frames and plays the
+ * launch sequence; the mark then flies onto the titlebar icon. */
+.launch-overlay {
   position: fixed;
   z-index: 10000;
   inset: 0;
-  opacity: 1;
+  display: grid;
+  place-items: center;
   background:
-    radial-gradient(circle at 50% 46%, color-mix(in srgb, var(--hm-accent) 10%, transparent), transparent 42%),
+    radial-gradient(circle at 50% 46%, var(--hm-launch-glow), transparent 46%),
     var(--hm-window-base);
-  pointer-events: none;
-  transition: opacity var(--hm-motion-background) var(--hm-motion-ease-out);
 }
 
-.startup-reveal.is-ready {
+.launch-mark {
+  width: 112px;
+  height: 112px;
+  overflow: visible;
+  transform-origin: 0 0;
+}
+
+/* Hidden while the launch mark is in flight; it appears as the mark lands. */
+.product-mark {
+  transition: opacity var(--hm-motion-fast) var(--hm-motion-ease-out);
+}
+
+[data-launching="true"] .product-mark {
   opacity: 0;
 }
 
@@ -94,8 +107,7 @@ html.window-closing #root > .hypomux-provider {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  #root > .hypomux-provider,
-  .startup-reveal {
+  #root > .hypomux-provider {
     transition-duration: 0ms;
   }
 }
