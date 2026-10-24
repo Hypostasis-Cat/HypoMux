@@ -1,6 +1,8 @@
-import { useId } from "react";
+import { useEffect, useId, useRef, useState } from "react";
+import { animate } from "motion/react";
 import { ArrowUpload20Regular, PlugConnected20Regular } from "@fluentui/react-icons";
 import { useI18n } from "../../i18n/i18n";
+import { prefersReducedMotion, springs } from "../../theme/motion";
 
 type ThroughputPoint = { x: number; y: number };
 
@@ -53,6 +55,28 @@ export function createThroughputChart(values: number[]) {
   };
 }
 
+/** Rolls the readout to each new sample with the gentle spring; retargets mid-flight. */
+function useRollingNumber(value: number) {
+  const [shown, setShown] = useState(value);
+  const current = useRef(value);
+  useEffect(() => {
+    if (!Number.isFinite(value) || prefersReducedMotion()) {
+      current.current = value;
+      setShown(value);
+      return;
+    }
+    const controls = animate(current.current, value, {
+      ...springs.gentle,
+      onUpdate: (latest) => {
+        current.current = latest;
+        setShown(latest);
+      },
+    });
+    return () => controls.stop();
+  }, [value]);
+  return shown;
+}
+
 export function ThroughputDisplay({
   download,
   upload,
@@ -71,6 +95,7 @@ export function ThroughputDisplay({
   const { locale, t } = useI18n();
   const chartID = useId().replace(/:/g, "");
   const { areaPath, linePath } = createThroughputChart(history);
+  const rollingDownload = useRollingNumber(download);
   const fillID = `${chartID}-throughput-fill`;
   const lineID = `${chartID}-throughput-line`;
   const live = active && !unavailable;
@@ -78,7 +103,7 @@ export function ThroughputDisplay({
     <div className={live ? "throughput-display" : "throughput-display is-idle"}>
       <div className="throughput-label">{t("home_total_speed")}</div>
       <div className="throughput-value">
-        <strong>{unavailable ? "—" : download.toFixed(1)}</strong>
+        <strong>{unavailable ? "—" : Math.max(0, rollingDownload).toFixed(1)}</strong>
         <span>MB/s</span>
       </div>
       <div className="throughput-meta">

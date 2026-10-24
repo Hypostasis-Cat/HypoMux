@@ -91,6 +91,24 @@
     transform var(--hm-motion-fast) var(--hm-motion-ease-out);
 }
 
+/* Press feedback: a button sinks with the snappy spring and springs back on
+ * release (release spring: a small overshoot past rest, then settles).
+ * Notification island buttons keep their own choreography; reduced motion
+ * keeps only the color cue (see below). */
+.fui-Button.fui-Button:not(.global-notification-button) {
+  transition: background-color var(--hm-motion-fast) var(--hm-motion-ease),
+    border-color var(--hm-motion-fast) var(--hm-motion-ease),
+    box-shadow var(--hm-motion-fast) var(--hm-motion-ease),
+    color var(--hm-motion-fast) var(--hm-motion-ease),
+    transform var(--hm-spring-release-duration) var(--hm-spring-release);
+}
+
+.fui-Button.fui-Button:not(.global-notification-button):not(:disabled):not([aria-disabled="true"]):active {
+  transform: scale(0.97);
+  transition-duration: var(--hm-motion-fast), var(--hm-motion-fast), var(--hm-motion-fast), var(--hm-motion-fast), var(--hm-spring-snappy-duration);
+  transition-timing-function: var(--hm-motion-ease), var(--hm-motion-ease), var(--hm-motion-ease), var(--hm-motion-ease), var(--hm-spring-snappy);
+}
+
 .fui-Listbox.fui-Listbox,
 .fui-MenuPopover.fui-MenuPopover {
   padding: 6px;

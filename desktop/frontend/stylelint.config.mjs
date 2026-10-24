@@ -22,12 +22,19 @@ export default {
         "/^border(?:-(?:top|bottom|start|end)-(?:left|right|start|end))?-radius$/": [/^(?!.*calc\().*\d+px/],
         "/^(?:padding|margin)(?:-(?:top|right|bottom|left|inline|block)(?:-(?:start|end))?)?$/": [offRampSpacing],
         "/^(?:gap|row-gap|column-gap)$/": [offRampSpacing],
+        // UI timing comes from the motion tokens (springs, durations, stagger); only choreographed
+        // or ambient loops of 600ms and longer, 0ms and linear/steps() timing stay literal.
+        "/^(?:transition|animation)(?:-duration|-timing-function|-delay)?$/": [
+          /(?<![\w.-])(?:[1-9]\d?|[1-5]\d\d)ms\b/,
+          /(?<![\w.-])0?\.[0-5]\d*s\b/,
+          /(?<![\w-])(?:ease|ease-in|ease-out|ease-in-out)(?![\w-])|cubic-bezier\(/,
+        ],
         // Literal colors belong in custom properties (token definitions), never in declarations.
         "/^(?!--)/": [/#[0-9a-f]{3,8}\b/i, /rgba?\(\s*\d/i, /hsla?\(\s*\d/i],
       },
       {
         message: (property, value) =>
-          `"${property}: ${value}" bypasses the design tokens. Use the Fluent token (var(--fontSize*), var(--fontWeight*), var(--lineHeight*), var(--borderRadius*)), var(--hm-line-height-reading|display), a color token, or a value on the spacing ramp ${SPACING_RAMP.join("/")}px.`,
+          `"${property}: ${value}" bypasses the design tokens. Use the Fluent token (var(--fontSize*), var(--fontWeight*), var(--lineHeight*), var(--borderRadius*)), var(--hm-line-height-reading|display), a color or motion token (var(--hm-spring-*), var(--hm-motion-*)), or a value on the spacing ramp ${SPACING_RAMP.join("/")}px.`,
       },
     ],
   },

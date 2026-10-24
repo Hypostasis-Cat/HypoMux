@@ -59,8 +59,8 @@ p {
   transform: scale(1);
   transform-origin: center;
   transition:
-    opacity 250ms var(--hm-motion-ease-out),
-    transform 250ms var(--hm-motion-ease-out);
+    opacity var(--hm-motion-normal) var(--hm-motion-ease-out),
+    transform var(--hm-motion-normal) var(--hm-motion-ease-out);
 }
 
 html.window-closing #root > .hypomux-provider {
@@ -78,7 +78,7 @@ html.window-closing #root > .hypomux-provider {
     radial-gradient(circle at 50% 46%, color-mix(in srgb, var(--hm-accent) 10%, transparent), transparent 42%),
     var(--hm-window-base);
   pointer-events: none;
-  transition: opacity 450ms var(--hm-motion-ease-out);
+  transition: opacity var(--hm-motion-background) var(--hm-motion-ease-out);
 }
 
 .startup-reveal.is-ready {
@@ -531,14 +531,14 @@ svg {
   transform: translateY(0) scale(1);
   visibility: visible;
   transform-origin: center 22px;
-  transition: opacity 180ms ease-out, transform var(--hm-nav-motion-duration) var(--hm-nav-motion-ease), visibility 0s;
+  transition: opacity var(--hm-motion-fast) var(--hm-motion-ease-out), transform var(--hm-nav-motion-duration) var(--hm-nav-motion-ease), visibility 0ms;
 }
 .compact-navigation[data-ai-enabled="false"] .nav-item-ai {
   opacity: 0;
   transform: translateY(-6px) scale(.9);
   visibility: hidden;
   pointer-events: none;
-  transition: opacity 140ms ease-out, transform var(--hm-nav-motion-duration) var(--hm-nav-motion-ease), visibility 0s 180ms;
+  transition: opacity var(--hm-motion-fast) var(--hm-motion-ease-out), transform var(--hm-nav-motion-duration) var(--hm-nav-motion-ease), visibility 0ms var(--hm-motion-fast);
 }
 :is([data-motion="reduced"], [data-motion="off"]) .compact-navigation :is(.nav-item, .nav-selection-window) { transition: none !important; }
 @media (prefers-reduced-motion: reduce) {
@@ -657,11 +657,13 @@ svg {
     0 14px 34px -18px color-mix(in srgb, var(--hm-island-tint) var(--hm-island-glow), transparent);
   --wails-draggable: no-drag;
   transform-origin: top center;
+  /* stylelint-disable declaration-property-value-disallowed-list -- notification island choreography; timings mirror AppNotifications.tsx */
   animation:
     dynamic-island-drop 440ms var(--hm-island-pop) both,
     dynamic-island-stretch 640ms var(--hm-island-spring) both,
     var(--hm-island-pulse),
     var(--hm-island-bloom);
+  /* stylelint-enable declaration-property-value-disallowed-list */
   transition:
     border-radius var(--hm-motion-normal) var(--hm-motion-ease-out),
     box-shadow var(--hm-motion-normal) var(--hm-motion-ease-out);
@@ -681,6 +683,7 @@ svg {
 }
 
 .global-notification-region.is-leaving {
+  /* stylelint-disable-next-line declaration-property-value-disallowed-list -- notification island choreography; timings mirror AppNotifications.tsx */
   animation: dynamic-island-leave 300ms cubic-bezier(0.5, 0, 0.3, 1) both;
   pointer-events: none;
 }
@@ -765,9 +768,11 @@ svg {
   opacity: 0;
   transform: translateY(0) scale(1);
   transform-origin: bottom center;
+  /* stylelint-disable declaration-property-value-disallowed-list -- notification island choreography; timings mirror AppNotifications.tsx */
   transition:
     opacity 220ms var(--hm-motion-ease-out),
     transform 560ms var(--hm-island-spring);
+  /* stylelint-enable declaration-property-value-disallowed-list */
 }
 
 .global-notification-region.has-stack-1 .global-notification-stack > :first-child,
@@ -827,19 +832,21 @@ svg {
 }
 
 .global-notification-bar > * {
+  /* stylelint-disable-next-line declaration-property-value-disallowed-list -- notification island choreography; timings mirror AppNotifications.tsx */
   animation: dynamic-island-content-in 380ms var(--hm-motion-ease-out) 150ms backwards;
 }
 
-.global-notification-bar > :nth-child(2) { animation-delay: 190ms; }
-.global-notification-bar > :nth-child(n + 3) { animation-delay: 240ms; }
+.global-notification-bar > :nth-child(2) { animation-delay: calc(var(--hm-motion-stagger) * 5); }
+.global-notification-bar > :nth-child(n + 3) { animation-delay: calc(var(--hm-motion-stagger) * 7); }
 
 /* Swapped or merged content arrives sooner: the island is already open. */
 .global-notification-region:is(.is-pulse-a, .is-pulse-b) .global-notification-bar > :is(.global-notification-icon, .global-notification-copy) {
-  animation-delay: 40ms;
+  animation-delay: var(--hm-motion-stagger);
 }
 
 .global-notification-region.is-leaving .global-notification-bar > *,
 .global-notification-region.is-leaving .global-notification-details {
+  /* stylelint-disable-next-line declaration-property-value-disallowed-list -- notification island choreography; timings mirror AppNotifications.tsx */
   animation: dynamic-island-content-out 140ms var(--hm-motion-ease-in-out) both;
 }
 
@@ -951,6 +958,7 @@ svg {
 }
 
 .global-notification-bar > .global-notification-count {
+  /* stylelint-disable-next-line declaration-property-value-disallowed-list -- notification island choreography; timings mirror AppNotifications.tsx */
   animation: dynamic-island-badge 520ms var(--hm-island-pop) 60ms backwards;
 }
 
@@ -964,10 +972,12 @@ svg {
   min-width: 26px;
   color: var(--hm-island-meta);
   background: transparent;
+  /* stylelint-disable declaration-property-value-disallowed-list -- notification island choreography; timings mirror AppNotifications.tsx */
   transition:
     color var(--hm-motion-fast) var(--hm-motion-ease-out),
     background var(--hm-motion-fast) var(--hm-motion-ease-out),
     transform 380ms var(--hm-island-pop);
+  /* stylelint-enable declaration-property-value-disallowed-list */
 }
 
 .global-notification-button.fui-Button:hover {
@@ -977,6 +987,7 @@ svg {
 
 .global-notification-button.fui-Button:active {
   transform: scale(0.92);
+  /* stylelint-disable-next-line declaration-property-value-disallowed-list -- notification island choreography; timings mirror AppNotifications.tsx */
   transition-duration: var(--hm-motion-fast), var(--hm-motion-fast), 90ms;
 }
 
@@ -1003,10 +1014,12 @@ svg {
   z-index: 1;
   display: grid;
   grid-template-rows: 1fr;
+  /* stylelint-disable-next-line declaration-property-value-disallowed-list -- notification island choreography; timings mirror AppNotifications.tsx */
   animation: dynamic-island-details-open 520ms var(--hm-island-spring) both;
 }
 
 .global-notification-details.is-closing {
+  /* stylelint-disable-next-line declaration-property-value-disallowed-list -- notification island choreography; timings mirror AppNotifications.tsx */
   animation: dynamic-island-details-close 200ms var(--hm-motion-ease-in-out) both;
 }
 
@@ -1023,6 +1036,7 @@ svg {
   align-items: flex-start;
   gap: 8px;
   border-top: 1px solid var(--hm-island-divider);
+  /* stylelint-disable-next-line declaration-property-value-disallowed-list -- notification island choreography; timings mirror AppNotifications.tsx */
   animation: dynamic-island-details-content 360ms var(--hm-motion-ease-out) 80ms backwards;
 }
 
@@ -1215,6 +1229,7 @@ svg {
 
   .global-notification-region.is-leaving {
     opacity: 0;
+    /* stylelint-disable-next-line declaration-property-value-disallowed-list -- notification island choreography; timings mirror AppNotifications.tsx */
     transition: opacity 120ms linear !important;
   }
 
@@ -1237,14 +1252,14 @@ svg {
 }
 
 .page-transition-layer.is-entering {
-  --hm-page-enter-offset: 6px;
+  --hm-page-enter-offset: 14px;
   /*
    * Backdrop-filter descendants cannot live below an animated opacity or
    * transform layer without WebView2 rebuilding their background snapshot.
    * Animate the layout offset instead: it preserves the slide while keeping
    * every glass surface in the stable root compositor layer.
    */
-  animation: page-content-in var(--hm-motion-page) var(--hm-motion-ease-out);
+  animation: page-content-in var(--hm-spring-gentle-duration) var(--hm-spring-gentle);
 }
 
 /* A nested tool view already travels with the entering page. */
@@ -1258,7 +1273,7 @@ svg {
 }
 
 .page-transition-layer.is-entering[data-direction="backward"] {
-  --hm-page-enter-offset: -6px;
+  --hm-page-enter-offset: -14px;
 }
 
 @keyframes page-content-in {
@@ -1299,15 +1314,15 @@ svg {
 }
 
 .motion-state-content > :nth-child(2) {
-  animation-delay: 35ms;
+  animation-delay: var(--hm-motion-stagger);
 }
 
 .motion-state-content > :nth-child(3) {
-  animation-delay: 65ms;
+  animation-delay: calc(var(--hm-motion-stagger) * 2);
 }
 
 .motion-state-content > :nth-child(4) {
-  animation-delay: 90ms;
+  animation-delay: calc(var(--hm-motion-stagger) * 3);
 }
 
 .page-transition-layer.is-entering > main > header > *,
@@ -1319,12 +1334,12 @@ svg {
 .page-transition-layer.is-entering > main > header > :nth-child(2),
 .page-transition-layer.is-entering .engine-copy > :nth-child(2),
 .page-transition-layer.is-entering .throughput-display > :nth-child(2) {
-  animation-delay: 45ms;
+  animation-delay: var(--hm-motion-stagger);
 }
 
 .page-transition-layer.is-entering .engine-copy > :nth-child(n + 3),
 .page-transition-layer.is-entering .throughput-display > :nth-child(n + 3) {
-  animation-delay: 75ms;
+  animation-delay: calc(var(--hm-motion-stagger) * 2);
 }
 
 @keyframes motion-inline-swap {
@@ -1404,8 +1419,8 @@ svg {
   gap: clamp(24px, 4vw, 54px);
   overflow: hidden;
   transition:
-    border-color var(--hm-motion-normal) ease,
-    background var(--hm-motion-normal) ease;
+    border-color var(--hm-motion-normal) var(--hm-motion-ease),
+    background var(--hm-motion-normal) var(--hm-motion-ease);
 }
 
 
@@ -1442,7 +1457,7 @@ svg {
   border-radius: 50%;
   background: var(--hm-success);
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--hm-success) 13%, transparent);
-  transition: background var(--hm-motion-normal) ease, box-shadow var(--hm-motion-normal) ease;
+  transition: background var(--hm-motion-normal) var(--hm-motion-ease), box-shadow var(--hm-motion-normal) var(--hm-motion-ease);
 }
 
 .phase-stopped .state-dot,
@@ -1475,10 +1490,11 @@ svg {
   font-size: var(--fontSizeBase200);
 }
 
-/* Proxy/TUN switch: a segmented control — one neutral track, the selected
- * option lifts as a surface "thumb". The page's only solid accent stays on
- * the start button below. Fluent's underline indicators are hidden by
- * clearing their stroke tokens, so the tab focus ring is untouched. */
+/* Proxy/TUN switch: a segmented control — one neutral track and a surface
+ * "thumb" (EngineHero, Motion smooth spring) that travels to the selected
+ * option. The page's only solid accent stays on the start button below.
+ * Fluent's underline indicators are hidden by clearing their stroke tokens,
+ * so the tab focus ring is untouched. */
 .mode-tabs {
   --colorCompoundBrandStroke: transparent;
   --colorCompoundBrandStrokeHover: transparent;
@@ -1486,6 +1502,7 @@ svg {
   --colorNeutralStroke1Hover: transparent;
   --colorNeutralStroke1Pressed: transparent;
   --colorNeutralForegroundDisabled: var(--hm-text-tertiary);
+  position: relative;
   width: fit-content;
   padding: 2px;
   gap: 2px;
@@ -1494,13 +1511,30 @@ svg {
   background: color-mix(in srgb, var(--hm-text-primary) 5%, transparent);
 }
 
+.mode-thumb {
+  position: absolute;
+  z-index: 0;
+  top: 2px;
+  bottom: 2px;
+  left: 0;
+  border-radius: var(--borderRadiusLarge);
+  background: var(--colorNeutralBackground1);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--hm-outer-border) 80%, transparent), var(--shadow2);
+  pointer-events: none;
+}
+
+[data-appearance="dark"] .mode-thumb {
+  background: var(--colorNeutralBackground1Hover);
+}
+
 .mode-tabs .fui-Tab {
+  position: relative;
+  z-index: 1;
   min-height: 28px;
   padding: 4px 12px;
   border-radius: var(--borderRadiusLarge);
   color: var(--hm-text-secondary);
   transition: background-color var(--hm-motion-fast) var(--hm-motion-ease-out),
-    box-shadow var(--hm-motion-fast) var(--hm-motion-ease-out),
     color var(--hm-motion-fast) var(--hm-motion-ease-out);
 }
 
@@ -1511,16 +1545,10 @@ svg {
 
 .mode-tabs .fui-Tab[aria-selected="true"] {
   color: var(--hm-text-primary);
-  background: var(--colorNeutralBackground1);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--hm-outer-border) 80%, transparent), var(--shadow2);
 }
 
 .mode-tabs .fui-Tab[aria-selected="true"] .fui-Tab__icon {
   color: var(--hm-accent-strong);
-}
-
-[data-appearance="dark"] .mode-tabs .fui-Tab[aria-selected="true"] {
-  background: var(--colorNeutralBackground1Hover);
 }
 
 /* While the service runs the mode is locked: keep the choice legible, just quieter. */
@@ -1727,6 +1755,7 @@ svg {
 .throughput-line,
 .throughput-line-glow,
 .throughput-fill {
+  /* stylelint-disable-next-line declaration-property-value-disallowed-list -- path morph spans the 800ms telemetry poll (HOME_TELEMETRY_POLL_MS) */
   transition: d 680ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
@@ -1750,7 +1779,7 @@ svg {
   .throughput-line,
   .throughput-line-glow,
   .throughput-fill {
-    transition-duration: 100ms;
+    transition-duration: var(--hm-motion-instant);
   }
 }
 
@@ -1898,18 +1927,18 @@ svg {
   color: var(--hm-accent);
   box-shadow: inset 0 0 0 2px currentColor;
 }
-.adapter-operation-glow.is-pending { animation: adapter-pending-glow 1.2s ease-in-out infinite; }
+.adapter-operation-glow.is-pending { animation: adapter-pending-glow 1.2s var(--hm-motion-ease-in-out) infinite; }
 .adapter-operation-glow.is-success {
   color: var(--hm-success);
   background: color-mix(in srgb, var(--hm-success) 8%, transparent);
-  animation: adapter-confirm-glow 1.8s ease-out both;
+  animation: adapter-confirm-glow 1.8s var(--hm-motion-ease-out) both;
 }
 .adapter-operation-glow.is-error {
   color: var(--hm-warning);
-  animation: adapter-error-glow 700ms ease-out both;
+  animation: adapter-error-glow 700ms var(--hm-motion-ease-out) both;
 }
 .network-adapter .adapter-icon { position: relative; }
-.adapter-device-icon { display: grid; place-items: center; transition: opacity 140ms ease; }
+.adapter-device-icon { display: grid; place-items: center; transition: opacity var(--hm-motion-fast) var(--hm-motion-ease); }
 .network-adapter:is(.has-pending, .has-success, .has-error) .adapter-device-icon { opacity: 0; }
 .adapter-operation-icon {
   position: absolute;
@@ -1919,11 +1948,11 @@ svg {
   border-radius: inherit;
   pointer-events: none;
 }
-.adapter-operation-icon.is-success { color: var(--hm-success); background: color-mix(in srgb, var(--hm-success) 12%, transparent); animation: adapter-confirm-icon 1.8s ease-out both; }
+.adapter-operation-icon.is-success { color: var(--hm-success); background: color-mix(in srgb, var(--hm-success) 12%, transparent); animation: adapter-confirm-icon 1.8s var(--hm-motion-ease-out) both; }
 .adapter-operation-icon.is-error { color: var(--hm-warning); background: color-mix(in srgb, var(--hm-warning) 12%, transparent); }
 .adapter-operation-icon > svg { width: 23px; height: 23px; }
 .adapter-operation-icon.is-success path { stroke: currentColor; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
-.adapter-operation-icon.is-success path { stroke-dasharray: 24; stroke-dashoffset: 24; animation: adapter-draw-check 320ms 80ms ease-out forwards; }
+.adapter-operation-icon.is-success path { stroke-dasharray: 24; stroke-dashoffset: 24; animation: adapter-draw-check var(--hm-motion-background) var(--hm-motion-instant) var(--hm-motion-ease-out) forwards; }
 .adapter-operation-ring { width: 21px; height: 21px; border: 2px solid color-mix(in srgb, var(--hm-accent) 20%, transparent); border-top-color: var(--hm-accent); border-radius: 50%; animation: adapter-ring-spin 700ms linear infinite; }
 @keyframes adapter-ring-spin { to { transform: rotate(360deg); } }
 @keyframes adapter-pending-glow { 0%, 100% { opacity: .25; } 50% { opacity: .7; } }
@@ -2459,10 +2488,10 @@ svg {
   animation: motion-row-enter var(--hm-motion-normal) var(--hm-motion-ease-out) backwards;
 }
 
-.routing-row:nth-child(2) { animation-delay: 25ms; }
-.routing-row:nth-child(3) { animation-delay: 50ms; }
-.routing-row:nth-child(4) { animation-delay: 75ms; }
-.routing-row:nth-child(n + 5) { animation-delay: 95ms; }
+.routing-row:nth-child(2) { animation-delay: var(--hm-motion-stagger); }
+.routing-row:nth-child(3) { animation-delay: var(--hm-motion-stagger); }
+.routing-row:nth-child(4) { animation-delay: calc(var(--hm-motion-stagger) * 2); }
+.routing-row:nth-child(n + 5) { animation-delay: calc(var(--hm-motion-stagger) * 3); }
 
 .routing-row:last-child {
   border-bottom: 0;
@@ -3026,9 +3055,9 @@ svg {
   animation: motion-content-rise var(--hm-motion-normal) var(--hm-motion-ease-out) backwards;
 }
 
-.tun-preflight-issue:nth-child(2) { animation-delay: 35ms; }
-.tun-preflight-issue:nth-child(3) { animation-delay: 70ms; }
-.tun-preflight-issue:nth-child(n + 4) { animation-delay: 95ms; }
+.tun-preflight-issue:nth-child(2) { animation-delay: var(--hm-motion-stagger); }
+.tun-preflight-issue:nth-child(3) { animation-delay: calc(var(--hm-motion-stagger) * 2); }
+.tun-preflight-issue:nth-child(n + 4) { animation-delay: calc(var(--hm-motion-stagger) * 3); }
 
 .tun-preflight-issue.is-blocker {
   border-inline-start-color: var(--colorPaletteRedBorderActive);
@@ -3133,9 +3162,9 @@ svg {
   white-space: nowrap;
 }
 
-.process-list > button:nth-child(2) { animation-delay: 20ms; }
-.process-list > button:nth-child(3) { animation-delay: 40ms; }
-.process-list > button:nth-child(n + 4) { animation-delay: 60ms; }
+.process-list > button:nth-child(2) { animation-delay: var(--hm-motion-stagger); }
+.process-list > button:nth-child(3) { animation-delay: var(--hm-motion-stagger); }
+.process-list > button:nth-child(n + 4) { animation-delay: calc(var(--hm-motion-stagger) * 2); }
 
 .process-list > button:active {
   transform: scale(0.985);
@@ -3182,7 +3211,7 @@ svg {
 
 .health-view-enter {
   position: relative;
-  animation: health-view-enter var(--hm-motion-normal) var(--hm-motion-ease-out) backwards;
+  animation: health-view-enter var(--hm-spring-smooth-duration) var(--hm-spring-smooth) backwards;
 }
 
 .health-heading-copy > *,
@@ -3192,15 +3221,15 @@ svg {
 
 .health-heading-copy > :nth-child(2),
 .health-heading-actions-enter > :nth-child(2) {
-  animation-delay: 25ms;
+  animation-delay: var(--hm-motion-stagger);
 }
 
 .health-heading-copy > :nth-child(3) {
-  animation-delay: 45ms;
+  animation-delay: var(--hm-motion-stagger);
 }
 
 @keyframes health-view-enter {
-  from { left: 8px; }
+  from { left: 12px; }
   to { left: 0; }
 }
 
@@ -3279,8 +3308,8 @@ svg {
   color: var(--hm-text-primary);
   background: color-mix(in srgb, var(--hm-row-hover) 45%, transparent);
   transition:
-    border-color var(--hm-motion-normal) ease,
-    background var(--hm-motion-normal) ease,
+    border-color var(--hm-motion-normal) var(--hm-motion-ease),
+    background var(--hm-motion-normal) var(--hm-motion-ease),
     transform var(--hm-motion-fast) var(--hm-motion-ease-out);
 }
 
@@ -3422,12 +3451,12 @@ svg {
 }
 
 .health-result-row > :nth-child(2) {
-  animation-delay: 45ms;
+  animation-delay: var(--hm-motion-stagger);
 }
 
 .health-result-row > :nth-child(3),
 .health-result-row > :nth-child(4) {
-  animation-delay: 80ms;
+  animation-delay: calc(var(--hm-motion-stagger) * 2);
 }
 
 .health-result-identity {
@@ -3532,9 +3561,9 @@ svg {
   animation: motion-content-rise var(--hm-motion-fast) var(--hm-motion-ease-out) backwards;
 }
 
-.health-check:nth-child(2) { animation-delay: 25ms; }
-.health-check:nth-child(3) { animation-delay: 50ms; }
-.health-check:nth-child(n + 4) { animation-delay: 70ms; }
+.health-check:nth-child(2) { animation-delay: var(--hm-motion-stagger); }
+.health-check:nth-child(3) { animation-delay: var(--hm-motion-stagger); }
+.health-check:nth-child(n + 4) { animation-delay: calc(var(--hm-motion-stagger) * 2); }
 
 .health-check > span:first-child {
   color: var(--hm-success);
@@ -3988,9 +4017,9 @@ svg {
   animation: motion-content-rise var(--hm-motion-normal) var(--hm-motion-ease-out) backwards;
 }
 
-.nat-state-enter > :nth-child(2) { animation-delay: 30ms; }
-.nat-state-enter > :nth-child(3) { animation-delay: 55ms; }
-.nat-state-enter > :nth-child(4) { animation-delay: 75ms; }
+.nat-state-enter > :nth-child(2) { animation-delay: var(--hm-motion-stagger); }
+.nat-state-enter > :nth-child(3) { animation-delay: calc(var(--hm-motion-stagger) * 2); }
+.nat-state-enter > :nth-child(4) { animation-delay: calc(var(--hm-motion-stagger) * 2); }
 
 [data-motion="reduced"] .health-view-enter {
   animation-duration: var(--hm-motion-fast);
@@ -5310,13 +5339,13 @@ svg {
 
 /* One brief entrance per category; saved values and live edits never replay it. */
 .settings-category-content > .settings-category-heading {
-  animation: settings-content-enter 260ms cubic-bezier(.22, 1, .36, 1) both;
+  animation: settings-content-enter var(--hm-motion-normal) var(--hm-spring-smooth) both;
 }
 .settings-category-content > .settings-group {
-  animation: settings-content-enter 360ms cubic-bezier(.22, 1, .36, 1) both;
+  animation: settings-content-enter var(--hm-motion-background) var(--hm-spring-smooth) both;
 }
-.settings-category-content > .settings-group:nth-child(3) { animation-delay: 35ms; }
-.settings-category-content > .settings-group:nth-child(n + 4) { animation-delay: 70ms; }
+.settings-category-content > .settings-group:nth-child(3) { animation-delay: var(--hm-motion-stagger); }
+.settings-category-content > .settings-group:nth-child(n + 4) { animation-delay: calc(var(--hm-motion-stagger) * 2); }
 
 @keyframes settings-content-enter {
   from { opacity: 0; transform: translate3d(0, 8px, 0); }
@@ -5324,8 +5353,8 @@ svg {
 }
 
 .settings-page :is(.settings-theme-option, .background-preset-card, .accent-swatch) {
-  transition: transform 240ms cubic-bezier(.22, 1, .36, 1),
-    background-color 200ms ease-out, border-color 200ms ease-out, box-shadow 240ms ease-out;
+  transition: transform var(--hm-motion-normal) var(--hm-spring-smooth),
+    background-color var(--hm-motion-fast) var(--hm-motion-ease-out), border-color var(--hm-motion-fast) var(--hm-motion-ease-out), box-shadow var(--hm-motion-normal) var(--hm-motion-ease-out);
 }
 .settings-page :is(.settings-theme-option, .background-preset-card):hover {
   transform: translateY(-2px);
@@ -5334,7 +5363,7 @@ svg {
 .settings-page :is(.settings-theme-option, .background-preset-card):active { transform: translateY(0) scale(.985); }
 .settings-page .accent-swatch:hover { transform: scale(1.12); }
 .settings-page .accent-swatch:active { transform: scale(.96); }
-.settings-page .settings-address-entry { animation: settings-content-enter 220ms ease-out both; }
+.settings-page .settings-address-entry { animation: settings-content-enter var(--hm-motion-normal) var(--hm-motion-ease-out) both; }
 
 /* Preference changes cancel ongoing entrances; navigation stays immediate. */
 :is([data-motion="reduced"], [data-motion="off"]) .settings-page :is(.settings-category-heading, .settings-group, .settings-address-entry) { animation: none; }
