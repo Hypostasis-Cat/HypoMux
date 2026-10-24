@@ -45,6 +45,7 @@ type Platform interface {
 	RestoreMetadata(string, json.RawMessage) error
 	PrepareTarget(string) error
 	ValidateTarget(string) error
+	PreflightTargets([]string) error
 }
 type Transaction struct {
 	Root         string
@@ -266,6 +267,16 @@ func (t *Transaction) Apply() error {
 	t.log("applying")
 	if err = t.Platform.Quiesce(); err != nil {
 		return err
+	}
+	var targets []string
+	for _, e := range j.Items {
+		if e.Staged != "" {
+			targets = append(targets, e.Target)
+		}
+	}
+	// A locked sidecar must fail before even the desktop/Core are replaced.
+	if err = t.Platform.PreflightTargets(targets); err != nil {
+		return fmt.Errorf("payload replacement preflight: %w", err)
 	}
 	for i, e := range j.Items {
 		if e.Staged == "" {

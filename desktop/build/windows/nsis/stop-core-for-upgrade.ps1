@@ -10,20 +10,26 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $targetPath = [System.IO.Path]::GetFullPath($EnginePath)
+$coreDirectory = [System.IO.Path]::GetDirectoryName($targetPath)
+$processPaths = @($targetPath, (Join-Path $coreDirectory 'sing-box.exe'))
+$payloadPaths = @($processPaths) + @((Join-Path $coreDirectory 'wintun.dll'))
 $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
 $lastStopFailure = ''
 $lastReplaceFailure = ''
 
 function Get-OwnedCoreProcesses {
     @(
-        Get-Process -Name 'hypomux-engine' -ErrorAction SilentlyContinue |
+        Get-Process -Name 'hypomux-engine','sing-box' -ErrorAction SilentlyContinue |
             Where-Object {
                 try {
-                    $_.Path -and
-                        [System.IO.Path]::GetFullPath($_.Path).Equals(
-                            $targetPath,
+                    if (-not $_.Path) { return $false }
+                    foreach ($ownedPath in $processPaths) {
+                        if ([System.IO.Path]::GetFullPath($_.Path).Equals(
+                            $ownedPath,
                             [System.StringComparison]::OrdinalIgnoreCase
-                        )
+                        )) { return $true }
+                    }
+                    $false
                 }
                 catch {
                     $false
@@ -33,18 +39,19 @@ function Get-OwnedCoreProcesses {
 }
 
 function Test-TargetReplaceable {
+    param([string]$Path)
     try {
         # File.Exists also returns false on access errors. Only genuinely
         # absent files may bypass the replacement check.
-        $attributes = [System.IO.File]::GetAttributes($targetPath)
+        $attributes = [System.IO.File]::GetAttributes($Path)
         if (($attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
-            throw "Refusing to modify a linked Core executable: $targetPath"
+            throw "Refusing to modify a linked Core payload: $Path"
         }
         # ReadOnly is not a process lock and rebooting cannot clear it.
         # Preserve every other attribute and never loosen the file's ACL.
         if (($attributes -band [System.IO.FileAttributes]::ReadOnly) -ne 0) {
             [System.IO.File]::SetAttributes(
-                $targetPath,
+                $Path,
                 ($attributes -band (-bnot [System.IO.FileAttributes]::ReadOnly))
             )
         }
@@ -54,7 +61,7 @@ function Test-TargetReplaceable {
         # write-locked Core remains blocked.
         $shareMode = [System.IO.FileShare]::Read -bor [System.IO.FileShare]::Delete
         $stream = [System.IO.File]::Open(
-            $targetPath,
+            $Path,
             [System.IO.FileMode]::Open,
             [System.IO.FileAccess]::Write,
             $shareMode
@@ -71,7 +78,7 @@ function Test-TargetReplaceable {
     }
     catch {
         $cause = $_.Exception.GetBaseException()
-        $script:lastReplaceFailure = '{0} (HRESULT=0x{1:X8})' -f $cause.Message, $cause.HResult
+        $script:lastReplaceFailure = '{0}: {1} (HRESULT=0x{2:X8})' -f $Path, $cause.Message, $cause.HResult
         return $false
     }
 }
@@ -87,8 +94,17 @@ do {
         }
     }
 
-    if (@(Get-OwnedCoreProcesses).Count -eq 0 -and (Test-TargetReplaceable)) {
-        exit 0
+    if (@(Get-OwnedCoreProcesses).Count -eq 0) {
+        # An old service can stop before its sing-box child exits. Check every
+        # payload in this exact Core directory before NSIS replaces any files.
+        $allReplaceable = $true
+        foreach ($path in $payloadPaths) {
+            if (-not (Test-TargetReplaceable $path)) {
+                $allReplaceable = $false
+                break
+            }
+        }
+        if ($allReplaceable) { exit 0 }
     }
 
     Start-Sleep -Milliseconds 250
@@ -104,7 +120,7 @@ if ($remaining.Count -gt 0) {
     exit 10
 }
 
-Write-Output "Core executable cannot be replaced: $targetPath"
+Write-Output "Core payload cannot be replaced in: $coreDirectory"
 if ($lastReplaceFailure) {
     Write-Output "Write probe failed: $lastReplaceFailure"
 }

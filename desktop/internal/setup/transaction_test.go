@@ -14,6 +14,7 @@ type fakePlatform struct {
 	service                 string
 	stopError, restoreError error
 	stops                   int
+	preflight               func([]string) error
 }
 
 func (p *fakePlatform) Snapshot(string) (json.RawMessage, error) { return json.Marshal(p.service) }
@@ -27,6 +28,12 @@ func (p *fakePlatform) Restore(_ string, b json.RawMessage) error {
 func (*fakePlatform) Metadata(string) (json.RawMessage, error)      { return json.RawMessage(`null`), nil }
 func (*fakePlatform) RestoreMetadata(string, json.RawMessage) error { return nil }
 func (*fakePlatform) PrepareTarget(string) error                    { return nil }
+func (p *fakePlatform) PreflightTargets(paths []string) error {
+	if p.preflight != nil {
+		return p.preflight(paths)
+	}
+	return nil
+}
 func (p *fakePlatform) ValidateTarget(path string) error {
 	r, e := filepath.Rel(p.root, path)
 	if e != nil || strings.HasPrefix(r, "..") || filepath.IsAbs(r) {

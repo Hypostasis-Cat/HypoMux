@@ -32,7 +32,7 @@ func TestInstallerCoreWriteProbeWindows(t *testing.T) {
 		t.Fatal(err)
 	}
 	host := filepath.Join(os.Getenv("SystemRoot"), "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
-	for _, name := range []string{"absent", "writable", "readonly", "shared-reader", "write-locked"} {
+	for _, name := range []string{"absent", "writable", "readonly", "shared-reader", "write-locked", "write-locked-sidecar", "write-locked-wintun"} {
 		t.Run(name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "hypomux-engine.exe")
 			const contents = "diagnostic fixture, not executable"
@@ -51,12 +51,27 @@ func TestInstallerCoreWriteProbeWindows(t *testing.T) {
 				}
 				defer syscall.SetFileAttributes(wide, syscall.FILE_ATTRIBUTE_NORMAL)
 			}
-			if name == "shared-reader" || name == "write-locked" {
+			lockedPath := path
+			if name == "write-locked-sidecar" || name == "write-locked-wintun" {
+				filename := "sing-box.exe"
+				if name == "write-locked-wintun" {
+					filename = "wintun.dll"
+				}
+				lockedPath = filepath.Join(filepath.Dir(path), filename)
+				if err := os.WriteFile(lockedPath, []byte(contents), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if name == "shared-reader" || strings.HasPrefix(name, "write-locked") {
 				share := uint32(syscall.FILE_SHARE_READ)
 				if name == "shared-reader" {
 					share |= syscall.FILE_SHARE_WRITE | syscall.FILE_SHARE_DELETE
 				}
-				handle, err := syscall.CreateFile(wide, syscall.GENERIC_READ, share, nil, syscall.OPEN_EXISTING, syscall.FILE_ATTRIBUTE_NORMAL, 0)
+				lockedWide, err := syscall.UTF16PtrFromString(lockedPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				handle, err := syscall.CreateFile(lockedWide, syscall.GENERIC_READ, share, nil, syscall.OPEN_EXISTING, syscall.FILE_ATTRIBUTE_NORMAL, 0)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -71,9 +86,9 @@ func TestInstallerCoreWriteProbeWindows(t *testing.T) {
 				}
 			}
 			out, err := cmd.CombinedOutput()
-			if name == "write-locked" {
+			if strings.HasPrefix(name, "write-locked") {
 				exit, ok := err.(*exec.ExitError)
-				if !ok || exit.ExitCode() != 11 || !strings.Contains(string(out), "HRESULT=0x80070020") {
+				if !ok || exit.ExitCode() != 11 || !strings.Contains(string(out), "HRESULT=0x80070020") || !strings.Contains(string(out), lockedPath) {
 					t.Fatalf("real write lock must fail with diagnostic error 32, got %v\n%s", err, out)
 				}
 			} else if err != nil {
@@ -95,6 +110,93 @@ func TestInstallerCoreWriteProbeWindows(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestInstallerSidecarProcessFixture(t *testing.T) {
+	if os.Getenv("HYPOMUX_INSTALLER_SIDECAR_FIXTURE") != "1" {
+		return
+	}
+	if err := os.WriteFile(os.Getenv("HYPOMUX_INSTALLER_FIXTURE_READY"), []byte("ready"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(time.Minute)
+}
+
+func TestInstallerStopsOnlyOwnedSingBoxWindows(t *testing.T) {
+	script, err := filepath.Abs("build/windows/nsis/stop-core-for-upgrade.ps1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	contents, err := os.ReadFile(executable)
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := func(dir string) <-chan struct{} {
+		t.Helper()
+		path := filepath.Join(dir, "sing-box.exe")
+		if err := os.WriteFile(path, contents, 0700); err != nil {
+			t.Fatal(err)
+		}
+		ready := filepath.Join(dir, "ready")
+		cmd := exec.Command(path, "-test.run=^TestInstallerSidecarProcessFixture$")
+		cmd.Env = append(os.Environ(), "HYPOMUX_INSTALLER_SIDECAR_FIXTURE=1", "HYPOMUX_INSTALLER_FIXTURE_READY="+ready)
+		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		done := make(chan struct{})
+		go func() { _ = cmd.Wait(); close(done) }()
+		t.Cleanup(func() { _ = cmd.Process.Kill(); <-done })
+		deadline := time.Now().Add(10 * time.Second)
+		for {
+			if _, err := os.Stat(ready); err == nil {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("sidecar fixture did not start")
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		return done
+	}
+	ownedDir := t.TempDir()
+	owned := start(ownedDir)
+	unrelated := start(t.TempDir())
+	enginePath := filepath.Join(ownedDir, "hypomux-engine.exe")
+	if err := os.WriteFile(enginePath, []byte("old Core fixture"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	host := filepath.Join(os.Getenv("SystemRoot"), "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, host, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script, "-EnginePath", enginePath, "-TimeoutSeconds", "5")
+	for _, entry := range os.Environ() {
+		if !strings.HasPrefix(strings.ToUpper(entry), "PSMODULEPATH=") {
+			cmd.Env = append(cmd.Env, entry)
+		}
+	}
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("stop owned orphan sidecar: %v\n%s", err, output)
+	}
+	select {
+	case <-owned:
+	case <-time.After(3 * time.Second):
+		t.Fatal("owned sing-box survived the upgrade barrier")
+	}
+	select {
+	case <-unrelated:
+		t.Fatal("upgrade stopped a different application's sing-box")
+	default:
+	}
+	file, err := os.OpenFile(filepath.Join(ownedDir, "sing-box.exe"), os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatalf("owned sidecar is still locked: %v", err)
+	}
+	_ = file.Close()
 }
 
 func readInstallerUTF16(t *testing.T, path string) string {
