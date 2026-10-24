@@ -124,8 +124,8 @@ LangString CoreServiceRemoveFailed ${LANG_ENGLISH} "Failed to remove HypoMux Cor
 LangString CoreServiceRemoveFailed ${LANG_SIMPCHINESE} "HypoMux Core 服务移除失败。退出代码："
 LangString RunningAppClosing ${LANG_ENGLISH} "Closing the running HypoMux application..."
 LangString RunningAppClosing ${LANG_SIMPCHINESE} "正在关闭运行中的 HypoMux…"
-LangString RunningAppCloseFailed ${LANG_ENGLISH} "HypoMux is still running. Close it and click Retry to continue installation."
-LangString RunningAppCloseFailed ${LANG_SIMPCHINESE} "HypoMux 仍在运行。请关闭软件后点击“重试”继续安装。"
+LangString RunningAppCloseFailed ${LANG_ENGLISH} "Setup could not close HypoMux automatically. Exit it (including the tray icon) and click Retry."
+LangString RunningAppCloseFailed ${LANG_SIMPCHINESE} "安装程序无法自动关闭 HypoMux。请手动退出软件（包括托盘图标）后点击“重试”。"
 LangString CoreServiceStopping ${LANG_ENGLISH} "Stopping HypoMux Core Service before updating files..."
 LangString CoreServiceStopping ${LANG_SIMPCHINESE} "正在停止 HypoMux Core 服务以更新文件…"
 LangString CoreServiceForceStopping ${LANG_ENGLISH} "The previous Core Service did not stop in time; terminating its service process..."
@@ -263,9 +263,7 @@ Function .onInit
    !insertmacro HypoMuxEnsureSingleInstaller
    Call HypoMuxCheckPlatform
    !insertmacro wails.setShellContext
-   Call StageSetupPayload
-   StrCpy $HypoMuxSetupOperation "recover"
-   Call RunSetupTransaction
+   Call RecoverInterruptedSetup
    StrCpy $HypoMuxPreviousInstallDir ""
    StrCpy $HypoMuxInstallPathChanged "0"
    StrCpy $HypoMuxAutostartEnabled "0"
@@ -294,7 +292,7 @@ Function un.onInit
    !insertmacro MUI_UNGETLANGUAGE
    !insertmacro HypoMuxEnsureSingleInstaller
    !insertmacro wails.setShellContext
-   Call un.StageSetupPayload
+   Call un.StageSetupHelper
    nsExec::ExecToStack /TIMEOUT=180000 '"$HypoMuxSetupHelper" --setup-transaction recover --scope ${WAILS_INSTALL_SCOPE}'
    Pop $0
    Pop $1
@@ -345,11 +343,21 @@ closeRetry:
     SetDetailsPrint textonly
     DetailPrint "$(RunningAppClosing)"
     SetDetailsPrint both
-    nsExec::ExecToStack /TIMEOUT=20000 '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "Get-Process -Name ${INFO_PROJECTNAME} -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue; Wait-Process -Name ${INFO_PROJECTNAME} -Timeout 15 -ErrorAction SilentlyContinue; if (Get-Process -Name ${INFO_PROJECTNAME} -ErrorAction SilentlyContinue) { exit 1 }; exit 0"'
+    ; taskkill is native and exits with 128 once no matching process remains.
+    ; A cold PowerShell start could outlast its timeout after the app had
+    ; already been killed, so a retry then appeared to "close it by itself".
+    StrCpy $2 0
+closePoll:
+    nsExec::ExecToStack /TIMEOUT=10000 '"$SYSDIR\taskkill.exe" /F /IM "${PRODUCT_EXECUTABLE}"'
     Pop $0
     Pop $1
-    ${If} $0 == 0
+    ${If} $0 == 128
         Return
+    ${EndIf}
+    IntOp $2 $2 + 1
+    ${If} $2 < 20
+        Sleep 250
+        Goto closePoll
     ${EndIf}
     DetailPrint "Result: $0; $1"
     IfSilent closeAbort 0
@@ -659,27 +667,65 @@ Function RemoveLegacyInstallations
 FunctionEnd
 
 !macro HypoMuxStagePayload PREFIX
-Function ${PREFIX}StageSetupPayload
+Function ${PREFIX}StageSetupHelper
     InitPluginsDir
-    SetOutPath "$PLUGINSDIR\payload"
-    !insertmacro wails.files
-    !if "${PREFIX}" == ""
-    ; The uninstaller only needs the headless recovery entrypoint, not a
-    ; duplicate archive of Core and its DLLs.
-    File /oname=hypomux-engine.exe "..\..\..\bin\hypomux-engine.exe"
-    File /oname=sing-box.exe "..\..\..\bin\sing-box.exe"
-    File /oname=wintun.dll "..\..\..\bin\wintun.dll"
-    !endif
     StrCpy $HypoMuxSetupHelper "$PLUGINSDIR\payload\${PRODUCT_EXECUTABLE}"
     !if "${WAILS_INSTALL_SCOPE}" == "user"
         StrCpy $HypoMuxSetupLog "$LOCALAPPDATA\HypoMux\SetupTransaction\installer-errors.log"
     !else
         StrCpy $HypoMuxSetupLog "$APPDATA\HypoMux\SetupTransaction\installer-errors.log"
     !endif
+    ; .onInit stages the helper only when it has a journal to recover.
+    IfFileExists "$HypoMuxSetupHelper" setupHelperStaged
+    SetOutPath "$PLUGINSDIR\payload"
+    !insertmacro wails.files
+    setupHelperStaged:
 FunctionEnd
 !macroend
 !insertmacro HypoMuxStagePayload ""
 !insertmacro HypoMuxStagePayload "un."
+
+Function StageSetupPayload
+    ; The uninstaller only needs the headless recovery entrypoint, not a
+    ; duplicate archive of Core and its DLLs. Extracting Core (sing-box alone
+    ; is ~80 MB) is deferred to the install section so the wizard opens at once.
+    Call StageSetupHelper
+    SetOutPath "$PLUGINSDIR\payload"
+    File /oname=hypomux-engine.exe "..\..\..\bin\hypomux-engine.exe"
+    File /oname=sing-box.exe "..\..\..\bin\sing-box.exe"
+    File /oname=wintun.dll "..\..\..\bin\wintun.dll"
+FunctionEnd
+
+Function RecoverInterruptedSetup
+    ; Begin always recovers first, so a completed journal can wait for it.
+    ; Only an unfinished one must roll back here, before the previous
+    ; InstallLocation is read from the registry it may restore. Anything that
+    ; cannot be read as completed falls back to the helper.
+    !if "${WAILS_INSTALL_SCOPE}" == "user"
+        StrCpy $0 "$LOCALAPPDATA\HypoMux\SetupTransaction\journal.json"
+    !else
+        StrCpy $0 "$APPDATA\HypoMux\SetupTransaction\journal.json"
+    !endif
+    IfFileExists "$0.new" recoverInterrupted
+    IfFileExists "$0" 0 recoverDone
+    ClearErrors
+    FileOpen $1 "$0" r
+    IfErrors recoverInterrupted
+    ; json.MarshalIndent writes "{", "Version", then "Phase" on line three.
+    FileRead $1 $2
+    FileRead $1 $2
+    FileRead $1 $2
+    FileClose $1
+    ${If} $2 == `  "Phase": "committed",$\n`
+    ${OrIf} $2 == `  "Phase": "rolled-back",$\n`
+        Goto recoverDone
+    ${EndIf}
+    recoverInterrupted:
+    Call StageSetupHelper
+    StrCpy $HypoMuxSetupOperation "recover"
+    Call RunSetupTransaction
+    recoverDone:
+FunctionEnd
 
 Function LogSetupFailure
     Push $2
@@ -794,6 +840,7 @@ FunctionEnd
 
 Section
     !insertmacro wails.setShellContext
+    Call StageSetupPayload
     Call DetermineInstallPathChange
     Call EnsureWebViewRuntime
     ; Snapshot files, registrations and service configuration BEFORE stopping
