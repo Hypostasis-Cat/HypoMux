@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 	"unicode/utf16"
+
+	"golang.org/x/sys/windows"
 )
 
 func installerFunction(t *testing.T, source, name string) string {
@@ -24,6 +26,54 @@ func installerFunction(t *testing.T, source, name string) string {
 		t.Fatalf("unterminated installer function %s", name)
 	}
 	return source[start : start+end+len("FunctionEnd")]
+}
+
+func installerWriteProbeReportsFile(output, expected string) bool {
+	_, diagnostic, found := strings.Cut(output, "Write probe failed: ")
+	if !found {
+		return false
+	}
+	reported, _, found := strings.Cut(diagnostic, ": ")
+	if !found {
+		return false
+	}
+	// Windows PowerShell can expand an 8.3 TEMP path to its long form. File
+	// identity also handles case differences without accepting another payload.
+	want, err := os.Stat(expected)
+	if err != nil {
+		return false
+	}
+	got, err := os.Stat(reported)
+	return err == nil && os.SameFile(want, got)
+}
+
+func TestInstallerWriteProbeMatchesWindowsFileIdentity(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "payload with a long filename.exe")
+	other := filepath.Join(filepath.Dir(path), "another.exe")
+	for _, file := range []string{path, other} {
+		if err := os.WriteFile(file, []byte("fixture"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	report := "Write probe failed: " + path + ": locked (HRESULT=0x80070020)"
+	if !installerWriteProbeReportsFile(report, strings.ToUpper(path)) {
+		t.Fatal("case-insensitive Windows file identity was rejected")
+	}
+	if installerWriteProbeReportsFile(report, other) || installerWriteProbeReportsFile("missing diagnostic", path) {
+		t.Fatal("an unrelated file or missing diagnostic was accepted")
+	}
+	wide, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	buffer := make([]uint16, 32768)
+	n, err := windows.GetShortPathName(wide, &buffer[0], uint32(len(buffer)))
+	if err != nil || n >= uint32(len(buffer)) {
+		t.Fatalf("read Windows short path: %v (length %d)", err, n)
+	}
+	if !installerWriteProbeReportsFile(report, windows.UTF16ToString(buffer[:n])) {
+		t.Fatal("short TEMP path and long diagnostic path did not match")
+	}
 }
 
 func TestInstallerCoreWriteProbeWindows(t *testing.T) {
@@ -88,8 +138,8 @@ func TestInstallerCoreWriteProbeWindows(t *testing.T) {
 			out, err := cmd.CombinedOutput()
 			if strings.HasPrefix(name, "write-locked") {
 				exit, ok := err.(*exec.ExitError)
-				if !ok || exit.ExitCode() != 11 || !strings.Contains(string(out), "HRESULT=0x80070020") || !strings.Contains(string(out), lockedPath) {
-					t.Fatalf("real write lock must fail with diagnostic error 32, got %v\n%s", err, out)
+				if !ok || exit.ExitCode() != 11 || !strings.Contains(string(out), "HRESULT=0x80070020") || !installerWriteProbeReportsFile(string(out), lockedPath) {
+					t.Fatalf("locked payload %q must return exit 11, error 32, and identify the same file; got %v\n%s", lockedPath, err, out)
 				}
 			} else if err != nil {
 				t.Fatalf("probe failed: %v\n%s", err, out)
