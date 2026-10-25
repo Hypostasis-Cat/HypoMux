@@ -1,5 +1,5 @@
 overrides:
-  "undici@>=8.0.0 <8.10.2": "8.10.2"
+  "undici@>=8.0.0 <8.12.2": "8.12.2"
   "nanoid@<3.3.18": "3.3.18"
   # The published Cubism browser bundle does not use this docs deployment CLI.
   "pixi-live2d-display>gh-pages": "-"
