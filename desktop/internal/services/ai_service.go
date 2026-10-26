@@ -59,7 +59,7 @@ type AIService struct {
 	tun         *TunService
 	logs        *SupportLogStore
 	mcp         *aiMCPServer
-	complete    func(context.Context, aiStoredConfig, []aiMessage, []aiTool, bool) (aiMessage, error)
+	complete    func(context.Context, aiStoredConfig, []aiMessage, []aiTool, aiToolChoice) (aiMessage, error)
 }
 
 func NewAIService(settings *SettingsService, adapters *AdapterService, engine *EngineService, routing *RoutingRuleService, diagnostics *DiagnosticsService, tun *TunService, logs *SupportLogStore) *AIService {
@@ -274,7 +274,7 @@ func (s *AIService) run(ctx context.Context, c aiStoredConfig, messages []aiMess
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		message, err := s.complete(ctx, c, messages, aiTools(), false)
+		message, err := s.complete(ctx, c, messages, aiTools(), aiToolAuto)
 		if err != nil {
 			return err
 		}
@@ -300,8 +300,35 @@ func (s *AIService) run(ctx context.Context, c aiStoredConfig, messages []aiMess
 			messages = append(messages, aiMessage{Role: "tool", ToolID: call.ID, Content: string(data)})
 		}
 	}
-	return errors.New("已达到本轮 12 次模型请求上限，请根据执行记录继续")
+	return s.summarizeAtLimit(ctx, c, messages)
 }
+
+// summarizeAtLimit asks for one tool-free reply so the user gets a status
+// summary instead of a bare error when the tool-round budget runs out.
+func (s *AIService) summarizeAtLimit(ctx context.Context, c aiStoredConfig, messages []aiMessage) error {
+	limit := errors.New("已达到本轮 12 次模型请求上限，请根据执行记录继续")
+	messages = append(messages, aiMessage{Role: "user", Content: aiRoundLimitPrompt})
+	message, err := s.complete(ctx, c, messages, aiTools(), aiToolNone)
+	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return limit
+	}
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	// Tool calls are never executed here, even if the provider ignored tool_choice.
+	if message.Content == "" {
+		return limit
+	}
+	s.addEntry(AIEntry{Role: "assistant", Text: message.Content, Source: "assistant"})
+	s.addEntry(AIEntry{Role: "notice", Text: "已达到本轮工具调用上限，上面是阶段性总结；可以继续对话让助手接着处理。", Source: "assistant"})
+	return nil
+}
+
+const aiRoundLimitPrompt = "HypoMux: the tool-call budget for this turn is exhausted. Do not call tools. Using only the tool results above, summarize what was completed, the current verified state, and what remains unfinished or unverified, then tell the user they can continue in a new message."
+
 func (s *AIService) Cancel() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -363,7 +390,7 @@ func (s *AIService) TestConnection() (string, error) {
 	nonce := aiID()
 	// Test the same automatic tool mode used by real conversations. Some reasoning
 	// providers support tools but reject forced tool_choice while thinking is on.
-	m, err := s.complete(ctx, c, []aiMessage{{Role: "user", Content: "Call connection_test with nonce " + nonce}}, []aiTool{tool}, false)
+	m, err := s.complete(ctx, c, []aiMessage{{Role: "user", Content: "Call connection_test with nonce " + nonce}}, []aiTool{tool}, aiToolAuto)
 	if err != nil {
 		return "", err
 	}

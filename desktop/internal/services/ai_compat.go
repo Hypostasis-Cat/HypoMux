@@ -50,7 +50,7 @@ func aiHTTPError(status int) error {
 	return fmt.Errorf("模型服务返回 HTTP %d；%s", status, hint)
 }
 
-func aiResponsesBody(model string, messages []aiMessage, tools []aiTool, forceTool bool) map[string]any {
+func aiResponsesBody(model string, messages []aiMessage, tools []aiTool, toolChoice aiToolChoice) map[string]any {
 	input := []any{}
 	for _, m := range messages {
 		if m.Role == "tool" {
@@ -68,8 +68,11 @@ func aiResponsesBody(model string, messages []aiMessage, tools []aiTool, forceTo
 		definitions = append(definitions, map[string]any{"type": "function", "name": t.Name, "description": t.Description, "parameters": t.Schema, "strict": false})
 	}
 	body := map[string]any{"model": model, "instructions": aiSystemPrompt + aiReplyGuidance, "input": input, "tools": definitions, "store": false, "include": []string{"reasoning.encrypted_content"}}
-	if forceTool {
+	switch toolChoice {
+	case aiToolForce:
 		body["tool_choice"] = map[string]any{"type": "function", "name": tools[0].Name}
+	case aiToolNone:
+		body["tool_choice"] = "none"
 	}
 	return body
 }
@@ -77,14 +80,24 @@ func aiResponsesBody(model string, messages []aiMessage, tools []aiTool, forceTo
 func aiParseResponses(data []byte) (aiMessage, error) {
 	result := aiMessage{Role: "assistant"}
 	var wire struct {
-		Status string            `json:"status"`
-		Error  json.RawMessage   `json:"error"`
-		Output []json.RawMessage `json:"output"`
+		Status     string            `json:"status"`
+		Error      json.RawMessage   `json:"error"`
+		Output     []json.RawMessage `json:"output"`
+		Incomplete struct {
+			Reason string `json:"reason"`
+		} `json:"incomplete_details"`
 	}
 	if json.Unmarshal(data, &wire) != nil || len(wire.Output) == 0 {
 		return result, errors.New("模型未返回有效 Responses 消息，请检查接口协议")
 	}
-	if (wire.Status != "" && wire.Status != "completed") || (len(wire.Error) > 0 && string(wire.Error) != "null") {
+	if len(wire.Error) > 0 && string(wire.Error) != "null" {
+		return result, errors.New("模型响应未完成，本次工具调用未执行；请检查服务状态或输出限制")
+	}
+	// Only an output-length stop is reported as truncation; aiComplete still
+	// refuses any tool call it contains.
+	if wire.Status == "incomplete" && wire.Incomplete.Reason == "max_output_tokens" {
+		result.Truncated = true
+	} else if wire.Status != "" && wire.Status != "completed" {
 		return result, errors.New("模型响应未完成，本次工具调用未执行；请检查服务状态或输出限制")
 	}
 	result.Blocks = wire.Output

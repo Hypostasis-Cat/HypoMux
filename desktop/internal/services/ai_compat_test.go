@@ -63,7 +63,7 @@ func TestAIRelayAuthForDiscoveryAndCompletion(t *testing.T) {
 			if _, err := s.ListModels(c, "secret", false); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := aiComplete(context.Background(), aiStoredConfig{Config: c, Key: "secret"}, []aiMessage{{Role: "user", Content: "hi"}}, aiTools(), false); err != nil {
+			if _, err := aiComplete(context.Background(), aiStoredConfig{Config: c, Key: "secret"}, []aiMessage{{Role: "user", Content: "hi"}}, aiTools(), aiToolAuto); err != nil {
 				t.Fatal(err)
 			}
 		})
@@ -110,12 +110,12 @@ func TestAIReasoningSurvivesToolRoundTrip(t *testing.T) {
 			defer server.Close()
 			c := aiStoredConfig{Config: AIConfig{Protocol: protocol, BaseURL: server.URL, Model: "reasoner"}}
 			messages := []aiMessage{{Role: "user", Content: "status"}}
-			first, err := aiComplete(context.Background(), c, messages, aiTools(), false)
+			first, err := aiComplete(context.Background(), c, messages, aiTools(), aiToolAuto)
 			if err != nil || len(first.Calls) != 1 {
 				t.Fatalf("first=%+v err=%v", first, err)
 			}
 			messages = append(messages, first, aiMessage{Role: "tool", ToolID: first.Calls[0].ID, Content: "{}"})
-			last, err := aiComplete(context.Background(), c, messages, aiTools(), false)
+			last, err := aiComplete(context.Background(), c, messages, aiTools(), aiToolAuto)
 			if err != nil || last.Content != "ok" {
 				t.Fatalf("last=%+v err=%v", last, err)
 			}
@@ -157,7 +157,7 @@ func TestAISwitchIsolatesHistoryAcrossReload(t *testing.T) {
 		t.Fatal("context ID did not persist")
 	}
 	received := make(chan []aiMessage, 1)
-	loaded.complete = func(_ context.Context, _ aiStoredConfig, m []aiMessage, _ []aiTool, _ bool) (aiMessage, error) {
+	loaded.complete = func(_ context.Context, _ aiStoredConfig, m []aiMessage, _ []aiTool, _ aiToolChoice) (aiMessage, error) {
 		received <- m
 		return aiMessage{Role: "assistant", Content: "ok"}, nil
 	}
@@ -247,8 +247,8 @@ func TestAIConnectionTestUsesAutomaticToolsAndValidatesNonce(t *testing.T) {
 	for _, valid := range []bool{true, false} {
 		s := testAIService(t)
 		s.config.Config = AIConfig{Protocol: "openai", BaseURL: "https://relay.example", Model: "reasoner"}
-		s.complete = func(_ context.Context, _ aiStoredConfig, messages []aiMessage, tools []aiTool, force bool) (aiMessage, error) {
-			if force {
+		s.complete = func(_ context.Context, _ aiStoredConfig, messages []aiMessage, tools []aiTool, force aiToolChoice) (aiMessage, error) {
+			if force != aiToolAuto {
 				t.Error("test forces a mode not used in real conversations")
 			}
 			nonce := strings.TrimPrefix(messages[0].Content, "Call connection_test with nonce ")

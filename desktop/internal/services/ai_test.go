@@ -117,7 +117,7 @@ func TestAIPageContextIsCapturedWithoutChangingUserText(t *testing.T) {
 	s := testAIService(t)
 	s.config.Config = AIConfig{Protocol: "openai", BaseURL: "https://example.com/v1", Model: "test"}
 	received := make(chan []aiMessage, 1)
-	s.complete = func(_ context.Context, _ aiStoredConfig, messages []aiMessage, _ []aiTool, _ bool) (aiMessage, error) {
+	s.complete = func(_ context.Context, _ aiStoredConfig, messages []aiMessage, _ []aiTool, _ aiToolChoice) (aiMessage, error) {
 		received <- messages
 		return aiMessage{Role: "assistant", Content: "Checked"}, nil
 	}
@@ -242,7 +242,7 @@ func TestAIProviderProtocolsAndToolResults(t *testing.T) {
 			two := one
 			two.ID = "two"
 			messages := []aiMessage{{Role: "user", Content: "check"}, {Role: "assistant", Calls: []aiToolCall{one, two}}, {Role: "tool", ToolID: "one", Content: "{}"}, {Role: "tool", ToolID: "two", Content: "{}"}}
-			result, err := aiComplete(context.Background(), aiStoredConfig{Config: AIConfig{Protocol: protocol, BaseURL: server.URL + "/v1", Model: "test"}, Key: "secret"}, messages, aiTools(), false)
+			result, err := aiComplete(context.Background(), aiStoredConfig{Config: AIConfig{Protocol: protocol, BaseURL: server.URL + "/v1", Model: "test"}, Key: "secret"}, messages, aiTools(), aiToolAuto)
 			if err != nil || result.Content != "done" {
 				t.Fatal(result, err)
 			}
@@ -256,7 +256,7 @@ func TestAIProviderDoesNotLeakErrorsOrFollowRedirects(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, target.URL, 307) }))
 	defer server.Close()
 	c := aiStoredConfig{Config: AIConfig{Protocol: "openai", BaseURL: server.URL, Model: "test"}, Key: "very-secret"}
-	_, err := aiComplete(context.Background(), c, []aiMessage{{Role: "user", Content: "hi"}}, aiTools(), false)
+	_, err := aiComplete(context.Background(), c, []aiMessage{{Role: "user", Content: "hi"}}, aiTools(), aiToolAuto)
 	if err == nil || targetHits != 0 || strings.Contains(err.Error(), "very-secret") {
 		t.Fatal("redirect or credential leak", err)
 	}
@@ -266,7 +266,7 @@ func TestAIProviderRejectsMalformedToolCalls(t *testing.T) {
 		_, _ = io.WriteString(w, `{"choices":[{"message":{"tool_calls":[{"id":"a","function":{"name":"start","arguments":"not json"}}]}}]}`)
 	}))
 	defer server.Close()
-	_, err := aiComplete(context.Background(), aiStoredConfig{Config: AIConfig{Protocol: "openai", BaseURL: server.URL, Model: "test"}}, nil, aiTools(), false)
+	_, err := aiComplete(context.Background(), aiStoredConfig{Config: AIConfig{Protocol: "openai", BaseURL: server.URL, Model: "test"}}, nil, aiTools(), aiToolAuto)
 	if err == nil {
 		t.Fatal("accepted invalid model arguments")
 	}
@@ -330,7 +330,7 @@ func TestAIApprovalRejectCancelAndStaleState(t *testing.T) {
 func TestAIRunReturnsToolErrorsToModelWithoutExecutingUnknownTools(t *testing.T) {
 	s := testAIService(t)
 	calls := 0
-	s.complete = func(ctx context.Context, c aiStoredConfig, m []aiMessage, tools []aiTool, force bool) (aiMessage, error) {
+	s.complete = func(ctx context.Context, c aiStoredConfig, m []aiMessage, tools []aiTool, force aiToolChoice) (aiMessage, error) {
 		calls++
 		if calls == 1 {
 			call := aiToolCall{ID: "unknown", Type: "function"}

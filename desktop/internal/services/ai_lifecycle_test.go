@@ -118,7 +118,7 @@ func TestAIDisableCancelsChatWithoutExecutingLateTools(t *testing.T) {
 	s := lifecycleAI(t)
 	s.config.Config = AIConfig{Protocol: "openai", BaseURL: "https://example.com/v1", Model: "test"}
 	started, stopped := make(chan struct{}), make(chan struct{})
-	s.complete = func(ctx context.Context, _ aiStoredConfig, _ []aiMessage, _ []aiTool, _ bool) (aiMessage, error) {
+	s.complete = func(ctx context.Context, _ aiStoredConfig, _ []aiMessage, _ []aiTool, _ aiToolChoice) (aiMessage, error) {
 		close(started)
 		<-ctx.Done()
 		close(stopped)
