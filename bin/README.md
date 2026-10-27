@@ -24,6 +24,23 @@ If the core hangs or the shutdown request is canceled, forced termination still
 cleans up its process tree. That fallback (like a crash) cannot guarantee FakeIP
 cache preservation; normal shutdown should be used whenever possible.
 
+## wintun
+
+- Version: **0.14.1** (Windows amd64, official WireGuard build).
+- Source: https://www.wintun.net/
+- `wintun.dll` SHA-256: `e5da8447dc2c320edc0fc52fa01885c103de8c118481f683643cacc3220dafce`
+- Vendor stamp: "Wintun API Library", WireGuard LLC (FileVersion/ProductVersion 0.14.1).
+
+wintun.dll is the driver API library the engine loads for virtual-adapter mode.
+It ships inside the installer, is covered by the installer's payload digest
+verification, and is replaced only through the protected sidecar upgrade
+transaction.
+Verify a replacement before committing it:
+
+```powershell
+certutil -hashfile bin\wintun.dll SHA256
+```
+
 The official archive also contains `libcronet.dll`. It is not shipped: sing-box
 loads it only for the naive outbound, which HypoMux never configures, and the
 core runs normally without it. Ship it again if a naive outbound is ever added.

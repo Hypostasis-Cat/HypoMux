@@ -17,6 +17,8 @@ HypoMux is an open-source multi-adapter aggregation and split-routing utility fo
 
 HypoMux balances independent connections; it does not split one TCP connection across multiple paths. It works best with highly concurrent workloads such as Steam updates, IDM downloads, game launchers, and large browser downloads. A single-connection transfer remains limited by that connection.
 
+Official website: [https://hypomux.com](https://hypomux.com)
+
 ## Desktop architecture migration (2.5.0)
 
 Version 2.5.0 completes the desktop migration from the former Python/Qt and transitional WPF implementations to **Go + Wails v3 + React + Fluent UI**. The desktop runs as a standard user, while an independent Go Core/Windows service owns privileged TUN, WFP, routing, DNS, and network-recovery operations.
