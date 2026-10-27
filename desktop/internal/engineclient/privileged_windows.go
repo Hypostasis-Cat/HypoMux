@@ -6,14 +6,14 @@ import (
 	"bufio"
 	"context"
 	"crypto/rand"
-	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
-	"strconv"
+	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -23,7 +23,7 @@ import (
 )
 
 const (
-	sessionProtocol        = 1
+	sessionProtocol        = 2
 	sessionAuthKind        = "hypomux.core.authenticate"
 	sessionReadyKind       = "hypomux.host.ready"
 	seeMaskNoCloseProcess  = 0x00000040
@@ -45,7 +45,6 @@ type privilegedLauncher struct{}
 type sessionAuthMessage struct {
 	Protocol int    `json:"protocol"`
 	Kind     string `json:"kind"`
-	Token    string `json:"token"`
 }
 
 type sessionReadyMessage struct {
@@ -58,7 +57,6 @@ type sessionReadyMessage struct {
 type namedPipeServer struct {
 	handle windows.Handle
 	name   string
-	token  string
 }
 
 type shellExecuteInfo struct {
@@ -106,11 +104,11 @@ func (privilegedLauncher) Launch(ctx context.Context, path string) (*coreSession
 	}
 	defer pipe.close()
 
-	process, err := launchElevatedCore(path, pipe.name, pipe.token)
+	process, err := launchElevatedCore(path, pipe.name)
 	if err != nil {
 		return nil, err
 	}
-	connection, err := pipe.accept(ctx, process.pid)
+	connection, err := pipe.accept(ctx, process.pid, path)
 	if err != nil {
 		// The desktop cannot terminate an elevated process (ACCESS_DENIED) and
 		// a wedged core may never exit on its own. Never wait indefinitely
@@ -131,12 +129,15 @@ func (privilegedLauncher) Launch(ctx context.Context, path string) (*coreSession
 }
 
 func createAuthenticatedPipe() (*namedPipeServer, error) {
-	random := make([]byte, 32)
+	random := make([]byte, 24)
 	if _, err := io.ReadFull(rand.Reader, random); err != nil {
 		return nil, err
 	}
-	token := hex.EncodeToString(random)
-	name := `\\.\pipe\HypoMux-Core-` + token[:24]
+	// The pipe name is not a secret: the session is authenticated by mutual
+	// process pinning (the host checks the client PID and image, the elevated
+	// core checks the pipe server image), so no credential travels on a
+	// command line that same-user processes can read.
+	name := `\\.\pipe\HypoMux-Core-` + hex.EncodeToString(random)
 
 	user, err := windows.GetCurrentProcessToken().GetTokenUser()
 	if err != nil {
@@ -169,10 +170,10 @@ func createAuthenticatedPipe() (*namedPipeServer, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &namedPipeServer{handle: handle, name: name, token: token}, nil
+	return &namedPipeServer{handle: handle, name: name}, nil
 }
 
-func (p *namedPipeServer) accept(ctx context.Context, expectedPID int) (pipeFile, error) {
+func (p *namedPipeServer) accept(ctx context.Context, expectedPID int, expectedPath string) (pipeFile, error) {
 	if err := connectAuthenticatedPipeServer(ctx, p.handle); err != nil {
 		return nil, err
 	}
@@ -184,13 +185,18 @@ func (p *namedPipeServer) accept(ctx context.Context, expectedPID int) (pipeFile
 	if expectedPID <= 0 || clientPID != uint32(expectedPID) {
 		return nil, fmt.Errorf("拒绝非预期核心进程（PID %d）", clientPID)
 	}
+	// A PID is reused by unrelated processes; pin the connecting process to
+	// the executable that was actually elevated before trusting the session.
+	if err := verifyCoreProcessImage(clientPID, expectedPath); err != nil {
+		return nil, err
+	}
 
 	connection, err := newPipeFile(p.handle)
 	p.handle = windows.InvalidHandle
 	if err != nil {
 		return nil, fmt.Errorf("创建命名管道连接失败：%w", err)
 	}
-	if err := authenticateCore(ctx, connection, p.token); err != nil {
+	if err := authenticateCore(ctx, connection); err != nil {
 		_ = connection.Close()
 		return nil, err
 	}
@@ -240,7 +246,7 @@ func connectAuthenticatedPipeServer(ctx context.Context, handle windows.Handle) 
 	}
 }
 
-func authenticateCore(ctx context.Context, connection pipeFile, token string) error {
+func authenticateCore(ctx context.Context, connection pipeFile) error {
 	// The pipe handle is overlapped, so the deadline is honoured by the
 	// netpoller and ReadBytes below cannot block past it. Without this the
 	// goroutine's only escape is the Close in the ctx.Done() branch, and a Close
@@ -269,15 +275,14 @@ func authenticateCore(ctx context.Context, connection pipeFile, token string) er
 			result <- errors.New("核心身份消息无效")
 			return
 		}
-		tokenMatches := subtle.ConstantTimeCompare([]byte(auth.Token), []byte(token)) == 1
-		if auth.Protocol != sessionProtocol || auth.Kind != sessionAuthKind || !tokenMatches {
+		if auth.Protocol != sessionProtocol || auth.Kind != sessionAuthKind {
 			_ = writeSessionMessage(connection, sessionReadyMessage{
 				Protocol: sessionProtocol,
 				Kind:     sessionReadyKind,
 				OK:       false,
 				Error:    "authentication_failed",
 			})
-			result <- errors.New("核心一次性会话凭据不匹配")
+			result <- errors.New("核心身份协议不匹配")
 			return
 		}
 		result <- writeSessionMessage(connection, sessionReadyMessage{
@@ -309,15 +314,93 @@ func writeSessionMessage(writer io.Writer, value any) error {
 	return err
 }
 
-func launchElevatedCore(path, pipeName, token string) (*windowsCoreProcess, error) {
+func processImagePath(processID uint32) (string, error) {
+	process, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, processID)
+	if err != nil {
+		return "", fmt.Errorf("读取核心进程身份（PID %d）：%w", processID, err)
+	}
+	defer windows.CloseHandle(process)
+	buffer := make([]uint16, 32768)
+	size := uint32(len(buffer))
+	if err := windows.QueryFullProcessImageName(process, 0, &buffer[0], &size); err != nil {
+		return "", fmt.Errorf("读取核心可执行文件（PID %d）：%w", processID, err)
+	}
+	if size == 0 {
+		return "", fmt.Errorf("核心进程 PID %d 没有可执行文件路径", processID)
+	}
+	return windows.UTF16ToString(buffer[:size]), nil
+}
+
+// canonicalFilePath resolves a path through the file system so reparse points
+// and aliasing cannot disguise a different executable behind the expected name.
+func canonicalFilePath(path string) (string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return "", err
+	}
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf("核心可执行文件不是常规文件：%s", path)
+	}
+	size := uint32(512)
+	for size <= 32768 {
+		buffer := make([]uint16, size)
+		length, err := windows.GetFinalPathNameByHandle(windows.Handle(file.Fd()), &buffer[0], size, 0)
+		if err != nil {
+			return "", err
+		}
+		if length < size {
+			canonical := windows.UTF16ToString(buffer[:length])
+			switch {
+			case strings.HasPrefix(canonical, `\\?\UNC\`):
+				canonical = `\\` + strings.TrimPrefix(canonical, `\\?\UNC\`)
+			case strings.HasPrefix(canonical, `\\?\`):
+				canonical = strings.TrimPrefix(canonical, `\\?\`)
+			}
+			if strings.TrimSpace(canonical) == "" {
+				return "", errors.New("canonical path is empty")
+			}
+			return filepath.Clean(canonical), nil
+		}
+		size = length + 1
+	}
+	return "", errors.New("canonical path exceeds the Windows path limit")
+}
+
+func verifyCoreProcessImage(processID uint32, expectedPath string) error {
+	actual, err := processImagePath(processID)
+	if err != nil {
+		return err
+	}
+	actualCanonical, err := canonicalFilePath(actual)
+	if err != nil {
+		return err
+	}
+	expectedCanonical, err := canonicalFilePath(expectedPath)
+	if err != nil {
+		return err
+	}
+	if !strings.EqualFold(actualCanonical, expectedCanonical) {
+		return fmt.Errorf("拒绝非预期核心可执行文件（PID %d）", processID)
+	}
+	return nil
+}
+
+func launchElevatedCore(path, pipeName string) (*windowsCoreProcess, error) {
 	verb, _ := windows.UTF16PtrFromString("runas")
 	file, err := windows.UTF16PtrFromString(path)
 	if err != nil {
 		return nil, err
 	}
-	parameters := "serve-pipe --pipe " + pipeName +
-		" --session-token " + token +
-		" --host-pid " + strconv.Itoa(os.Getpid())
+	// The pipe name is not a secret: the session is authenticated by mutual
+	// process pinning (the host checks the client PID and image, the elevated
+	// core checks the pipe server image), so no credential travels on a
+	// command line that same-user processes can read.
+	parameters := "serve-pipe --pipe " + pipeName
 	parameterPointer, err := windows.UTF16PtrFromString(parameters)
 	if err != nil {
 		return nil, err

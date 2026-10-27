@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	pipeSessionProtocol   = 1
+	pipeSessionProtocol   = 2
 	pipeSessionAuthKind   = "hypomux.core.authenticate"
 	pipeSessionReadyKind  = "hypomux.host.ready"
 	maxPipeSessionMessage = 4096
@@ -25,7 +25,6 @@ const (
 type pipeAuthMessage struct {
 	Protocol int    `json:"protocol"`
 	Kind     string `json:"kind"`
-	Token    string `json:"token"`
 }
 
 type pipeReadyMessage struct {
@@ -41,15 +40,16 @@ type bufferedPipeConnection struct {
 	io.Closer
 }
 
+// pipeHostVerifier validates the process serving the host pipe before the
+// engine sends anything on it. Production uses verifyDesktopHostProcess;
+// tests supply a stub because the test pipe server lives in the test binary.
+type pipeHostVerifier func(serverPID uint32) error
+
 func connectAuthenticatedPipe(
 	ctx context.Context,
 	name string,
-	token string,
-	hostPID int,
+	verifyHost pipeHostVerifier,
 ) (io.ReadWriteCloser, error) {
-	if hostPID <= 0 {
-		return nil, errors.New("invalid desktop host PID")
-	}
 	namePointer, err := windows.UTF16PtrFromString(name)
 	if err != nil {
 		return nil, err
@@ -86,14 +86,16 @@ func connectAuthenticatedPipe(
 		_ = connection.Close()
 		return nil, fmt.Errorf("read desktop host process identity: %w", err)
 	}
-	if serverPID != uint32(hostPID) {
+	// The pipe name and any caller-supplied arguments are attacker-chosen in
+	// the threat model, so the server is trusted only after its executable has
+	// been pinned to the installed desktop application.
+	if err := verifyHost(serverPID); err != nil {
 		_ = connection.Close()
-		return nil, fmt.Errorf("reject unexpected desktop host process (PID %d)", serverPID)
+		return nil, err
 	}
 	auth := pipeAuthMessage{
 		Protocol: pipeSessionProtocol,
 		Kind:     pipeSessionAuthKind,
-		Token:    token,
 	}
 	if err := writePipeMessage(connection, auth); err != nil {
 		_ = connection.Close()

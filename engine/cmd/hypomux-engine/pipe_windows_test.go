@@ -6,8 +6,10 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -15,7 +17,7 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-func TestCorePipeClientAuthenticatesExpectedDesktopHost(t *testing.T) {
+func TestCorePipeClientAuthenticatesVerifiedDesktopHost(t *testing.T) {
 	name, server := createTestPipeServer(t)
 	var serverFileOwnsHandle atomic.Bool
 	defer func() {
@@ -46,7 +48,7 @@ func TestCorePipeClientAuthenticatesExpectedDesktopHost(t *testing.T) {
 			serverResult <- err
 			return
 		}
-		if auth.Token != "one-time-test-token" || auth.Kind != pipeSessionAuthKind {
+		if auth.Kind != pipeSessionAuthKind || auth.Protocol != pipeSessionProtocol {
 			serverResult <- fmt.Errorf("unexpected auth message: %+v", auth)
 			return
 		}
@@ -67,7 +69,13 @@ func TestCorePipeClientAuthenticatesExpectedDesktopHost(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	connection, err := connectAuthenticatedPipe(ctx, name, "one-time-test-token", os.Getpid())
+	verifier := func(serverPID uint32) error {
+		if serverPID != uint32(os.Getpid()) {
+			return fmt.Errorf("unexpected test server PID %d", serverPID)
+		}
+		return nil
+	}
+	connection, err := connectAuthenticatedPipe(ctx, name, verifier)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +92,7 @@ func TestCorePipeClientAuthenticatesExpectedDesktopHost(t *testing.T) {
 	}
 }
 
-func TestCorePipeClientRejectsUnexpectedDesktopHostPID(t *testing.T) {
+func TestCorePipeClientRejectsUnverifiedDesktopHost(t *testing.T) {
 	name, server := createTestPipeServer(t)
 	defer windows.CloseHandle(server)
 	connected := make(chan error, 1)
@@ -100,15 +108,68 @@ func TestCorePipeClientRejectsUnexpectedDesktopHostPID(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	connection, err := connectAuthenticatedPipe(ctx, name, "unused", os.Getpid()+1)
+	verifier := func(serverPID uint32) error { return errors.New("unverified host") }
+	connection, err := connectAuthenticatedPipe(ctx, name, verifier)
 	if connection != nil {
 		_ = connection.Close()
 	}
 	if err == nil {
-		t.Fatal("unexpected desktop host PID was accepted")
+		t.Fatal("unverified desktop host was accepted")
 	}
 	if connectErr := <-connected; connectErr != nil {
 		t.Fatal(connectErr)
+	}
+}
+
+func TestDesktopHostVerificationAcceptsSiblingExecutable(t *testing.T) {
+	// The development layout resolves hypomux.exe next to the engine binary.
+	// The test binary plays the engine role, so the hypomux.exe placed in the
+	// same directory must satisfy the image verifier.
+	sibling := filepath.Join(filepath.Dir(mustTestExecutable(t)), "hypomux.exe")
+	mustWriteTestFile(t, sibling, "test desktop executable")
+	t.Cleanup(func() { _ = os.Remove(sibling) })
+	canonical, err := canonicalRegularFile(sibling, "test desktop executable")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyDesktopHostImage(canonical, uint32(os.Getpid())); err != nil {
+		t.Fatalf("sibling desktop executable was rejected: %v", err)
+	}
+}
+
+func TestDesktopHostVerificationRejectsForeignImage(t *testing.T) {
+	engine := mustTestExecutable(t)
+	canonical, err := canonicalRegularFile(engine, "test engine executable")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyDesktopHostImage(canonical, uint32(os.Getpid())); err == nil {
+		t.Fatal("a process image that is not the pinned desktop executable was accepted")
+	}
+}
+
+func TestDesktopHostProcessVerificationRejectsForeignProcess(t *testing.T) {
+	// End to end: the test binary is neither the policy-pinned desktop
+	// executable nor a hypomux.exe next to itself, so the verifier must
+	// reject it whatever the registry state is.
+	if err := verifyDesktopHostProcess(uint32(os.Getpid())); err == nil {
+		t.Fatal("a process that is not the pinned desktop executable was accepted")
+	}
+}
+
+func mustTestExecutable(t *testing.T) string {
+	t.Helper()
+	path, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func mustWriteTestFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatal(err)
 	}
 }
 

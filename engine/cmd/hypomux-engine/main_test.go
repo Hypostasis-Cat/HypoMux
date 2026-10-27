@@ -33,10 +33,10 @@ func TestDiagnoseCommandEmitsCompatibleJSONForInvalidSource(t *testing.T) {
 	}
 }
 
-func TestServePipeRejectsMissingAuthenticatedSessionArguments(t *testing.T) {
+func TestServePipeRejectsMissingPipeArgument(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	exitCode := run(
-		[]string{"serve-pipe", "--pipe", `\\.\pipe\HypoMux-Core-test`},
+		[]string{"serve-pipe"},
 		strings.NewReader(""),
 		&stdout,
 		&stderr,
@@ -44,7 +44,7 @@ func TestServePipeRejectsMissingAuthenticatedSessionArguments(t *testing.T) {
 	if exitCode != 2 {
 		t.Fatalf("exit code = %d, stderr = %s", exitCode, stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "--session-token") {
+	if !strings.Contains(stderr.String(), "--pipe") {
 		t.Fatalf("missing safe argument error: %s", stderr.String())
 	}
 }
