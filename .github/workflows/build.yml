@@ -39,17 +39,20 @@ jobs:
       - name: Validate release options
         if: github.event_name == 'workflow_dispatch'
         shell: pwsh
+        env:
+          HYPO_SIGNING_MODE: ${{ inputs.signing_mode }}
+          HYPO_DISPATCH_REF: ${{ github.ref }}
         run: |
-          if ("${{ inputs.signing_mode }}" -eq "production" -and
-              "${{ github.ref }}" -ne "refs/heads/main") {
+          if ($env:HYPO_SIGNING_MODE -eq "production" -and
+              $env:HYPO_DISPATCH_REF -ne "refs/heads/main") {
             throw "Production-signing tests must be started from main."
           }
-          if ("${{ inputs.signing_mode }}" -eq "publish" -and
-              "${{ github.ref }}" -notlike "refs/tags/v*") {
+          if ($env:HYPO_SIGNING_MODE -eq "publish" -and
+              $env:HYPO_DISPATCH_REF -notlike "refs/tags/v*") {
             throw "Publishing must be started from a v* tag."
           }
-          if ("${{ inputs.signing_mode }}" -eq "test" -and
-              "${{ github.ref }}" -like "refs/tags/*") {
+          if ($env:HYPO_SIGNING_MODE -eq "test" -and
+              $env:HYPO_DISPATCH_REF -like "refs/tags/*") {
             throw "Test signing must not be started from a release tag."
           }
 
@@ -121,8 +124,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
           # The community feed can return transient 504s before packaging starts.
+          # NSIS produces the installer that goes on to SignPath, so pin its
+          # version like every other third-party build tool in this workflow.
           for ($nsisAttempt = 1; $nsisAttempt -le 3; $nsisAttempt++) {
-            choco install nsis --yes --no-progress --execution-timeout=300
+            choco install nsis --version 3.13.0 --yes --no-progress --execution-timeout=300
             $nsisInstallCode = $LASTEXITCODE
             if ($nsisInstallCode -in @(0, 3010)) { break }
             if ($nsisAttempt -eq 3) {
