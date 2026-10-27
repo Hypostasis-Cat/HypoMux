@@ -256,6 +256,21 @@ FunctionEnd
 
 !include "install-directory.nsh"
 
+; Payload integrity: compute the SHA-256 of every staged Core binary while
+; compiling and embed the digests into the (signed) installer. The elevated
+; setup helper re-hashes the staged files against these digests before it
+; mutates anything, so bytes swapped inside the user-writable staging
+; directory between extraction and the privileged run are rejected.
+!tempfile HYPOMUX_PAYLOAD_DIGESTS
+!system 'powershell -NoProfile -ExecutionPolicy Bypass -File "${__FILEDIR__}\compute-payload-hashes.ps1" -BinDir "${__FILEDIR__}\..\..\..\bin" -OutFile "${HYPOMUX_PAYLOAD_DIGESTS}"'
+!include "${HYPOMUX_PAYLOAD_DIGESTS}"
+!ifdef HYPOMUX_PAYLOAD_SHA256
+   !delfile "${HYPOMUX_PAYLOAD_DIGESTS}"
+   !undef HYPOMUX_PAYLOAD_DIGESTS
+!else
+   !error "payload SHA-256 computation failed; refusing to build an installer without payload integrity digests"
+!endif
+
 Function .onInit
    SetErrorLevel 1 ; Success is assigned only after transaction commit.
    !insertmacro HypoMuxClearInheritedPSModulePath
@@ -666,18 +681,59 @@ Function RemoveLegacyInstallations
     !endif
 FunctionEnd
 
+!macro HypoMuxHardenStagingDirectory DIRECTORY
+   ; The elevated helper and the Core payloads are staged under the user's
+   ; temp directory, where same-user malware could otherwise swap them between
+   ; extraction and the privileged run. Restrict the directory to
+   ; SYSTEM/Administrators, hand ownership to Administrators and apply an
+   ; inheritable High mandatory label, so an unprivileged caller can neither
+   ; write nor replace the staged bytes. The setup helper independently
+   ; verifies the directory and payload digests (see internal/setup), so a
+   ; hardening failure here aborts instead of continuing unprotected.
+   !if "${WAILS_INSTALL_SCOPE}" != "user"
+       nsExec::ExecToStack /TIMEOUT=15000 '"$SYSDIR\icacls.exe" "${DIRECTORY}" /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F"'
+       Pop $0
+       Pop $1
+       ${If} $0 != 0
+           MessageBox MB_OK|MB_ICONSTOP "Failed to protect the setup staging directory: $1"
+           SetErrorLevel 69
+           Abort
+       ${EndIf}
+       nsExec::ExecToStack /TIMEOUT=15000 '"$SYSDIR\icacls.exe" "${DIRECTORY}" /setowner "*S-1-5-32-544"'
+       Pop $0
+       Pop $1
+       ${If} $0 != 0
+           MessageBox MB_OK|MB_ICONSTOP "Failed to protect the setup staging directory: $1"
+           SetErrorLevel 69
+           Abort
+       ${EndIf}
+       nsExec::ExecToStack /TIMEOUT=15000 '"$SYSDIR\icacls.exe" "${DIRECTORY}" /setintegritylevel "(OI)(CI)H"'
+       Pop $0
+       Pop $1
+       ${If} $0 != 0
+           MessageBox MB_OK|MB_ICONSTOP "Failed to protect the setup staging directory: $1"
+           SetErrorLevel 69
+           Abort
+       ${EndIf}
+   !endif
+!macroend
+
 !macro HypoMuxStagePayload PREFIX
 Function ${PREFIX}StageSetupHelper
     InitPluginsDir
+    !insertmacro HypoMuxHardenStagingDirectory "$PLUGINSDIR"
     StrCpy $HypoMuxSetupHelper "$PLUGINSDIR\payload\${PRODUCT_EXECUTABLE}"
     !if "${WAILS_INSTALL_SCOPE}" == "user"
         StrCpy $HypoMuxSetupLog "$LOCALAPPDATA\HypoMux\SetupTransaction\installer-errors.log"
     !else
         StrCpy $HypoMuxSetupLog "$APPDATA\HypoMux\SetupTransaction\installer-errors.log"
     !endif
+    ; SetOutPath creates the payload directory before the helper path is
+    ; checked so the hardening below always sees a real directory.
+    SetOutPath "$PLUGINSDIR\payload"
+    !insertmacro HypoMuxHardenStagingDirectory "$PLUGINSDIR\payload"
     ; .onInit stages the helper only when it has a journal to recover.
     IfFileExists "$HypoMuxSetupHelper" setupHelperStaged
-    SetOutPath "$PLUGINSDIR\payload"
     !insertmacro wails.files
     setupHelperStaged:
 FunctionEnd
@@ -769,7 +825,7 @@ FunctionEnd
 
 Function RunSetupTransaction
     DetailPrint "Setup: $HypoMuxSetupOperation"
-    nsExec::ExecToStack /TIMEOUT=180000 '"$HypoMuxSetupHelper" --setup-transaction $HypoMuxSetupOperation --scope ${WAILS_INSTALL_SCOPE} --install-dir "$INSTDIR\." --payload "$PLUGINSDIR\payload"'
+    nsExec::ExecToStack /TIMEOUT=180000 '"$HypoMuxSetupHelper" --setup-transaction $HypoMuxSetupOperation --scope ${WAILS_INSTALL_SCOPE} --install-dir "$INSTDIR\." --payload "$PLUGINSDIR\payload" --payload-sha256 "${HYPOMUX_PAYLOAD_SHA256}"'
     Pop $0
     Pop $1
     DetailPrint "$1"
