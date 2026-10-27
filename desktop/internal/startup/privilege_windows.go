@@ -412,13 +412,31 @@ func verifyAndResumeReplacement(processInfo windows.ProcessInformation, expected
 	return nil
 }
 
+// systemTool resolves a Windows system utility by absolute path. This runs
+// while the process is elevated, and Go resolves bare names through the whole
+// PATH — including user-writable directories — so "schtasks.exe" would let a
+// same-user program plant an executable into an elevated context.
+func systemTool(name string) (string, error) {
+	dir, err := windows.GetSystemDirectory()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, name), nil
+}
+
 func repairLegacyAutostartTask() error {
-	query := exec.Command("schtasks.exe", "/Query", "/TN", legacyAutostartTaskName)
+	schtasks, err := systemTool("schtasks.exe")
+	if err != nil {
+		// Without the system tool the legacy task cannot be inspected either;
+		// leave it alone exactly like a failed query would.
+		return nil
+	}
+	query := exec.Command(schtasks, "/Query", "/TN", legacyAutostartTaskName)
 	hideWindow(query)
 	if err := query.Run(); err != nil {
 		return nil
 	}
-	remove := exec.Command("schtasks.exe", "/Delete", "/TN", legacyAutostartTaskName, "/F")
+	remove := exec.Command(schtasks, "/Delete", "/TN", legacyAutostartTaskName, "/F")
 	hideWindow(remove)
 	output, err := remove.CombinedOutput()
 	if err != nil {

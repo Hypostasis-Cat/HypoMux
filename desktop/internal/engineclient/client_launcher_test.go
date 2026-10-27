@@ -245,8 +245,8 @@ func TestEnsureWaitForConcurrentStartupHonoursContext(t *testing.T) {
 	}
 }
 
-func TestServiceFirstLauncherFallsBackOnlyWhenServiceIsNotInstalled(t *testing.T) {
-	serviceCalls, fallbackCalls := 0, 0
+func TestServiceFirstLauncherValidatesFallbackPathWhenServiceIsUnavailable(t *testing.T) {
+	serviceCalls, fallbackCalls, trustCalls := 0, 0, 0
 	expected := &coreSession{}
 	launcher := serviceFirstLauncher{
 		service: countingLauncher{
@@ -257,13 +257,43 @@ func TestServiceFirstLauncherFallsBackOnlyWhenServiceIsNotInstalled(t *testing.T
 			calls:   &fallbackCalls,
 			session: expected,
 		},
+		allowAutomaticFallbackPath: func(string) error {
+			trustCalls++
+			return nil
+		},
 	}
 	session, err := launcher.Launch(context.Background(), "core.exe")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if session != expected || serviceCalls != 1 || fallbackCalls != 1 {
-		t.Fatalf("unexpected service-first result: session=%p service=%d fallback=%d", session, serviceCalls, fallbackCalls)
+	if session != expected || session.fallback != "service_unavailable" {
+		t.Fatalf("unexpected service-first result: session=%p fallback=%q", session, session.fallback)
+	}
+	if serviceCalls != 1 || fallbackCalls != 1 || trustCalls != 1 {
+		t.Fatalf("unexpected calls: service=%d fallback=%d trust=%d", serviceCalls, fallbackCalls, trustCalls)
+	}
+}
+
+func TestServiceFirstLauncherFailsClosedWhenUnavailableServiceFallbackPathIsUntrusted(t *testing.T) {
+	serviceCalls, fallbackCalls := 0, 0
+	launcher := serviceFirstLauncher{
+		service: countingLauncher{
+			calls: &serviceCalls,
+			err:   ErrCoreServiceUnavailable,
+		},
+		fallback: countingLauncher{
+			calls: &fallbackCalls,
+		},
+		allowAutomaticFallbackPath: func(string) error {
+			return errors.New("untrusted packaged path")
+		},
+	}
+	_, err := launcher.Launch(context.Background(), "core.exe")
+	if !errors.Is(err, ErrCoreServiceUnavailable) {
+		t.Fatalf("expected unavailable service error, got %v", err)
+	}
+	if serviceCalls != 1 || fallbackCalls != 0 {
+		t.Fatalf("unexpected calls: service=%d fallback=%d", serviceCalls, fallbackCalls)
 	}
 }
 
