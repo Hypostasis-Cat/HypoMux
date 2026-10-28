@@ -33,6 +33,7 @@ func Run(args []string, out io.Writer) int {
 	scope := fs.String("scope", "machine", "machine or user")
 	install := fs.String("install-dir", "", "desktop destination")
 	payload := fs.String("payload", "", "staged installer payload")
+	digests := fs.String("payload-sha256", "", "expected staged payload SHA-256 digests")
 	previous := fs.String("previous-dir", "", "previous desktop directory")
 	if e := fs.Parse(args[1:]); e != nil {
 		return 2
@@ -91,7 +92,9 @@ func Run(args []string, out io.Writer) int {
 		e = t.Recover()
 	case "begin":
 		var items []Item
-		items, e = makePlan(*install, *payload, platform)
+		if e = verifyPayloadIntegrity(*payload, *digests, machine); e == nil {
+			items, e = makePlan(*install, *payload, platform)
+		}
 		if e == nil {
 			e = t.Begin(items)
 		}
