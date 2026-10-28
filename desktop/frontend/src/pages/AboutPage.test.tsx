@@ -148,3 +148,28 @@ it.each([true, false])("opens and reopens notes at the top (footer link: %s)", a
     });
   }
 });
+
+it("renders non-http release-note links as inert text", async () => {
+  mocks.check.mockResolvedValue({
+    available: true,
+    current_version: "2.8.2",
+    release: {
+      tag_name: "v2.8.3",
+      notes: "[docs](file:///C:/Windows/System32) and [evil](javascript:alert(1)) stay inert; [ok](https://example.com) opens.",
+    },
+  });
+  render(<FluentProvider theme={webLightTheme}><AboutPage /></FluentProvider>);
+  const checkButton = await waitFor(() => {
+    const button = screen.getByRole("button", { name: "about_check_update" });
+    expect(button.hasAttribute("disabled")).toBe(false);
+    return button;
+  });
+  fireEvent.click(checkButton);
+  const dialog = await screen.findByRole("dialog");
+  // Only the https link is interactive; other schemes never reach the shell.
+  const links = within(dialog).getAllByRole("link");
+  expect(links).toHaveLength(1);
+  fireEvent.click(links[0]);
+  expect(mocks.openURL).toHaveBeenCalledTimes(1);
+  expect(mocks.openURL).toHaveBeenCalledWith("https://example.com");
+});

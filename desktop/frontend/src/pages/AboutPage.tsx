@@ -43,17 +43,24 @@ function ReleaseNotes({
         remarkPlugins={[remarkGfm]}
         skipHtml
         components={{
-          a: ({ href, children }) => (
-            <Link
-              href={href}
-              onClick={(event) => {
-                event.preventDefault();
-                if (href) void desktopPlatform.openURL(href);
-              }}
-            >
-              {children}
-            </Link>
-          ),
+          // Release notes come from the remote update channel, so apply the
+          // same handling as AI replies: degrade images to alt text and open
+          // links only for http(s) — other schemes must never reach the shell.
+          img: ({ alt }) => <span>{alt || ""}</span>,
+          a: ({ href, children }) =>
+            /^https?:\/\//i.test(href ?? "") ? (
+              <Link
+                href={href}
+                onClick={(event) => {
+                  event.preventDefault();
+                  if (href) void desktopPlatform.openURL(href);
+                }}
+              >
+                {children}
+              </Link>
+            ) : (
+              <span>{children}</span>
+            ),
         }}
       >
         {value}
