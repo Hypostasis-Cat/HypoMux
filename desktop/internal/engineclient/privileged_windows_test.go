@@ -15,7 +15,16 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-func TestAuthenticatedPipeAcceptsExpectedProcessAndToken(t *testing.T) {
+func testExecutablePath(t *testing.T) string {
+	t.Helper()
+	path, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestAuthenticatedPipeAcceptsExpectedProcessAndImage(t *testing.T) {
 	pipe, err := createAuthenticatedPipe()
 	if err != nil {
 		t.Fatal(err)
@@ -29,7 +38,7 @@ func TestAuthenticatedPipeAcceptsExpectedProcessAndToken(t *testing.T) {
 		err  error
 	}, 1)
 	go func() {
-		file, acceptErr := pipe.accept(ctx, os.Getpid())
+		file, acceptErr := pipe.accept(ctx, os.Getpid(), testExecutablePath(t))
 		accepted <- struct {
 			file pipeFile
 			err  error
@@ -41,7 +50,6 @@ func TestAuthenticatedPipeAcceptsExpectedProcessAndToken(t *testing.T) {
 	if err := writeSessionMessage(client, sessionAuthMessage{
 		Protocol: sessionProtocol,
 		Kind:     sessionAuthKind,
-		Token:    pipe.token,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +84,7 @@ func TestAuthenticatedPipeSupportsConcurrentProtocolTrafficAfterAuthDeadline(t *
 		err  error
 	}, 1)
 	go func() {
-		file, acceptErr := pipe.accept(ctx, os.Getpid())
+		file, acceptErr := pipe.accept(ctx, os.Getpid(), testExecutablePath(t))
 		accepted <- struct {
 			file pipeFile
 			err  error
@@ -88,7 +96,6 @@ func TestAuthenticatedPipeSupportsConcurrentProtocolTrafficAfterAuthDeadline(t *
 	if err := writeSessionMessage(client, sessionAuthMessage{
 		Protocol: sessionProtocol,
 		Kind:     sessionAuthKind,
-		Token:    pipe.token,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -156,18 +163,27 @@ func TestAuthenticatedPipeSupportsConcurrentProtocolTrafficAfterAuthDeadline(t *
 	}
 }
 
-func TestAuthenticatedPipeRejectsWrongOneTimeToken(t *testing.T) {
+func TestAuthenticatedPipeRejectsUnexpectedClientImage(t *testing.T) {
 	pipe, err := createAuthenticatedPipe()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer pipe.close()
 
+	// The pinned executable exists but is not the connecting process's image,
+	// which is exactly what a reused PID or forged client looks like.
+	other, err := os.CreateTemp(t.TempDir(), "hypomux-other-*.exe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherPath := other.Name()
+	other.Close()
+
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	accepted := make(chan error, 1)
 	go func() {
-		_, acceptErr := pipe.accept(ctx, os.Getpid())
+		_, acceptErr := pipe.accept(ctx, os.Getpid(), otherPath)
 		accepted <- acceptErr
 	}()
 
@@ -176,19 +192,11 @@ func TestAuthenticatedPipeRejectsWrongOneTimeToken(t *testing.T) {
 	if err := writeSessionMessage(client, sessionAuthMessage{
 		Protocol: sessionProtocol,
 		Kind:     sessionAuthKind,
-		Token:    "not-the-issued-token",
 	}); err != nil {
 		t.Fatal(err)
 	}
-	var ready sessionReadyMessage
-	if err := readTestPipeMessage(client, &ready); err != nil {
-		t.Fatal(err)
-	}
-	if ready.OK || ready.Error != "authentication_failed" {
-		t.Fatalf("unexpected rejection response: %+v", ready)
-	}
 	if err := <-accepted; err == nil {
-		t.Fatal("wrong token was accepted")
+		t.Fatal("unexpected client image was accepted")
 	}
 }
 
@@ -203,7 +211,7 @@ func TestAuthenticatedPipeRejectsUnexpectedClientPID(t *testing.T) {
 	defer cancel()
 	accepted := make(chan error, 1)
 	go func() {
-		_, acceptErr := pipe.accept(ctx, os.Getpid()+1)
+		_, acceptErr := pipe.accept(ctx, os.Getpid()+1, testExecutablePath(t))
 		accepted <- acceptErr
 	}()
 	client := openTestPipe(t, pipe.name)

@@ -85,17 +85,15 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		flags := flag.NewFlagSet("serve-pipe", flag.ContinueOnError)
 		flags.SetOutput(stderr)
 		pipeName := flags.String("pipe", "", "authenticated host pipe name")
-		sessionToken := flags.String("session-token", "", "one-time host session token")
-		hostPID := flags.Int("host-pid", 0, "expected desktop host process ID")
 		if err := flags.Parse(args[1:]); err != nil {
 			return 2
 		}
-		if *pipeName == "" || *sessionToken == "" || *hostPID <= 0 {
-			fmt.Fprintln(stderr, "serve-pipe requires --pipe, --session-token and --host-pid")
+		if *pipeName == "" {
+			fmt.Fprintln(stderr, "serve-pipe requires --pipe")
 			return 2
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-		connection, err := connectAuthenticatedPipe(ctx, *pipeName, *sessionToken, *hostPID)
+		connection, err := connectAuthenticatedPipe(ctx, *pipeName, verifyDesktopHostProcess)
 		cancel()
 		if err != nil {
 			fmt.Fprintf(stderr, "connect authenticated host pipe: %v\n", err)
