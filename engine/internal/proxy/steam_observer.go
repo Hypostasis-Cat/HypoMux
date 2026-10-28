@@ -236,9 +236,23 @@ func (s *Server) newSteamObserver(session *connection) *steamHTTPObserver {
 	}
 	o.timer = time.AfterFunc(5*time.Second, o.expire)
 	o.mu.Lock()
-	o.stopContext = context.AfterFunc(c.ctx, o.close)
+	o.stopContext = context.AfterFunc(c.ctx, o.closeAfterContext)
 	o.mu.Unlock()
 	return o
+}
+
+// closeAfterContext bridges context cancellation to close. context.AfterFunc
+// invokes its function synchronously in the registering goroutine when the
+// context is already done, and newSteamObserver registers while holding
+// o.mu and cdn.mu — both of which close re-acquires non-reentrantly — so a
+// synchronous call would deadlock the engine's stop path. Detaching into a
+// goroutine keeps registration safe in that race; in the normal case the
+// AfterFunc goroutine merely spawns the closer one hop later.
+func (o *steamHTTPObserver) closeAfterContext() {
+	if o == nil {
+		return
+	}
+	go o.close()
 }
 func (o *steamHTTPObserver) expire() {
 	o.mu.Lock()

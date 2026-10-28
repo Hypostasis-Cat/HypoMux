@@ -489,3 +489,43 @@ func TestSteamPromotionDiagnosticReasons(t *testing.T) {
 		})
 	}
 }
+
+func TestSteamObserverAfterFuncOnCancelledContextDoesNotDeadlock(t *testing.T) {
+	s, o := observerFixture(t)
+	// Reproduces the registration race: cancellation landing between the
+	// cdn.active() check and the AfterFunc call in newSteamObserver makes
+	// context.AfterFunc invoke the callback synchronously in this goroutine.
+	// Before the closeAfterContext hop, that callback re-acquired o.mu and
+	// cdn.mu already held here and deadlocked the stop path.
+	s.cdn.cancel()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		// Hold the same locks newSteamObserver holds while registering, so the
+		// synchronous callback path is identical to the production race.
+		s.cdn.mu.Lock()
+		defer s.cdn.mu.Unlock()
+		o.mu.Lock()
+		defer o.mu.Unlock()
+		stop := context.AfterFunc(s.cdn.ctx, o.closeAfterContext)
+		stop()
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("registering the stop hook on a cancelled context deadlocked")
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		o.mu.Lock()
+		stopped := o.stopped
+		o.mu.Unlock()
+		if stopped {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("observer was not closed after cancellation")
+		}
+		time.Sleep(time.Millisecond)
+	}
+}

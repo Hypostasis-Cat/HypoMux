@@ -440,6 +440,10 @@ func (s *Server) dialDNS(
 
 func (s *Server) acceptLoop(listener net.Listener, protocol string, channel string) {
 	defer s.wg.Done()
+	// Windows listeners surface aborted client connections (connect followed
+	// by an immediate RST) as Accept errors. Proxy workloads produce them in
+	// bursts, so back off instead of spinning on a ready-to-fail socket.
+	var acceptBackoff time.Duration
 	for {
 		client, err := listener.Accept()
 		if err != nil {
@@ -450,9 +454,22 @@ func (s *Server) acceptLoop(listener net.Listener, protocol string, channel stri
 			case <-s.ctx.Done():
 				return
 			default:
-				continue
 			}
+			if acceptBackoff == 0 {
+				acceptBackoff = time.Millisecond
+			} else if acceptBackoff < 100*time.Millisecond {
+				acceptBackoff *= 2
+			}
+			timer := time.NewTimer(acceptBackoff)
+			select {
+			case <-s.ctx.Done():
+				timer.Stop()
+				return
+			case <-timer.C:
+			}
+			continue
 		}
+		acceptBackoff = 0
 		_ = client.SetDeadline(time.Time{})
 		if s.shouldTuneTCP(channel) {
 			tuneTCPConnection(client)

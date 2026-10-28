@@ -240,8 +240,8 @@ func parseProxyRequest(header []byte) (proxyRequest, error) {
 		host = parsed.Hostname()
 		if parsed.Port() != "" {
 			port, err = strconv.Atoi(parsed.Port())
-			if err != nil {
-				return proxyRequest{}, err
+			if err != nil || port < 1 || port > 65535 {
+				return proxyRequest{}, fmt.Errorf("invalid port in absolute target %q", originTarget)
 			}
 		} else if strings.EqualFold(parsed.Scheme, "https") {
 			port = 443
