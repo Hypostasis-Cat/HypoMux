@@ -75,19 +75,32 @@ func allowAutomaticCoreFallbackPath(path string) error {
 	if err != nil {
 		return fmt.Errorf("读取 HypoMux 安装路径失败：%w", err)
 	}
-	expected := filepath.Join(filepath.Dir(desktopPath), "bin", "hypomux-engine.exe")
-	expectedInfo, err := os.Stat(expected)
-	if err != nil {
-		return fmt.Errorf("正式安装目录中的 Core 不可用：%w", err)
-	}
 	actualInfo, err := os.Stat(path)
 	if err != nil {
 		return fmt.Errorf("待启动 Core 不可用：%w", err)
 	}
-	if !expectedInfo.Mode().IsRegular() || !actualInfo.Mode().IsRegular() || !os.SameFile(expectedInfo, actualInfo) {
+	if !actualInfo.Mode().IsRegular() {
 		return errors.New("待启动 Core 不是当前 HypoMux 安装目录中的 bin\\hypomux-engine.exe")
 	}
-	return nil
+	// The packaged layout keeps the desktop binary in <install> with
+	// bin\hypomux-engine.exe beside it; development builds place the desktop
+	// binary and the engine in one directory. Either way the engine must be a
+	// file in this desktop executable's own directory: a path chosen through
+	// the environment or a directory scan is refused even when the name fits.
+	desktopDir := filepath.Dir(desktopPath)
+	for _, candidate := range []string{
+		filepath.Join(desktopDir, "bin", "hypomux-engine.exe"),
+		filepath.Join(desktopDir, "hypomux-engine.exe"),
+	} {
+		expectedInfo, err := os.Stat(candidate)
+		if err != nil || !expectedInfo.Mode().IsRegular() {
+			continue
+		}
+		if os.SameFile(expectedInfo, actualInfo) {
+			return nil
+		}
+	}
+	return errors.New("待启动 Core 不是当前 HypoMux 安装目录中的 bin\\hypomux-engine.exe")
 }
 
 func allowServicePostHandshakeFallback(session *coreSession, cause error) bool {

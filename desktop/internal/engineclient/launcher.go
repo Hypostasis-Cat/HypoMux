@@ -78,7 +78,9 @@ func (launcher serviceFirstLauncher) Launch(ctx context.Context, path string) (*
 	if !errors.Is(err, ErrCoreServiceUnavailable) && !errors.Is(err, ErrCoreServiceNotRunning) {
 		return nil, err
 	}
-	if errors.Is(err, ErrCoreServiceNotRunning) && launcher.allowAutomaticFallbackPath != nil {
+	// Every automatic fallback launches an elevated process, so the path must
+	// pass the same trust check no matter why the service was skipped.
+	if launcher.allowAutomaticFallbackPath != nil {
 		if trustErr := launcher.allowAutomaticFallbackPath(path); trustErr != nil {
 			return nil, fmt.Errorf("%w；自动兼容启动已取消：%v", err, trustErr)
 		}
