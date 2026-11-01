@@ -131,7 +131,11 @@ func TestStopClosesHandshakeOnlyClients(t *testing.T) {
 	}
 }
 
-func TestOrdinaryProxyStillRejectsUDPAssociate(t *testing.T) {
+// Chained clients such as Mihomo dial UDP-based nodes through the ordinary
+// SOCKS5 port, so it must aggregate UDP like its TCP connects.
+func TestOrdinaryProxyRelaysUDPThroughAggregation(t *testing.T) {
+	echoAddress, echoPackets, stopEcho := startUDPEchoServer(t)
+	defer stopEcho()
 	server, err := New(Config{
 		SOCKSPort: 0,
 		HTTPPort:  0,
@@ -148,23 +152,22 @@ func TestOrdinaryProxyStillRejectsUDPAssociate(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer stopServer(t, server)
-	client, err := net.DialTimeout("tcp", endpoints.SOCKS, time.Second)
-	if err != nil {
-		t.Fatal(err)
-	}
+
+	control, relay := startUDPAssociation(t, endpoints.SOCKS, 0)
+	defer control.Close()
+	client := listenUDPClient(t)
 	defer client.Close()
-	_ = client.SetDeadline(time.Now().Add(time.Second))
-	_, _ = client.Write([]byte{5, 1, 0})
-	if _, err := io.ReadFull(client, make([]byte, 2)); err != nil {
-		t.Fatal(err)
+	payload := []byte("hysteria-handshake")
+	sendSOCKSUDP(t, client, relay, echoAddress, payload)
+	if reply := readSOCKSUDP(t, client); string(reply) != string(payload) {
+		t.Fatalf("UDP reply = %q, want %q", reply, payload)
 	}
-	_, _ = client.Write([]byte{5, 3, 0, 1, 0, 0, 0, 0, 0, 0})
-	reply := make([]byte, 10)
-	if _, err := io.ReadFull(client, reply); err != nil {
-		t.Fatal(err)
+	if echoPackets.Load() != 1 {
+		t.Fatalf("echo packets = %d, want 1", echoPackets.Load())
 	}
-	if reply[1] != 7 {
-		t.Fatalf("ordinary proxy UDP reply = %d, want command unsupported", reply[1])
+	flow := waitForUDPFlowTelemetry(t, server, uint64(len(payload)), uint64(len(payload)), time.Second)
+	if flow.Channel != "" || flow.Adapter != "loopback" {
+		t.Fatalf("ordinary UDP flow = %#v, want aggregation through loopback", flow)
 	}
 }
 

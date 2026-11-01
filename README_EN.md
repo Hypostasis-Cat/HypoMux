@@ -114,6 +114,25 @@ Before using HypoMux, please be aware of the following behavior:
 5. Enable the aggregation engine, then start the download. If Steam was already running, restart it when prompted so the proxy change takes full effect.
 6. Stop aggregation or exit normally when finished. HypoMux restores the system network settings it owned.
 
+## Using HypoMux with Clash and other proxy clients
+
+To use Clash/Mihomo together with multi-NIC aggregation, use chain mode: Clash keeps the system proxy, its TUN, nodes and rules, and hands every node connection to HypoMux, which spreads them across adapters. The two apps no longer compete for the system proxy or the default route, and no loop is formed.
+
+1. Open Settings → Network → Local proxy, choose **Set up** next to the Clash option, turn off Windows system proxy management as prompted, and start aggregation in System Proxy mode.
+2. Copy the generated extend script into Clash Verge Rev's Global Extend Script, or create a JavaScript override in Mihomo Party / Clash Nyanpasu. Hand-written configurations can use the generated Mihomo YAML instead.
+3. The script adds `dialer-proxy` to every node and provider, pointing at a hidden fallback group. While HypoMux runs, nodes are reached through HypoMux's SOCKS5 port (TCP and UDP, so Hysteria2 and TUIC nodes work too); when HypoMux stops, Clash falls back to connecting nodes directly within about 30 seconds without any configuration change.
+4. Direct traffic is aggregated too by default: `DIRECT` rule targets use the same fallback group, and manual select groups gain a `HypoMux-Egress` option (a `DIRECT` you already selected is left alone). LAN and private addresses, `GEOIP,LAN`, and direct rules pinned by process, source or inbound stay truly direct. Clear the option in the dialog if you do not want this.
+5. The dialog shows the live chain status, for example "Chain is active: verge-mihomo.exe has 12 connection(s) leaving through HypoMux across Ethernet, WLAN".
+
+Other clients:
+
+- **sing-box** (including GUI.for.SingBox): copy the sing-box outbound from the same dialog and set `"detour": "hypomux"` on every node outbound. sing-box has no automatic fallback, so remove the detour while HypoMux is stopped.
+- **v2rayN, Hiddify, NekoBox and others**: if the client supports an upstream or chained proxy, set SOCKS5 `127.0.0.1:10800` as the first hop; otherwise use the TUN option below.
+
+**When HypoMux uses TUN mode**: two TUNs cannot both own the default route, so turn off the client's TUN and keep only its system proxy. Then choose **Aggregate proxy cores** in the chain dialog; HypoMux adds aggregation process rules for running Mihomo, FlClash, Xray/V2Ray, Hiddify and NekoBox cores without any client change. Existing rules that point those processes elsewhere are left untouched. sing-box cores share their name with HypoMux's own core and cannot be told apart, so use the detour option for them.
+
+For sing-box, v2rayN and similar clients only node traffic is aggregated; traffic their rules send direct is not.
+
 ## Compatibility with third-party proxies and game accelerators
 
 Version 2.5.3 adds dedicated bypass handling for common local proxies and game accelerators, including process families used by UU, Xunyou, Leigod, Qiyou, Clash/Mihomo, v2rayN, Hiddify, Shadowsocks, and Proxifier. Active products are detected by full executable path where possible, while local system-proxy listeners are resolved back to their owning PID instead of relying only on mutable process names.

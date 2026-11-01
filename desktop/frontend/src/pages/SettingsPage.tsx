@@ -29,6 +29,7 @@ import { GlassSurface } from "../components/material/GlassSurface";
 import { savePreferences, useSkins } from "../components/ai/skins/store";
 import { useAppNotifications } from "../components/notifications/AppNotifications";
 import { PageHeader } from "../components/shell/PageHeader";
+import { ProxyChainDialog } from "../components/ProxyChainDialog";
 import { desktopPlatform } from "../platform/desktop";
 import { appServices, type AdapterView, type CompleteAppSettings, type ConfigMigrationStatus } from "../platform/services";
 import { SettingsSaveQueue, type SaveOutcome } from "../platform/settingsQueue";
@@ -264,6 +265,7 @@ export function SettingsPage({
   const [migration, setMigration] = useState<ConfigMigrationStatus | null>(null);
   const [migrationDialog, setMigrationDialog] = useState<"migrate" | "rollback" | null>(null);
   const [migrationDialogOpen, setMigrationDialogOpen] = useState(false);
+  const [proxyChainOpen, setProxyChainOpen] = useState(false);
   const [category, selectCategory] = useSettingsCategory();
   const { settings: appearance, update: updateAppearance, persistenceError: appearancePersistenceError } = useAppearance();
   const { locale, setLocale, t } = useI18n();
@@ -1030,7 +1032,21 @@ export function SettingsPage({
                     )}
                   />
                 </SettingRow>
+                <SettingRow title={text("与 Clash 等代理软件联动", "Use with Clash and other proxy clients")} description={text(
+                  "Clash、sing-box、v2rayN 等保留系统代理与分流规则，节点连接经 HypoMux 分配到多张网卡，两者不再冲突。",
+                  "Clash, sing-box, v2rayN and others keep the system proxy and rules while their node connections go through HypoMux across your adapters, so the two no longer conflict.",
+                )}>
+                  <Button disabled={loading || loadFailed} onClick={() => setProxyChainOpen(true)}>{text("配置联动", "Set up")}</Button>
+                </SettingRow>
               </SettingGroup>
+              <ProxyChainDialog
+                open={proxyChainOpen}
+                socksPort={settings.socks_port}
+                systemProxyTakeover={settings.system_proxy_takeover}
+                busy={loading || loadFailed || saving}
+                onClose={() => setProxyChainOpen(false)}
+                onEnableChainMode={() => patchAndSave({ system_proxy_takeover: false }, t("settings_system_proxy_takeover_off"))}
+              />
             </>}
             {category === "ai" && <>
               <SettingGroup title={text("AI 与小 Mux", "AI and Mux")}>

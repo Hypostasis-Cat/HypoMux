@@ -98,13 +98,7 @@ func (s *EngineService) Connections() (ConnectionListSnapshot, error) {
 			remotePort = targetPort
 		}
 		outbound, detail := connectionOutbound(item.Channel, item.Adapter)
-		process := processes[item.ID]
-		if process != "" {
-			process = filepath.Base(process)
-		}
-		if strings.EqualFold(process, "sing-box.exe") || strings.EqualFold(process, "hypomux-engine.exe") {
-			process = ""
-		}
+		process := connectionProcessLabel(processes[item.ID], item.Channel)
 		result.Connections = append(result.Connections, ConnectionView{
 			ID: item.ID, Process: process, Protocol: item.Protocol, Client: item.Client,
 			Target: item.Target, Domain: domain, RemoteIP: remoteHost, RemotePort: remotePort,
@@ -114,6 +108,21 @@ func (s *EngineService) Connections() (ConnectionListSnapshot, error) {
 	}
 	sortConnectionViews(result.Connections)
 	return result, nil
+}
+
+// TUN channels are dialed by HypoMux's own sing-box, which hides the real app,
+// so that relay is not shown as the process. The ordinary SOCKS5/HTTP ports
+// have no channel; a sing-box.exe there is a third-party client chained into
+// HypoMux and is worth showing.
+func connectionProcessLabel(process, channel string) string {
+	if process == "" {
+		return ""
+	}
+	process = filepath.Base(process)
+	if channel != "" && (strings.EqualFold(process, "sing-box.exe") || strings.EqualFold(process, "hypomux-engine.exe")) {
+		return ""
+	}
+	return process
 }
 
 func sortConnectionViews(connections []ConnectionView) {

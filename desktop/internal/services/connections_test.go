@@ -65,3 +65,20 @@ func TestSplitConnectionEndpoint(t *testing.T) {
 		t.Fatalf("IPv6 endpoint = %q, %q", host, port)
 	}
 }
+
+func TestConnectionProcessLabelShowsChainedSingBoxOnly(t *testing.T) {
+	cases := []struct {
+		process, channel, want string
+	}{
+		{`C:\Program Files\HypoMux\sing-box.exe`, "aggregation", ""},
+		{`C:\Program Files\HypoMux\hypomux-engine.exe`, "nic_wifi", ""},
+		{`C:\Tools\GUI.for.SingBox\sing-box.exe`, "", "sing-box.exe"},
+		{`C:\Program Files\Clash Verge\verge-mihomo.exe`, "", "verge-mihomo.exe"},
+		{"", "", ""},
+	}
+	for _, tc := range cases {
+		if got := connectionProcessLabel(tc.process, tc.channel); got != tc.want {
+			t.Fatalf("connectionProcessLabel(%q, %q) = %q, want %q", tc.process, tc.channel, got, tc.want)
+		}
+	}
+}
