@@ -60,6 +60,16 @@ type udpFlow struct {
 	sendMu      sync.Mutex
 }
 
+// The ordinary SOCKS5 port has no channel and aggregates through the default
+// scheduler, as its TCP connects do. Chained proxy clients such as Mihomo relay
+// UDP-based nodes (Hysteria2, TUIC, WireGuard) through it.
+func (s *Server) udpScheduler(channel string) *scheduler {
+	if channel == "" {
+		return s.scheduler
+	}
+	return s.schedulers[channel]
+}
+
 func (s *Server) handleUDPAssociation(
 	reader *bufio.Reader,
 	client net.Conn,
@@ -94,7 +104,7 @@ func (s *Server) handleUDPAssociation(
 		server:        s,
 		control:       client,
 		channel:       session.channel,
-		scheduler:     s.schedulers[session.channel],
+		scheduler:     s.udpScheduler(session.channel),
 		relay:         relay,
 		allowedIP:     allowedIP,
 		lockedPort:    requestedPort,

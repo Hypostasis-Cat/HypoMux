@@ -5639,6 +5639,45 @@ svg {
   width: 98px;
 }
 
+.proxy-chain-dialog {
+  max-width: 680px;
+}
+
+.proxy-chain-content {
+  display: grid;
+  gap: 12px;
+}
+
+.proxy-chain-content p {
+  margin: 0;
+}
+
+.proxy-chain-steps {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding-left: 20px;
+}
+
+.proxy-chain-steps li {
+  display: grid;
+  justify-items: start;
+  gap: 4px;
+}
+
+.proxy-chain-steps span,
+.proxy-chain-note {
+  color: var(--hm-text-tertiary);
+  font-size: var(--fontSizeBase200);
+}
+
+.proxy-chain-code textarea {
+  min-height: 220px;
+  font-family: Consolas, "Cascadia Mono", monospace;
+  font-size: var(--fontSizeBase200);
+  white-space: pre;
+}
+
 .settings-accent-row {
   justify-content: flex-end;
 }

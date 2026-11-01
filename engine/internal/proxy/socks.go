@@ -50,10 +50,6 @@ func (s *Server) handleSOCKS(reader *bufio.Reader, client net.Conn, session *con
 	}
 	port := int(binary.BigEndian.Uint16(portBytes))
 	if request[1] == 3 {
-		if session.channel == "" {
-			writeSOCKSReply(client, 7)
-			return nil
-		}
 		started, err := s.handleUDPAssociation(reader, client, session, host, port)
 		if err != nil && !started {
 			writeSOCKSReply(client, 1)

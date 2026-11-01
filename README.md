@@ -114,6 +114,16 @@ HypoMux 是一个透明、开源的网络工具，仅用于用户本人拥有授
 5. 开启聚合引擎，再启动下载任务。若 Steam 已经运行，按界面提示重启 Steam 以完整应用代理设置。
 6. 使用完毕后停止聚合或正常退出，HypoMux 会恢复其接管的系统网络设置。
 
+## 与 Clash 等代理软件联动
+
+想同时使用 Clash/Mihomo 和多网卡聚合时，推荐联动模式：Clash 继续负责系统代理、TUN、节点和分流规则，它连接节点的每条连接再交给 HypoMux 分配到不同网卡。两者不再争抢系统代理或默认路由，也不会互相回环。
+
+1. 在“设置 → 网络 → 本地代理”中点击“配置联动”，按提示关闭“管理 Windows 系统代理”，然后以系统代理模式启动聚合。
+2. 复制生成的扩展脚本：Clash Verge Rev 放入“全局扩展脚本”，Mihomo Party / Clash Nyanpasu 新建 JavaScript 覆写；手写配置可改用生成的 Mihomo YAML。
+3. 脚本会给每个节点和订阅加上 `dialer-proxy`，指向一个隐藏的回退组：HypoMux 运行时走 HypoMux 的 SOCKS5 端口（TCP 与 UDP 都支持，Hysteria2、TUIC 等 UDP 节点同样适用）；HypoMux 停止后约 30 秒内自动回落为直连节点，无需改回配置。
+
+Clash 规则中走 DIRECT 的流量不经过节点，因此不参与聚合。
+
 ## 第三方代理与游戏加速器兼容
 
 2.5.3 对常见本地代理与游戏加速器增加了专门的兼容旁路，包括 UU、迅游、雷神、奇游，以及 Clash/Mihomo、v2rayN、Hiddify、Shadowsocks、Proxifier 等常见进程族。运行中的程序会优先按完整可执行文件路径识别；本地系统代理监听器还会按端口反查 PID，避免只依赖容易变化的进程名。
