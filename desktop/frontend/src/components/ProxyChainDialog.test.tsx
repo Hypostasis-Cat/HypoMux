@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { ProxyChainDialog } from "./ProxyChainDialog";
 import { LanguageProvider } from "../i18n/i18n";
@@ -35,6 +35,12 @@ const renderDialog = (overrides: Partial<Parameters<typeof ProxyChainDialog>[0]>
 };
 
 describe("ProxyChainDialog", () => {
+  beforeEach(() => {
+    // FluentUI MessageBar reflows through ResizeObserver, which jsdom lacks, and
+    // the live chain status renders one in every test.
+    vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
+  });
+
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
@@ -43,8 +49,6 @@ describe("ProxyChainDialog", () => {
   it("releases the system proxy and copies the script for the configured port", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
-    // FluentUI MessageBar reflows through ResizeObserver, which jsdom lacks.
-    vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
     const props = renderDialog();
 
     fireEvent.click(screen.getByRole("button", { name: "关闭系统代理接管" }));
@@ -68,7 +72,6 @@ describe("ProxyChainDialog", () => {
   });
 
   it("shows when a proxy client is leaving through HypoMux", async () => {
-    vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
     vi.mocked(appServices.engine.connections).mockResolvedValueOnce({
       phase: "running", mode: "proxy", sampled_at: "", connections: [
         { id: 1, process: "verge-mihomo.exe", protocol: "socks5", adapter: "WLAN", outbound: "aggregation", started_at: "", bytes_up: 0, bytes_down: 0 },
@@ -90,7 +93,6 @@ describe("ProxyChainDialog", () => {
   });
 
   it("adds aggregation rules for running proxy cores in one click", async () => {
-    vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
     const routing = vi.mocked(appServices.routing);
     routing.listProcesses.mockResolvedValue(["xray.exe"]);
     routing.snapshot.mockResolvedValue({ revision: "r", match_order: null, rules: [], outbounds: [] } as any);
