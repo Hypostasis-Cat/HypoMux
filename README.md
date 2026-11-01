@@ -122,7 +122,14 @@ HypoMux 是一个透明、开源的网络工具，仅用于用户本人拥有授
 2. 复制生成的扩展脚本：Clash Verge Rev 放入“全局扩展脚本”，Mihomo Party / Clash Nyanpasu 新建 JavaScript 覆写；手写配置可改用生成的 Mihomo YAML。
 3. 脚本会给每个节点和订阅加上 `dialer-proxy`，指向一个隐藏的回退组：HypoMux 运行时走 HypoMux 的 SOCKS5 端口（TCP 与 UDP 都支持，Hysteria2、TUIC 等 UDP 节点同样适用）；HypoMux 停止后约 30 秒内自动回落为直连节点，无需改回配置。
 
-Clash 规则中走 DIRECT 的流量不经过节点，因此不参与聚合。
+其他客户端：
+
+- **sing-box**（含 GUI.for.SingBox 等）：在同一对话框复制 sing-box 出站，给每个节点出站加 `"detour": "hypomux"`。sing-box 没有自动回落，HypoMux 停止时需先去掉 detour。
+- **v2rayN、Hiddify、NekoBox 等**：支持“前置代理 / 链式代理”时，把 SOCKS5 `127.0.0.1:10800` 设为前置；否则使用下面的 TUN 方案。
+
+**HypoMux 使用 TUN 模式时**：两个 TUN 不能同时接管默认路由，请关闭代理软件的 TUN，只保留它的系统代理。再在联动对话框中点击“让代理内核参与聚合”，HypoMux 会为正在运行的 Mihomo、FlClash、Xray/V2Ray、Hiddify、NekoBox 内核添加“多卡聚合”进程规则，客户端配置不用改。已有指向其他出口的同名规则不会被覆盖。sing-box 内核与 HypoMux 自带内核同名，无法这样区分，请改用 detour 方案。
+
+代理软件规则中走直连的流量不经过节点，因此不参与聚合。
 
 ## 第三方代理与游戏加速器兼容
 

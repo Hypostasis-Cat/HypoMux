@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildMihomoChainScript, buildMihomoChainYAML, CHAIN_GROUP_NAME, CHAIN_PROXY_NAME } from "./proxyChain";
+import { buildMihomoChainScript, buildMihomoChainYAML, buildSingBoxChainJSON, CHAIN_GROUP_NAME, CHAIN_PROXY_NAME } from "./proxyChain";
 
 type Config = Record<string, any>;
 
@@ -62,6 +62,14 @@ describe("Mihomo chain script", () => {
     expect(result.proxies).toHaveLength(1);
     expect(result.proxies[0]).toMatchObject({ port: 10800 });
     expect(result.proxies[0]["dialer-proxy"]).toBeUndefined();
+  });
+});
+
+describe("sing-box chain outbound", () => {
+  it("is a bare socks outbound sing-box can parse", () => {
+    expect(JSON.parse(buildSingBoxChainJSON(23456))).toEqual({
+      outbounds: [{ type: "socks", tag: "hypomux", server: "127.0.0.1", server_port: 23456, version: "5" }],
+    });
   });
 });
 

@@ -5671,6 +5671,23 @@ svg {
   font-size: var(--fontSizeBase200);
 }
 
+.proxy-chain-tun {
+  display: grid;
+  justify-items: start;
+  gap: 6px;
+  padding-top: 12px;
+  border-top: 1px solid var(--hm-outer-border);
+}
+
+.proxy-chain-tun > span {
+  color: var(--hm-text-tertiary);
+  font-size: var(--fontSizeBase200);
+}
+
+.proxy-chain-tun .fui-MessageBar {
+  justify-self: stretch;
+}
+
 .proxy-chain-code textarea {
   min-height: 220px;
   font-family: Consolas, "Cascadia Mono", monospace;

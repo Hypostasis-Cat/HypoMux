@@ -62,6 +62,15 @@ function main(config) {
 `;
 }
 
+// sing-box has no priority-fallback group, so its nodes detour straight to the
+// SOCKS5 port and need HypoMux running. The snippet is plain JSON because
+// sing-box rejects comments and unknown fields; the dialog carries the steps.
+export function buildSingBoxChainJSON(socksPort: number): string {
+  return `${JSON.stringify({
+    outbounds: [{ type: "socks", tag: CHAIN_PROXY_NAME.toLowerCase(), server: "127.0.0.1", server_port: socksPort, version: "5" }],
+  }, null, 2)}\n`;
+}
+
 export function buildMihomoChainYAML(socksPort: number): string {
   return `# HypoMux 多网卡链式出口 · 合并到 Mihomo / Clash Meta 配置
 proxies:

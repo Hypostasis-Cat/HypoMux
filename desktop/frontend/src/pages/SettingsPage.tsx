@@ -1033,8 +1033,8 @@ export function SettingsPage({
                   />
                 </SettingRow>
                 <SettingRow title={text("与 Clash 等代理软件联动", "Use with Clash and other proxy clients")} description={text(
-                  "Clash 保留系统代理、TUN 与分流规则，节点连接经 HypoMux 分配到多张网卡，两者不再冲突。",
-                  "Clash keeps the system proxy, its TUN and rules while its node connections go through HypoMux across your adapters, so the two no longer conflict.",
+                  "Clash、sing-box、v2rayN 等保留系统代理与分流规则，节点连接经 HypoMux 分配到多张网卡，两者不再冲突。",
+                  "Clash, sing-box, v2rayN and others keep the system proxy and rules while their node connections go through HypoMux across your adapters, so the two no longer conflict.",
                 )}>
                   <Button disabled={loading || loadFailed} onClick={() => setProxyChainOpen(true)}>{text("配置联动", "Set up")}</Button>
                 </SettingRow>

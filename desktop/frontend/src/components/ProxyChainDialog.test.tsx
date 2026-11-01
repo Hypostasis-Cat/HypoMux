@@ -3,6 +3,18 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { ProxyChainDialog } from "./ProxyChainDialog";
 import { LanguageProvider } from "../i18n/i18n";
+import { appServices } from "../platform/services";
+
+vi.mock("../platform/services", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../platform/services")>();
+  return {
+    ...original,
+    appServices: {
+      ...original.appServices,
+      routing: { listProcesses: vi.fn(), snapshot: vi.fn(), previewBatch: vi.fn(), save: vi.fn() },
+    },
+  };
+});
 
 const renderDialog = (overrides: Partial<Parameters<typeof ProxyChainDialog>[0]> = {}) => {
   const props = {
@@ -41,11 +53,30 @@ describe("ProxyChainDialog", () => {
     expect(await screen.findByText("已复制到剪贴板。")).toBeTruthy();
   });
 
-  it("offers the YAML snippet and hides the takeover action once released", () => {
+  it("offers the YAML and sing-box snippets and hides the takeover action once released", () => {
     renderDialog({ systemProxyTakeover: false });
 
     expect(screen.queryByRole("button", { name: "关闭系统代理接管" })).toBeNull();
     fireEvent.click(screen.getByRole("tab", { name: "Mihomo YAML" }));
     expect((screen.getByLabelText("联动配置") as HTMLTextAreaElement).value).toContain("port: 12800");
+    fireEvent.click(screen.getByRole("tab", { name: "sing-box" }));
+    expect((screen.getByLabelText("联动配置") as HTMLTextAreaElement).value).toContain("\"server_port\": 12800");
+  });
+
+  it("adds aggregation rules for running proxy cores in one click", async () => {
+    vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
+    const routing = vi.mocked(appServices.routing);
+    routing.listProcesses.mockResolvedValue(["xray.exe"]);
+    routing.snapshot.mockResolvedValue({ revision: "r", match_order: null, rules: [], outbounds: [] } as any);
+    routing.previewBatch.mockResolvedValue({
+      items: [{ input: "xray.exe", status: "add", rule: { match_type: "process", value: "xray.exe", outbound: "aggregation" } }],
+    } as any);
+    routing.save.mockResolvedValue({ restart_required: false } as any);
+    renderDialog();
+
+    fireEvent.click(screen.getByRole("button", { name: "让代理内核参与聚合" }));
+
+    expect(await screen.findByText(/已添加多卡聚合规则：xray\.exe。/)).toBeTruthy();
+    expect(routing.save).toHaveBeenCalledTimes(1);
   });
 });
