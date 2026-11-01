@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { addChainTunProcessRules } from "./proxyChainTun";
+import { addChainTunProcessRules, summarizeChainConnections } from "./proxyChainTun";
 
 const routingFixture = (processes: string[], existing: { match_type: string; value: string; outbound: string }[] = []) => {
   const listProcesses = vi.fn().mockResolvedValue(processes);
@@ -59,5 +59,24 @@ describe("addChainTunProcessRules", () => {
     expect(result.detected).toEqual([]);
     expect(routing.snapshot).not.toHaveBeenCalled();
     expect(routing.save).not.toHaveBeenCalled();
+  });
+});
+
+describe("summarizeChainConnections", () => {
+  const connection = (id: number, process: string, adapter: string) =>
+    ({ id, process, adapter, protocol: "socks5", outbound: "aggregation", started_at: "", bytes_up: 0, bytes_down: 0 });
+
+  it("reports proxy cores and the adapters they leave through", () => {
+    expect(summarizeChainConnections({
+      phase: "running", mode: "proxy", sampled_at: "",
+      connections: [connection(1, "Xray.exe", "WLAN"), connection(2, "chrome.exe", "以太网"), connection(3, "sing-box.exe", "以太网")],
+    })).toEqual({ state: "active", processes: ["Xray.exe", "sing-box.exe"], connections: 2, adapters: ["WLAN", "以太网"] });
+  });
+
+  it("separates a running engine without chained traffic from a stopped one", () => {
+    expect(summarizeChainConnections({ phase: "running", mode: "tun", sampled_at: "", connections: [connection(1, "chrome.exe", "WLAN")] }))
+      .toEqual({ state: "waiting" });
+    expect(summarizeChainConnections({ phase: "stopped", mode: "proxy", sampled_at: "", connections: [] }))
+      .toEqual({ state: "stopped" });
   });
 });

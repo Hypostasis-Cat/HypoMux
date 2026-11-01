@@ -121,6 +121,8 @@ HypoMux 是一个透明、开源的网络工具，仅用于用户本人拥有授
 1. 在“设置 → 网络 → 本地代理”中点击“配置联动”，按提示关闭“管理 Windows 系统代理”，然后以系统代理模式启动聚合。
 2. 复制生成的扩展脚本：Clash Verge Rev 放入“全局扩展脚本”，Mihomo Party / Clash Nyanpasu 新建 JavaScript 覆写；手写配置可改用生成的 Mihomo YAML。
 3. 脚本会给每个节点和订阅加上 `dialer-proxy`，指向一个隐藏的回退组：HypoMux 运行时走 HypoMux 的 SOCKS5 端口（TCP 与 UDP 都支持，Hysteria2、TUIC 等 UDP 节点同样适用）；HypoMux 停止后约 30 秒内自动回落为直连节点，无需改回配置。
+4. 默认连直连流量也一起聚合：规则里的 `DIRECT` 改走同一个回退组，手选分组里多出一个 `HypoMux-Egress` 选项（已手动选中的 `DIRECT` 不会被改动）。局域网与私有地址、`GEOIP,LAN`，以及按进程、来源、入站指定的直连保持真正直连。不需要时可在对话框中取消勾选。
+5. 对话框会实时显示联动状态，例如“联动已生效：verge-mihomo.exe 有 12 条连接正经 HypoMux 出站，分布在以太网、WLAN”。
 
 其他客户端：
 
@@ -129,7 +131,7 @@ HypoMux 是一个透明、开源的网络工具，仅用于用户本人拥有授
 
 **HypoMux 使用 TUN 模式时**：两个 TUN 不能同时接管默认路由，请关闭代理软件的 TUN，只保留它的系统代理。再在联动对话框中点击“让代理内核参与聚合”，HypoMux 会为正在运行的 Mihomo、FlClash、Xray/V2Ray、Hiddify、NekoBox 内核添加“多卡聚合”进程规则，客户端配置不用改。已有指向其他出口的同名规则不会被覆盖。sing-box 内核与 HypoMux 自带内核同名，无法这样区分，请改用 detour 方案。
 
-代理软件规则中走直连的流量不经过节点，因此不参与聚合。
+sing-box、v2rayN 等客户端只有节点流量参与聚合，规则里的直连流量不参与。
 
 ## 第三方代理与游戏加速器兼容
 

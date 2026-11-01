@@ -1,4 +1,4 @@
-import type { appServices, RoutingRule } from "../platform/services";
+import type { appServices, ConnectionListSnapshot, RoutingRule } from "../platform/services";
 
 // When HypoMux owns the TUN and a proxy client runs as a plain system proxy, the
 // TUN compatibility bypass sends known proxy cores straight to the system NIC.
@@ -58,4 +58,29 @@ export async function addChainTunProcessRules(routing: RoutingServices): Promise
     result.restartRequired = Boolean(saved?.restart_required);
   }
   return result;
+}
+
+// A chained client (SOCKS5 port) and a core aggregated through HypoMux's TUN
+// both show up as live connections owned by the proxy core, which is the most
+// direct proof that the setup works. A third-party sing-box only appears on
+// the ordinary ports, where the desktop keeps its process name.
+const CHAIN_CLIENT_PROCESSES = new Set([...CHAIN_TUN_CORE_PROCESSES, "sing-box.exe"]);
+
+export type ChainStatus =
+  | { state: "stopped" }
+  | { state: "waiting" }
+  | { state: "active"; processes: string[]; connections: number; adapters: string[] };
+
+export function summarizeChainConnections(snapshot: ConnectionListSnapshot): ChainStatus {
+  if (snapshot.phase !== "running") return { state: "stopped" };
+  const chained = (snapshot.connections ?? [])
+    .filter((connection) => CHAIN_CLIENT_PROCESSES.has((connection.process ?? "").toLowerCase()));
+  if (chained.length === 0) return { state: "waiting" };
+  const unique = (values: (string | undefined)[]) => [...new Set(values.filter((value): value is string => Boolean(value)))].sort();
+  return {
+    state: "active",
+    processes: unique(chained.map((connection) => connection.process)),
+    connections: chained.length,
+    adapters: unique(chained.map((connection) => connection.adapter)),
+  };
 }

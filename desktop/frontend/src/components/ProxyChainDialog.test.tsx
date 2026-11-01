@@ -12,6 +12,10 @@ vi.mock("../platform/services", async (importOriginal) => {
     appServices: {
       ...original.appServices,
       routing: { listProcesses: vi.fn(), snapshot: vi.fn(), previewBatch: vi.fn(), save: vi.fn() },
+      engine: {
+        ...original.appServices.engine,
+        connections: vi.fn().mockResolvedValue({ phase: "stopped", mode: "proxy", sampled_at: "", connections: [] }),
+      },
     },
   };
 });
@@ -61,6 +65,28 @@ describe("ProxyChainDialog", () => {
     expect((screen.getByLabelText("联动配置") as HTMLTextAreaElement).value).toContain("port: 12800");
     fireEvent.click(screen.getByRole("tab", { name: "sing-box" }));
     expect((screen.getByLabelText("联动配置") as HTMLTextAreaElement).value).toContain("\"server_port\": 12800");
+  });
+
+  it("shows when a proxy client is leaving through HypoMux", async () => {
+    vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
+    vi.mocked(appServices.engine.connections).mockResolvedValueOnce({
+      phase: "running", mode: "proxy", sampled_at: "", connections: [
+        { id: 1, process: "verge-mihomo.exe", protocol: "socks5", adapter: "WLAN", outbound: "aggregation", started_at: "", bytes_up: 0, bytes_down: 0 },
+        { id: 2, process: "verge-mihomo.exe", protocol: "socks5", adapter: "以太网", outbound: "aggregation", started_at: "", bytes_up: 0, bytes_down: 0 },
+      ],
+    } as any);
+    renderDialog();
+
+    expect(await screen.findByText("联动已生效：verge-mihomo.exe 有 2 条连接正经 HypoMux 出站，分布在 WLAN、以太网。")).toBeTruthy();
+  });
+
+  it("can generate the script without aggregating direct traffic", () => {
+    renderDialog();
+    const code = () => (screen.getByLabelText("联动配置") as HTMLTextAreaElement).value;
+
+    expect(code()).toContain("const AGGREGATE_DIRECT = true;");
+    fireEvent.click(screen.getByRole("checkbox"));
+    expect(code()).toContain("const AGGREGATE_DIRECT = false;");
   });
 
   it("adds aggregation rules for running proxy cores in one click", async () => {

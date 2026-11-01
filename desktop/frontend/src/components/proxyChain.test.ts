@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { buildMihomoChainScript, buildMihomoChainYAML, buildSingBoxChainJSON, CHAIN_GROUP_NAME, CHAIN_PROXY_NAME } from "./proxyChain";
+import { buildMihomoChainScript, buildMihomoChainYAML, buildSingBoxChainJSON, CHAIN_GROUP_NAME, CHAIN_LOCAL_RULES, CHAIN_PROXY_NAME } from "./proxyChain";
 
 type Config = Record<string, any>;
 
-const runScript = (port: number, config: Config): Config =>
+const runScript = (port: number, config: Config, aggregateDirect = true): Config =>
   // The script runs inside the client's JavaScript sandbox, so execute it the same way.
-  new Function(`${buildMihomoChainScript(port)}\nreturn main;`)()(config);
+  new Function(`${buildMihomoChainScript(port, aggregateDirect)}\nreturn main;`)()(config);
 
 describe("Mihomo chain script", () => {
   it("chains every node through the hidden HypoMux fallback group", () => {
@@ -29,8 +29,61 @@ describe("Mihomo chain script", () => {
     expect(result.rules).toEqual([
       "PROCESS-NAME,hypomux-engine.exe,DIRECT",
       "PROCESS-NAME,HypoMux.exe,DIRECT",
+      ...CHAIN_LOCAL_RULES,
       "MATCH,Proxy",
     ]);
+  });
+
+  it("sends direct traffic through HypoMux but keeps explicit and local direct rules", () => {
+    const result = runScript(10800, {
+      rules: [
+        "GEOIP,CN,DIRECT,no-resolve",
+        "PROCESS-NAME,game.exe,DIRECT",
+        "SRC-IP-CIDR,192.168.1.50/32,DIRECT",
+        "GEOIP,LAN,DIRECT",
+        "AND,((DOMAIN,a.example),(NETWORK,UDP)),DIRECT",
+        "DOMAIN,x.example,Proxy",
+        "SUB-RULE,(NETWORK,TCP),tcp",
+        "MATCH,DIRECT",
+      ],
+      "sub-rules": { tcp: ["DOMAIN-SUFFIX,cn,DIRECT", "MATCH,Proxy"] },
+    });
+
+    expect(result.rules.slice(2 + CHAIN_LOCAL_RULES.length)).toEqual([
+      `GEOIP,CN,${CHAIN_GROUP_NAME},no-resolve`,
+      "PROCESS-NAME,game.exe,DIRECT",
+      "SRC-IP-CIDR,192.168.1.50/32,DIRECT",
+      "GEOIP,LAN,DIRECT",
+      `AND,((DOMAIN,a.example),(NETWORK,UDP)),${CHAIN_GROUP_NAME}`,
+      "DOMAIN,x.example,Proxy",
+      "SUB-RULE,(NETWORK,TCP),tcp",
+      `MATCH,${CHAIN_GROUP_NAME}`,
+    ]);
+    expect(result["sub-rules"].tcp).toEqual([`DOMAIN-SUFFIX,cn,${CHAIN_GROUP_NAME}`, "MATCH,Proxy"]);
+  });
+
+  it("offers HypoMux in groups without changing a manual DIRECT choice", () => {
+    const result = runScript(10800, {
+      "proxy-groups": [
+        { name: "Direct", type: "select", proxies: ["DIRECT", "Proxy"] },
+        { name: "Auto", type: "url-test", proxies: ["HK", "DIRECT"] },
+      ],
+    });
+
+    expect(result["proxy-groups"][0].proxies).toEqual([CHAIN_GROUP_NAME, "DIRECT", "Proxy"]);
+    expect(result["proxy-groups"][1].proxies).toEqual(["HK", CHAIN_GROUP_NAME]);
+    // The egress group itself must keep a real DIRECT fallback.
+    expect(result["proxy-groups"].at(-1).proxies).toEqual([CHAIN_PROXY_NAME, "DIRECT"]);
+  });
+
+  it("leaves direct traffic alone when that option is off", () => {
+    const result = runScript(10800, {
+      "proxy-groups": [{ name: "Direct", type: "select", proxies: ["DIRECT"] }],
+      rules: ["GEOIP,CN,DIRECT", "MATCH,Proxy"],
+    }, false);
+
+    expect(result.rules).toEqual(["PROCESS-NAME,hypomux-engine.exe,DIRECT", "PROCESS-NAME,HypoMux.exe,DIRECT", "GEOIP,CN,DIRECT", "MATCH,Proxy"]);
+    expect(result["proxy-groups"][0].proxies).toEqual(["DIRECT"]);
   });
 
   it("applies to subscription providers without overriding their own dialer", () => {

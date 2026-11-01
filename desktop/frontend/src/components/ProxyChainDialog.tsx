@@ -1,17 +1,19 @@
-import { Button, Dialog, DialogActions, DialogBody, DialogContent, DialogSurface, DialogTitle, MessageBar, MessageBarBody, Tab, TabList, Textarea } from "@fluentui/react-components";
-import { useState } from "react";
+import { Button, Checkbox, Dialog, DialogActions, DialogBody, DialogContent, DialogSurface, DialogTitle, MessageBar, MessageBarBody, Tab, TabList, Textarea } from "@fluentui/react-components";
+import { useEffect, useState } from "react";
 import { useI18n } from "../i18n/i18n";
 import { appServices } from "../platform/services";
 import { buildMihomoChainScript, buildMihomoChainYAML, buildSingBoxChainJSON } from "./proxyChain";
-import { addChainTunProcessRules, type ChainTunResult } from "./proxyChainTun";
+import { addChainTunProcessRules, summarizeChainConnections, type ChainStatus, type ChainTunResult } from "./proxyChainTun";
 
 type ChainFormat = "script" | "yaml" | "singbox";
 
-const chainBuilders: Record<ChainFormat, (port: number) => string> = {
+const chainBuilders: Record<ChainFormat, (port: number, aggregateDirect: boolean) => string> = {
   script: buildMihomoChainScript,
-  yaml: buildMihomoChainYAML,
-  singbox: buildSingBoxChainJSON,
+  yaml: (port) => buildMihomoChainYAML(port),
+  singbox: (port) => buildSingBoxChainJSON(port),
 };
+
+const CHAIN_STATUS_POLL_MS = 3000;
 
 type ProxyChainDialogProps = {
   open: boolean;
@@ -34,7 +36,29 @@ export function ProxyChainDialog({ open, socksPort, systemProxyTakeover, busy, o
   const [tunBusy, setTunBusy] = useState(false);
   const [tunResult, setTunResult] = useState<ChainTunResult | null>(null);
   const [tunError, setTunError] = useState("");
-  const content = chainBuilders[format](socksPort);
+  const [aggregateDirect, setAggregateDirect] = useState(true);
+  const [status, setStatus] = useState<ChainStatus | null>(null);
+  const content = chainBuilders[format](socksPort, aggregateDirect);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    let timer: number | undefined;
+    const poll = async () => {
+      try {
+        const next = summarizeChainConnections(await appServices.engine.connections());
+        if (!cancelled) setStatus(next);
+      } catch {
+        if (!cancelled) setStatus({ state: "stopped" });
+      }
+      if (!cancelled) timer = window.setTimeout(() => void poll(), CHAIN_STATUS_POLL_MS);
+    };
+    void poll();
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [open]);
   const formatHint: Record<ChainFormat, string> = {
     script: text(
       "Clash Verge Rev：订阅 → 全局扩展脚本；Mihomo Party / Clash Nyanpasu / FlClash：覆写里新建 JavaScript 脚本并启用。保存后重新应用配置。HypoMux 停止时约 30 秒内自动回落直连节点，无需改回配置。",
@@ -82,6 +106,7 @@ export function ProxyChainDialog({ open, socksPort, systemProxyTakeover, busy, o
             "联动后，代理软件继续负责系统代理、TUN、节点和分流规则；它连接节点的每条连接再交给 HypoMux 分配到不同网卡。两者不再争抢系统设置，也不会互相回环。",
             "In chain mode, the proxy client keeps the system proxy, its TUN, nodes and rules, and hands each node connection to HypoMux, which spreads them across your adapters. Neither app competes for system settings and no loop is formed.",
           )}</p>
+          {status && <ChainStatusMessage status={status} text={text} />}
           <ol className="proxy-chain-steps">
             <li>
               <strong>{text("HypoMux 让出系统代理", "Release the system proxy in HypoMux")}</strong>
@@ -109,13 +134,18 @@ export function ProxyChainDialog({ open, socksPort, systemProxyTakeover, busy, o
             <Tab value="yaml">{text("Mihomo YAML", "Mihomo YAML")}</Tab>
             <Tab value="singbox">sing-box</Tab>
           </TabList>
+          {format === "script" && <Checkbox checked={aggregateDirect} onChange={(_, data) => setAggregateDirect(Boolean(data.checked))}
+            label={text(
+              "直连流量也参与聚合（局域网地址，以及按进程、来源或入站指定的直连保持不变）",
+              "Aggregate direct traffic too (LAN addresses and direct rules pinned by process, source or inbound stay direct)",
+            )} />}
           <Textarea className="proxy-chain-code" readOnly resize="vertical" value={content}
             aria-label={text("联动配置", "Chain configuration")} />
           {copied === format && <MessageBar intent="success"><MessageBarBody>{text("已复制到剪贴板。", "Copied to the clipboard.")}</MessageBarBody></MessageBar>}
           {copyError && <MessageBar intent="error"><MessageBarBody>{copyError}</MessageBarBody></MessageBar>}
           <p className="proxy-chain-note">{text(
-            `修改 HypoMux 的 SOCKS5 端口（当前 ${socksPort}）后需要重新复制配置。代理软件规则中走直连的流量不经过节点，因此不参与聚合。`,
-            `Copy the configuration again after changing HypoMux's SOCKS5 port (currently ${socksPort}). Traffic that the client's rules send direct does not use a node and is not aggregated.`,
+            `修改 HypoMux 的 SOCKS5 端口（当前 ${socksPort}）后需要重新复制配置。sing-box 和其他客户端只聚合节点流量，规则里的直连流量不参与。`,
+            `Copy the configuration again after changing HypoMux's SOCKS5 port (currently ${socksPort}). sing-box and other clients aggregate node traffic only; traffic their rules send direct is not aggregated.`,
           )}</p>
           <section className="proxy-chain-tun" aria-labelledby="proxy-chain-tun-heading">
             <strong id="proxy-chain-tun-heading">{text("HypoMux 使用 TUN 模式时", "When HypoMux uses TUN mode")}</strong>
@@ -165,4 +195,24 @@ function ChainTunMessage({ result, text }: { result: ChainTunResult; text: (zh: 
   }
   const intent = result.conflicts.length > 0 ? "warning" : result.added.length > 0 ? "success" : "info";
   return <MessageBar intent={intent}><MessageBarBody>{lines.join(" ")}</MessageBarBody></MessageBar>;
+}
+
+function ChainStatusMessage({ status, text }: { status: ChainStatus; text: (zh: string, en: string) => string }) {
+  if (status.state === "active") {
+    const adapters = status.adapters.length > 0 ? text(`，分布在 ${status.adapters.join("、")}`, ` across ${status.adapters.join(", ")}`) : "";
+    return <MessageBar intent="success"><MessageBarBody>{text(
+      `联动已生效：${status.processes.join("、")} 有 ${status.connections} 条连接正经 HypoMux 出站${adapters}。`,
+      `Chain is active: ${status.processes.join(", ")} has ${status.connections} connection(s) leaving through HypoMux${adapters}.`,
+    )}</MessageBarBody></MessageBar>;
+  }
+  if (status.state === "waiting") {
+    return <MessageBar intent="info"><MessageBarBody>{text(
+      "聚合正在运行，但尚未检测到代理软件经 HypoMux 出站。完成下面的设置后，用代理软件访问一次网络即可确认。",
+      "Aggregation is running, but no proxy client is leaving through HypoMux yet. Finish the steps below and browse once through the client to confirm.",
+    )}</MessageBarBody></MessageBar>;
+  }
+  return <MessageBar intent="warning"><MessageBarBody>{text(
+    "聚合未运行，暂时无法检测联动状态。",
+    "Aggregation is not running, so the chain status cannot be checked yet.",
+  )}</MessageBarBody></MessageBar>;
 }
