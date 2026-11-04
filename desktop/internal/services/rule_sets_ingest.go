@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"regexp"
 	"sort"
@@ -49,28 +50,57 @@ type ruleSetParseResult struct {
 	Format  string
 }
 
-// fetchRuleSet downloads the subscription over HTTPS. The dial guard rejects
-// every non-public address, so a stored URL cannot be repointed at localhost or
-// the LAN, and redirects cannot smuggle the request there either: every hop
-// dials through the same guarded transport and must stay on HTTPS.
+// fetchRuleSet downloads the subscription over HTTPS, through the user's proxy
+// when one is configured because the common list hosts are unreachable from
+// some networks without it. A direct attempt's dial guard rejects every
+// non-public address, so a stored URL cannot be repointed at localhost or the
+// LAN, and redirects cannot smuggle the request there either: every hop goes
+// through the same guarded transport and must stay on HTTPS.
 func fetchRuleSet(ctx context.Context, set RuleSet) (ruleSetFetchResult, error) {
 	if err := validateRuleSetSourceURL(set.URL); err != nil {
 		return ruleSetFetchResult{}, err
 	}
-	dialer := &net.Dialer{
-		Timeout: 15 * time.Second,
-		Control: guardRuleSetDialAddress,
+	target, err := url.Parse(set.URL)
+	if err != nil {
+		return ruleSetFetchResult{}, fmt.Errorf("订阅地址无法解析：%w", err)
 	}
+	return fetchRuleSetWithFallback(ctx, set, detectRuleSetProxy(target), func(ctx context.Context, set RuleSet, proxy *url.URL) (ruleSetFetchResult, error) {
+		return fetchRuleSetOnce(ctx, set, ruleSetTransport(proxy))
+	})
+}
+
+func ruleSetTransport(proxy *url.URL) *http.Transport {
+	transport := &http.Transport{
+		TLSHandshakeTimeout:   15 * time.Second,
+		DisableKeepAlives:     true,
+		ForceAttemptHTTP2:     true,
+		ResponseHeaderTimeout: 20 * time.Second,
+	}
+	if proxy == nil {
+		dialer := &net.Dialer{
+			Timeout: 15 * time.Second,
+			Control: guardRuleSetDialAddress,
+		}
+		transport.DialContext = dialer.DialContext
+		return transport
+	}
+	// This transport only ever dials the proxy, which is usually on loopback and
+	// so cannot pass the dial guard. Targets are checked per hop in Proxy instead.
+	dialer := &net.Dialer{Timeout: 15 * time.Second}
+	transport.DialContext = dialer.DialContext
+	transport.Proxy = func(request *http.Request) (*url.URL, error) {
+		if err := guardRuleSetProxyTarget(request.URL.Hostname()); err != nil {
+			return nil, err
+		}
+		return proxy, nil
+	}
+	return transport
+}
+
+func fetchRuleSetOnce(ctx context.Context, set RuleSet, transport *http.Transport) (ruleSetFetchResult, error) {
 	client := &http.Client{
-		Transport: &http.Transport{
-			DialContext:           dialer.DialContext,
-			TLSHandshakeTimeout:   15 * time.Second,
-			DisableKeepAlives:     true,
-			Proxy:                 nil,
-			ForceAttemptHTTP2:     true,
-			ResponseHeaderTimeout: 20 * time.Second,
-		},
-		Timeout: ruleSetFetchTimeout,
+		Transport: transport,
+		Timeout:   ruleSetFetchTimeout,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if req.URL.Scheme != "https" {
 				return errors.New("订阅地址重定向到了非 HTTPS 地址")
@@ -95,7 +125,7 @@ func fetchRuleSet(ctx context.Context, set RuleSet) (ruleSetFetchResult, error) 
 	}
 	response, err := client.Do(request)
 	if err != nil {
-		return ruleSetFetchResult{}, fmt.Errorf("下载订阅内容失败：%w", err)
+		return ruleSetFetchResult{}, &ruleSetConnectError{err: fmt.Errorf("下载订阅内容失败：%w", err)}
 	}
 	defer response.Body.Close()
 	result := ruleSetFetchResult{
@@ -137,11 +167,15 @@ func guardRuleSetDialAddress(network, address string, _ syscall.RawConn) error {
 	if ip == nil {
 		return fmt.Errorf("订阅地址解析到了无效地址：%s", host)
 	}
-	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
-		ip.IsMulticast() || ip.IsUnspecified() {
+	if isNonPublicRuleSetIP(ip) {
 		return fmt.Errorf("订阅地址解析到了不允许的内网地址：%s", host)
 	}
 	return nil
+}
+
+func isNonPublicRuleSetIP(ip net.IP) bool {
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
+		ip.IsMulticast() || ip.IsUnspecified()
 }
 
 // parseRuleSetSubscription accepts the two provider formats the ecosystem
