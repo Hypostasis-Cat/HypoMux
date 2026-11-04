@@ -188,7 +188,24 @@ Windows 代码签名服务由 [SignPath.io](https://signpath.io/) 免费提供�
 
 ## 支持项目
 
-HypoMux 由在校学生在业余时间独立开发和维护，核心功能永久免费。如果它帮到了你，欢迎[赞赏支持](https://hypomux.com/sponsor/)，感谢[赞助墙](https://hypomux.com/sponsor/wall/)上的每一位支持者。赞赏属于无偿赠予，不等同于商业定制，也不影响项目的开发方向。
+HypoMux 由在校学生在业余时间独立开发和维护，核心功能永久免费。如果它帮到了你，欢迎扫码赞赏，感谢[赞助墙](https://hypomux.com/sponsor/wall/)上的每一位支持者。赞赏属于无偿赠予，不等同于商业定制，也不影响项目的开发方向。
+
+<div align="center">
+  <table>
+    <tr>
+      <td align="center" width="320">
+        <img src="support/wei.png" alt="微信赞赏码" width="260" />
+        <br />
+        <sub>微信赞赏（请备注昵称，未备注则显示为匿名）</sub>
+      </td>
+      <td align="center" width="320">
+        <img src="support/zhi.jpg" alt="支付宝赞赏码" width="260" />
+        <br />
+        <sub>支付宝赞赏（请备注昵称，未备注则显示为匿名）</sub>
+      </td>
+    </tr>
+  </table>
+</div>
 
 ## Star 历史
 

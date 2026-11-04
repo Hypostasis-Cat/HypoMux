@@ -188,7 +188,24 @@ Free code signing provided by [SignPath.io](https://signpath.io/), certificate b
 
 ## Support the project
 
-HypoMux is developed and maintained by a student in their spare time, and its core features remain free. If it has helped you, you can [support it with a donation](https://hypomux.com/en/sponsor/). Thank you to everyone on the [Supporter Wall](https://hypomux.com/en/sponsor/wall/). Donations are voluntary gifts: they are not commercial customization and do not influence the project's direction.
+HypoMux is developed and maintained by a student in their spare time, and its core features remain free. If it has helped you, you can support it with a donation by scanning a code below. Thank you to everyone on the [Supporter Wall](https://hypomux.com/en/sponsor/wall/). Donations are voluntary gifts: they are not commercial customization and do not influence the project's direction.
+
+<div align="center">
+  <table>
+    <tr>
+      <td align="center" width="320">
+        <img src="support/wei.png" alt="WeChat donation QR code" width="260" />
+        <br />
+        <sub>WeChat (leave a nickname; otherwise listed as anonymous)</sub>
+      </td>
+      <td align="center" width="320">
+        <img src="support/zhi.jpg" alt="Alipay donation QR code" width="260" />
+        <br />
+        <sub>Alipay (leave a nickname; otherwise listed as anonymous)</sub>
+      </td>
+    </tr>
+  </table>
+</div>
 
 ## Star History
 
