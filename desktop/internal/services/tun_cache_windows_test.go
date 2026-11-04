@@ -168,7 +168,7 @@ func TestBundledSingBoxRestoresFakeIPCheckpointAfterForcedTermination(t *testing
 	if first == second {
 		t.Fatal("distinct domains must have distinct FakeIPs")
 	}
-	// sing-box 1.14.2 debounces FakeIP allocation metadata writes for 10 seconds
+	// sing-box 1.14.4 debounces FakeIP allocation metadata writes for 10 seconds
 	// (constant.FakeIPMetadataSaveInterval). Killing before that checkpoint
 	// intentionally cannot guarantee recovery, even if address writes completed.
 	time.Sleep(12 * time.Second)
