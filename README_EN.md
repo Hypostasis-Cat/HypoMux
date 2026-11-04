@@ -17,58 +17,19 @@ HypoMux is an open-source multi-adapter aggregation and split-routing utility fo
 
 HypoMux balances independent connections; it does not split one TCP connection across multiple paths. It works best with highly concurrent workloads such as Steam updates, IDM downloads, game launchers, and large browser downloads. A single-connection transfer remains limited by that connection.
 
-Official website: [https://hypomux.com](https://hypomux.com)
-
-## Desktop architecture migration (2.5.0)
-
-Version 2.5.0 completes the desktop migration from the former Python/Qt and transitional WPF implementations to **Go + Wails v3 + React + Fluent UI**. The desktop runs as a standard user, while an independent Go Core/Windows service owns privileged TUN, WFP, routing, DNS, and network-recovery operations.
-
-- **All-Go backend**: Desktop services and the network engine now use Go, with no Python, Qt, asyncio, or .NET/WPF runtime dependency.
-- **Safer TUN lifecycle**: Adapters, DNS, the privileged service, Wintun, sing-box, WFP, and foreign TUNs are checked before startup. Failures are blocked before network changes or rolled back automatically.
-- **Complete split routing**: Route by process, domain and subdomain, destination IP/CIDR, aggregation, direct connection, or a specific adapter. Multi-value legacy rules are expanded and preserved.
-- **Third-party proxy compatibility**: Common local proxies and game accelerators are bypassed by executable path or listener PID to reduce loops and proxy-on-proxy failures.
-- **Reliable recovery**: Windows system-proxy state is snapshotted and restored atomically. Recovery is retried after failed startup, abnormal exit, or the next launch.
-- **New personalization and diagnostics**: Fluent UI, light/dark themes, Mica/material effects, custom backgrounds, adapter health checks, live connections, support logs, and update checks.
-
-## Sponsors
-
-<p align="center">
-  <a href="https://signpath.io/"><img src="support/SignPath/SignPath.png" alt="SignPath" height="38" /></a>&nbsp;&nbsp;
-  Free code signing provided by <a href="https://signpath.io/">SignPath.io</a>, certificate by <a href="https://signpath.org/">SignPath Foundation</a>.
-</p>
-
-### Code Signing Policy
-
-HypoMux is sincerely grateful to SignPath and the SignPath Foundation for supporting open-source software and helping us deliver a safer Windows download experience.
-
-The official Windows releases of HypoMux are built from this repository through GitHub Actions and submitted to SignPath for code signing. [GitHub Releases](https://github.com/Hypostasis-Cat/HypoMux/releases/latest) is the authoritative public release page, while [Tencent CNB Release](https://cnb.cool/Hypostasis-Cat/HypoMux/-/releases/latest) is the official mainland China mirror; both distribute only the same SignPath-signed installer. Automatic update metadata is delivered through a separate signed update channel and verified with Ed25519, followed by installer size, SHA-256, and Windows Authenticode verification. Signed installers should show **SignPath Foundation** as the publisher.
-
-### Team roles
-
-* **Committer and reviewer:** [Hypostasis-Cat](https://github.com/Hypostasis-Cat), the project maintainer. Pull requests from non-committers must be reviewed by a project maintainer before merging.
-* **Approver:** [Hypostasis-Cat](https://github.com/Hypostasis-Cat). Each production signing request is manually approved in the SignPath UI before the signed artifact is retrieved.
-
-### Privacy policy
-
-HypoMux does not sell personal data or upload telemetry by default. Requested features communicate with network services to forward traffic, check the official signed update channel, download installers, and validate connectivity. The optional built-in AI assistant sends conversations and necessary tool results to the model API configured by the user. Enabling external MCP makes selected data available to the connected AI client. Diagnostics are redacted by default, but application names, adapter identifiers, routing values, and manually entered text can contain personal information. API credentials and conversation history are encrypted locally. See [AI assistant and external MCP](docs/AI_ASSISTANT.md) for scope and limitations.
-
----
+Website and documentation: [https://hypomux.com](https://hypomux.com)
 
 ## Download
 
 > **Windows installer:** [GitHub Releases](https://github.com/Hypostasis-Cat/HypoMux/releases/latest) · [Tencent CNB Release](https://cnb.cool/Hypostasis-Cat/HypoMux/-/releases/latest)
 >
-> Download the latest `HypoMux_Setup_*.exe`. Official releases are built by GitHub Actions and signed through SignPath.
+> Download the latest `HypoMux_Setup_*.exe`. See the [Code signing policy](#sponsors) for how releases are signed and published.
 
 ## UI preview
 
-### Default interface
-
 <p align="center">
-  <img src="assets/ui_idle_2.5.png" alt="HypoMux 2.5 default desktop interface" width="850" style="border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
+  <img src="assets/ui_idle_2.5.png" alt="HypoMux default desktop interface" width="850" style="border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
 </p>
-
-### Custom theme
 
 <p align="center">
   <img src="assets/paper_dark.png" alt="HypoMux custom dark theme" width="850" style="border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
@@ -76,12 +37,12 @@ HypoMux does not sell personal data or upload telemetry by default. Requested fe
 
 ## Core features
 
-- **System Proxy mode**: Starts local HTTP/HTTPS and SOCKS5 services. It manages the Windows system proxy by default, or can leave Windows unchanged and expose only the local ports to manually configured downloaders and other apps. It is lightweight and works with proxy-aware software.
+- **System Proxy mode**: Starts local HTTP/HTTPS and SOCKS5 services. It manages the Windows system proxy by default, or can leave Windows unchanged and expose only the local ports to manually configured apps.
 - **Virtual NIC mode**: Uses Wintun and sing-box to capture a broader range of system traffic, with WFP, DNS, and routing rules for precise split tunneling.
 - **Per-connection adapter scheduling**: Selects an outbound adapter for each new connection, combining source-address binding with `IP_UNICAST_IF` to pin sockets to physical links.
 - **Advanced routing rules**: Route by process, domain, IP/CIDR, aggregation, direct connection, Ethernet, Wi-Fi, or one specific adapter.
 - **Per-adapter blocked-domain handling**: Remembers domains unavailable through a particular link so later connections are not assigned to it again.
-- **Encrypted DNS**: Supports DoH and custom DoT. In Settings → Network & DNS, choose Custom DoT only, add `tls://hostname[:port]` URLs (default port 853), save, and restart aggregation. Multiple servers, IPv4/IPv6, and explicit DNS egress are supported. Server certificates are verified; failed DoT queries never downgrade to plaintext DNS. Server-hostname bootstrap uses source-bound traditional DNS; NAT64 prefix discovery on IPv6-only links still uses network DNS.
+- **Encrypted DNS**: Supports DoH and custom DoT (`tls://hostname[:port]`, configured in Settings → Network & DNS). Server certificates are verified; failed DoT queries never downgrade to plaintext DNS.
 - **Live telemetry and diagnostics**: Shows adapter throughput, connection counts, and combined speed, with packet-loss, latency, jitter, DNS, gateway, and source-binding checks.
 - **Least-privilege architecture**: The UI does not stay elevated. After a normal installation, only the independent Core service has the network-management permissions it needs.
 
@@ -91,19 +52,6 @@ HypoMux does not sell personal data or upload telemetry by default. Requested fe
 | --- | --- | --- | --- |
 | System Proxy | Applications that honor the Windows system proxy or are configured with the local HTTP/SOCKS5 ports | Lightweight; optional system-proxy management; no virtual adapter | IDM, browsers, Steam, and other proxy-aware downloads |
 | Virtual NIC | Broader TCP/UDP and non-proxy-aware traffic | Requires the Core service and Wintun/WFP; cannot share the default route with another TUN | Game-launcher downloads, WeGame, advanced split routing, and broader capture |
-
-## 📢 Important Notice & Compliance Disclaimer
-
-HypoMux is a transparent, open-source network utility intended only for authorized use on the user's own devices and network connections. It is not designed or permitted for bypassing third-party access controls, network restrictions, platform rules, or any security measures without authorization.
-
-Before using HypoMux, please be aware of the following behavior:
-
-1. **System Changes**: While active, HypoMux may dynamically adjust Windows system proxy and/or routing-related settings so traffic can enter the acceleration core.
-2. **Local Proxying**: Accelerated traffic is processed locally through the secure core for splitting, proxying, and multiplexing.
-3. **Automatic Restoration**: Modified system proxy and network settings are restored automatically when the tool is stopped or uninstalled.
-4. **Gaming & Split Tunneling**: HypoMux provides advanced split tunneling. For latency-sensitive applications such as competitive online games, users are strongly advised to add them to the **Direct/Bypass routing list** to preserve raw network latency, or suspend HypoMux during gameplay.
-
----
 
 ## Quick start
 
@@ -116,33 +64,28 @@ Before using HypoMux, please be aware of the following behavior:
 
 ## Using HypoMux with Clash and other proxy clients
 
-To use Clash/Mihomo together with multi-NIC aggregation, use chain mode: Clash keeps the system proxy, its TUN, nodes and rules, and hands every node connection to HypoMux, which spreads them across adapters. The two apps no longer compete for the system proxy or the default route, and no loop is formed.
+To use Clash/Mihomo together with multi-NIC aggregation, use chain mode: Clash keeps the system proxy, its TUN, nodes and rules, and hands every node connection to HypoMux, which spreads them across adapters. The two apps do not compete for the system proxy or the default route, and no loop is formed.
 
 1. Open Settings → Network → Local proxy, choose **Set up** next to the Clash option, turn off Windows system proxy management as prompted, and start aggregation in System Proxy mode.
 2. Copy the generated extend script into Clash Verge Rev's Global Extend Script, or create a JavaScript override in Mihomo Party / Clash Nyanpasu. Hand-written configurations can use the generated Mihomo YAML instead.
-3. The script adds `dialer-proxy` to every node and provider, pointing at a hidden fallback group. While HypoMux runs, nodes are reached through HypoMux's SOCKS5 port (TCP and UDP, so Hysteria2 and TUIC nodes work too); when HypoMux stops, Clash falls back to connecting nodes directly within about 30 seconds without any configuration change.
-4. Direct traffic is aggregated too by default: `DIRECT` rule targets use the same fallback group, and manual select groups gain a `HypoMux-Egress` option (a `DIRECT` you already selected is left alone). LAN and private addresses, `GEOIP,LAN`, and direct rules pinned by process, source or inbound stay truly direct. Clear the option in the dialog if you do not want this.
-5. The dialog shows the live chain status, for example "Chain is active: verge-mihomo.exe has 12 connection(s) leaving through HypoMux across Ethernet, WLAN".
+3. The script adds `dialer-proxy` to every node and provider, pointing at a hidden fallback group. While HypoMux runs, nodes are reached through its SOCKS5 port (TCP and UDP, so Hysteria2 and TUIC nodes work too); when it stops, Clash falls back to connecting nodes directly within about 30 seconds.
+4. `DIRECT` rule targets are aggregated too by default; clear the option in the dialog if you do not want this. LAN and private addresses, and direct rules pinned by process, source or inbound, stay truly direct.
 
-Other clients:
+Other clients (only node traffic is aggregated; traffic their rules send direct is not):
 
-- **sing-box** (including GUI.for.SingBox): copy the sing-box outbound from the same dialog and set `"detour": "hypomux"` on every node outbound. sing-box has no automatic fallback, so remove the detour while HypoMux is stopped.
+- **sing-box** (including GUI.for.SingBox): copy the sing-box outbound from the same dialog and set `"detour": "hypomux"` on every node outbound. There is no automatic fallback, so remove the detour while HypoMux is stopped.
 - **v2rayN, Hiddify, NekoBox and others**: if the client supports an upstream or chained proxy, set SOCKS5 `127.0.0.1:10800` as the first hop; otherwise use the TUN option below.
 
-**When HypoMux uses TUN mode**: two TUNs cannot both own the default route, so turn off the client's TUN and keep only its system proxy. Then choose **Aggregate proxy cores** in the chain dialog; HypoMux adds aggregation process rules for running Mihomo, FlClash, Xray/V2Ray, Hiddify and NekoBox cores without any client change. Existing rules that point those processes elsewhere are left untouched. sing-box cores share their name with HypoMux's own core and cannot be told apart, so use the detour option for them.
-
-For sing-box, v2rayN and similar clients only node traffic is aggregated; traffic their rules send direct is not.
+**When HypoMux uses TUN mode**: two TUNs cannot both own the default route, so turn off the client's TUN and keep only its system proxy, then choose **Aggregate proxy cores** in the chain dialog. HypoMux adds aggregation process rules for running Mihomo, FlClash, Xray/V2Ray, Hiddify and NekoBox cores; existing rules that point those processes elsewhere are left untouched. sing-box cores share their name with HypoMux's own core and cannot be told apart, so use the detour option for them.
 
 ## Compatibility with third-party proxies and game accelerators
 
-Version 2.5.3 adds dedicated bypass handling for common local proxies and game accelerators, including process families used by UU, Xunyou, Leigod, Qiyou, Clash/Mihomo, v2rayN, Hiddify, Shadowsocks, and Proxifier. Active products are detected by full executable path where possible, while local system-proxy listeners are resolved back to their owning PID instead of relying only on mutable process names.
+HypoMux detects common process families such as UU, Xunyou, Leigod, Qiyou, Clash/Mihomo, v2rayN, Hiddify, Shadowsocks, and Proxifier, and bypasses them to avoid proxy loops. Keep in mind:
 
-The following boundaries still apply:
-
-- If a third-party product only exposes a local HTTP/SOCKS proxy, HypoMux Virtual NIC mode attempts to bypass that product's process and listener to avoid a proxy loop.
 - Two applications should not compete for the Windows system-proxy switch. Disable the other application's system-proxy takeover before enabling HypoMux System Proxy mode.
 - If another product creates a TUN/VPN adapter and owns the default route, close it before starting HypoMux Virtual NIC mode. HypoMux detects this conflict and blocks startup before changing the system network.
-- A proxy or accelerator update may change its process layout. Check HypoMux's compatibility notice and local support log before choosing another mode or closing the conflicting product.
+
+See the [routing documentation](https://hypomux.com/en/docs/routing#third-party-proxies-and-accelerators) for more.
 
 ## How it works
 
@@ -161,43 +104,26 @@ Application connections
                        Combined throughput
 ```
 
-System Proxy mode writes the local proxy chain to the current user's Windows Internet Settings. Virtual NIC mode asks the independent privileged service to create and manage TUN, WFP, DNS, and route resources. For every new connection, the Go engine chooses an outbound path and combines local source-address binding with the Windows interface index to keep different connections on their selected physical adapters.
+## Usage notes
 
-## Supported scenarios and technical boundaries
+Use HypoMux only on devices and network connections you own or are authorized to manage. It is not intended to bypass unauthorized access controls, security measures, or platform restrictions.
 
-- Suitable for multi-connection download workloads from IDM, Steam, Epic Games Launcher, EA App, Xbox, WeGame, Chrome, Edge, Firefox, and similar applications.
-- Multi-adapter aggregation is **connection-level load distribution**. It cannot make one TCP connection exceed its original path speed, nor does it turn several providers into one bonded link with a single public IP.
-- Aggregation targets throughput, not lower latency. Use direct rules or stop aggregation for competitive games, voice chat, and video meetings.
-- HypoMux does not read game memory, inject DLLs, or modify private game-protocol packets. Platform and anti-cheat policies vary, so users must still follow the applicable terms of service.
-- Use HypoMux only on devices and network connections you own or are authorized to manage. It is not intended to bypass unauthorized access controls, security measures, or platform restrictions.
+- **System changes**: While active, HypoMux may adjust Windows system proxy and routing-related settings, and accelerated traffic is processed locally by its core. These settings are restored when it is stopped or uninstalled.
+- **Scope**: Multi-adapter aggregation is **connection-level load distribution**. It cannot make one TCP connection exceed its original path speed, nor does it turn several providers into one bonded link with a single public IP.
+- **Latency**: Aggregation targets throughput, not lower latency. Use direct rules or stop aggregation for competitive games, voice chat, and video meetings.
+- **Games and anti-cheat**: HypoMux does not read game memory, inject DLLs, or modify private game-protocol packets. Platform and anti-cheat policies vary, so users must still follow the applicable terms of service.
 
 ## Real-world results
 
-The following images are real multi-adapter, multi-connection tests captured with earlier builds. They demonstrate connection-level aggregation; actual results depend on each link, the download source, concurrency, storage, and CPU, and are not a performance guarantee.
+These images are real multi-adapter, multi-connection tests captured with earlier builds. Actual results depend on each link, the download source, concurrency, storage, and CPU, and are not a performance guarantee.
 
-### IDM multi-threaded download
+| IDM multi-threaded download | Steam game update |
+| --- | --- |
+| <img src="assets/screenshot_2.0_idm.png" alt="IDM multi-adapter download" width="420"> | <img src="assets/screenshot_steam.png" alt="Steam multi-adapter update" width="420"> |
 
-<p align="center">
-  <img src="assets/screenshot_2.0_idm.png" alt="IDM multi-adapter download" width="850" style="border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
-</p>
-
-### Steam game update
-
-<p align="center">
-  <img src="assets/screenshot_steam.png" alt="Steam multi-adapter update" width="850" style="border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
-</p>
-
-### WeGame game download
-
-<p align="center">
-  <img src="assets/screenshot_2.0_wegame.png" alt="WeGame multi-adapter download" width="850" style="border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
-</p>
-
-### Multiple adapters in Windows Task Manager
-
-<p align="center">
-  <img src="assets/screenshot_taskmgr.png" alt="Multi-adapter throughput in Task Manager" width="400" style="border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
-</p>
+| WeGame game download | Task Manager throughput |
+| --- | --- |
+| <img src="assets/screenshot_2.0_wegame.png" alt="WeGame multi-adapter download" width="420"> | <img src="assets/screenshot_taskmgr.png" alt="Multi-adapter throughput in Task Manager" width="300"> |
 
 ## Development and building
 
@@ -223,99 +149,51 @@ wails3 task windows:package
 ```
 
 See [`.github/workflows/build.yml`](.github/workflows/build.yml) for the complete release pipeline.
-Before a production release, the read-only `Release Trust Smoke Test` workflow can validate the update signing key, synchronized GitHub/CNB tags, CNB Release access, and any existing signed update channel without creating a Release, uploading assets, or modifying the channel.
 
-##  Acknowledgments & Contributors
+## Acknowledgments
 
-A special thanks to all the amazing developers who have contributed to the early core stability and engineering standardization of this project:
+HypoMux is built on these excellent open-source projects:
+
+| Project | Role in HypoMux |
+| --- | --- |
+| [Wails](https://github.com/wailsapp/wails) | Desktop application framework |
+| [sing-box](https://github.com/SagerNet/sing-box) | TUN core for Virtual NIC mode |
+| [Wintun](https://www.wintun.net/) | Windows virtual adapter driver |
+| [gVisor](https://github.com/google/gvisor) | User-space network stack used by sing-box |
+| [React](https://github.com/facebook/react) · [Fluent UI](https://github.com/microsoft/fluentui) | Desktop interface |
+| [pion/stun](https://github.com/pion/stun) | STUN and NAT detection |
+| [go-winio](https://github.com/microsoft/go-winio) | Windows named-pipe communication |
+| [NSIS](https://nsis.sourceforge.io/) | Windows installer |
+
+Thanks to everyone who has contributed code to this project. Pull requests are welcome:
 
 <a href="https://github.com/Hypostasis-Cat/HypoMux/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=Hypostasis-Cat/HypoMux" />
+  <img src="https://contrib.rocks/image?repo=Hypostasis-Cat/HypoMux" alt="HypoMux contributors" />
 </a>
 
-If you're also interested in multi-NIC traffic distribution and low-level network scheduling, feel free to submit a Pull Request and help improve HypoMux!
+## Sponsors
 
----
-
-##  Support & Sponsorship
-
-HypoMux is an open-source project driven purely by technical passion, independently developed and maintained by the author in their spare time. The author is currently a student, and the in-depth development and daily maintenance of the project (such as frequent use of AI tools for refactoring, API testing, etc.) involve certain real costs. If you find this tool genuinely solves your networking pain points, feel free to buy the author a coffee to support the continuous iteration of this project!
-
->  **Note:** Give within your means. Sponsorship is purely voluntary, and you can always use HypoMux's core features for free, regardless of whether you sponsor!
->
-> Please leave your nickname when sponsoring!
-
-<div align="center">
-  <table>
-    <tr>
-      <td align="center" width="320">
-        <img src="support/wei.png" alt="WeChat Sponsorship QR Code" width="260" />
-        <br />
-        <sub>WeChat Sponsorship (Please note: HypoMux Support)</sub>
-      </td>
-      <td align="center" width="320">
-        <img src="support/zhi.jpg" alt="Alipay Sponsorship QR Code" width="260" />
-        <br />
-        <sub>Alipay Sponsorship (Please note: HypoMux Support)</sub>
-      </td>
-    </tr>
-  </table>
-</div>
-
-
-### ️ Developer Statement
-* **Regarding Feature Direction**: This project has a clear technical roadmap and architectural boundaries. All sponsorships are voluntary donations, and **sponsorship does not equate to commercial customization, nor can it directly determine or influence the direction of future feature development**.
-* **Regarding Disclaimer**: This project is open-sourced under the **AGPL-3.0** license. The software is provided "as is", and the author assumes no liability for any direct or indirect damages resulting from the use of this tool.
-
-### Individual Supporters
-
-Thanks to all supporters who have injected energy into HypoMux:
-
-#### ✨ Special Thanks
-
-<p align="center">
-  <a href="https://github.com/Hypostasis-Cat/HypoMux"><img alt="Anonymous, special thanks" src="https://img.shields.io/badge/%E5%8C%BF%E5%90%8D-%E7%BB%99%E7%8C%AB%E5%92%AA%E5%8F%91%E7%94%B5-DCD0FF?style=for-the-badge&logo=github-sponsors&logoColor=6A5ACD&labelColor=E6E6FA" /></a>
-  <a href="https://github.com/Hypostasis-Cat/HypoMux"><img alt="Anonymous, special thanks" src="https://img.shields.io/badge/%E5%8C%BF%E5%90%8D-%E7%BB%99%E7%8C%AB%E5%92%AA%E5%8F%91%E7%94%B5-DCD0FF?style=for-the-badge&logo=github-sponsors&logoColor=6A5ACD&labelColor=E6E6FA" /></a>
-  <a href="https://github.com/Hypostasis-Cat/HypoMux"><img alt="六花 DY, special thanks" src="https://img.shields.io/static/v1?label=%E5%85%AD%E8%8A%B1%20DY&message=%E7%BB%99%E7%8C%AB%E5%92%AA%E5%8F%91%E7%94%B5&color=DCD0FF&labelColor=E6E6FA&style=for-the-badge&logo=github-sponsors&logoColor=6A5ACD" /></a>
-  <a href="https://github.com/Hypostasis-Cat/HypoMux"><img alt="Anonymous, special thanks" src="https://img.shields.io/badge/%E5%8C%BF%E5%90%8D-%E7%BB%99%E7%8C%AB%E5%92%AA%E5%8F%91%E7%94%B5-DCD0FF?style=for-the-badge&logo=github-sponsors&logoColor=6A5ACD&labelColor=E6E6FA" /></a>
-  <a href="https://github.com/Hypostasis-Cat/HypoMux"><img alt="Anonymous, special thanks" src="https://img.shields.io/badge/%E5%8C%BF%E5%90%8D-%E7%BB%99%E7%8C%AB%E5%92%AA%E5%8F%91%E7%94%B5-DCD0FF?style=for-the-badge&logo=github-sponsors&logoColor=6A5ACD&labelColor=E6E6FA" /></a>
+<p>
+  <a href="https://signpath.io/"><img src="support/SignPath/SignPath.png" alt="SignPath" height="38" /></a>
 </p>
 
-#### ☕ Coffee Support
+Free code signing provided by [SignPath.io](https://signpath.io/), certificate by [SignPath Foundation](https://signpath.org/).
 
-<p align="center">
-  <a href="https://github.com/Hypostasis-Cat/HypoMux"><img alt="Liang, ¥5 coffee support" src="https://img.shields.io/static/v1?label=%E8%B0%85&message=%C2%A55&color=orange&style=for-the-badge&logo=coffeescript&logoColor=white" /></a>
-  <a href="https://github.com/Hypostasis-Cat/HypoMux"><img alt="Anonymous, ¥5 coffee support" src="https://img.shields.io/static/v1?label=Anonymous&message=%C2%A55&color=orange&style=for-the-badge&logo=coffeescript&logoColor=white" /></a>
-  <a href="https://github.com/Hypostasis-Cat/HypoMux"><img alt="Shout_bb, ¥6.66 coffee support" src="https://img.shields.io/static/v1?label=Shout_bb&message=%C2%A56.66&color=orange&style=for-the-badge&logo=coffeescript&logoColor=white" /></a>
-  <a href="https://github.com/Hypostasis-Cat/HypoMux"><img alt="Qi261716, ¥10 coffee support" src="https://img.shields.io/static/v1?label=Qi261716&message=%C2%A510&color=orange&style=for-the-badge&logo=coffeescript&logoColor=white" /></a>
-  <a href="https://github.com/Hypostasis-Cat/HypoMux"><img src="https://img.shields.io/badge/Whale-%20Buy%20a%20Coffee-orange?style=for-the-badge&logo=coffeescript&logoColor=white" alt="Whale, coffee support"></a>
-  <a href="https://github.com/Hypostasis-Cat/HypoMux"><img alt="Anonymous, coffee support" src="https://img.shields.io/badge/%E5%8C%BF%E5%90%8D-%E8%AF%B7%E5%96%9D%E5%92%96%E5%95%A1-orange?style=for-the-badge&logo=coffeescript&logoColor=white" /></a>
-  <a href="https://github.com/Hypostasis-Cat/HypoMux"><img alt="Anonymous, coffee support" src="https://img.shields.io/badge/%E5%8C%BF%E5%90%8D-%E8%AF%B7%E5%96%9D%E5%92%96%E5%95%A1-orange?style=for-the-badge&logo=coffeescript&logoColor=white" /></a>
-  <a href="https://github.com/Hypostasis-Cat/HypoMux"><img alt="Anonymous, coffee support" src="https://img.shields.io/badge/%E5%8C%BF%E5%90%8D-%E8%AF%B7%E5%96%9D%E5%92%96%E5%95%A1-orange?style=for-the-badge&logo=coffeescript&logoColor=white" /></a>
-  <a href="https://github.com/Hypostasis-Cat/HypoMux"><img alt="廾阁, coffee support" src="https://img.shields.io/badge/%E5%BB%BE%E9%98%81-%E8%AF%B7%E5%96%9D%E5%92%96%E5%95%A1-orange?style=for-the-badge&logo=coffeescript&logoColor=white" /></a>
-  <a href="https://github.com/Hypostasis-Cat/HypoMux"><img alt="Anonymous, coffee support" src="https://img.shields.io/badge/%E5%8C%BF%E5%90%8D-%E8%AF%B7%E5%96%9D%E5%92%96%E5%95%A1-orange?style=for-the-badge&logo=coffeescript&logoColor=white" /></a>
-  <a href="https://github.com/Hypostasis-Cat/HypoMux"><img alt="Anonymous, coffee support" src="https://img.shields.io/badge/%E5%8C%BF%E5%90%8D-%E8%AF%B7%E5%96%9D%E5%92%96%E5%95%A1-orange?style=for-the-badge&logo=coffeescript&logoColor=white" /></a>
-  <a href="https://github.com/Hypostasis-Cat/HypoMux"><img alt="Anonymous, coffee support" src="https://img.shields.io/badge/%E5%8C%BF%E5%90%8D-%E8%AF%B7%E5%96%9D%E5%92%96%E5%95%A1-orange?style=for-the-badge&logo=coffeescript&logoColor=white" /></a>
-  <a href="https://github.com/Hypostasis-Cat/HypoMux"><img alt="Anonymous, coffee support" src="https://img.shields.io/badge/%E5%8C%BF%E5%90%8D-%E8%AF%B7%E5%96%9D%E5%92%96%E5%95%A1-orange?style=for-the-badge&logo=coffeescript&logoColor=white" /></a>
-  <a href="https://github.com/Hypostasis-Cat/HypoMux"><img alt="Anonymous, coffee support" src="https://img.shields.io/badge/%E5%8C%BF%E5%90%8D-%E8%AF%B7%E5%96%9D%E5%92%96%E5%95%A1-orange?style=for-the-badge&logo=coffeescript&logoColor=white" /></a>
-  <a href="https://github.com/Hypostasis-Cat/HypoMux"><img alt="Anonymous, coffee support" src="https://img.shields.io/badge/%E5%8C%BF%E5%90%8D-%E8%AF%B7%E5%96%9D%E5%92%96%E5%95%A1-orange?style=for-the-badge&logo=coffeescript&logoColor=white" /></a>
-  <a href="https://github.com/Hypostasis-Cat/HypoMux"><img alt="SK, coffee support" src="https://img.shields.io/badge/SK-%E8%AF%B7%E5%96%9D%E5%92%96%E5%95%A1-orange?style=for-the-badge&logo=coffeescript&logoColor=white" /></a>
-  <a href="https://github.com/Hypostasis-Cat/HypoMux"><img alt="WZLN, coffee support" src="https://img.shields.io/static/v1?label=WZLN&message=%E8%AF%B7%E5%96%9D%E5%92%96%E5%95%A1&color=orange&style=for-the-badge&logo=coffeescript&logoColor=white" /></a>
-  <a href="https://github.com/Hypostasis-Cat/HypoMux"><img alt="幸運上上簽, coffee support" src="https://img.shields.io/static/v1?label=%E5%B9%B8%E9%81%8B%E4%B8%8A%E4%B8%8A%E7%B1%A4&message=%E8%AF%B7%E5%96%9D%E5%92%96%E5%95%A1&color=orange&style=for-the-badge&logo=coffeescript&logoColor=white" /></a>
-  <a href="https://github.com/Hypostasis-Cat/HypoMux"><img alt="Anonymous, coffee support" src="https://img.shields.io/badge/%E5%8C%BF%E5%90%8D-%E8%AF%B7%E5%96%9D%E5%92%96%E5%95%A1-orange?style=for-the-badge&logo=coffeescript&logoColor=white" /></a>
-  <a href="https://github.com/Hypostasis-Cat/HypoMux"><img alt="HEDE WANG, coffee support" src="https://img.shields.io/static/v1?label=HEDE%20WANG&message=%E8%AF%B7%E5%96%9D%E5%92%96%E5%95%A1&color=orange&style=for-the-badge&logo=coffeescript&logoColor=white" /></a>
-  <a href="https://github.com/Hypostasis-Cat/HypoMux"><img alt="画船倾雨, coffee support" src="https://img.shields.io/static/v1?label=%E7%94%BB%E8%88%B9%E5%80%BE%E9%9B%A8&message=%E8%AF%B7%E5%96%9D%E5%92%96%E5%95%A1&color=orange&style=for-the-badge&logo=coffeescript&logoColor=white" /></a>
-  <a href="https://github.com/Hypostasis-Cat/HypoMux"><img alt="Anonymous, coffee support" src="https://img.shields.io/badge/%E5%8C%BF%E5%90%8D-%E8%AF%B7%E5%96%9D%E5%92%96%E5%95%A1-orange?style=for-the-badge&logo=coffeescript&logoColor=white" /></a>
-</p>
+**Code signing policy**
 
-Thank you again for your respect and support for the open-source community and independent developers!
+- **Releases**: Official installers are built from this repository by GitHub Actions and signed through SignPath; the publisher should show as **SignPath Foundation**. GitHub Releases is the authoritative release page and Tencent CNB Release is the official mainland China mirror; both distribute the same installer. Automatic updates use a separate signed update channel and verify the Ed25519 manifest, installer size, SHA-256, and Authenticode signature.
+- **Committer and reviewer**: [Hypostasis-Cat](https://github.com/Hypostasis-Cat). Pull requests from non-committers must be reviewed by the maintainer before merging.
+- **Approver**: [Hypostasis-Cat](https://github.com/Hypostasis-Cat). Each production signing request is manually approved in SignPath.
+- **Privacy policy**: HypoMux does not sell personal data or upload telemetry by default. It communicates with other networked systems only when the user or operator requests the relevant feature: forwarding selected traffic, checking for updates, downloading installers, and validating connectivity. The optional built-in AI assistant sends conversations and necessary tool results to the model API configured by the user. Enabling external MCP makes selected data available to the connected AI client. Diagnostics are redacted by default, but application names, adapter identifiers, routing values, and manually entered text can contain personal information. See [AI assistant and external MCP](docs/AI_ASSISTANT.md).
 
-##  Star History
+## Support the project
 
-Join us on our journey to push Windows multi-adapter aggregation to its absolute limits!
+HypoMux is developed and maintained by a student in their spare time, and its core features remain free. If it has helped you, you can [support it with a donation](https://hypomux.com/en/sponsor/). Thank you to everyone on the [Supporter Wall](https://hypomux.com/en/sponsor/wall/). Donations are voluntary gifts: they are not commercial customization and do not influence the project's direction.
+
+## Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=Hypostasis-Cat/HypoMux&type=Date)](https://star-history.com/#Hypostasis-Cat/HypoMux&Date)
 
-##  License
+## License
 
-This project is licensed under the **AGPL-3.0** License.
+This project is licensed under the **AGPL-3.0** License. The software is provided "as is", and the author assumes no liability for any direct or indirect damages resulting from its use.
