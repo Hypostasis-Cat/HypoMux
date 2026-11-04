@@ -2,12 +2,12 @@
 
 ## sing-box
 
-- Version: **1.14.2** (Windows amd64, official SagerNet build).
-- Release: https://github.com/SagerNet/sing-box/releases/tag/v1.14.2
-- Archive: `sing-box-1.14.2-windows-amd64.zip`
-- Archive SHA-256: `c2d8bfff918755808781dfdeeb8581b6c91eb3a243d9a7b55483cfc0c0684d32`
-- `sing-box.exe` SHA-256: `7bbef1dea9189ee12799ae834ea4b4658355da25c47a21ad8804904c0ccd9410`
-- Upstream revision: `af6e64c3b69e6132ebaee0e1a3d24e93903f6709`
+- Version: **1.14.4** (Windows amd64, official SagerNet build).
+- Release: https://github.com/SagerNet/sing-box/releases/tag/v1.14.4
+- Archive: `sing-box-1.14.4-windows-amd64.zip`
+- Archive SHA-256: `99185d75d314a07dbba4a130c8ad986cbeb629a07927975636b341ca61f991df`
+- `sing-box.exe` SHA-256: `8f30682ee198855440d2a7fe070d5d3653793b2d01bb8c85eea88f93bbe7c8b9`
+- Upstream revision: `c005f35300ce76427dc285481ec5695f5b179cd2`
 
 The official binary includes gVisor support. HypoMux explicitly selects the
 1.14+ TUN DNS mode: `disabled` for the system DNS policy and `hijack` for the
