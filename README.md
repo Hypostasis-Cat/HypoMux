@@ -201,12 +201,12 @@ sing-box、v2rayN 等客户端只有节点流量参与聚合，规则里的直�
 
 ## 开发与构建
 
-推荐环境：Windows 10/11、Go 1.26、Node.js 22、pnpm 10、Wails v3 CLI `v3.0.0-alpha2.119`。构建安装包还需要 NSIS；仓库根目录 `bin/` 必须包含官方运行时文件 `sing-box.exe` 和 `wintun.dll`。
+推荐环境：Windows 10/11、Go 1.26、Node.js 22、pnpm 10、Wails v3 CLI `v3.0.0`。构建安装包还需要 NSIS；仓库根目录 `bin/` 必须包含官方运行时文件 `sing-box.exe` 和 `wintun.dll`。
 
 当前随附 sing-box **1.14.2**（保留 gVisor 支持），来源与 SHA-256 校验信息见 [运行时说明](bin/README.md)。
 
 ```powershell
-go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-alpha2.119
+go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0
 pnpm --dir desktop/frontend install --frozen-lockfile
 Push-Location desktop
 wails3 generate bindings -clean=true -ts -i

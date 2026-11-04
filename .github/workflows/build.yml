@@ -23,7 +23,7 @@ permissions:
   contents: read
 
 env:
-  WAILS_VERSION: v3.0.0-alpha2.119
+  WAILS_VERSION: v3.0.0
   PNPM_VERSION: 10.34.5
   INSTALLER_PATH: desktop/bin/hypomux-amd64-installer.exe
 
