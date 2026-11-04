@@ -134,6 +134,159 @@ func runtimeBindingFixture() AdapterView {
 		DNSServers: []string{"fe80::1%7"}, Operational: true, Selected: true, Weight: 1}
 }
 
+func runtimeBindingsChanged(previous, available []AdapterView) (bool, error) {
+	changes, err := runtimeBindingChanges(previous, available)
+	return len(changes) > 0, err
+}
+
+func TestRuntimeBindingDNSFamilyLossIsNotAChange(t *testing.T) {
+	const v4, v4b, v6, v6b = "192.0.2.53", "192.0.2.54", "2001:db8::53", "2001:db8::54"
+	for name, test := range map[string]struct {
+		before, after []string
+		want          []string
+	}{
+		"ipv6 list emptied while tun is up": {before: []string{v4, v6}, after: []string{v4}},
+		"ipv4 list emptied":                 {before: []string{v4, v6}, after: []string{v6}},
+		"both lists emptied":                {before: []string{v4, v6}, after: nil},
+		"unchanged":                         {before: []string{v4, v6}, after: []string{v4, v6}},
+		"ipv6 replaced":                     {before: []string{v6}, after: []string{v6b}, want: []string{"dns_ipv6"}},
+		"ipv4 replaced":                     {before: []string{v4}, after: []string{v4b}, want: []string{"dns_ipv4"}},
+		"ipv6 reordered":                    {before: []string{v6, v6b}, after: []string{v6b, v6}, want: []string{"dns_ipv6"}},
+		"ipv6 gained":                       {before: []string{v4}, after: []string{v4, v6}, want: []string{"dns_ipv6"}},
+		"ipv6 lost while ipv4 replaced":     {before: []string{v4, v6}, after: []string{v4b}, want: []string{"dns_ipv4"}},
+		"zoned ipv6 is not ipv4":            {before: []string{"fe80::1%7"}, after: []string{v4}, want: []string{"dns_ipv4"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			old, next := runtimeBindingFixture(), runtimeBindingFixture()
+			old.DNSServers, next.DNSServers = test.before, test.after
+			changes, err := runtimeBindingChanges([]AdapterView{old}, []AdapterView{next})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var fields []string
+			for _, change := range changes {
+				fields = append(fields, change.Field)
+			}
+			if !reflect.DeepEqual(fields, test.want) {
+				t.Fatal(fields, test.want)
+			}
+		})
+	}
+}
+
+// Issue #109: the list returns whenever the TUN stops, so each restart would
+// capture it again and lose it again. The session must simply keep running.
+func TestRuntimeBindingTUNHiddenDNSDoesNotRestart(t *testing.T) {
+	old := runtimeBindingFixture()
+	old.DNSServers = []string{"2001:db8::53"}
+	next := cloneRuntimeBindings([]AdapterView{old})[0]
+	next.DNSServers = nil
+	service := &EngineService{runtimeBindings: []AdapterView{old}, runtimeBindingMode: "tun", runtimeBindingEnabled: true,
+		runtimeAdapters: func() ([]AdapterView, error) { return []AdapterView{next}, nil }}
+	fail := func(context.Context) error { t.Fatal("hidden DNS restarted the session"); return nil }
+	err := service.refreshRuntimeBindings(context.Background(), runtimeBindingActions{
+		status: func(context.Context) (string, error) { return "running", nil },
+		stop:   fail,
+		start:  func(ctx context.Context, _ string) error { return fail(ctx) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRuntimeBindingChangesNameTheTriggerWithoutAddresses(t *testing.T) {
+	old := runtimeBindingFixture()
+	old.Address, old.IfIndex = "192.0.2.1", 6
+	old.DNSServers = []string{"2001:db8::53"}
+	next := old
+	next.Address, next.SourceIPv6, next.IfIndex = "192.0.2.2", "", 8
+	next.DNSServers = []string{"2001:db8::54", "2001:db8::55"}
+	returning := AdapterView{ID: "eth", Name: "Ethernet", Address: "192.0.2.9", Operational: true, Selected: true}
+	changes, err := runtimeBindingChanges([]AdapterView{old}, []AdapterView{next, returning})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []runtimeBindingChange{
+		{Adapter: "WLAN", Field: "ipv4", Before: "set", After: "set"},
+		{Adapter: "WLAN", Field: "ipv6", Before: "set", After: "empty"},
+		{Adapter: "WLAN", Field: "if_index", Before: "6", After: "8"},
+		{Adapter: "WLAN", Field: "dns_ipv6", Before: "1", After: "2"},
+		{Adapter: "Ethernet", Field: "selection", Before: "absent", After: "usable"},
+	}
+	if !reflect.DeepEqual(changes, want) {
+		t.Fatal(changes)
+	}
+}
+
+func TestRuntimeBindingRestartBudgetHoldsBackALoop(t *testing.T) {
+	old := runtimeBindingFixture()
+	next := cloneRuntimeBindings([]AdapterView{old})[0]
+	next.SourceIPv6 = "2001:db8::2"
+	service := &EngineService{runtimeBindings: []AdapterView{old}, runtimeBindingMode: "tun", runtimeBindingEnabled: true,
+		runtimeAdapters: func() ([]AdapterView, error) { return []AdapterView{next}, nil }}
+	stops, starts := 0, 0
+	actions := runtimeBindingActions{
+		status: func(context.Context) (string, error) { return "running", nil },
+		stop:   func(context.Context) error { stops++; return nil },
+		start: func(context.Context, string) error {
+			starts++
+			// Each restart captures the old value again, as a TUN-dependent field would.
+			service.rememberRuntimeBindingsLocked("tun", []AdapterView{old}, AdapterView{})
+			return nil
+		},
+	}
+	refresh := func() {
+		t.Helper()
+		if err := service.refreshRuntimeBindings(context.Background(), actions); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for range runtimeBindingRestartLimit {
+		refresh()
+	}
+	if stops != runtimeBindingRestartLimit || starts != runtimeBindingRestartLimit || service.runtimeBindingNotice != "" {
+		t.Fatal("restarts within budget were blocked", stops, starts, service.runtimeBindingNotice)
+	}
+	refresh()
+	if stops != runtimeBindingRestartLimit || starts != runtimeBindingRestartLimit {
+		t.Fatal("restart loop was not held back", stops, starts)
+	}
+	if !strings.Contains(service.runtimeBindingNotice, "暂停自动重新绑定") || !service.runtimeBindingEnabled {
+		t.Fatal("held-back session must stay monitored and tell the user", service.runtimeBindingNotice)
+	}
+
+	// The window ages out, so a genuine later change still recovers.
+	service.runtimeBindingRestarts[0] = time.Now().Add(-runtimeBindingRestartWindow)
+	refresh()
+	if stops != runtimeBindingRestartLimit+1 || service.runtimeBindingNotice != "" {
+		t.Fatal("aged budget did not allow recovery", stops, service.runtimeBindingNotice)
+	}
+
+	// An explicit Start/Stop is the user's own retry and starts a fresh budget.
+	service.cancelRuntimeBindingRefresh()
+	if service.runtimeBindingRestarts != nil {
+		t.Fatal("explicit lifecycle action kept the restart budget")
+	}
+}
+
+func TestRuntimeBindingRestartBudgetSparesFailedRecoveryRetries(t *testing.T) {
+	old := runtimeBindingFixture()
+	service := &EngineService{runtimeBindings: []AdapterView{old}, runtimeBindingMode: "tun", runtimeBindingEnabled: true,
+		runtimeBindingRecovery: &runtimeBindingRecovery{},
+		runtimeAdapters:        func() ([]AdapterView, error) { return []AdapterView{old}, nil }}
+	for range runtimeBindingRestartLimit {
+		service.allowRuntimeBindingRestart(time.Now())
+	}
+	starts := 0
+	err := service.refreshRuntimeBindings(context.Background(), runtimeBindingActions{
+		stop:  func(context.Context) error { return nil },
+		start: func(context.Context, string) error { starts++; return nil },
+	})
+	if err != nil || starts != 1 {
+		t.Fatal("a stopped session must keep retrying its recovery", starts, err)
+	}
+}
+
 func TestRuntimeBindingChangeIncludesBothFamiliesIndicesAndDNS(t *testing.T) {
 	old := runtimeBindingFixture()
 	old.Address, old.IfIndex = "192.0.2.1", 6

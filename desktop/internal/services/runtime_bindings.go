@@ -4,11 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/netip"
 	"slices"
+	"strconv"
 	"time"
 )
 
-const runtimeBindingPollInterval = 5 * time.Second
+const (
+	runtimeBindingPollInterval  = 5 * time.Second
+	runtimeBindingRestartLimit  = 3
+	runtimeBindingRestartWindow = 10 * time.Minute
+)
 
 // Survives a failed automatic restart, including its original hotspot intent.
 // Explicit Start/Stop clears it before waiting for the lifecycle gate.
@@ -85,12 +91,21 @@ func (s *EngineService) rememberAdditionalRuntimeBindings(adapters []AdapterView
 	}
 }
 
-func runtimeBindingsChanged(previous, available []AdapterView) (bool, error) {
+// Logged with each automatic restart. Addresses are reduced to set/empty and
+// DNS lists to counts so a support log never needs values to name the trigger.
+type runtimeBindingChange struct {
+	Adapter string `json:"adapter"`
+	Field   string `json:"field"`
+	Before  string `json:"before"`
+	After   string `json:"after"`
+}
+
+func runtimeBindingChanges(previous, available []AdapterView) ([]runtimeBindingChange, error) {
 	current := make(map[string]AdapterView, len(available))
 	for _, adapter := range available {
 		current[adapter.ID] = adapter
 	}
-	changed := false
+	var changes []runtimeBindingChange
 	var missing error
 	installed := make(map[string]bool, len(previous))
 	for _, old := range previous {
@@ -101,21 +116,92 @@ func runtimeBindingsChanged(previous, available []AdapterView) (bool, error) {
 			missing = fmt.Errorf("等待网卡 %s 恢复可用地址", old.Name)
 			continue
 		}
-		changed = changed || old.Name != next.Name || old.Address != next.Address ||
-			old.SourceIPv6 != next.SourceIPv6 || old.IfIndex != next.IfIndex ||
-			old.IPv6IfIndex != next.IPv6IfIndex || !slices.Equal(old.DNSServers, next.DNSServers)
+		changes = append(changes, adapterBindingChanges(old, next)...)
 	}
 	// A restart may have omitted a disconnected NIC. Its persisted selection
 	// still matters even if it returns with exactly the same address/index.
 	for _, next := range available {
 		if next.Selected && usableRuntimeBinding(next) && !installed[next.ID] {
-			changed = true
+			changes = append(changes, runtimeBindingChange{Adapter: next.Name, Field: "selection", Before: "absent", After: "usable"})
 		}
 	}
-	if !changed && missing != nil {
-		return false, missing
+	if len(changes) == 0 && missing != nil {
+		return nil, missing
 	}
-	return changed, nil
+	return changes, nil
+}
+
+func adapterBindingChanges(old, next AdapterView) []runtimeBindingChange {
+	var changes []runtimeBindingChange
+	add := func(field, before, after string) {
+		changes = append(changes, runtimeBindingChange{Adapter: next.Name, Field: field, Before: before, After: after})
+	}
+	if old.Name != next.Name {
+		add("name", old.Name, next.Name)
+	}
+	if old.Address != next.Address {
+		add("ipv4", bindingAddressState(old.Address), bindingAddressState(next.Address))
+	}
+	if old.SourceIPv6 != next.SourceIPv6 {
+		add("ipv6", bindingAddressState(old.SourceIPv6), bindingAddressState(next.SourceIPv6))
+	}
+	if old.IfIndex != next.IfIndex {
+		add("if_index", strconv.Itoa(old.IfIndex), strconv.Itoa(next.IfIndex))
+	}
+	if old.IPv6IfIndex != next.IPv6IfIndex {
+		add("ipv6_if_index", strconv.Itoa(old.IPv6IfIndex), strconv.Itoa(next.IPv6IfIndex))
+	}
+	oldDNS4, oldDNS6 := dnsServersByFamily(old.DNSServers)
+	nextDNS4, nextDNS6 := dnsServersByFamily(next.DNSServers)
+	if dnsFamilyChanged(oldDNS4, nextDNS4) {
+		add("dns_ipv4", strconv.Itoa(len(oldDNS4)), strconv.Itoa(len(nextDNS4)))
+	}
+	if dnsFamilyChanged(oldDNS6, nextDNS6) {
+		add("dns_ipv6", strconv.Itoa(len(oldDNS6)), strconv.Itoa(len(nextDNS6)))
+	}
+	return changes
+}
+
+func bindingAddressState(address string) string {
+	if address == "" {
+		return "empty"
+	}
+	return "set"
+}
+
+func dnsServersByFamily(servers []string) (ipv4, ipv6 []string) {
+	for _, server := range servers {
+		if ip, err := netip.ParseAddr(server); err == nil && ip.Unmap().Is4() {
+			ipv4 = append(ipv4, server)
+		} else {
+			ipv6 = append(ipv6, server)
+		}
+	}
+	return ipv4, ipv6
+}
+
+// Windows can report an empty per-family DNS list while the TUN is up and
+// restore it once the TUN stops, even though the NIC's addresses never changed
+// (phone hotspots advertising IPv6 DNS, #109). Restarting removes the TUN, so
+// the next snapshot holds the list again and the restart repeats indefinitely.
+// An empty list names no replacement server, so only a new list is a change.
+func dnsFamilyChanged(before, after []string) bool {
+	return len(after) > 0 && !slices.Equal(before, after)
+}
+
+// A running session keeps working on its old binding, so holding back a restart
+// is safe. The window ages out, which lets a genuine later change still recover.
+func (s *EngineService) allowRuntimeBindingRestart(now time.Time) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.runtimeBindingRestarts = slices.DeleteFunc(s.runtimeBindingRestarts, func(at time.Time) bool {
+		return now.Sub(at) >= runtimeBindingRestartWindow
+	})
+	if len(s.runtimeBindingRestarts) >= runtimeBindingRestartLimit {
+		return false
+	}
+	s.runtimeBindingRestarts = append(s.runtimeBindingRestarts, now)
+	return true
 }
 
 func usableRuntimeBinding(adapter AdapterView) bool {
@@ -129,6 +215,7 @@ func (s *EngineService) cancelRuntimeBindingRefresh() {
 	defer s.mu.Unlock()
 	s.runtimeBindingEnabled = false
 	s.runtimeBindingRecovery = nil
+	s.runtimeBindingRestarts = nil
 	if s.runtimeBindingCancel != nil {
 		// Serialize cancellation with the startup commit so it cannot re-enable
 		// monitoring after an explicit Stop has already revoked recovery.
@@ -212,13 +299,13 @@ func (s *EngineService) refreshRuntimeBindings(ctx context.Context, actions runt
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	changed, err := runtimeBindingsChanged(previous, available)
+	changes, err := runtimeBindingChanges(previous, available)
 	hasSelected := slices.ContainsFunc(available, func(a AdapterView) bool { return a.Selected && usableRuntimeBinding(a) })
 	if err != nil && (recovery == nil || !hasSelected) {
 		s.setRuntimeBindingNotice("提示："+err.Error(), "waiting_for_adapter")
 		return nil
 	}
-	if !changed && recovery == nil {
+	if len(changes) == 0 && recovery == nil {
 		s.setRuntimeBindingNotice("", "")
 		return nil
 	}
@@ -228,6 +315,10 @@ func (s *EngineService) refreshRuntimeBindings(ctx context.Context, actions runt
 			return err
 		}
 		if state != "running" && state != "degraded" {
+			return nil
+		}
+		if !s.allowRuntimeBindingRestart(time.Now()) {
+			s.setRuntimeBindingNotice("提示：网卡配置短时间内反复变化，已暂停自动重新绑定，稍后会自动重试；也可以手动停止后重新启动", "refresh_suspended")
 			return nil
 		}
 		recovery = &runtimeBindingRecovery{}
@@ -244,7 +335,7 @@ func (s *EngineService) refreshRuntimeBindings(ctx context.Context, actions runt
 	s.runtimeBindingRecovery = recovery
 	s.mu.Unlock()
 	if s.logs != nil {
-		s.logs.RecordEvent("adapter_binding", "refresh_requested", map[string]any{"mode": mode})
+		s.logs.RecordEvent("adapter_binding", "refresh_requested", map[string]any{"mode": mode, "changes": changes})
 	}
 	if err := actions.stop(ctx); err != nil {
 		return fmt.Errorf("清理旧绑定失败：%w", err)
