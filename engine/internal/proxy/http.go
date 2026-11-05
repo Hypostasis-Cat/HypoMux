@@ -153,7 +153,9 @@ func (s *Server) relayHTTP(request *http.Request, requestReader *bufio.Reader, c
 				_ = upstream.SetReadDeadline(time.Now())
 				return err
 			}
-			if wantsUpgrade && <-upgradeDecision {
+			// Wait for the response even without an upgrade: returning earlier
+			// half-closes the upstream and makes some HTTP CDNs abort the reply.
+			if <-upgradeDecision && wantsUpgrade {
 				_, err := io.CopyBuffer(writer, readerOnly{requestReader}, buffer)
 				return err
 			}
