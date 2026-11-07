@@ -114,11 +114,28 @@ func (s *BlockedDomainService) Clear() error {
 func (s *BlockedDomainService) ReplaceRuntime(entries []BlockedDomainEntry) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	useExpiry := s.settings.Get().BlockedDomainExpiry
+	now := s.now()
 	next := make(map[string]map[string]float64)
+	if !useExpiry {
+		// Runtime telemetry describes only the current engine run, not the
+		// lifetime of persisted records. Expiry under the old start-time
+		// settings, recovery, or an unselected adapter must not erase records
+		// while automatic expiry is disabled.
+		for adapter, domains := range s.entries {
+			next[adapter] = make(map[string]float64, len(domains))
+			for domain, expiry := range domains {
+				next[adapter][domain] = expiry
+			}
+		}
+	}
 	for _, entry := range entries {
 		adapter := strings.TrimSpace(entry.Adapter)
 		domain := normalizeDomain(entry.Domain)
-		if adapter == "" || domain == "" || !entry.ExpiresAt.After(s.now()) {
+		if adapter == "" || domain == "" || entry.ExpiresAt.IsZero() {
+			continue
+		}
+		if useExpiry && !entry.ExpiresAt.After(now) {
 			continue
 		}
 		if next[adapter] == nil {
@@ -129,8 +146,15 @@ func (s *BlockedDomainService) ReplaceRuntime(entries []BlockedDomainEntry) erro
 	if blockedDomainMapsEqual(s.entries, next) {
 		return nil
 	}
+	previous := s.entries
 	s.entries = next
-	return s.saveLocked()
+	if err := s.saveLocked(); err != nil {
+		// Keep the last persisted state so an identical telemetry sample can
+		// retry the write instead of being mistaken for a no-op.
+		s.entries = previous
+		return err
+	}
+	return nil
 }
 
 func (s *BlockedDomainService) load() error {
