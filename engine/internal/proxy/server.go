@@ -279,8 +279,15 @@ func (s *Server) Endpoints() Endpoints {
 	return s.endpoints
 }
 
+// UpdateDomainQuarantines applies a live quarantine change without restarting.
+func (s *Server) UpdateDomainQuarantines(update DomainQuarantineUpdate) {
+	s.health.updateDomainQuarantines(update)
+}
+
 func (s *Server) Snapshot(includeConnections bool) TelemetrySnapshot {
 	result := s.registry.Snapshot(includeConnections)
+	domainExpiry := s.health.domainExpiryEnabled()
+	result.DomainIsolationExpiry = &domainExpiry
 	result.Scheduling = s.scheduler.performanceSnapshot()
 	result.TCPProfile = s.tcpProfileName()
 	result.UDPProfile = s.udpProfileName()

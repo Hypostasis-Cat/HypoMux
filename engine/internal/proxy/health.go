@@ -62,6 +62,26 @@ type healthTable struct {
 	domainIsolationExpiry bool
 }
 
+// DomainQuarantineKey identifies one adapter's quarantine of one domain.
+type DomainQuarantineKey struct {
+	Adapter string `json:"adapter"`
+	Domain  string `json:"domain"`
+}
+
+// DomainQuarantineUpdate changes quarantine state on a running engine. A nil
+// Expiry keeps the current automatic-expiry policy.
+type DomainQuarantineUpdate struct {
+	Expiry *bool                 `json:"expiry,omitempty"`
+	Clear  bool                  `json:"clear,omitempty"`
+	Remove []DomainQuarantineKey `json:"remove,omitempty"`
+}
+
+// DomainQuarantineUpdateResult reports whether an engine run received the
+// update. Applied is false when no engine has been started.
+type DomainQuarantineUpdateResult struct {
+	Applied bool `json:"applied"`
+}
+
 type adapterHealthSnapshot struct {
 	State               string
 	ConsecutiveFailures int
@@ -246,8 +266,63 @@ func (h *healthTable) recordSuccess(name string, domain string) {
 	state.cooldownUntil = time.Time{}
 	state.lastSuccessAt = now
 	domain = normalizeDomain(domain)
+	// With automatic expiry disabled, a confirmed quarantine lasts until the
+	// user removes it. candidates still falls back to a quarantined adapter when
+	// nothing else is available, so such a success must not end the quarantine.
+	if entry := state.domains[domain]; entry != nil && !h.domainIsolationExpiry &&
+		entry.evidence >= domainFailureThreshold {
+		return
+	}
 	delete(state.domains, domain)
 	state.domainExpiry.Delete(domain)
+}
+
+// updateDomainQuarantines applies a live change from the desktop. Expiry is
+// applied first so the removals below always act on the final state.
+func (h *healthTable) updateDomainQuarantines(update DomainQuarantineUpdate) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	now := h.now().UTC()
+	if update.Expiry != nil && *update.Expiry != h.domainIsolationExpiry {
+		h.domainIsolationExpiry = *update.Expiry
+		for _, state := range h.adapters {
+			h.pruneExpiredDomains(state, now)
+			for domain, entry := range state.domains {
+				if entry.evidence < domainFailureThreshold {
+					continue
+				}
+				if !h.domainIsolationExpiry {
+					entry.expiresAt = now.AddDate(100, 0, 0)
+				} else if deadline := now.Add(domainQuarantineTTL); entry.expiresAt.After(deadline) {
+					entry.expiresAt = deadline
+				}
+				state.domainExpiry.Set(domain, entry.expiresAt)
+			}
+		}
+	}
+	if update.Clear {
+		for _, state := range h.adapters {
+			for domain := range state.domains {
+				state.domainExpiry.Delete(domain)
+			}
+			state.domains = make(map[string]*domainHealth)
+		}
+	}
+	for _, key := range update.Remove {
+		state := h.adapters[key.Adapter]
+		if state == nil {
+			continue
+		}
+		domain := normalizeDomain(key.Domain)
+		delete(state.domains, domain)
+		state.domainExpiry.Delete(domain)
+	}
+}
+
+func (h *healthTable) domainExpiryEnabled() bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.domainIsolationExpiry
 }
 
 func (h *healthTable) recordComparativeDomainFailure(

@@ -26,12 +26,26 @@ type BlockedDomainSnapshot struct {
 	Entries   []BlockedDomainEntry `json:"entries"`
 }
 
+const (
+	// blockedDomainExpiryTTL matches the engine's quarantine lifetime.
+	blockedDomainExpiryTTL = 30 * time.Minute
+	// A deadline further away than this can only come from a period with
+	// automatic expiry disabled, which records a date 100 years ahead.
+	blockedDomainPermanentHorizon = 24 * time.Hour
+)
+
 type BlockedDomainService struct {
 	mu       sync.Mutex
 	path     string
 	settings *SettingsService
 	now      func() time.Time
 	entries  map[string]map[string]float64
+	// removals counts manual removals so a telemetry sample requested before
+	// one of them can be recognized and dropped instead of restoring the record.
+	removals uint64
+	// evictRuntime runs commit after removing the records from a running engine.
+	// It is set once while EngineService is constructed.
+	evictRuntime func(params map[string]any, commit func() error) error
 }
 
 func NewBlockedDomainService(settings *SettingsService) *BlockedDomainService {
@@ -45,7 +59,8 @@ func NewBlockedDomainService(settings *SettingsService) *BlockedDomainService {
 	return service
 }
 
-type purgedDomain struct {
+// expiryChange is a record's state before enforceExpiryLocked changed it.
+type expiryChange struct {
 	adapter string
 	domain  string
 	expiry  float64
@@ -54,10 +69,10 @@ type purgedDomain struct {
 func (s *BlockedDomainService) List() (BlockedDomainSnapshot, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	purged := s.purgeExpiredLocked()
-	if len(purged) > 0 {
+	changes := s.enforceExpiryLocked()
+	if len(changes) > 0 {
 		if err := s.saveLocked(); err != nil {
-			s.restorePurgedLocked(purged)
+			s.restoreExpiryLocked(changes)
 		}
 	}
 	preferences := s.settings.Get()
@@ -93,27 +108,65 @@ func (s *BlockedDomainService) Remove(adapter string, domain string) error {
 	if adapter == "" || domain == "" {
 		return errors.New("网卡与域名不能为空")
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if domains := s.entries[adapter]; domains != nil {
-		delete(domains, domain)
-		if len(domains) == 0 {
-			delete(s.entries, adapter)
+	return s.commitRemoval(map[string]any{
+		"remove": []map[string]string{{"adapter": adapter, "domain": domain}},
+	}, func() {
+		if domains := s.entries[adapter]; domains != nil {
+			delete(domains, domain)
+			if len(domains) == 0 {
+				delete(s.entries, adapter)
+			}
 		}
-	}
-	return s.saveLocked()
+	})
 }
 
 func (s *BlockedDomainService) Clear() error {
+	return s.commitRemoval(map[string]any{"clear": true}, func() {
+		s.entries = map[string]map[string]float64{}
+	})
+}
+
+// commitRemoval tells a running engine first. A sample taken after that cannot
+// contain the removed records, and one taken earlier is dropped by the removals
+// count, so old telemetry cannot write them back.
+func (s *BlockedDomainService) commitRemoval(params map[string]any, remove func()) error {
+	commit := func() error {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		s.removals++
+		remove()
+		return s.saveLocked()
+	}
+	if s.evictRuntime == nil {
+		return commit()
+	}
+	return s.evictRuntime(params, commit)
+}
+
+// runtimeSampleToken must be read before requesting the telemetry passed to
+// replaceRuntimeSample.
+func (s *BlockedDomainService) runtimeSampleToken() uint64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.entries = map[string]map[string]float64{}
-	return s.saveLocked()
+	return s.removals
+}
+
+func (s *BlockedDomainService) replaceRuntimeSample(token uint64, entries []BlockedDomainEntry) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if token != s.removals {
+		return nil
+	}
+	return s.replaceRuntimeLocked(entries)
 }
 
 func (s *BlockedDomainService) ReplaceRuntime(entries []BlockedDomainEntry) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.replaceRuntimeLocked(entries)
+}
+
+func (s *BlockedDomainService) replaceRuntimeLocked(entries []BlockedDomainEntry) error {
 	useExpiry := s.settings.Get().BlockedDomainExpiry
 	now := s.now()
 	next := make(map[string]map[string]float64)
@@ -141,7 +194,16 @@ func (s *BlockedDomainService) ReplaceRuntime(entries []BlockedDomainEntry) erro
 		if next[adapter] == nil {
 			next[adapter] = map[string]float64{}
 		}
-		next[adapter][domain] = float64(entry.ExpiresAt.Unix())
+		expiry := float64(entry.ExpiresAt.Unix())
+		if useExpiry && entry.ExpiresAt.After(now.Add(blockedDomainPermanentHorizon)) {
+			// The engine has not received the policy yet. Keep an already limited
+			// deadline so repeated samples neither extend it nor rewrite the file.
+			expiry = float64(now.Add(blockedDomainExpiryTTL).Unix())
+			if existing, ok := s.entries[adapter][domain]; ok && existing > float64(now.Unix()) && existing <= expiry {
+				expiry = existing
+			}
+		}
+		next[adapter][domain] = expiry
 	}
 	if blockedDomainMapsEqual(s.entries, next) {
 		return nil
@@ -194,32 +256,43 @@ func (s *BlockedDomainService) load() error {
 			}
 		}
 	}
-	s.purgeExpiredLocked()
+	s.enforceExpiryLocked()
 	return nil
 }
 
-func (s *BlockedDomainService) purgeExpiredLocked() []purgedDomain {
+// enforceExpiryLocked applies automatic expiry to the stored records: past
+// deadlines are removed, and records made permanent while expiry was disabled
+// get the normal lifetime from now on. It returns what it changed.
+func (s *BlockedDomainService) enforceExpiryLocked() []expiryChange {
 	if !s.settings.Get().BlockedDomainExpiry {
 		return nil
 	}
-	now := float64(s.now().Unix())
-	var purged []purgedDomain
+	current := s.now()
+	now := float64(current.Unix())
+	horizon := float64(current.Add(blockedDomainPermanentHorizon).Unix())
+	limited := float64(current.Add(blockedDomainExpiryTTL).Unix())
+	var changes []expiryChange
 	for adapter, domains := range s.entries {
 		for domain, expiry := range domains {
-			if expiry <= now {
+			switch {
+			case expiry <= now:
 				delete(domains, domain)
-				purged = append(purged, purgedDomain{adapter: adapter, domain: domain, expiry: expiry})
+			case expiry > horizon:
+				domains[domain] = limited
+			default:
+				continue
 			}
+			changes = append(changes, expiryChange{adapter: adapter, domain: domain, expiry: expiry})
 		}
 		if len(domains) == 0 {
 			delete(s.entries, adapter)
 		}
 	}
-	return purged
+	return changes
 }
 
-func (s *BlockedDomainService) restorePurgedLocked(purged []purgedDomain) {
-	for _, entry := range purged {
+func (s *BlockedDomainService) restoreExpiryLocked(changes []expiryChange) {
+	for _, entry := range changes {
 		if s.entries[entry.adapter] == nil {
 			s.entries[entry.adapter] = map[string]float64{}
 		}

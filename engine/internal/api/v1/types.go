@@ -18,25 +18,26 @@ import (
 )
 
 const (
-	MethodEngineHello       = "engine.hello"
-	MethodEngineStatus      = "engine.status"
-	MethodEngineScheduling  = "engine.scheduling"
-	MethodEngineStart       = "engine.start"
-	MethodEngineStop        = "engine.stop"
-	MethodEngineTelemetry   = "engine.telemetry"
-	MethodSteamCDNConfigure = "steam_cdn.configure"
-	MethodTunActivate       = "tun.activate"
-	MethodTunStatus         = "tun.status"
-	MethodTunDeactivate     = "tun.deactivate"
-	MethodDNSResolve        = "dns.resolve"
-	MethodDNSStatus         = "dns.status"
-	MethodDNSDoHRelay       = "dns.dohRelay"
-	MethodHealthCheck       = "health.check"
-	MethodDiagnosticRun     = "diagnostic.run"
-	MethodMTUSet            = "mtu.set"
-	MethodWFPInspect        = "wfp.inspect"
-	MethodHotspotInspect    = "hotspot.inspect"
-	MethodHostShutdown      = "host.shutdown"
+	MethodEngineHello            = "engine.hello"
+	MethodEngineStatus           = "engine.status"
+	MethodEngineScheduling       = "engine.scheduling"
+	MethodEngineStart            = "engine.start"
+	MethodEngineStop             = "engine.stop"
+	MethodEngineTelemetry        = "engine.telemetry"
+	MethodSteamCDNConfigure      = "steam_cdn.configure"
+	MethodDomainQuarantineUpdate = "domain_quarantine.update"
+	MethodTunActivate            = "tun.activate"
+	MethodTunStatus              = "tun.status"
+	MethodTunDeactivate          = "tun.deactivate"
+	MethodDNSResolve             = "dns.resolve"
+	MethodDNSStatus              = "dns.status"
+	MethodDNSDoHRelay            = "dns.dohRelay"
+	MethodHealthCheck            = "health.check"
+	MethodDiagnosticRun          = "diagnostic.run"
+	MethodMTUSet                 = "mtu.set"
+	MethodWFPInspect             = "wfp.inspect"
+	MethodHotspotInspect         = "hotspot.inspect"
+	MethodHostShutdown           = "host.shutdown"
 
 	EventEngineStateChanged  = "engine.state_changed"
 	EventDNSFallbackRequired = "dns.fallback_required"
@@ -53,6 +54,7 @@ var capabilities = []string{
 	MethodEngineStop,
 	MethodEngineTelemetry,
 	MethodSteamCDNConfigure,
+	MethodDomainQuarantineUpdate,
 	MethodTunActivate,
 	MethodTunStatus,
 	MethodTunDeactivate,

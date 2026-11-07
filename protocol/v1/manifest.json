@@ -55,6 +55,12 @@
       "cancellation": "not_applicable"
     },
     {
+      "name": "domain_quarantine.update",
+      "idempotency": "safe_retry",
+      "privilege": "none",
+      "cancellation": "not_applicable"
+    },
+    {
       "name": "tun.activate",
       "idempotency": "state_guarded",
       "privilege": "administrator",

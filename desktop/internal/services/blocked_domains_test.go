@@ -2,6 +2,7 @@ package services
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -292,6 +293,130 @@ func TestBlockedDomainReplaceRuntimeRetriesFailedPersistence(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestBlockedDomainDropsSampleRequestedBeforeRemoval(t *testing.T) {
+	service := newBlockedDomainTestService(t, false)
+	expiresAt := service.now().AddDate(100, 0, 0)
+	stale := []BlockedDomainEntry{
+		{Adapter: "WLAN", Domain: "a.example.com", ExpiresAt: expiresAt},
+		{Adapter: "WLAN", Domain: "b.example.com", ExpiresAt: expiresAt},
+	}
+	syncBlockedDomains(t, service, stale...)
+
+	// Permanent records are merged, so one stale sample would restore a removal
+	// for good. Removal and Clear must both invalidate an in-flight sample.
+	token := service.runtimeSampleToken()
+	if err := service.Remove("WLAN", "a.example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.replaceRuntimeSample(token, stale); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]time.Time{"WLAN/b.example.com": expiresAt}
+	requireBlockedDomainRecords(t, service, want)
+
+	token = service.runtimeSampleToken()
+	if err := service.Clear(); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.replaceRuntimeSample(token, stale); err != nil {
+		t.Fatal(err)
+	}
+	requireBlockedDomainRecords(t, service, nil)
+
+	// A sample requested after the removal is current: a new failure still counts.
+	if err := service.replaceRuntimeSample(service.runtimeSampleToken(), stale[:1]); err != nil {
+		t.Fatal(err)
+	}
+	requireBlockedDomainRecords(t, service, map[string]time.Time{"WLAN/a.example.com": expiresAt})
+}
+
+func TestBlockedDomainRemovalEvictsRuntimeBeforeCommitting(t *testing.T) {
+	service := newBlockedDomainTestService(t, false)
+	expiresAt := service.now().AddDate(100, 0, 0)
+	syncBlockedDomains(t, service,
+		BlockedDomainEntry{Adapter: "WLAN", Domain: "a.example.com", ExpiresAt: expiresAt},
+		BlockedDomainEntry{Adapter: "WLAN", Domain: "b.example.com", ExpiresAt: expiresAt},
+	)
+	want := map[string]time.Time{"WLAN/a.example.com": expiresAt, "WLAN/b.example.com": expiresAt}
+
+	// The record must survive a failed eviction, or the engine would report it
+	// again while the user believes it is gone.
+	failure := errors.New("core unavailable")
+	service.evictRuntime = func(map[string]any, func() error) error { return failure }
+	token := service.runtimeSampleToken()
+	if err := service.Remove("WLAN", "a.example.com"); !errors.Is(err, failure) {
+		t.Fatalf("Remove error = %v", err)
+	}
+	if err := service.Clear(); !errors.Is(err, failure) {
+		t.Fatalf("Clear error = %v", err)
+	}
+	requireBlockedDomainRecords(t, service, want)
+	if token != service.runtimeSampleToken() {
+		t.Fatal("failed eviction must not invalidate in-flight samples")
+	}
+
+	var received []map[string]any
+	service.evictRuntime = func(params map[string]any, commit func() error) error {
+		requireBlockedDomainRecords(t, service, want)
+		received = append(received, params)
+		return commit()
+	}
+	if err := service.Remove(" WLAN ", "A.EXAMPLE.COM."); err != nil {
+		t.Fatal(err)
+	}
+	if len(received) != 1 {
+		t.Fatalf("evictions = %#v", received)
+	}
+	remove, ok := received[0]["remove"].([]map[string]string)
+	if !ok || len(remove) != 1 || remove[0]["adapter"] != "WLAN" || remove[0]["domain"] != "a.example.com" {
+		t.Fatalf("remove params = %#v", received[0])
+	}
+	want = map[string]time.Time{"WLAN/b.example.com": expiresAt}
+	requireBlockedDomainRecords(t, reloadBlockedDomainTestService(t, service), want)
+
+	if err := service.Clear(); err != nil {
+		t.Fatal(err)
+	}
+	if len(received) != 2 || received[1]["clear"] != true {
+		t.Fatalf("clear params = %#v", received)
+	}
+	requireBlockedDomainRecords(t, reloadBlockedDomainTestService(t, service), nil)
+}
+
+func TestBlockedDomainReenablingExpiryLimitsPermanentRecords(t *testing.T) {
+	service := newBlockedDomainTestService(t, false)
+	now := service.now()
+	permanent := now.AddDate(100, 0, 0)
+	syncBlockedDomains(t, service, BlockedDomainEntry{Adapter: "WLAN", Domain: "a.example.com", ExpiresAt: permanent})
+
+	setBlockedDomainExpiry(t, service.settings, true)
+	limited := now.Add(blockedDomainExpiryTTL)
+	want := map[string]time.Time{"WLAN/a.example.com": limited}
+	requireBlockedDomainRecords(t, service, want)
+	requireBlockedDomainRecords(t, reloadBlockedDomainTestService(t, service), want)
+
+	// Later reads and samples from an engine still on the old policy must not
+	// restart the 30 minutes, or the record would never expire.
+	service.now = func() time.Time { return now.Add(10 * time.Minute) }
+	requireBlockedDomainRecords(t, service, want)
+	syncBlockedDomains(t, service, BlockedDomainEntry{Adapter: "WLAN", Domain: "a.example.com", ExpiresAt: permanent})
+	requireBlockedDomainRecords(t, service, want)
+
+	service.now = func() time.Time { return limited }
+	requireBlockedDomainRecords(t, service, nil)
+}
+
+func TestBlockedDomainLoadLimitsStoredPermanentRecordsWhenExpiryEnabled(t *testing.T) {
+	service := newBlockedDomainTestService(t, false)
+	now := service.now()
+	syncBlockedDomains(t, service, BlockedDomainEntry{Adapter: "WLAN", Domain: "a.example.com", ExpiresAt: now.AddDate(100, 0, 0)})
+	setBlockedDomainExpiry(t, service.settings, true)
+
+	// Records written by an earlier version are repaired on the first load.
+	want := map[string]time.Time{"WLAN/a.example.com": now.Add(blockedDomainExpiryTTL)}
+	requireBlockedDomainRecords(t, reloadBlockedDomainTestService(t, service), want)
 }
 
 func TestBlockedDomainConcurrentPermanentSyncAndList(t *testing.T) {

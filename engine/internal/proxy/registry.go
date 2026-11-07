@@ -61,8 +61,11 @@ type TelemetrySnapshot struct {
 	Adapters          []AdapterTelemetry          `json:"adapters"`
 	Connections       []ConnectionSnapshot        `json:"active_connections,omitempty"`
 	DomainQuarantines []DomainQuarantineTelemetry `json:"domain_quarantines,omitempty"`
-	DNS               *dns.Status                 `json:"dns,omitempty"`
-	Total             struct {
+	// DomainIsolationExpiry is the policy this run currently applies, so the
+	// desktop can detect a settings change the engine has not received yet.
+	DomainIsolationExpiry *bool       `json:"domain_isolation_expiry,omitempty"`
+	DNS                   *dns.Status `json:"dns,omitempty"`
+	Total                 struct {
 		Connections uint64 `json:"connections"`
 		BytesUp     uint64 `json:"bytes_up"`
 		BytesDown   uint64 `json:"bytes_down"`

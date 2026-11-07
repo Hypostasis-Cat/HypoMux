@@ -203,6 +203,8 @@ func decodeRequestParams(t *testing.T, request protocol.Request) {
 			Enabled *bool `json:"enabled"`
 			Reset   bool  `json:"reset"`
 		}{}
+	case MethodDomainQuarantineUpdate:
+		target = &proxy.DomainQuarantineUpdate{}
 	case MethodEngineScheduling:
 		target = &proxy.SchedulingConfig{}
 	case MethodEngineStart:
@@ -252,6 +254,8 @@ func decodeResult(t *testing.T, method string, payload json.RawMessage) {
 		target = &StatusResult{}
 	case MethodSteamCDNConfigure:
 		target = &proxy.SteamCDNStatus{}
+	case MethodDomainQuarantineUpdate:
+		target = &proxy.DomainQuarantineUpdateResult{}
 	case MethodEngineScheduling:
 		target = &proxy.SchedulingConfig{}
 	case MethodEngineStart:

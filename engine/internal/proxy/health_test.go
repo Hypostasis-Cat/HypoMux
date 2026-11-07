@@ -162,6 +162,92 @@ func TestDomainIsolationCanKeepQuarantineWithoutAutomaticExpiry(t *testing.T) {
 	}
 }
 
+func TestSuccessKeepsConfirmedQuarantineWithoutAutomaticExpiry(t *testing.T) {
+	adapters := []Adapter{{Name: "a", SourceIP: "127.0.0.1"}}
+	health := newHealthTableConfigured(adapters, true, false, nil)
+	health.recordComparativeDomainFailure("a", "confirmed.example")
+	health.recordComparativeDomainFailure("a", "confirmed.example")
+	health.recordComparativeDomainFailure("a", "evidence.example")
+
+	health.recordSuccess("a", "confirmed.example")
+	health.recordSuccess("a", "evidence.example")
+
+	_, quarantines := health.snapshot()
+	if len(quarantines) != 1 || quarantines[0].Domain != "confirmed.example" {
+		t.Fatalf("quarantines after success = %#v", quarantines)
+	}
+	if _, exists := health.adapters["a"].domains["evidence.example"]; exists {
+		t.Fatal("unconfirmed evidence must still clear on success")
+	}
+}
+
+func TestDomainQuarantineUpdateSwitchesExpiryOnRunningTable(t *testing.T) {
+	adapters := []Adapter{{Name: "a", SourceIP: "127.0.0.1"}}
+	now := time.Date(2026, 7, 30, 4, 0, 0, 0, time.UTC)
+	health := newHealthTableConfigured(adapters, true, true, nil)
+	health.now = func() time.Time { return now }
+	health.recordComparativeDomainFailure("a", "example.com")
+	health.recordComparativeDomainFailure("a", "example.com")
+	health.recordComparativeDomainFailure("a", "evidence.example")
+	evidenceExpiry := health.adapters["a"].domains["evidence.example"].expiresAt
+
+	disabled, enabled := false, true
+	health.updateDomainQuarantines(DomainQuarantineUpdate{Expiry: &disabled})
+	if health.domainExpiryEnabled() {
+		t.Fatal("expiry policy did not switch off")
+	}
+	_, quarantines := health.snapshot()
+	if len(quarantines) != 1 || !quarantines[0].ExpiresAt.Equal(now.AddDate(100, 0, 0)) {
+		t.Fatalf("permanent quarantines = %#v", quarantines)
+	}
+	if got := health.adapters["a"].domains["evidence.example"].expiresAt; !got.Equal(evidenceExpiry) {
+		t.Fatalf("unconfirmed evidence expiry changed to %v", got)
+	}
+
+	// A permanent quarantine must not stay permanent once expiry is back on.
+	now = now.Add(time.Hour)
+	health.updateDomainQuarantines(DomainQuarantineUpdate{Expiry: &enabled})
+	_, quarantines = health.snapshot()
+	if len(quarantines) != 1 || !quarantines[0].ExpiresAt.Equal(now.Add(domainQuarantineTTL)) {
+		t.Fatalf("limited quarantines = %#v", quarantines)
+	}
+
+	// The expiry index has to follow, or the entry would outlive its deadline.
+	now = now.Add(domainQuarantineTTL)
+	if _, quarantines = health.snapshot(); len(quarantines) != 0 {
+		t.Fatalf("quarantines after deadline = %#v", quarantines)
+	}
+}
+
+func TestDomainQuarantineUpdateRemovesAndClears(t *testing.T) {
+	adapters := []Adapter{{Name: "a", SourceIP: "127.0.0.1"}, {Name: "b", SourceIP: "127.0.0.2"}}
+	health := newHealthTableConfigured(adapters, true, false, nil)
+	for _, target := range []struct{ adapter, domain string }{
+		{"a", "one.example"}, {"a", "two.example"}, {"b", "one.example"},
+	} {
+		health.recordComparativeDomainFailure(target.adapter, target.domain)
+		health.recordComparativeDomainFailure(target.adapter, target.domain)
+	}
+
+	health.updateDomainQuarantines(DomainQuarantineUpdate{Remove: []DomainQuarantineKey{
+		{Adapter: "a", Domain: " ONE.example. "}, {Adapter: "missing", Domain: "one.example"},
+	}})
+	_, quarantines := health.snapshot()
+	if len(quarantines) != 2 || quarantines[0].Domain != "two.example" || quarantines[1].Adapter != "b" {
+		t.Fatalf("quarantines after remove = %#v", quarantines)
+	}
+
+	health.updateDomainQuarantines(DomainQuarantineUpdate{Clear: true})
+	if _, quarantines = health.snapshot(); len(quarantines) != 0 {
+		t.Fatalf("quarantines after clear = %#v", quarantines)
+	}
+	// A cleared domain starts from no evidence.
+	health.recordComparativeDomainFailure("a", "two.example")
+	if _, quarantines = health.snapshot(); len(quarantines) != 0 {
+		t.Fatalf("one failure re-quarantined a cleared domain: %#v", quarantines)
+	}
+}
+
 func TestSuccessClearsOnlyMatchingDomainEvidence(t *testing.T) {
 	adapters := []Adapter{{Name: "a", SourceIP: "127.0.0.1"}}
 	health := newHealthTable(adapters)
