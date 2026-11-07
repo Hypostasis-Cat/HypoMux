@@ -116,3 +116,18 @@ aggregation flows use the new pool; explicit NIC channels retain their bindings.
 A NIC can join the pool even if it was not selected at startup. This does not
 create new explicit NIC routing channels or change the TUN IPv6/DNS topology.
 Clients must check the `engine.scheduling` capability before live updates.
+
+### Live domain quarantine updates
+
+`domain_quarantine.update` accepts `{expiry?: boolean, clear?: boolean,
+remove?: [{adapter, domain}]}` and returns `{applied: boolean}`, which is false
+when no engine has been started. Every `remove` item needs an adapter and a
+domain. All fields apply to the current run only and are safe to retry.
+
+`expiry` switches the automatic-expiry policy without a restart. Disabling it
+makes confirmed quarantines permanent; enabling it limits them to the normal
+30-minute lifetime from that moment. While expiry is disabled, a successful
+connection no longer ends a confirmed quarantine, so it lasts until `remove` or
+`clear`. `engine.telemetry` reports the current policy as
+`domain_isolation_expiry`. Clients must check the `domain_quarantine.update`
+capability before live updates.

@@ -103,7 +103,8 @@ type telemetryResult struct {
 		Evidence  int       `json:"evidence"`
 		ExpiresAt time.Time `json:"expires_at"`
 	} `json:"domain_quarantines"`
-	Total struct {
+	DomainIsolationExpiry *bool `json:"domain_isolation_expiry"`
+	Total                 struct {
 		Connections int   `json:"connections"`
 		BytesUp     int64 `json:"bytes_up"`
 		BytesDown   int64 `json:"bytes_down"`
@@ -280,6 +281,9 @@ func newEngineService(
 		hostElevated:        hostPrivilege.Elevated,
 		elevatedProxySafe:   hostPrivilege.ProxySafe,
 		hostPrivilegeDetail: strings.TrimSpace(hostPrivilege.Detail),
+	}
+	if blockedDomains != nil {
+		blockedDomains.evictRuntime = service.evictDomainQuarantines
 	}
 	if recoveryErr != nil {
 		service.proxyRecoveryError = recoveryErr.Error()
@@ -475,6 +479,10 @@ func (s *EngineService) Snapshot() (EngineSnapshot, error) {
 		return snapshot, nil
 	}
 	s.mu.Unlock()
+	var quarantineToken uint64
+	if s.blockedDomains != nil {
+		quarantineToken = s.blockedDomains.runtimeSampleToken()
+	}
 	var telemetry telemetryResult
 	if err := s.client.Request(ctx, "engine.telemetry", map[string]any{"include_connections": false}, &telemetry); err != nil {
 		return EngineSnapshot{}, fmt.Errorf("读取聚合遥测失败：%w", err)
@@ -543,13 +551,7 @@ func (s *EngineService) Snapshot() (EngineSnapshot, error) {
 		})
 	}
 	if s.blockedDomains != nil && settings.BlockedDomainBypass {
-		runtimeEntries := make([]BlockedDomainEntry, 0, len(telemetry.DomainQuarantines))
-		for _, entry := range telemetry.DomainQuarantines {
-			runtimeEntries = append(runtimeEntries, BlockedDomainEntry{
-				Adapter: entry.Adapter, Domain: entry.Domain, ExpiresAt: entry.ExpiresAt,
-			})
-		}
-		_ = s.blockedDomains.ReplaceRuntime(runtimeEntries)
+		syncDomainQuarantines(ctx, s.client.Request, s.blockedDomains, hello.Capabilities, settings.BlockedDomainExpiry, quarantineToken, telemetry)
 	}
 	shouldCheckTUN := false
 	s.mu.Lock()
