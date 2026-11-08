@@ -1576,11 +1576,20 @@ svg {
 }
 
 .engine-mode-note {
+  display: grid;
   max-width: 410px;
   margin-top: 8px;
   color: var(--hm-text-tertiary);
   font-size: var(--fontSizeBase200);
   line-height: var(--hm-line-height-reading);
+}
+
+.engine-mode-note-text {
+  grid-area: 1 / 1;
+}
+
+.engine-mode-note-text[aria-hidden="true"] {
+  visibility: hidden;
 }
 
 .engine-action {
