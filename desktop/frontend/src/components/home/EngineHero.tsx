@@ -14,6 +14,8 @@ import { ThroughputDisplay } from "./ThroughputDisplay";
 import { useI18n } from "../../i18n/i18n";
 import { springs } from "../../theme/motion";
 
+const modes: EngineMode[] = ["proxy", "tun"];
+
 export function EngineHero({
   phase,
   mode,
@@ -77,6 +79,21 @@ export function EngineHero({
     observer.observe(list);
     return () => observer.disconnect();
   }, [mode, locale]);
+  const modeNotes: Record<EngineMode, string> = {
+    proxy: systemProxyTakeover
+      ? text(
+        `接管遵循 Windows 系统代理的应用流量 · HTTP ${httpPort} · SOCKS5 ${socksPort}`,
+        `Manages apps that follow the Windows system proxy · HTTP ${httpPort} · SOCKS5 ${socksPort}`,
+      )
+      : text(
+        `仅开放本地代理端口，不修改 Windows 系统代理 · HTTP ${httpPort} · SOCKS5 ${socksPort}`,
+        `Local proxy ports only; Windows system proxy is unchanged · HTTP ${httpPort} · SOCKS5 ${socksPort}`,
+      ),
+    tun: text(
+      "启动前执行只读路由、WFP 与权限检查；系统级资源由独立 Go Core 管理",
+      "Performs read-only route, WFP, and permission checks before start; system resources are managed by the independent Go Core.",
+    ),
+  };
   const active = phase === "running" || phase === "degraded" || phase === "starting";
   const actionLabel = phase === "starting"
     ? text("正在启动", "Starting")
@@ -135,22 +152,19 @@ export function EngineHero({
           <Tab value="proxy" icon={<PlugConnected20Regular />}>{t("mode_proxy")}</Tab>
           <Tab value="tun" icon={<Navigation20Regular />}>{text("TUN 模式", "TUN mode")}</Tab>
         </TabList>
-        <span key={mode} className="engine-mode-note motion-inline-swap">
-          {mode === "proxy"
-            ? systemProxyTakeover
-              ? text(
-                `接管遵循 Windows 系统代理的应用流量 · HTTP ${httpPort} · SOCKS5 ${socksPort}`,
-                `Manages apps that follow the Windows system proxy · HTTP ${httpPort} · SOCKS5 ${socksPort}`,
-              )
-              : text(
-                `仅开放本地代理端口，不修改 Windows 系统代理 · HTTP ${httpPort} · SOCKS5 ${socksPort}`,
-                `Local proxy ports only; Windows system proxy is unchanged · HTTP ${httpPort} · SOCKS5 ${socksPort}`,
-              )
-            : text(
-              "启动前执行只读路由、WFP 与权限检查；系统级资源由独立 Go Core 管理",
-              "Performs read-only route, WFP, and permission checks before start; system resources are managed by the independent Go Core.",
-            )}
-        </span>
+        {/* Both notes share one grid cell so the card keeps the taller note's
+            height; switching modes would otherwise resize the whole card. */}
+        <div className="engine-mode-note">
+          {modes.map(value => (
+            <span
+              key={value === mode ? `${value}-shown` : value}
+              className={value === mode ? "engine-mode-note-text motion-inline-swap" : "engine-mode-note-text"}
+              aria-hidden={value === mode ? undefined : true}
+            >
+              {modeNotes[value]}
+            </span>
+          ))}
+        </div>
         <div className="engine-control-row">
           <Button
             className="engine-action"
