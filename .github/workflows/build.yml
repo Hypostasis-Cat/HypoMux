@@ -31,6 +31,10 @@ jobs:
   build:
     name: Validate and package Wails desktop
     runs-on: windows-2025
+    outputs:
+      # Re-running only the publish job keeps this job's outputs, so the
+      # release job downloads the artifact from the attempt that built it.
+      artifact_name: ${{ steps.artifact_name.outputs.name }}
 
     steps:
       - name: Checkout
@@ -328,10 +332,15 @@ jobs:
           $env:HYPOMUX_SIGNED_INSTALLER_TEST = (Resolve-Path "${{ env.INSTALLER_PATH }}").Path
           go -C desktop test ./internal/services -run TestVerifyDownloadedInstallerAuthenticityAcceptsOfficialSignedInstaller -count=1 -v
 
+      - name: Resolve build artifact name
+        id: artifact_name
+        shell: bash
+        run: echo "name=HypoMux-Windows-${{ github.sha }}-${{ github.run_attempt }}" >> "${GITHUB_OUTPUT}"
+
       - name: Upload build artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: HypoMux-Windows-${{ github.sha }}-${{ github.run_attempt }}
+          name: ${{ steps.artifact_name.outputs.name }}
           path: |
             desktop/bin/hypomux.exe
             desktop/bin/hypomux-engine.exe
@@ -365,7 +374,7 @@ jobs:
       - name: Download build artifacts
         uses: actions/download-artifact@v8
         with:
-          name: HypoMux-Windows-${{ github.sha }}-${{ github.run_attempt }}
+          name: ${{ needs.build.outputs.artifact_name }}
           path: artifacts
 
       - name: Resolve release channel
@@ -527,28 +536,55 @@ jobs:
       - name: Check existing GitHub installer
         id: github_installer
         shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           installer="artifacts/${{ steps.stage_release.outputs.installer_name }}"
-          asset_url="https://github.com/Hypostasis-Cat/HypoMux/releases/download/${GITHUB_REF_NAME}/$(basename "${installer}")"
-          existing="artifacts/github-existing-installer.exe"
-          status="$(curl --silent --show-error --location --output "${existing}" --write-out '%{http_code}' "${asset_url}" || true)"
-          case "${status}" in
-            200)
-              if ! cmp --silent "${installer}" "${existing}"; then
-                echo "GitHub Release already contains a different installer with the same name."
-                exit 1
-              fi
-              echo "upload=false" >> "${GITHUB_OUTPUT}"
-              ;;
-            404)
-              echo "upload=true" >> "${GITHUB_OUTPUT}"
-              ;;
-            *)
-              echo "Unable to inspect the GitHub installer before upload (HTTP ${status:-unknown})."
+          installer_name="$(basename "${installer}")"
+          existing_dir="artifacts/github-existing"
+
+          # Query the REST API instead of the public download URL, which can
+          # return 5xx for long stretches; retry transient API failures.
+          release_json=""
+          for attempt in 1 2 3 4 5; do
+            if release_json="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}" 2>api-error.txt)"; then
+              break
+            fi
+            if grep -q 'HTTP 404' api-error.txt; then
+              release_json=""
+              break
+            fi
+            if [[ "${attempt}" == 5 ]]; then
+              echo "Unable to inspect the GitHub Release before upload:"
+              cat api-error.txt
               exit 1
-              ;;
-          esac
+            fi
+            sleep $((attempt * 15))
+          done
+
+          if [[ -z "${release_json}" ]] || ! jq -e --arg name "${installer_name}"             'any(.assets[]; .name == $name)' <<< "${release_json}" > /dev/null; then
+            echo "upload=true" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          for attempt in 1 2 3 4 5; do
+            rm -rf "${existing_dir}"
+            if gh release download "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}"               --pattern "${installer_name}" --dir "${existing_dir}"; then
+              break
+            fi
+            if [[ "${attempt}" == 5 ]]; then
+              echo "Unable to download the existing GitHub installer for comparison."
+              exit 1
+            fi
+            sleep $((attempt * 15))
+          done
+
+          if ! cmp --silent "${installer}" "${existing_dir}/${installer_name}"; then
+            echo "GitHub Release already contains a different installer with the same name."
+            exit 1
+          fi
+          echo "upload=false" >> "${GITHUB_OUTPUT}"
 
       - name: Create or update GitHub Release metadata
         if: steps.github_installer.outputs.upload == 'false'
