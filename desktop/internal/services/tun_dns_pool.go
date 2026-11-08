@@ -146,6 +146,18 @@ func buildTUNDNSPool(adapter AdapterView, options tunConfigOptions) (map[string]
 			map[string]any{"match_response": tag, "response_rcode": "NXDOMAIN", "action": "respond", "race": race},
 		}
 	}
+	// sing-box records finished upstream answers before it checks whether each
+	// upstream has finished. An answer that lands between the two steps is
+	// treated as finished but missing, so that rule skips a good answer and the
+	// query can end in SERVFAIL. The next rule bound to the same upstream
+	// records it, so repeat plain respond rules after each group.
+	recheck := func(group []string) []any {
+		var result []any
+		for _, tag := range group {
+			result = append(result, respond(tag, false)...)
+		}
+		return result
+	}
 	for start := 0; start < len(tags); {
 		if encrypted[start] {
 			end := start + 1
@@ -158,11 +170,13 @@ func buildTUNDNSPool(adapter AdapterView, options tunConfigOptions) (map[string]
 			for _, tag := range tags[start:end] {
 				rules = append(rules, respond(tag, true)...)
 			}
+			rules = append(rules, recheck(tags[start:end])...)
 			start = end
 		} else {
 			tag := tags[start]
 			rules = append(rules, map[string]any{"action": "evaluate", "server": tag, "tag": tag, "timeout": "500ms"})
 			rules = append(rules, respond(tag, false)...)
+			rules = append(rules, recheck(tags[start:start+1])...)
 			start++
 		}
 	}
