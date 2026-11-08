@@ -52,7 +52,7 @@ Unicode true
 
 # The version information for this two must consist of 4 parts
 VIProductVersion "${HYPOMUX_WINDOWS_VERSION}"
-VIFileVersion    "${INFO_PRODUCTVERSION}.0"
+VIFileVersion    "${HYPOMUX_WINDOWS_VERSION}"
 
 VIAddVersionKey "CompanyName"     "${INFO_COMPANYNAME}"
 VIAddVersionKey "FileDescription" "${INFO_PRODUCTNAME} Installer"
