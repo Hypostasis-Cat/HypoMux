@@ -199,6 +199,7 @@ type EngineService struct {
 	runtimeBindingRefresh  bool
 	runtimeBindingEnabled  bool
 	runtimeBindingRecovery *runtimeBindingRecovery
+	runtimeBindingRestarts []time.Time
 	bindingMonitorDone     chan struct{}
 	tunConnectivityNotice  string
 	ipv4OnlyFallback       bool
