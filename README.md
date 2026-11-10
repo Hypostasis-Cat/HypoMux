@@ -62,6 +62,27 @@ HypoMux 聚合的是多个独立连接，而不是把单条 TCP 连接拆成多�
 5. 开启聚合引擎，再启动下载任务。若 Steam 已经运行，按界面提示重启 Steam 以完整应用代理设置。
 6. 使用完毕后停止聚合或正常退出，HypoMux 会恢复其接管的系统网络设置。
 
+## 命令行（CLI）
+
+安装版自带官方命令行客户端 `bin\hypomux-cli.exe`。它与界面走同一条经认证的 Core 服务管道（按安装路径 + SHA-256 指纹认证），控制的是同一个聚合引擎，适合脚本和 AI Agent 无人值守调用：
+
+```powershell
+# 查看可用于聚合的网卡，并以系统代理模式启动
+hypomux-cli adapters
+hypomux-cli start --adapter Ethernet --adapter "Wi-Fi:3" --socks-port 10800 --http-port 10801
+
+# 状态、遥测、域名解析与链路诊断（--json 输出协议 v1 原始结果）
+hypomux-cli status
+hypomux-cli telemetry --connections
+hypomux-cli dns resolve example.com
+hypomux-cli diagnose --src-ip 192.168.1.10
+
+# 停止聚合
+hypomux-cli stop
+```
+
+命令面、安全模型与 Agent 集成说明见 [官方 CLI 架构文档](docs/architecture/official-cli.md)。
+
 ## 与 Clash 等代理软件联动
 
 想同时使用 Clash/Mihomo 和多网卡聚合时，推荐联动模式：Clash 继续负责系统代理、TUN、节点和分流规则，它连接节点的每条连接再交给 HypoMux 分配到不同网卡，两者不会争抢系统代理或默认路由，也不会互相回环。

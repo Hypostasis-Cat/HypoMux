@@ -160,7 +160,7 @@ func cleanupPrevious(previous, current string, p windowsPlatform) error {
 	} else if err != nil {
 		return err
 	}
-	names := []string{"hypomux.exe", "uninstall.exe", filepath.Join("bin", "hypomux-engine.exe"), filepath.Join("bin", "sing-box.exe"), filepath.Join("bin", "wintun.dll"), filepath.Join("bin", "libcronet.dll")}
+	names := []string{"hypomux.exe", "uninstall.exe", filepath.Join("bin", "hypomux-engine.exe"), filepath.Join("bin", "hypomux-cli.exe"), filepath.Join("bin", "sing-box.exe"), filepath.Join("bin", "wintun.dll"), filepath.Join("bin", "libcronet.dll")}
 	for _, name := range names {
 		path := filepath.Join(previous, name)
 		if err = p.ValidateTarget(path); err != nil {
@@ -208,7 +208,7 @@ func makePlan(install, payload string, p windowsPlatform) ([]Item, error) {
 	// libcronet.dll is no longer shipped: only sing-box's naive outbound loads it,
 	// and HypoMux never configures one. Uninstall and old-layout cleanup still
 	// remove copies left by earlier versions.
-	for _, name := range []string{"hypomux-engine.exe", "sing-box.exe", "wintun.dll"} {
+	for _, name := range []string{"hypomux-engine.exe", "hypomux-cli.exe", "sing-box.exe", "wintun.dll"} {
 		source := filepath.Join(payload, name)
 		if info, e := os.Stat(source); e != nil || info.Size() == 0 {
 			return nil, fmt.Errorf("required payload missing or empty: %s", name)

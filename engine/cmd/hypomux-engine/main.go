@@ -25,6 +25,8 @@ var (
 
 	recoverTUN = tun.Recover
 
+	// installWindowsService pins the desktop executable and, optionally, the
+	// official CLI executable by path and SHA-256.
 	installServiceCommand = installWindowsService
 	removeServiceCommand  = removeWindowsService
 )
@@ -61,6 +63,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		flags := flag.NewFlagSet("install-service", flag.ContinueOnError)
 		flags.SetOutput(stderr)
 		desktopPath := flags.String("desktop", "", "installed HypoMux desktop executable")
+		cliPath := flags.String("cli", "", "official HypoMux CLI executable allowed to use the service pipe")
 		if err := flags.Parse(args[1:]); err != nil {
 			return 2
 		}
@@ -68,7 +71,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stderr, "install-service requires --desktop")
 			return 2
 		}
-		if err := installServiceCommand(*desktopPath); err != nil {
+		if err := installServiceCommand(*desktopPath, *cliPath); err != nil {
 			fmt.Fprintf(stderr, "install HypoMux Core Service: %v\n", err)
 			return 1
 		}
@@ -136,7 +139,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return 0
 	default:
 		fmt.Fprintf(stderr, "unknown command %q\n", command)
-		fmt.Fprintln(stderr, "usage: hypomux-engine [serve|serve-pipe|service|install-service --desktop PATH|remove-service|version|recover|diagnose]")
+		fmt.Fprintln(stderr, "usage: hypomux-engine [serve|serve-pipe|service|install-service --desktop PATH [--cli PATH]|remove-service|version|recover|diagnose]")
 		return 2
 	}
 }

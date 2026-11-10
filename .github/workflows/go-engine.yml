@@ -65,3 +65,4 @@ jobs:
         shell: pwsh
         run: |
           go build -trimpath -o "$env:RUNNER_TEMP\hypomux-engine.exe" .\cmd\hypomux-engine
+          go build -trimpath -o "$env:RUNNER_TEMP\hypomux-cli.exe" .\cmd\hypomux-cli

@@ -32,7 +32,7 @@ const (
 
 var errServiceClientRejected = errors.New("Core Service client rejected")
 
-func installWindowsService(desktopPath string) error {
+func installWindowsService(desktopPath string, cliPath string) error {
 	executable, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("resolve executable: %w", err)
@@ -44,7 +44,7 @@ func installWindowsService(desktopPath string) error {
 	if err := requireMachineInstallLocation(executable); err != nil {
 		return err
 	}
-	policy, err := buildCoreServicePolicy(executable, desktopPath)
+	policy, err := buildCoreServicePolicy(executable, desktopPath, cliPath)
 	if err != nil {
 		return fmt.Errorf("build Core Service security policy: %w", err)
 	}
@@ -432,11 +432,22 @@ func validateServicePipeClient(handle windows.Handle, policy coreServicePolicy) 
 	if clientPID == 0 {
 		return errors.New("reject Core Service client without process identity")
 	}
-	// Authenticate the exact installed desktop binary before evaluating session
-	// compatibility. Session state broadens console-only support to active RDP
-	// users, but never replaces the pinned path and digest security boundary.
-	if err := validateServiceClientExecutable(clientPID, policy); err != nil {
-		return err
+	// Authenticate the exact installed desktop or CLI binary before evaluating
+	// session compatibility. Session state broadens console-only support to
+	// active RDP users, but never replaces the pinned path and digest security
+	// boundary.
+	matched := false
+	var rejections []error
+	for _, pin := range policy.serviceClientPins() {
+		if err := validateServiceClientExecutable(clientPID, pin); err != nil {
+			rejections = append(rejections, err)
+			continue
+		}
+		matched = true
+		break
+	}
+	if !matched {
+		return errors.Join(rejections...)
 	}
 	var clientSession uint32
 	if err := windows.ProcessIdToSessionId(clientPID, &clientSession); err != nil {

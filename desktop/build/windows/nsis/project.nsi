@@ -748,6 +748,7 @@ Function StageSetupPayload
     Call StageSetupHelper
     SetOutPath "$PLUGINSDIR\payload"
     File /oname=hypomux-engine.exe "..\..\..\bin\hypomux-engine.exe"
+    File /oname=hypomux-cli.exe "..\..\..\bin\hypomux-cli.exe"
     File /oname=sing-box.exe "..\..\..\bin\sing-box.exe"
     File /oname=wintun.dll "..\..\..\bin\wintun.dll"
 FunctionEnd
@@ -919,7 +920,7 @@ Section
     !if "${WAILS_INSTALL_SCOPE}" != "user"
         StrCpy $HypoMuxSetupOperation "install-service"
         DetailPrint "$(CoreServiceInstalling)"
-        nsExec::ExecToStack /TIMEOUT=60000 '"${HYPOMUX_PROTECTED_CORE_BIN}\hypomux-engine.exe" install-service --desktop "$INSTDIR\${PRODUCT_EXECUTABLE}"'
+        nsExec::ExecToStack /TIMEOUT=60000 '"${HYPOMUX_PROTECTED_CORE_BIN}\hypomux-engine.exe" install-service --desktop "$INSTDIR\${PRODUCT_EXECUTABLE}" --cli "$INSTDIR\bin\hypomux-cli.exe"'
         Pop $0
         Pop $1
         ${If} $0 != 0
@@ -1022,6 +1023,7 @@ Section "uninstall"
         Delete "${HYPOMUX_PROTECTED_CORE_BIN}\wintun.dll"
         Delete "${HYPOMUX_PROTECTED_CORE_BIN}\sing-box.exe"
         Delete "${HYPOMUX_PROTECTED_CORE_BIN}\hypomux-engine.exe"
+        Delete "${HYPOMUX_PROTECTED_CORE_BIN}\hypomux-cli.exe"
         RMDir "${HYPOMUX_PROTECTED_CORE_BIN}"
         RMDir "${HYPOMUX_PROTECTED_CORE_ROOT}"
         RMDir "$APPDATA\HypoMux"
@@ -1063,6 +1065,7 @@ Section "uninstall"
     Delete "$INSTDIR\bin\wintun.dll"
     Delete "$INSTDIR\bin\sing-box.exe"
     Delete "$INSTDIR\bin\hypomux-engine.exe"
+    Delete "$INSTDIR\bin\hypomux-cli.exe"
     RMDir "$INSTDIR\bin"
     Delete "$INSTDIR\${PRODUCT_EXECUTABLE}"
     RMDir "$INSTDIR"

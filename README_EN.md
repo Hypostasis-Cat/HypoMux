@@ -62,6 +62,27 @@ Website and documentation: [https://hypomux.com](https://hypomux.com)
 5. Enable the aggregation engine, then start the download. If Steam was already running, restart it when prompted so the proxy change takes full effect.
 6. Stop aggregation or exit normally when finished. HypoMux restores the system network settings it owned.
 
+## Command line (CLI)
+
+The installer ships an official command-line client, `bin\hypomux-cli.exe`. It uses the same authenticated Core Service pipe as the desktop app (authenticated by install path + SHA-256 fingerprint) and drives the same aggregation engine, which makes unattended scripting and AI Agent workflows straightforward:
+
+```powershell
+# List aggregatable adapters, then start system-proxy aggregation
+hypomux-cli adapters
+hypomux-cli start --adapter Ethernet --adapter "Wi-Fi:3" --socks-port 10800 --http-port 10801
+
+# Status, telemetry, DNS and link diagnostics (--json returns raw protocol v1 results)
+hypomux-cli status
+hypomux-cli telemetry --connections
+hypomux-cli dns resolve example.com
+hypomux-cli diagnose --src-ip 192.168.1.10
+
+# Stop aggregation
+hypomux-cli stop
+```
+
+See the [official CLI architecture note](docs/architecture/official-cli.md) for the command surface, security model, and Agent integration details.
+
 ## Using HypoMux with Clash and other proxy clients
 
 To use Clash/Mihomo together with multi-NIC aggregation, use chain mode: Clash keeps the system proxy, its TUN, nodes and rules, and hands every node connection to HypoMux, which spreads them across adapters. The two apps do not compete for the system proxy or the default route, and no loop is formed.

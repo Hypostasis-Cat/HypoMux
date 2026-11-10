@@ -160,7 +160,7 @@ func secureDirectory(path string, machine, public bool) error {
 }
 func (p windowsPlatform) ValidateTarget(path string) error {
 	switch strings.ToLower(filepath.Base(path)) {
-	case "hypomux.exe", "uninstall.exe", "hypomux-engine.exe", "sing-box.exe", "wintun.dll", "libcronet.dll", "hypomux.lnk":
+	case "hypomux.exe", "uninstall.exe", "hypomux-engine.exe", "hypomux-cli.exe", "sing-box.exe", "wintun.dll", "libcronet.dll", "hypomux.lnk":
 	default:
 		return fmt.Errorf("unowned payload name: %s", path)
 	}

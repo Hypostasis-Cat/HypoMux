@@ -32,6 +32,7 @@ func TestVerifyPayloadIntegrityAcceptsMatchingDigests(t *testing.T) {
 	dir := t.TempDir()
 	expected := payloadDigestList(t, dir, map[string]string{
 		"hypomux-engine.exe": "engine-bytes",
+		"hypomux-cli.exe":    "cli-bytes",
 		"sing-box.exe":       "sidecar-bytes",
 		"wintun.dll":         "driver-bytes",
 	})
@@ -44,6 +45,7 @@ func TestVerifyPayloadIntegrityRejectsTamperedPayload(t *testing.T) {
 	dir := t.TempDir()
 	expected := payloadDigestList(t, dir, map[string]string{
 		"hypomux-engine.exe": "engine-bytes",
+		"hypomux-cli.exe":    "cli-bytes",
 		"sing-box.exe":       "sidecar-bytes",
 		"wintun.dll":         "driver-bytes",
 	})
@@ -58,6 +60,7 @@ func TestVerifyPayloadIntegrityRejectsMissingDigest(t *testing.T) {
 	dir := t.TempDir()
 	expected := payloadDigestList(t, dir, map[string]string{
 		"hypomux-engine.exe": "engine-bytes",
+		"hypomux-cli.exe":    "cli-bytes",
 		"sing-box.exe":       "sidecar-bytes",
 	})
 	if err := verifyPayloadIntegrity(dir, expected, false); err == nil {
@@ -69,6 +72,7 @@ func TestVerifyPayloadIntegrityRejectsUnknownAndMalformedEntries(t *testing.T) {
 	dir := t.TempDir()
 	expected := payloadDigestList(t, dir, map[string]string{
 		"hypomux-engine.exe": "engine-bytes",
+		"hypomux-cli.exe":    "cli-bytes",
 		"sing-box.exe":       "sidecar-bytes",
 		"wintun.dll":         "driver-bytes",
 	})
@@ -93,6 +97,7 @@ func TestVerifyPayloadIntegrityRejectsUntrustedMachineStaging(t *testing.T) {
 	dir := t.TempDir()
 	expected := payloadDigestList(t, dir, map[string]string{
 		"hypomux-engine.exe": "engine-bytes",
+		"hypomux-cli.exe":    "cli-bytes",
 		"sing-box.exe":       "sidecar-bytes",
 		"wintun.dll":         "driver-bytes",
 	})
@@ -106,6 +111,7 @@ func TestVerifyPayloadIntegrityRejectsLinkedPayload(t *testing.T) {
 	dir := t.TempDir()
 	expected := payloadDigestList(t, dir, map[string]string{
 		"hypomux-engine.exe": "engine-bytes",
+		"hypomux-cli.exe":    "cli-bytes",
 		"sing-box.exe":       "sidecar-bytes",
 		"wintun.dll":         "driver-bytes",
 	})

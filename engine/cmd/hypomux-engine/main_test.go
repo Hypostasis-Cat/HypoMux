@@ -85,9 +85,10 @@ func TestRecoverCommandReportsCleanupFailure(t *testing.T) {
 func TestServiceManagementCommandsReportResults(t *testing.T) {
 	originalInstallService := installServiceCommand
 	originalRemoveService := removeServiceCommand
-	var installedDesktop string
-	installServiceCommand = func(desktop string) error {
+	var installedDesktop, installedCLI string
+	installServiceCommand = func(desktop, cli string) error {
 		installedDesktop = desktop
+		installedCLI = cli
 		return nil
 	}
 	removeServiceCommand = func() error { return errors.New("remove failed") }
@@ -98,7 +99,7 @@ func TestServiceManagementCommandsReportResults(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	if exitCode := run(
-		[]string{"install-service", "--desktop", `D:\Apps\HypoMux\hypomux.exe`},
+		[]string{"install-service", "--desktop", `D:\Apps\HypoMux\hypomux.exe`, "--cli", `D:\Apps\HypoMux\bin\hypomux-cli.exe`},
 		strings.NewReader(""),
 		&stdout,
 		&stderr,
@@ -107,6 +108,9 @@ func TestServiceManagementCommandsReportResults(t *testing.T) {
 	}
 	if installedDesktop != `D:\Apps\HypoMux\hypomux.exe` {
 		t.Fatalf("desktop path = %q", installedDesktop)
+	}
+	if installedCLI != `D:\Apps\HypoMux\bin\hypomux-cli.exe` {
+		t.Fatalf("cli path = %q", installedCLI)
 	}
 	if !strings.Contains(stdout.String(), "installed and started") {
 		t.Fatalf("install output = %q", stdout.String())

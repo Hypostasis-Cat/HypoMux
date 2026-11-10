@@ -344,6 +344,7 @@ jobs:
           path: |
             desktop/bin/hypomux.exe
             desktop/bin/hypomux-engine.exe
+            desktop/bin/hypomux-cli.exe
             ${{ env.INSTALLER_PATH }}
           if-no-files-found: error
 

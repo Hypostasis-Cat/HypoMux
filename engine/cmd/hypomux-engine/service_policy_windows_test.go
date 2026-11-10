@@ -34,7 +34,7 @@ func TestBuildCoreServicePolicyPinsInstalledDesktopAndSidecar(t *testing.T) {
 		}
 	}
 
-	policy, err := buildCoreServicePolicy(enginePath, desktopPath)
+	policy, err := buildCoreServicePolicy(enginePath, desktopPath, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,6 +58,82 @@ func TestBuildCoreServicePolicyPinsInstalledDesktopAndSidecar(t *testing.T) {
 	if err := fileintegrity.VerifySHA256(policy.TunExecutable, policy.TunExecutableSHA256); err != nil {
 		t.Fatalf("sidecar pin: %v", err)
 	}
+	if policy.CoreCliPath != "" || policy.CoreCliSHA256 != "" {
+		t.Fatalf("empty --cli must not pin a CLI executable: %#v", policy)
+	}
+	if err := validateCoreServicePolicy(policy); err != nil {
+		t.Fatalf("policy without a CLI pin must validate: %v", err)
+	}
+}
+
+func TestBuildCoreServicePolicyPinsOptionalCLIExecutable(t *testing.T) {
+	temporaryRoot := t.TempDir()
+	installRoot := filepath.Join(temporaryRoot, "D-Apps", "HypoMux")
+	binDirectory := filepath.Join(temporaryRoot, "ProgramData", "HypoMux", "Core", "bin")
+	if err := os.MkdirAll(binDirectory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(installRoot, "bin"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	enginePath := filepath.Join(binDirectory, "hypomux-engine.exe")
+	desktopPath := filepath.Join(installRoot, "hypomux.exe")
+	tunPath := filepath.Join(binDirectory, "sing-box.exe")
+	cliPath := filepath.Join(installRoot, "bin", "hypomux-cli.exe")
+	for path, contents := range map[string]string{
+		enginePath:  "engine",
+		desktopPath: "desktop",
+		tunPath:     "sidecar",
+		cliPath:     "cli",
+	} {
+		if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	policy, err := buildCoreServicePolicy(enginePath, desktopPath, cliPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectedCLI, err := canonicalRegularFile(cliPath, "expected CLI executable")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.EqualFold(policy.CoreCliPath, expectedCLI) {
+		t.Fatalf("CLI pin path = %q, want %q", policy.CoreCliPath, expectedCLI)
+	}
+	if err := fileintegrity.VerifySHA256(policy.CoreCliPath, policy.CoreCliSHA256); err != nil {
+		t.Fatalf("CLI pin: %v", err)
+	}
+	if err := validateCoreServicePolicy(policy); err != nil {
+		t.Fatalf("policy with a CLI pin must validate: %v", err)
+	}
+	if len(policy.serviceClientPins()) != 2 {
+		t.Fatalf("policy pins = %#v, want desktop and CLI entries", policy.serviceClientPins())
+	}
+
+	if _, err := buildCoreServicePolicy(enginePath, desktopPath, filepath.Join(temporaryRoot, "missing-cli.exe")); err == nil {
+		t.Fatal("a missing CLI executable was accepted")
+	}
+	// A half-written pin must fail validation so an interrupted install can
+	// never leave a path-only or digest-only grant behind. Digest *mismatch*
+	// is format-valid here and is enforced later by fileintegrity at pipe
+	// connect time, matching the desktop pin behavior.
+	broken := policy
+	broken.CoreCliSHA256 = ""
+	if err := validateCoreServicePolicy(broken); err == nil {
+		t.Fatal("path-only CLI pin was accepted")
+	}
+	broken = policy
+	broken.CoreCliPath = ""
+	if err := validateCoreServicePolicy(broken); err == nil {
+		t.Fatal("digest-only CLI pin was accepted")
+	}
+	broken = policy
+	broken.CoreCliPath = "relative\\hypomux-cli.exe"
+	if err := validateCoreServicePolicy(broken); err == nil {
+		t.Fatal("relative CLI pin path was accepted")
+	}
 }
 
 func TestValidateServiceClientExecutableRequiresPathAndDigest(t *testing.T) {
@@ -73,19 +149,19 @@ func TestValidateServiceClientExecutableRequiresPathAndDigest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	policy := coreServicePolicy{DesktopPath: executable, DesktopSHA256: digest}
-	if err := validateServiceClientExecutable(uint32(os.Getpid()), policy); err != nil {
+	pin := clientExecutablePin{Path: executable, SHA256: digest}
+	if err := validateServiceClientExecutable(uint32(os.Getpid()), pin); err != nil {
 		t.Fatalf("current trusted process was rejected: %v", err)
 	}
-	policy.DesktopSHA256 = strings.Repeat("0", 64)
-	if err := validateServiceClientExecutable(uint32(os.Getpid()), policy); err == nil {
+	pin.SHA256 = strings.Repeat("0", 64)
+	if err := validateServiceClientExecutable(uint32(os.Getpid()), pin); err == nil {
 		t.Fatal("client with a mismatched pinned digest was accepted")
 	}
-	policy.DesktopPath = filepath.Join(t.TempDir(), "different.exe")
-	if err := os.WriteFile(policy.DesktopPath, []byte("different executable"), 0o600); err != nil {
+	pin.Path = filepath.Join(t.TempDir(), "different.exe")
+	if err := os.WriteFile(pin.Path, []byte("different executable"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := validateServiceClientExecutable(uint32(os.Getpid()), policy); err == nil {
+	if err := validateServiceClientExecutable(uint32(os.Getpid()), pin); err == nil {
 		t.Fatal("client at an untrusted path was accepted")
 	}
 }

@@ -26,6 +26,8 @@ const (
 	policyValueDesktopSHA256 = "DesktopSHA256"
 	policyValueTunPath       = "TunExecutablePath"
 	policyValueTunSHA256     = "TunExecutableSHA256"
+	policyValueCliPath       = "CoreCliPath"
+	policyValueCliSHA256     = "CoreCliSHA256"
 )
 
 type coreServicePolicy struct {
@@ -33,9 +35,13 @@ type coreServicePolicy struct {
 	DesktopSHA256       string
 	TunExecutable       string
 	TunExecutableSHA256 string
+	// CoreCliPath/CoreCliSHA256 optionally pin the official hypomux-cli
+	// executable. An empty pair means the Core Service accepts no CLI client.
+	CoreCliPath   string
+	CoreCliSHA256 string
 }
 
-func buildCoreServicePolicy(enginePath string, desktopPath string) (coreServicePolicy, error) {
+func buildCoreServicePolicy(enginePath string, desktopPath string, cliPath string) (coreServicePolicy, error) {
 	engine, err := canonicalRegularFile(enginePath, "Core Service executable")
 	if err != nil {
 		return coreServicePolicy{}, err
@@ -73,12 +79,31 @@ func buildCoreServicePolicy(enginePath string, desktopPath string) (coreServiceP
 	if err != nil {
 		return coreServicePolicy{}, fmt.Errorf("hash sing-box executable: %w", err)
 	}
-	return coreServicePolicy{
+	policy := coreServicePolicy{
 		DesktopPath:         desktop,
 		DesktopSHA256:       desktopDigest,
 		TunExecutable:       tunExecutable,
 		TunExecutableSHA256: tunDigest,
-	}, nil
+	}
+	// The CLI is a pipe client, never an executable the service launches, so it
+	// may live in any fixed local volume location. A missing --cli keeps the pin
+	// empty and the service keeps rejecting CLI clients.
+	if strings.TrimSpace(cliPath) != "" {
+		cli, err := canonicalRegularFile(cliPath, "HypoMux CLI executable")
+		if err != nil {
+			return coreServicePolicy{}, err
+		}
+		if err := requireFixedLocalVolume(cli, "HypoMux CLI executable"); err != nil {
+			return coreServicePolicy{}, err
+		}
+		cliDigest, err := fileintegrity.SHA256(cli)
+		if err != nil {
+			return coreServicePolicy{}, fmt.Errorf("hash HypoMux CLI executable: %w", err)
+		}
+		policy.CoreCliPath = cli
+		policy.CoreCliSHA256 = cliDigest
+	}
+	return policy, nil
 }
 
 func writeCoreServicePolicy(policy coreServicePolicy) error {
@@ -108,6 +133,8 @@ func writeCoreServicePolicy(policy coreServicePolicy) error {
 		{name: policyValueDesktopSHA256, value: policy.DesktopSHA256},
 		{name: policyValueTunPath, value: policy.TunExecutable},
 		{name: policyValueTunSHA256, value: policy.TunExecutableSHA256},
+		{name: policyValueCliPath, value: policy.CoreCliPath},
+		{name: policyValueCliSHA256, value: policy.CoreCliSHA256},
 	}
 	for _, value := range values {
 		if err := key.SetStringValue(value.name, value.value); err != nil {
@@ -160,11 +187,22 @@ func loadCoreServicePolicy() (coreServicePolicy, error) {
 	if err != nil {
 		return coreServicePolicy{}, err
 	}
+	// The optional CLI pin was introduced after policy schema version 1; a
+	// policy written by an older engine simply omits both values.
+	readOptionalString := func(name string) string {
+		value, err := readString(name)
+		if err != nil {
+			return ""
+		}
+		return value
+	}
 	policy := coreServicePolicy{
 		DesktopPath:         desktopPath,
 		DesktopSHA256:       desktopDigest,
 		TunExecutable:       tunPath,
 		TunExecutableSHA256: tunDigest,
+		CoreCliPath:         readOptionalString(policyValueCliPath),
+		CoreCliSHA256:       readOptionalString(policyValueCliSHA256),
 	}
 	if err := validateCoreServicePolicy(policy); err != nil {
 		return coreServicePolicy{}, err
@@ -198,7 +236,46 @@ func validateCoreServicePolicy(policy coreServicePolicy) error {
 	if err := validatePinnedSHA256(policy.TunExecutableSHA256); err != nil {
 		return fmt.Errorf("invalid sing-box executable policy: %w", err)
 	}
+	if err := validateOptionalClientPin(policy.CoreCliPath, policy.CoreCliSHA256); err != nil {
+		return fmt.Errorf("invalid CLI executable policy: %w", err)
+	}
 	return nil
+}
+
+// validateOptionalClientPin keeps the CLI pin all-or-nothing: both values, or
+// neither. A half-written pin must never silently broaden pipe access.
+func validateOptionalClientPin(path string, digest string) error {
+	if strings.TrimSpace(path) == "" && strings.TrimSpace(digest) == "" {
+		return nil
+	}
+	if strings.TrimSpace(path) == "" || strings.TrimSpace(digest) == "" {
+		return errors.New("path and SHA-256 digest must be set together")
+	}
+	cleaned := filepath.Clean(path)
+	if !filepath.IsAbs(cleaned) {
+		return errors.New("pinned client path must be absolute")
+	}
+	if err := validatePinnedSHA256(digest); err != nil {
+		return err
+	}
+	return nil
+}
+
+// serviceClientPins lists every executable identity allowed to open the Core
+// Service pipe, in evaluation order.
+func (policy coreServicePolicy) serviceClientPins() []clientExecutablePin {
+	pins := []clientExecutablePin{
+		{Path: policy.DesktopPath, SHA256: policy.DesktopSHA256},
+	}
+	if strings.TrimSpace(policy.CoreCliPath) != "" {
+		pins = append(pins, clientExecutablePin{Path: policy.CoreCliPath, SHA256: policy.CoreCliSHA256})
+	}
+	return pins
+}
+
+type clientExecutablePin struct {
+	Path   string
+	SHA256 string
 }
 
 func validatePinnedSHA256(value string) error {
@@ -209,7 +286,7 @@ func validatePinnedSHA256(value string) error {
 	return nil
 }
 
-func validateServiceClientExecutable(clientPID uint32, policy coreServicePolicy) error {
+func validateServiceClientExecutable(clientPID uint32, pin clientExecutablePin) error {
 	clientPath, err := processExecutablePath(clientPID)
 	if err != nil {
 		return err
@@ -218,14 +295,14 @@ func validateServiceClientExecutable(clientPID uint32, policy coreServicePolicy)
 	if err != nil {
 		return err
 	}
-	expectedPath, err := canonicalRegularFile(policy.DesktopPath, "trusted HypoMux desktop executable")
+	expectedPath, err := canonicalRegularFile(pin.Path, "trusted HypoMux client executable")
 	if err != nil {
 		return err
 	}
 	if !strings.EqualFold(filepath.Clean(clientPath), filepath.Clean(expectedPath)) {
 		return fmt.Errorf("reject untrusted Core Service client executable for PID %d", clientPID)
 	}
-	if err := fileintegrity.VerifySHA256(clientPath, policy.DesktopSHA256); err != nil {
+	if err := fileintegrity.VerifySHA256(clientPath, pin.SHA256); err != nil {
 		return fmt.Errorf("reject modified Core Service client executable for PID %d: %w", clientPID, err)
 	}
 	return nil

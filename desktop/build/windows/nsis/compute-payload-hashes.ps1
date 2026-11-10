@@ -32,7 +32,7 @@ function Get-Sha256Hex {
     return ($hashBytes | ForEach-Object { $_.ToString("x2") }) -join ""
 }
 
-$names = @("hypomux-engine.exe", "sing-box.exe", "wintun.dll")
+$names = @("hypomux-engine.exe", "hypomux-cli.exe", "sing-box.exe", "wintun.dll")
 $digests = @()
 foreach ($name in $names) {
     $path = Join-Path $BinDir $name

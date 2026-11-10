@@ -18,7 +18,7 @@ import (
 // cannot appear here — it is the party doing the verification; its integrity
 // rests on the hardened staging directory instead (see the
 // HypoMuxHardenStagingDirectory macro in project.nsi).
-var payloadDigestNames = []string{"hypomux-engine.exe", "sing-box.exe", "wintun.dll"}
+var payloadDigestNames = []string{"hypomux-engine.exe", "hypomux-cli.exe", "sing-box.exe", "wintun.dll"}
 
 // verifyPayloadIntegrity proves the staged payload still contains exactly the
 // bytes the installer embedded at compile time. The digests travel on the
