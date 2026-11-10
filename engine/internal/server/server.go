@@ -1,7 +1,6 @@
 package server
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -39,9 +38,11 @@ type tunController interface {
 	SetHandlers(func(string), func(tun.Status))
 }
 
+// Server owns the service-level engine state (proxy pool, managed TUN, runtime
+// snapshot, isolation rules). It is a singleton shared by every authenticated
+// client session; a session is only a protocol-v1 client of this state and its
+// disconnect never tears the engine down on its own. See session.go.
 type Server struct {
-	input               io.Reader
-	encoder             *json.Encoder
 	metadata            Metadata
 	identity            platform.Identity
 	runtime             *engineRuntime.Runtime
@@ -53,114 +54,53 @@ type Server struct {
 	activeTunGeneration uint64
 	startedAt           time.Time
 	started             time.Time
-	writeMu             sync.Mutex
 	lifecycleMu         sync.Mutex
-	eventSeq            uint64
+
+	sessionsMu  sync.Mutex
+	sessions    map[*Session]struct{}
+	broadcastMu sync.Mutex
+	eventSeq    uint64
+	closeOnce   sync.Once
+	stdio       *Session
 }
 
+// New builds a single-session stdio host (the `hypomux-engine serve` and
+// serve-pipe development fallback). The implicit session carries the desktop
+// role and Run stops the engine when that session ends, matching a process whose
+// lifetime is the engine's lifetime.
 func New(input io.Reader, output io.Writer, metadata Metadata) *Server {
+	server := NewHost(metadata)
+	server.stdio = server.Attach(input, output, RoleDesktop)
+	return server
+}
+
+// NewHost builds a shared engine with no attached session. The Core Service
+// creates one host and attaches every authenticated pipe client to it.
+func NewHost(metadata Metadata) *Server {
 	now := time.Now()
 	server := &Server{
-		input:     input,
-		encoder:   json.NewEncoder(output),
 		metadata:  metadata,
 		identity:  platform.CurrentIdentity(),
 		runtime:   engineRuntime.New(time.Now),
 		startedAt: now.UTC(),
 		started:   now,
 		tun:       tun.NewSupervisor(),
+		sessions:  make(map[*Session]struct{}),
 	}
 	server.tun.SetHandlers(server.handleTunLog, server.handleTunUnexpectedExit)
 	return server
 }
 
-// Run serves protocol-v1 requests as newline-delimited JSON. Standard output is
-// reserved for protocol messages; callers must send human-readable logs to
-// standard error.
+// Run serves the implicit stdio session. Standard output is reserved for
+// protocol messages; callers must send human-readable logs to standard error.
+// Unlike a service session, ending this session stops the engine because the
+// hosting process is exiting.
 func (s *Server) Run(ctx context.Context) error {
 	defer s.stopProxyForHostExit()
-	// A service context can outlive many client sessions. Give the reader its
-	// own lifetime so every Run exit also releases queued request delivery.
-	ctx, cancel := context.WithCancel(ctx)
-	scanner := bufio.NewScanner(s.input)
-	scanner.Buffer(make([]byte, 64*1024), protocol.MaxMessageBytes)
-
-	// scanner.Scan 会阻塞在对端的下一次写入/关闭上，放在独立 goroutine 里
-	// 才能让 ctx 取消（如信号退出）立即结束 Run，而不是等到输入流关闭。
-	lines := make(chan []byte)
-	scanErr := make(chan error, 1)
-	go func() {
-		for scanner.Scan() {
-			line := append([]byte(nil), scanner.Bytes()...)
-			select {
-			case lines <- line:
-			case <-ctx.Done():
-				return
-			}
-		}
-		scanErr <- scanner.Err()
-		close(lines)
-	}()
-
-	// Cancel before closing: the reader may be waiting either on lines or in
-	// Scan. Do both on normal shutdown and errors, not only service cancellation.
-	defer func() {
-		cancel()
-		if closer, ok := s.input.(io.Closer); ok {
-			_ = closer.Close()
-		}
-	}()
-
-	for {
-		var raw []byte
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case received, ok := <-lines:
-			if !ok {
-				if err := <-scanErr; err != nil {
-					return fmt.Errorf("read request: %w", err)
-				}
-				return nil
-			}
-			raw = received
-		}
-
-		line := bytes.TrimSpace(raw)
-		if len(line) == 0 {
-			continue
-		}
-
-		stateBefore := s.runtime.Snapshot()
-		tunBefore := s.tun.Status()
-		response, shutdown := s.handle(ctx, line)
-		if err := s.writeMessage(response); err != nil {
-			return fmt.Errorf("write response: %w", err)
-		}
-		stateAfter := s.runtime.Snapshot()
-		if stateAfter.Sequence != stateBefore.Sequence {
-			if err := s.emitEvent(api.EventEngineStateChanged, stateAfter); err != nil {
-				return fmt.Errorf("write state event: %w", err)
-			}
-		}
-		tunAfter := s.tun.Status()
-		if tunAfter.State != tunBefore.State || tunAfter.PID != tunBefore.PID {
-			if err := s.emitEvent(api.EventTunStateChanged, tunAfter); err != nil {
-				return fmt.Errorf("write TUN state event: %w", err)
-			}
-		}
-		if shutdown {
-			if err := s.emitEvent(api.EventHostExiting, api.HostExitingData{
-				Reason: "requested",
-			}); err != nil {
-				return fmt.Errorf("write shutdown event: %w", err)
-			}
-			return nil
-		}
-	}
+	return s.stdio.Run(ctx)
 }
 
-func (s *Server) handle(ctx context.Context, line []byte) (protocol.Response, bool) {
+func (s *Server) handle(ctx context.Context, role ClientRole, line []byte) (protocol.Response, bool) {
 	var request protocol.Request
 	decoder := json.NewDecoder(bytes.NewReader(line))
 	if err := decoder.Decode(&request); err != nil {
@@ -183,16 +123,24 @@ func (s *Server) handle(ctx context.Context, line []byte) (protocol.Response, bo
 	if strings.TrimSpace(request.Method) == "" {
 		return protocol.Failure(request.ID, "invalid_request", "request method is required", nil), false
 	}
+	// The client role is derived server-side from the matched executable pin,
+	// never from the request. Enforce the method boundary before dispatch so a
+	// restricted client cannot reach privileged methods through any path.
+	if !roleAllowsMethod(role, request.Method) {
+		return protocol.Failure(request.ID, "security_policy_rejected",
+			"method is not available to this client role",
+			map[string]any{"method": request.Method, "role": string(role)}), false
+	}
 
 	switch request.Method {
 	case api.MethodEngineHello:
-		return protocol.Result(request.ID, s.hello()), false
+		return protocol.Result(request.ID, s.hello(role)), false
 	case api.MethodEngineStatus:
 		return protocol.Result(request.ID, s.status()), false
 	case api.MethodEngineScheduling:
 		return s.updateScheduling(request), false
 	case api.MethodEngineStart:
-		return s.startProxy(request), false
+		return s.startProxy(role, request), false
 	case api.MethodEngineStop:
 		return s.stopProxy(request.ID), false
 	case api.MethodSteamCDNConfigure:
@@ -287,15 +235,15 @@ func (s *Server) handle(ctx context.Context, line []byte) (protocol.Response, bo
 	}
 }
 
-func (s *Server) hello() api.HelloResult {
-	return api.NewHelloResult(
+func (s *Server) hello(role ClientRole) api.HelloResult {
+	return trimHelloForRole(api.NewHelloResult(
 		s.metadata.Name,
 		s.metadata.Version,
 		s.metadata.Commit,
 		s.identity.ProcessID,
 		s.identity.Elevated,
 		s.startedAt,
-	)
+	), role)
 }
 
 func (s *Server) status() api.StatusResult {
@@ -320,7 +268,7 @@ func (s *Server) status() api.StatusResult {
 	return result
 }
 
-func (s *Server) startProxy(request protocol.Request) protocol.Response {
+func (s *Server) startProxy(role ClientRole, request protocol.Request) protocol.Response {
 	s.lifecycleMu.Lock()
 	defer s.lifecycleMu.Unlock()
 	state := s.runtime.Snapshot().State
@@ -348,6 +296,12 @@ func (s *Server) startProxy(request protocol.Request) protocol.Response {
 			map[string]any{"mode": params.Mode},
 		)
 	}
+	// Restricted clients may only start a loopback proxy pool. This is enforced
+	// here, on the server, so `raw engine.start` cannot bypass the CLI's own
+	// flags to reach TUN orchestration or a LAN-facing listener.
+	if err := authorizeStartForRole(role, mode, params.ListenHost); err != nil {
+		return protocol.Failure(request.ID, "security_policy_rejected", err.Error(), nil)
+	}
 	if mode == "proxy" && len(params.Channels) != 0 {
 		return protocol.Failure(
 			request.ID,
@@ -374,7 +328,7 @@ func (s *Server) startProxy(request protocol.Request) protocol.Response {
 	if err == nil {
 		proxyServer.SetDNSFallbackHandler(s.handleDNSFallback)
 		proxyServer.SetConnectFailureHandler(func(message string) {
-			_ = s.emitEvent(api.EventLogRecord, api.LogRecordData{Component: "proxy", Message: message})
+			s.emitEvent(api.EventLogRecord, api.LogRecordData{Component: "proxy", Message: message})
 		})
 		var endpoints proxy.Endpoints
 		endpoints, err = proxyServer.Start()
@@ -579,7 +533,7 @@ func (s *Server) dnsStatus(requestID string) protocol.Response {
 }
 
 func (s *Server) handleDNSFallback(event dns.FallbackEvent) {
-	_ = s.emitEvent(api.EventDNSFallbackRequired, api.DNSFallbackRequiredData{
+	s.emitEvent(api.EventDNSFallbackRequired, api.DNSFallbackRequiredData{
 		Adapter: event.Adapter,
 		Policy:  event.Policy,
 		Reason:  event.Reason,
@@ -813,7 +767,7 @@ func (s *Server) deactivateTun(
 }
 
 func (s *Server) handleTunLog(message string) {
-	_ = s.emitEvent(api.EventLogRecord, api.LogRecordData{
+	s.emitEvent(api.EventLogRecord, api.LogRecordData{
 		Component: "sing-box",
 		Message:   message,
 	})
@@ -844,8 +798,8 @@ func (s *Server) handleTunUnexpectedExit(status tun.Status) {
 	}
 	engineState := s.runtime.Snapshot()
 	s.lifecycleMu.Unlock()
-	_ = s.emitEvent(api.EventTunStateChanged, status)
-	_ = s.emitEvent(api.EventEngineStateChanged, engineState)
+	s.emitEvent(api.EventTunStateChanged, status)
+	s.emitEvent(api.EventEngineStateChanged, engineState)
 }
 
 func (s *Server) stopProxyForHostExit() {
@@ -888,17 +842,4 @@ func (s *Server) closeDNSExemption() error {
 
 func (s *Server) uptimeMilliseconds() int64 {
 	return time.Since(s.started).Milliseconds()
-}
-
-func (s *Server) writeMessage(message any) error {
-	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
-	return s.encoder.Encode(message)
-}
-
-func (s *Server) emitEvent(name string, data any) error {
-	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
-	s.eventSeq++
-	return s.encoder.Encode(protocol.Notification(s.eventSeq, name, data))
 }

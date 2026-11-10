@@ -213,31 +213,6 @@ func printStop(w io.Writer, raw json.RawMessage) error {
 	return nil
 }
 
-// commandShutdown implements `hypomux-cli shutdown` (host.shutdown). For the
-// Core Service this stops aggregation and ends this client session only; the
-// service keeps running and accepts the next client.
-func commandShutdown(c *commandContext) int {
-	flags := c.newFlagSet("shutdown")
-	if err := flags.Parse(c.args); err != nil {
-		return 2
-	}
-	return c.callOnce("host.shutdown", nil, printShutdown)
-}
-
-type shutdownResult struct {
-	Accepted bool `json:"accepted"`
-}
-
-func printShutdown(w io.Writer, raw json.RawMessage) error {
-	var shutdown shutdownResult
-	if err := json.Unmarshal(raw, &shutdown); err != nil {
-		return err
-	}
-	fmt.Fprintf(w, "核心已接受关闭请求: %s（Core 服务继续运行，仅结束当前会话）\n",
-		yesNo(shutdown.Accepted))
-	return nil
-}
-
 // commandTelemetry implements `hypomux-cli telemetry` (engine.telemetry).
 func commandTelemetry(c *commandContext) int {
 	flags := c.newFlagSet("telemetry")

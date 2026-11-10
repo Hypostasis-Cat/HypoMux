@@ -13,6 +13,7 @@ import (
 	"unsafe"
 
 	"github.com/Hypostasis-Cat/HypoMux/engine/internal/fileintegrity"
+	"github.com/Hypostasis-Cat/HypoMux/engine/internal/server"
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
 )
@@ -262,13 +263,15 @@ func validateOptionalClientPin(path string, digest string) error {
 }
 
 // serviceClientPins lists every executable identity allowed to open the Core
-// Service pipe, in evaluation order.
+// Service pipe, in evaluation order, together with the client role each pin
+// grants. The desktop pin grants the full protocol surface; the optional CLI pin
+// grants the restricted CLI surface.
 func (policy coreServicePolicy) serviceClientPins() []clientExecutablePin {
 	pins := []clientExecutablePin{
-		{Path: policy.DesktopPath, SHA256: policy.DesktopSHA256},
+		{Path: policy.DesktopPath, SHA256: policy.DesktopSHA256, Role: server.RoleDesktop},
 	}
 	if strings.TrimSpace(policy.CoreCliPath) != "" {
-		pins = append(pins, clientExecutablePin{Path: policy.CoreCliPath, SHA256: policy.CoreCliSHA256})
+		pins = append(pins, clientExecutablePin{Path: policy.CoreCliPath, SHA256: policy.CoreCliSHA256, Role: server.RoleCLI})
 	}
 	return pins
 }
@@ -276,6 +279,7 @@ func (policy coreServicePolicy) serviceClientPins() []clientExecutablePin {
 type clientExecutablePin struct {
 	Path   string
 	SHA256 string
+	Role   server.ClientRole
 }
 
 func validatePinnedSHA256(value string) error {

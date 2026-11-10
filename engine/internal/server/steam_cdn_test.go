@@ -29,7 +29,7 @@ func TestSteamCDNRuntimeToggleProtocol(t *testing.T) {
 		value   string
 		enabled bool
 	}{{`{"enabled":true}`, true}, {`{"reset":true}`, true}, {`{"enabled":false}`, false}, {`{}`, false}} {
-		response, _ := s.handle(context.Background(), []byte(`{"protocol":1,"id":"cdn","method":"steam_cdn.configure","params":`+test.value+`}`))
+		response, _ := s.handle(context.Background(), RoleDesktop, []byte(`{"protocol":1,"id":"cdn","method":"steam_cdn.configure","params":`+test.value+`}`))
 		if response.Error != nil {
 			t.Fatal(response.Error)
 		}
@@ -38,7 +38,7 @@ func TestSteamCDNRuntimeToggleProtocol(t *testing.T) {
 			t.Fatal(response.Result)
 		}
 	}
-	response, _ := s.handle(context.Background(), []byte(`{"protocol":1,"id":"cdn","method":"steam_cdn.configure","params":{"enabled":"yes"}}`))
+	response, _ := s.handle(context.Background(), RoleDesktop, []byte(`{"protocol":1,"id":"cdn","method":"steam_cdn.configure","params":{"enabled":"yes"}}`))
 	if response.Error == nil || response.Error.Code != "invalid_params" {
 		t.Fatal(response)
 	}

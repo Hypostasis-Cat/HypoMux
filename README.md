@@ -64,7 +64,7 @@ HypoMux 聚合的是多个独立连接，而不是把单条 TCP 连接拆成多�
 
 ## 命令行（CLI）
 
-安装版自带官方命令行客户端 `bin\hypomux-cli.exe`。它与界面走同一条经认证的 Core 服务管道（按安装路径 + SHA-256 指纹认证），控制的是同一个聚合引擎，适合脚本和 AI Agent 无人值守调用：
+安装版自带官方命令行客户端 `bin\hypomux-cli.exe`。它与界面走同一条经认证的 Core 服务管道（按安装路径 + SHA-256 指纹认证），控制的是**同一个共享聚合引擎**：一次调用启动的代理在该进程退出后继续运行，桌面界面也能看到 CLI 引起的状态变化。CLI 被授予服务端强制的受限角色（仅 proxy 模式聚合与只读诊断，不含 TUN/MTU/WFP 等特权编排），适合脚本和 AI Agent 无人值守调用：
 
 ```powershell
 # 查看可用于聚合的网卡，并以系统代理模式启动
@@ -80,6 +80,8 @@ hypomux-cli diagnose --src-ip 192.168.1.10
 # 停止聚合
 hypomux-cli stop
 ```
+
+CLI 默认不加入 `PATH`，机器级安装的完整路径为 `C:\Program Files\HypoMux\bin\hypomux-cli.exe`。脚本中可用该完整路径调用，或自行把安装目录加入 `PATH`。
 
 命令面、安全模型与 Agent 集成说明见 [官方 CLI 架构文档](docs/architecture/official-cli.md)。
 

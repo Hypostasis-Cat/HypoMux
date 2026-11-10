@@ -14,7 +14,6 @@ import (
 type pipeFile interface {
 	io.ReadWriteCloser
 	SetReadDeadline(time.Time) error
-	Fd() uintptr
 }
 
 // Take ownership of an overlapped pipe handle, including on failure. Go 1.26's

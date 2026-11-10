@@ -14,7 +14,7 @@ import (
 
 func TestDomainQuarantineUpdateWithoutEngineIsNoOp(t *testing.T) {
 	s := New(bytes.NewReader(nil), io.Discard, Metadata{Name: "test"})
-	response, _ := s.handle(context.Background(), []byte(`{"protocol":1,"id":"dq","method":"domain_quarantine.update","params":{"expiry":false,"clear":true}}`))
+	response, _ := s.handle(context.Background(), RoleDesktop, []byte(`{"protocol":1,"id":"dq","method":"domain_quarantine.update","params":{"expiry":false,"clear":true}}`))
 	if response.Error != nil {
 		t.Fatal(response.Error)
 	}
@@ -93,7 +93,7 @@ func TestDomainQuarantineUpdateRejectsInvalidParams(t *testing.T) {
 		`{"remove":[{"adapter":" ","domain":"example.com"}]}`,
 		`{"remove":[{"adapter":"a","domain":" "}]}`,
 	} {
-		response, _ := s.handle(context.Background(), []byte(`{"protocol":1,"id":"dq","method":"domain_quarantine.update","params":`+params+`}`))
+		response, _ := s.handle(context.Background(), RoleDesktop, []byte(`{"protocol":1,"id":"dq","method":"domain_quarantine.update","params":`+params+`}`))
 		if response.Error == nil || response.Error.Code != "invalid_params" {
 			t.Fatalf("params %s: response = %#v", params, response)
 		}

@@ -26,7 +26,7 @@ func TestMTURejectsUnprivilegedRunningAndInvalidRequests(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			response, shutdown := s.handle(context.Background(), []byte(`{"protocol":1,"id":"mtu","method":"mtu.set","params":{"value":1}}`))
+			response, shutdown := s.handle(context.Background(), RoleDesktop, []byte(`{"protocol":1,"id":"mtu","method":"mtu.set","params":{"value":1}}`))
 			if shutdown || response.Error == nil || response.Error.Code != test.want {
 				t.Fatalf("unexpected response: %+v", response)
 			}

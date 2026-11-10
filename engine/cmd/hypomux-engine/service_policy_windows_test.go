@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/Hypostasis-Cat/HypoMux/engine/internal/fileintegrity"
+	"github.com/Hypostasis-Cat/HypoMux/engine/internal/server"
 )
 
 func TestBuildCoreServicePolicyPinsInstalledDesktopAndSidecar(t *testing.T) {
@@ -179,5 +180,28 @@ func TestPathWithinRejectsSiblingPrefix(t *testing.T) {
 func TestFixedLocalVolumeRejectsUNCDesktopPath(t *testing.T) {
 	if err := requireFixedLocalVolume(`\\server\share\HypoMux\hypomux.exe`, "desktop"); err == nil {
 		t.Fatal("UNC desktop path was accepted for a machine Core policy")
+	}
+}
+
+// The matched pin determines the session role, so each pin must carry the role
+// the engine will enforce. The desktop pin grants the full surface; the optional
+// CLI pin grants the restricted surface.
+func TestServiceClientPinsCarryRoles(t *testing.T) {
+	policy := coreServicePolicy{
+		DesktopPath:   `C:\HypoMux\hypomux.exe`,
+		DesktopSHA256: strings.Repeat("a", 64),
+		CoreCliPath:   `C:\HypoMux\bin\hypomux-cli.exe`,
+		CoreCliSHA256: strings.Repeat("b", 64),
+	}
+	pins := policy.serviceClientPins()
+	if len(pins) != 2 || pins[0].Role != server.RoleDesktop || pins[1].Role != server.RoleCLI {
+		t.Fatalf("pins with CLI = %#v, want desktop then cli roles", pins)
+	}
+
+	policy.CoreCliPath = ""
+	policy.CoreCliSHA256 = ""
+	pins = policy.serviceClientPins()
+	if len(pins) != 1 || pins[0].Role != server.RoleDesktop {
+		t.Fatalf("pins without CLI = %#v, want desktop only", pins)
 	}
 }

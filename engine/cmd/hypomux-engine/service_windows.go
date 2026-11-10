@@ -272,74 +272,102 @@ func (service *coreWindowsService) stop(
 }
 
 func serveCoreServicePipe(ctx context.Context, metadata server.Metadata) error {
+	policy, err := loadCoreServicePolicy()
+	if err != nil {
+		return fmt.Errorf("load Core Service security policy: %w", err)
+	}
+	metadata.TunExecutable = policy.TunExecutable
+	metadata.TunExecutableSHA256 = policy.TunExecutableSHA256
+	// One engine instance is shared by every authenticated session. A CLI
+	// invocation that starts the proxy and exits no longer tears it down, and a
+	// later status call observes the same running engine.
+	host := server.NewHost(metadata)
+	defer host.Close()
+
+	firstInstance := true
 	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		// Reload the policy on each accept so an in-place install-service pin
+		// update takes effect without waiting for a service restart.
 		policy, err := loadCoreServicePolicy()
 		if err != nil {
 			return fmt.Errorf("load Core Service security policy: %w", err)
 		}
-		connection, err := acceptServicePipe(ctx, policy)
+		handle, err := createServicePipeInstance(coreServicePipeName, firstInstance)
+		firstInstance = false
+		if err != nil {
+			if errors.Is(err, windows.ERROR_PIPE_BUSY) {
+				// Every instance is held by a connected client; wait for a slot
+				// instead of terminating the service.
+				if waitErr := waitForServicePipeSlot(ctx); waitErr != nil {
+					return waitErr
+				}
+				continue
+			}
+			return err
+		}
+		connection, role, err := acceptServicePipe(ctx, handle, policy)
 		if err != nil {
 			if errors.Is(err, errServiceClientRejected) {
 				fmt.Fprintf(os.Stderr, "%v\n", err)
 				continue
 			}
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
 			return err
 		}
-		sessionMetadata := metadata
-		sessionMetadata.TunExecutable = policy.TunExecutable
-		sessionMetadata.TunExecutableSHA256 = policy.TunExecutableSHA256
-		engineServer := server.New(connection, connection, sessionMetadata)
-		sessionDone := make(chan error, 1)
+		session := host.Attach(connection, connection, role)
+		// Handle each client concurrently so the desktop's long-lived session
+		// and short CLI connections coexist. The loop immediately creates the
+		// next listening instance.
 		go func() {
-			sessionDone <- engineServer.Run(ctx)
+			defer connection.Close()
+			runErr := session.Run(ctx)
+			if ctx.Err() != nil {
+				return
+			}
+			if runErr != nil && !errors.Is(runErr, io.EOF) {
+				// A malformed or abruptly disconnected client must not terminate
+				// the Windows Service. The next authenticated client reconnects.
+				fmt.Fprintf(os.Stderr, "Core Service client session ended: %v\n", runErr)
+			}
+			if role == server.RoleDesktop {
+				host.DesktopSessionEnded()
+			}
 		}()
-		var runErr error
-		select {
-		case runErr = <-sessionDone:
-			_ = connection.Close()
-		case <-ctx.Done():
-			// Cancel and disconnect the server handle before Close. os.File.Close
-			// alone is not guaranteed to interrupt an overlapped named-pipe read on
-			// every supported Windows build.
-			interruptServicePipeConnection(connection)
-			runErr = <-sessionDone
-		}
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		if runErr != nil && !errors.Is(runErr, io.EOF) {
-			// A malformed or abruptly disconnected client must not terminate the
-			// Windows Service. The next authenticated local UI may reconnect.
-			fmt.Fprintf(os.Stderr, "Core Service client session ended: %v\n", runErr)
-		}
 	}
 }
 
-func interruptServicePipeConnection(connection pipeFile) {
-	if connection == nil {
-		return
+func waitForServicePipeSlot(ctx context.Context) error {
+	timer := time.NewTimer(50 * time.Millisecond)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
 	}
-	handle := windows.Handle(connection.Fd())
-	_ = windows.CancelIoEx(handle, nil)
-	_ = windows.DisconnectNamedPipe(handle)
-	_ = connection.Close()
 }
 
-func acceptServicePipe(ctx context.Context, policy coreServicePolicy) (pipeFile, error) {
-	handle, err := createServicePipe()
-	if err != nil {
-		return nil, err
-	}
+func acceptServicePipe(ctx context.Context, handle windows.Handle, policy coreServicePolicy) (pipeFile, server.ClientRole, error) {
 	if err := connectServicePipe(ctx, handle); err != nil {
 		_ = windows.CloseHandle(handle)
-		return nil, err
+		return nil, "", err
 	}
-	if err := validateServicePipeClient(handle, policy); err != nil {
+	role, err := validateServicePipeClient(handle, policy)
+	if err != nil {
 		_ = windows.DisconnectNamedPipe(handle)
 		_ = windows.CloseHandle(handle)
-		return nil, fmt.Errorf("%w: %v", errServiceClientRejected, err)
+		return nil, "", fmt.Errorf("%w: %v", errServiceClientRejected, err)
 	}
-	return newPipeFile(handle)
+	connection, err := newPipeFile(handle)
+	if err != nil {
+		return nil, "", err
+	}
+	return connection, role, nil
 }
 
 func connectServicePipe(ctx context.Context, handle windows.Handle) error {
@@ -385,15 +413,15 @@ func connectServicePipe(ctx context.Context, handle windows.Handle) error {
 	}
 }
 
-func createServicePipe() (windows.Handle, error) {
-	return createServicePipeNamed(coreServicePipeName)
-}
-
 func createServicePipeNamed(pipeName string) (windows.Handle, error) {
-	return createServicePipeNamedWithSDDL(pipeName, coreServicePipeSDDL)
+	return createServicePipeInstance(pipeName, true)
 }
 
-func createServicePipeNamedWithSDDL(pipeName string, sddl string) (windows.Handle, error) {
+func createServicePipeInstance(pipeName string, firstInstance bool) (windows.Handle, error) {
+	return createServicePipeNamedWithSDDL(pipeName, coreServicePipeSDDL, firstInstance)
+}
+
+func createServicePipeNamedWithSDDL(pipeName string, sddl string, firstInstance bool) (windows.Handle, error) {
 	descriptor, err := windows.SecurityDescriptorFromString(
 		sddl,
 	)
@@ -408,11 +436,18 @@ func createServicePipeNamedWithSDDL(pipeName string, sddl string) (windows.Handl
 	if err != nil {
 		return 0, err
 	}
+	// Only the first instance asserts FIRST_PIPE_INSTANCE so a squatted pipe
+	// name fails the service closed. Later instances coexist with the connected
+	// clients, letting CLI short connections share the pipe with the desktop.
+	openMode := uint32(windows.PIPE_ACCESS_DUPLEX | windows.FILE_FLAG_OVERLAPPED)
+	if firstInstance {
+		openMode |= windows.FILE_FLAG_FIRST_PIPE_INSTANCE
+	}
 	handle, err := windows.CreateNamedPipe(
 		name,
-		windows.PIPE_ACCESS_DUPLEX|windows.FILE_FLAG_FIRST_PIPE_INSTANCE|windows.FILE_FLAG_OVERLAPPED,
+		openMode,
 		windows.PIPE_TYPE_BYTE|windows.PIPE_READMODE_BYTE|windows.PIPE_WAIT|windows.PIPE_REJECT_REMOTE_CLIENTS,
-		1,
+		windows.PIPE_UNLIMITED_INSTANCES,
 		servicePipeBuffer,
 		servicePipeBuffer,
 		0,
@@ -424,46 +459,47 @@ func createServicePipeNamedWithSDDL(pipeName string, sddl string) (windows.Handl
 	return handle, nil
 }
 
-func validateServicePipeClient(handle windows.Handle, policy coreServicePolicy) error {
+func validateServicePipeClient(handle windows.Handle, policy coreServicePolicy) (server.ClientRole, error) {
 	var clientPID uint32
 	if err := windows.GetNamedPipeClientProcessId(handle, &clientPID); err != nil {
-		return fmt.Errorf("read Core Service client PID: %w", err)
+		return "", fmt.Errorf("read Core Service client PID: %w", err)
 	}
 	if clientPID == 0 {
-		return errors.New("reject Core Service client without process identity")
+		return "", errors.New("reject Core Service client without process identity")
 	}
 	// Authenticate the exact installed desktop or CLI binary before evaluating
 	// session compatibility. Session state broadens console-only support to
 	// active RDP users, but never replaces the pinned path and digest security
-	// boundary.
-	matched := false
+	// boundary. The matched pin also determines the client role enforced by the
+	// engine for this session.
+	var role server.ClientRole
 	var rejections []error
 	for _, pin := range policy.serviceClientPins() {
 		if err := validateServiceClientExecutable(clientPID, pin); err != nil {
 			rejections = append(rejections, err)
 			continue
 		}
-		matched = true
+		role = pin.Role
 		break
 	}
-	if !matched {
-		return errors.Join(rejections...)
+	if role == "" {
+		return "", errors.Join(rejections...)
 	}
 	var clientSession uint32
 	if err := windows.ProcessIdToSessionId(clientPID, &clientSession); err != nil {
-		return fmt.Errorf("read Core Service client session: %w", err)
+		return "", fmt.Errorf("read Core Service client session: %w", err)
 	}
 	state, err := queryServiceSessionState(clientSession)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if !serviceSessionIsActive(state) {
-		return fmt.Errorf(
+		return "", fmt.Errorf(
 			"reject Core Service client outside an active interactive session (PID %d, session %d, state %s)",
 			clientPID,
 			clientSession,
 			state,
 		)
 	}
-	return nil
+	return role, nil
 }

@@ -1,8 +1,11 @@
 // Command hypomux-cli is the official command-line client for the HypoMux
 // aggregation engine. It speaks protocol v1 over the authenticated local Core
-// Service pipe and therefore inherits the same executable path and SHA-256
-// fingerprint trust boundary as the desktop client: the service only accepts
-// an installed, pinned hypomux-cli.exe.
+// Service pipe and is authenticated by the same executable path and SHA-256
+// fingerprint mechanism as the desktop client: the service only accepts an
+// installed, pinned hypomux-cli.exe. The matched CLI pin grants a restricted
+// client role (proxy-mode aggregation and read-only diagnostics, no privileged
+// TUN/MTU/WFP orchestration), enforced server-side, and every invocation is a
+// short-lived session of the one shared service engine.
 package main
 
 import (
@@ -65,7 +68,6 @@ func init() {
 		{name: "dns", summary: "域名解析与 DNS 状态", run: commandDNS},
 		{name: "tun", summary: "查看或关闭 TUN 状态", run: commandTun},
 		{name: "raw", summary: "调用任意已协商的协议 v1 方法", run: commandRaw},
-		{name: "shutdown", summary: "请求核心停止聚合并结束本次会话", run: commandShutdown},
 		{name: "version", summary: "显示 CLI 版本", run: commandVersion},
 		{name: "help", summary: "显示帮助", run: commandHelp},
 	}

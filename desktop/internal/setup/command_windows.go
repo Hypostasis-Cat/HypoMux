@@ -218,7 +218,12 @@ func makePlan(install, payload string, p windowsPlatform) ([]Item, error) {
 			if strings.EqualFold(filepath.Join(install, "bin"), p.coreBin) {
 				return nil, errors.New("desktop cannot use the protected Core directory")
 			}
-			items = append(items, Item{filepath.Join(p.coreBin, name), source})
+			// The CLI is a pipe client, never a service-launched sidecar: its pin
+			// points at the install-dir copy, so a protected duplicate would be
+			// unused. Only the engine and its sidecars need the protected bin.
+			if name != "hypomux-cli.exe" {
+				items = append(items, Item{filepath.Join(p.coreBin, name), source})
+			}
 		}
 	}
 	folders := []*windows.KNOWNFOLDERID{windows.FOLDERID_Desktop, windows.FOLDERID_Programs}

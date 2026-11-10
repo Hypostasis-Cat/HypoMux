@@ -267,6 +267,7 @@ func TestManagedTunLifecycleRequiresPreparedPoolAndStopsInOrder(t *testing.T) {
 	}
 	response, _ := engineServer.handle(
 		context.Background(),
+		RoleDesktop,
 		[]byte(`{
 			"protocol":1,
 			"id":"tun-activate",
@@ -320,6 +321,7 @@ func TestManagedTunActivationFailureRollsBackPreparedPool(t *testing.T) {
 
 	response, _ := engineServer.handle(
 		context.Background(),
+		RoleDesktop,
 		[]byte(`{
 			"protocol":1,
 			"id":"tun-activate",
@@ -355,6 +357,7 @@ func TestTunActivateRejectsExecutableOutsideCorePolicy(t *testing.T) {
 
 	response, _ := engineServer.handle(
 		context.Background(),
+		RoleDesktop,
 		[]byte(`{
 			"protocol":1,
 			"id":"tun-policy-reject",
@@ -389,6 +392,7 @@ func TestTunActivateRequiresConfigDigestForInstalledServicePolicy(t *testing.T) 
 	startTUNPoolForLifecycleTest(t, engineServer)
 	response, _ := engineServer.handle(
 		context.Background(),
+		RoleDesktop,
 		[]byte(`{
 			"protocol":1,
 			"id":"tun-config-pin",
@@ -428,7 +432,7 @@ func TestTunActivatePinsConfigDigestForInstalledServicePolicy(t *testing.T) {
 			"config_sha256":"%s"
 		}
 	}`, digest)
-	response, _ := engineServer.handle(context.Background(), []byte(request))
+	response, _ := engineServer.handle(context.Background(), RoleDesktop, []byte(request))
 	if response.Error != nil {
 		t.Fatalf("pinned configuration was rejected: %#v", response.Error)
 	}
@@ -459,7 +463,7 @@ func TestTunActivateUsesProtectedPinnedExecutableWhenDesktopAssertsAppCopy(t *te
 			"config_sha256":"%s"
 		}
 	}`, digest)
-	response, _ := engineServer.handle(context.Background(), []byte(request))
+	response, _ := engineServer.handle(context.Background(), RoleDesktop, []byte(request))
 	if response.Error != nil {
 		t.Fatalf("protected executable override was rejected: %#v", response.Error)
 	}
@@ -486,6 +490,7 @@ func TestTunActivateRetriesWithIPv4OnlyConfigAfterIPv6SetupFailure(t *testing.T)
 
 	response, _ := engineServer.handle(
 		context.Background(),
+		RoleDesktop,
 		[]byte(`{
 			"protocol":1,
 			"id":"tun-activate",
@@ -534,6 +539,7 @@ func TestTunActivateRecoversStaleWintunAdapterOnce(t *testing.T) {
 
 	response, _ := engineServer.handle(
 		context.Background(),
+		RoleDesktop,
 		[]byte(`{
 			"protocol":1,
 			"id":"tun-activate",
@@ -645,6 +651,7 @@ func TestTunActivateRejectsUnpreparedAndOrdinaryProxyModes(t *testing.T) {
 	)
 	response, _ := engineServer.handle(
 		context.Background(),
+		RoleDesktop,
 		[]byte(`{
 			"protocol":1,
 			"id":"tun-activate",
@@ -676,7 +683,7 @@ func startTUNPoolForLifecycleTest(t *testing.T, server *Server) {
 			]
 		}`),
 	}
-	response := server.startProxy(request)
+	response := server.startProxy(RoleDesktop, request)
 	if response.Error != nil {
 		t.Fatalf("prepare TUN pool: %#v", response.Error)
 	}

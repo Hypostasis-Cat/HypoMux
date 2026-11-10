@@ -64,7 +64,7 @@ Website and documentation: [https://hypomux.com](https://hypomux.com)
 
 ## Command line (CLI)
 
-The installer ships an official command-line client, `bin\hypomux-cli.exe`. It uses the same authenticated Core Service pipe as the desktop app (authenticated by install path + SHA-256 fingerprint) and drives the same aggregation engine, which makes unattended scripting and AI Agent workflows straightforward:
+The installer ships an official command-line client, `bin\hypomux-cli.exe`. It uses the same authenticated Core Service pipe as the desktop app (authenticated by install path + SHA-256 fingerprint) and drives the **same shared aggregation engine**: a proxy started by one invocation keeps running after that process exits, and the desktop UI sees CLI-driven state changes. The CLI is granted a restricted, server-enforced role (proxy-mode aggregation plus read-only diagnostics; no privileged TUN/MTU/WFP orchestration), which makes unattended scripting and AI Agent workflows straightforward:
 
 ```powershell
 # List aggregatable adapters, then start system-proxy aggregation
@@ -80,6 +80,8 @@ hypomux-cli diagnose --src-ip 192.168.1.10
 # Stop aggregation
 hypomux-cli stop
 ```
+
+The CLI is not added to `PATH` by default; the full install path is `C:\Program Files\HypoMux\bin\hypomux-cli.exe` (machine-wide install). Call it by that full path from scripts, or add the install directory to `PATH` yourself.
 
 See the [official CLI architecture note](docs/architecture/official-cli.md) for the command surface, security model, and Agent integration details.
 

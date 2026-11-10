@@ -12,25 +12,28 @@ import (
 	"github.com/Hypostasis-Cat/HypoMux/engine/internal/server"
 )
 
-// engineTestHost wires a real protocol-v1 engine server (the same package the
-// installed Core runs) to the CLI over net.Pipe. Each invocation gets a fresh
-// pipe and server, matching the service's one-session-per-client behavior.
+// engineTestHost wires a real protocol-v1 engine (the same package the installed
+// Core runs) to the CLI over net.Pipe. It models production: one shared service
+// engine singleton, with every CLI invocation attaching a short-lived session
+// carrying the restricted CLI role.
 type engineTestHost struct {
 	factory transportFactory
-	servers []context.CancelFunc
+	engine  *server.Server
 }
 
 func startEngineTestHost(t *testing.T) *engineTestHost {
 	t.Helper()
-	host := &engineTestHost{}
+	host := &engineTestHost{
+		engine: server.NewHost(server.Metadata{
+			Name:    "hypomux-engine",
+			Version: "test",
+			Commit:  "test",
+		}),
+	}
 	host.factory = func() transport {
 		return &hostTransport{host: host}
 	}
-	t.Cleanup(func() {
-		for _, cancel := range host.servers {
-			cancel()
-		}
-	})
+	t.Cleanup(host.engine.Close)
 	return host
 }
 
@@ -41,15 +44,9 @@ type hostTransport struct {
 
 func (t *hostTransport) Connect(ctx context.Context) (io.ReadWriteCloser, error) {
 	clientConn, engineConn := net.Pipe()
-	engineServer := server.New(engineConn, engineConn, server.Metadata{
-		Name:    "hypomux-engine",
-		Version: "test",
-		Commit:  "test",
-	})
-	runCtx, cancel := context.WithCancel(context.Background())
-	t.host.servers = append(t.host.servers, cancel)
+	session := t.host.engine.Attach(engineConn, engineConn, server.RoleCLI)
 	go func() {
-		_ = engineServer.Run(runCtx)
+		_ = session.Run(context.Background())
 	}()
 	// Closing the client side also releases the engine's reader.
 	go func() {
@@ -185,6 +182,53 @@ func TestCLIStatusReportsEngineState(t *testing.T) {
 	}
 	if !strings.Contains(stdout, "stopped") {
 		t.Fatalf("status output = %q", stdout)
+	}
+}
+
+// Reproduces the production semantics the per-connection server model broke: a
+// proxy started by one CLI invocation must still be running when a later
+// invocation queries status, because both are sessions of one service engine.
+func TestCLIStartSurvivesAcrossInvocations(t *testing.T) {
+	host := startEngineTestHost(t)
+	params := `{"mode":"proxy","listen_host":"127.0.0.1","socks_port":0,"http_port":0,"dns":{"policy":"off"},"adapters":[{"name":"loopback","source_ip":"127.0.0.1"}]}`
+	code, _, stderr := runCLI(t, host.factory, "raw", "engine.start", params)
+	if code != 0 {
+		t.Fatalf("start exit = %d, stderr = %s", code, stderr)
+	}
+
+	// The starting process has exited; a fresh invocation attaches a new session.
+	code, stdout, stderr := runCLI(t, host.factory, "status", "--json")
+	if code != 0 {
+		t.Fatalf("status exit = %d, stderr = %s", code, stderr)
+	}
+	var status struct {
+		Engine struct {
+			State string `json:"state"`
+		} `json:"engine"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &status); err != nil {
+		t.Fatalf("invalid status JSON %q: %v", stdout, err)
+	}
+	if status.Engine.State != "running" {
+		t.Fatalf("engine state across invocations = %q, want running", status.Engine.State)
+	}
+
+	if code, _, stderr := runCLI(t, host.factory, "stop"); code != 0 {
+		t.Fatalf("stop exit = %d, stderr = %s", code, stderr)
+	}
+}
+
+// The CLI role must not be able to reach privileged methods even through raw.
+func TestCLIRawCannotReachPrivilegedMethods(t *testing.T) {
+	host := startEngineTestHost(t)
+	for _, method := range []string{"tun.activate", "mtu.set", "host.shutdown"} {
+		code, _, stderr := runCLI(t, host.factory, "raw", method)
+		if code != 1 {
+			t.Fatalf("raw %s exit = %d, want 1", method, code)
+		}
+		if !strings.Contains(stderr, method) {
+			t.Fatalf("raw %s stderr = %q", method, stderr)
+		}
 	}
 }
 
