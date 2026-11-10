@@ -1,6 +1,7 @@
 package wails
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -14,6 +15,9 @@ type trayTestWindow struct {
 func (w *trayTestWindow) Hide() application.Window { w.hidden = true; return w }
 func (w *trayTestWindow) Show() application.Window { w.shown = true; return w }
 func (w *trayTestWindow) Focus()                   { w.focused = true }
+func (w *trayTestWindow) GetScreen() (*application.Screen, error) {
+	return nil, errors.New("no screen in tests")
+}
 
 func TestTrayActionTargetsMainWindow(t *testing.T) {
 	for _, action := range []string{"show", "hide", "dismiss", "invalid"} {

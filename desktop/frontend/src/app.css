@@ -2,7 +2,8 @@
   box-sizing: border-box;
 }
 
-.tray-document body { min-width: 0; min-height: 0; }
+.tray-document #root { overflow: hidden; }
+.tray-document #root > .hypomux-provider { min-width: 0; min-height: 0; }
 .tray-document, .tray-document body, .tray-document #root { background: transparent; color-scheme: normal; }
 .tray-document .tray-menu { background: transparent; font-size: var(--fontSizeBase300); line-height: var(--lineHeightBase300); }
 .tray-menu { height: 100%; padding: 6px; background: transparent; color: var(--colorNeutralForeground1); font-family: var(--fontFamilyBase); font-size: var(--fontSizeBase300); line-height: var(--lineHeightBase300); }
@@ -46,6 +47,12 @@ body,
   overflow: hidden;
 }
 
+/* When the window is smaller than the shell's minimum (heavily scaled or small
+   displays, see issue #118), scroll the shell instead of clipping it. */
+#root {
+  overflow: auto;
+}
+
 /* Avoid a lone CJK character or punctuation mark on the last line. */
 p {
   text-wrap: pretty;
@@ -54,6 +61,9 @@ p {
 #root > .hypomux-provider {
   width: 100%;
   height: 100%;
+  min-width: 960px;
+  /* Compact home layout (max-height: 730px) still fits at this height. */
+  min-height: 540px;
   overflow: hidden;
   opacity: 1;
   transform: scale(1);
@@ -113,8 +123,6 @@ html.window-closing #root > .hypomux-provider {
 }
 
 body {
-  min-width: 960px;
-  min-height: 680px;
   color: var(--hm-text-primary);
   background: transparent;
   user-select: none;

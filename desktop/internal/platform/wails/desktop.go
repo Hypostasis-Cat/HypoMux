@@ -29,6 +29,7 @@ type DesktopHost struct {
 	startupShown atomic.Bool
 	quitting     atomic.Bool
 	cleanupOnce  sync.Once
+	fitOnce      sync.Once
 }
 
 func NewDesktopHost(app *application.App, window application.Window, startSilent bool, onQuit func(), closeToTray func() bool) *DesktopHost {
@@ -186,6 +187,7 @@ func (d *DesktopHost) HideToTray() {
 
 func (d *DesktopHost) Show() {
 	d.startupShown.Store(true)
+	d.fitToScreen()
 	d.window.Show().Focus()
 }
 
@@ -193,6 +195,7 @@ func (d *DesktopHost) ShowStartup() {
 	if d.startSilent || !d.startupShown.CompareAndSwap(false, true) {
 		return
 	}
+	d.fitToScreen()
 	d.window.Show().Focus()
 }
 

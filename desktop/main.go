@@ -64,6 +64,7 @@ func main() {
 		return
 	}
 	var mainWindow application.Window
+	var desktopHost *wails.DesktopHost
 	startSilent := hasArgument(os.Args[1:], "--silent")
 	appearanceService := services.NewAppearanceService()
 	appearanceBackground := services.NewAppearanceBackgroundHandler(appearanceService)
@@ -92,7 +93,11 @@ func main() {
 						return
 					}
 				}
-				if mainWindow != nil {
+				// Route through the host so a second launch after a silent
+				// start still fits the window to the screen before showing it.
+				if desktopHost != nil {
+					desktopHost.Show()
+				} else if mainWindow != nil {
 					mainWindow.Show().Focus()
 				}
 			},
@@ -102,10 +107,10 @@ func main() {
 	mainWindow = app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:            "main",
 		Title:           "HypoMux",
-		Width:           1120,
-		Height:          800,
-		MinWidth:        960,
-		MinHeight:       680,
+		Width:           wails.MainWindowWidth,
+		Height:          wails.MainWindowHeight,
+		MinWidth:        wails.MainWindowMinWidth,
+		MinHeight:       wails.MainWindowMinHeight,
 		Frameless:       true,
 		Hidden:          true,
 		InitialPosition: application.WindowCentered,
@@ -163,6 +168,7 @@ func main() {
 	}, func() bool {
 		return settingsService.Get().CloseToTray
 	})
+	desktopHost = desktop
 	updaterService := services.NewUpdaterServiceWithSettings(settingsService, desktop.Quit)
 	diagnosticsService = services.NewDiagnosticsService(
 		settingsService, adapterService, desktop, supportLogs,
