@@ -134,6 +134,9 @@ type hotspotSession struct {
 	done          chan struct{}
 	stopOnce      sync.Once
 	stopRequested bool
+	// stopping is closed with the stop request so a slow broker inspection
+	// never delays worker shutdown.
+	stopping chan struct{}
 }
 
 func (h *hotspotSession) snapshot() HotspotStatus {
@@ -165,6 +168,7 @@ func (h *hotspotSession) requestStop() {
 			h.status.SharingVerified = false
 		}
 		h.mu.Unlock()
+		close(h.stopping)
 		_ = h.input.Close()
 	})
 }
@@ -193,11 +197,15 @@ type hotspotSharingReply struct {
 	Error       string                     `json:"error,omitempty"`
 }
 
-func launchHotspot(ctx context.Context, command *exec.Cmd, config HotspotConfig, inspectors ...func() hotspotSharingReply) (*hotspotSession, error) {
+const hotspotSharingInspectionTimeout = 100 * time.Second
+
+type hotspotSharingInspector func(context.Context) hotspotSharingReply
+
+func launchHotspot(ctx context.Context, command *exec.Cmd, config HotspotConfig, inspectors ...hotspotSharingInspector) (*hotspotSession, error) {
 	return launchHotspotObserved(ctx, command, config, nil, inspectors...)
 }
 
-func launchHotspotObserved(ctx context.Context, command *exec.Cmd, config HotspotConfig, onCreated func(*hotspotSession), inspectors ...func() hotspotSharingReply) (*hotspotSession, error) {
+func launchHotspotObserved(ctx context.Context, command *exec.Cmd, config HotspotConfig, onCreated func(*hotspotSession), inspectors ...hotspotSharingInspector) (*hotspotSession, error) {
 	input, err := command.StdinPipe()
 	if err != nil {
 		return nil, err
@@ -216,7 +224,7 @@ func launchHotspotObserved(ctx context.Context, command *exec.Cmd, config Hotspo
 		_ = output.Close()
 		return nil, err
 	}
-	h := &hotspotSession{id: rand.Text(), config: config, input: input, done: make(chan struct{}), status: HotspotStatus{State: "starting", SSID: config.SSID, Band: config.Band, HotspotAdapterID: config.AdapterID}}
+	h := &hotspotSession{id: rand.Text(), config: config, input: input, done: make(chan struct{}), stopping: make(chan struct{}), status: HotspotStatus{State: "starting", SSID: config.SSID, Band: config.Band, HotspotAdapterID: config.AdapterID}}
 	if onCreated != nil {
 		onCreated(h)
 	}
@@ -234,7 +242,16 @@ func launchHotspotObserved(ctx context.Context, command *exec.Cmd, config Hotspo
 			if json.Unmarshal(scanner.Bytes(), &request) == nil && request.Kind == "inspect_sharing" {
 				reply := hotspotSharingReply{Connections: []hotspotSharingConnection{}, Error: "管理员共享检查不可用，请更新 Core"}
 				if len(inspectors) > 0 {
-					reply = inspectors[0]()
+					inspectionCtx, inspectionCancel := context.WithCancel(context.Background())
+					go func() {
+						select {
+						case <-h.stopping:
+							inspectionCancel()
+						case <-inspectionCtx.Done():
+						}
+					}()
+					reply = inspectors[0](inspectionCtx)
+					inspectionCancel()
 				}
 				inputMu.Lock()
 				err := json.NewEncoder(input).Encode(reply)
@@ -417,8 +434,10 @@ func (s *EngineService) startHotspotLocked(ctx context.Context, config HotspotCo
 		s.mu.Lock()
 		s.hotspot = h
 		s.mu.Unlock()
-	}, func() hotspotSharingReply {
-		inspectionCtx, inspectionCancel := context.WithTimeout(context.Background(), 12*time.Second)
+	}, func(ctx context.Context) hotspotSharingReply {
+		// Core bounds one ICS enumeration to 45 s and may first finish one that
+		// is still running; the worker script waits slightly longer than this.
+		inspectionCtx, inspectionCancel := context.WithTimeout(ctx, hotspotSharingInspectionTimeout)
 		defer inspectionCancel()
 		reply := hotspotSharingReply{Connections: []hotspotSharingConnection{}}
 		if err := s.client.Request(inspectionCtx, "hotspot.inspect", nil, &reply); err != nil {

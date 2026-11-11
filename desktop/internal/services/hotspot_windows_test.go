@@ -243,14 +243,23 @@ if ((Update-SharingCheck $id) -ne 'transitional') { throw 'partial snapshot not 
 $answer = 'verified'
 $null = Update-SharingCheck $id
 if ($script:sharingRetryCount -ne 0 -or $script:nextSharingCheck -lt [DateTime]::UtcNow.AddSeconds(14)) { throw 'normal cadence or reset incorrect' }
-foreach ($answer in @('query_error', 'transitional')) {
- $script:sharingRetryCount = 0
- $null = Update-SharingCheck $id
- $null = Update-SharingCheck $id
- $rejected = $false
- try { Update-SharingCheck $id } catch { $rejected = $true }
- if (-not $rejected) { throw 'persistent failure accepted' }
-}
+$script:sharingRetryCount = 0
+$answer = 'transitional'
+$null = Update-SharingCheck $id
+$null = Update-SharingCheck $id
+$rejected = $false
+try { Update-SharingCheck $id } catch { $rejected = $true }
+if (-not $rejected) { throw 'persistent partial sharing accepted' }
+# A failed query observes nothing: never close for it, and do not hammer ICS.
+$script:sharingRetryCount = 0
+$answer = 'query_error'
+$script:sharingQueryError = 'inspect Windows sharing: slow'
+1..5 | ForEach-Object { if ((Update-SharingCheck $id) -ne 'query_error') { throw 'query error not reported' } }
+if ($script:sharingQueryErrors -ne 5 -or $script:sharingRetryCount -ne 0) { throw 'query errors counted as partial sharing' }
+if ($script:nextSharingCheck -lt [DateTime]::UtcNow.AddSeconds(14)) { throw 'query error retried too fast' }
+$answer = 'verified'
+$null = Update-SharingCheck $id
+if ($script:sharingQueryErrors -ne 0 -or $script:sharingQueryError -ne '') { throw 'query error state not reset' }
 $script:sharingRetryCount = 0
 $answer = 'mismatch'
 $rejected = $false

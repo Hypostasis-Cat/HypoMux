@@ -56,6 +56,8 @@ type Server struct {
 	writeMu             sync.Mutex
 	lifecycleMu         sync.Mutex
 	eventSeq            uint64
+	background          sync.WaitGroup
+	inspectSharing      func(context.Context) (platform.SharingSnapshot, error)
 }
 
 func New(input io.Reader, output io.Writer, metadata Metadata) *Server {
@@ -69,6 +71,8 @@ func New(input io.Reader, output io.Writer, metadata Metadata) *Server {
 		startedAt: now.UTC(),
 		started:   now,
 		tun:       tun.NewSupervisor(),
+
+		inspectSharing: platform.InspectSharing,
 	}
 	server.tun.SetHandlers(server.handleTunLog, server.handleTunUnexpectedExit)
 	return server
@@ -109,6 +113,7 @@ func (s *Server) Run(ctx context.Context) error {
 		if closer, ok := s.input.(io.Closer); ok {
 			_ = closer.Close()
 		}
+		s.background.Wait()
 	}()
 
 	for {
@@ -128,6 +133,18 @@ func (s *Server) Run(ctx context.Context) error {
 
 		line := bytes.TrimSpace(raw)
 		if len(line) == 0 {
+			continue
+		}
+		if isSlowReadOnlyRequest(line) {
+			// Windows ICS enumeration may take tens of seconds. Answer it out of
+			// order (responses carry their id) instead of stalling every other
+			// request behind it; it changes no runtime or TUN state.
+			s.background.Add(1)
+			go func() {
+				defer s.background.Done()
+				response, _ := s.handle(ctx, line)
+				_ = s.writeMessage(response)
+			}()
 			continue
 		}
 
@@ -158,6 +175,13 @@ func (s *Server) Run(ctx context.Context) error {
 			return nil
 		}
 	}
+}
+
+func isSlowReadOnlyRequest(line []byte) bool {
+	var request struct {
+		Method string `json:"method"`
+	}
+	return json.Unmarshal(line, &request) == nil && request.Method == api.MethodHotspotInspect
 }
 
 func (s *Server) handle(ctx context.Context, line []byte) (protocol.Response, bool) {
@@ -251,7 +275,7 @@ func (s *Server) handle(ctx context.Context, line []byte) (protocol.Response, bo
 		if !s.identity.Elevated {
 			return protocol.Failure(request.ID, "elevation_required", "共享状态检查需要管理员 Core，请重新启动 TUN", nil), false
 		}
-		result, err := platform.InspectSharing(ctx)
+		result, err := s.inspectSharing(ctx)
 		if err != nil {
 			return protocol.Failure(request.ID, "hotspot_inspection_failed", err.Error(), nil), false
 		}

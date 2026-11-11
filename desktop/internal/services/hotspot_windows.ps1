@@ -24,6 +24,8 @@ $hotspotOffConfirmed = $null
 $configurationRestored = $true
 $cleanupError = ''
 $sharingRetryCount = 0
+$sharingQueryErrors = 0
+$sharingQueryError = ''
 $nextSharingCheck = [DateTime]::MinValue
 $privateNetworkDetail = ''
 $gatewayAddress = ''
@@ -135,7 +137,9 @@ function Shared-Connections {
     # Core through the desktop broker; keep WinRT in the interactive session.
     if ($script:stopSignal.IsCompleted) { throw 'Desktop requested hotspot shutdown' }
     [Console]::WriteLine('{"kind":"inspect_sharing"}')
-    if (-not $script:stopSignal.Wait(15000)) { throw 'Core sharing inspection timed out' }
+    # Windows ICS can take tens of seconds on slow adapters (USB tethering).
+    # The broker answers within 100 s; a closed pipe still ends this wait at once.
+    if (-not $script:stopSignal.Wait(105000)) { throw 'Core sharing inspection timed out' }
     $line = $script:stopSignal.Result
     if ($null -eq $line) { throw 'Desktop disconnected during sharing inspection' }
     $script:stopSignal = [HypoMuxHotspotLifetime]::ReadStop()
@@ -162,6 +166,7 @@ function Test-Sharing([guid]$publicID) {
         # Only a consumed error reply is retryable. Pipe/timeout failures lose
         # protocol synchronization and must terminate the worker.
         if (-not $script:sharingQueryFailed) { throw }
+        $script:sharingQueryError = $_.Exception.Message
         $script:sharingDetail = 'sharing_query_error=' + $_.Exception.Message
         return 'query_error'
     }
@@ -277,7 +282,18 @@ function Test-HotspotNetwork([guid]$publicID) {
 function Update-SharingCheck([guid]$publicID) {
     $verdict = Test-Sharing $publicID
     if ($verdict -eq 'mismatch') { throw 'Shared egress mismatch; hotspot is being closed' }
-    if ($verdict -in @('transitional', 'query_error')) {
+    if ($verdict -eq 'query_error') {
+        # A failed or slow query observes nothing: it is not evidence of wrong
+        # egress. Keep the AP up and retry at the normal cadence, so a stalled
+        # ICS service is not hammered; only an observed mismatch closes it.
+        $script:sharingQueryErrors++
+        $script:sharingDetail += '; consecutive_query_errors=' + $script:sharingQueryErrors
+        $script:nextSharingCheck = [DateTime]::UtcNow.AddSeconds(15)
+        return $verdict
+    }
+    $script:sharingQueryErrors = 0; $script:sharingQueryError = ''
+    if ($verdict -eq 'transitional') {
+        # An observed partial ICS configuration must settle quickly.
         $script:sharingRetryCount++
         if ($script:sharingRetryCount -ge 3) { throw '共享接口连续三次未能完成校验，正在关闭热点。' }
         $script:nextSharingCheck = [DateTime]::UtcNow.AddSeconds(3)
@@ -291,7 +307,13 @@ function Update-SharingCheck([guid]$publicID) {
 function Publish-Running([string]$verdict) {
     $message = ''
     if ($verdict -eq 'unobserved') { $message = '热点已开启，但传统 ICS 接口未提供出口信息。请连接手机测试；当前尚未确认手机流量经过聚合。' }
-    if ($verdict -in @('transitional', 'query_error')) { $message = '共享接口正在重新校验，当前出口尚未确认。' }
+    if ($verdict -eq 'transitional') { $message = '共享接口正在重新校验，当前出口尚未确认。' }
+    if ($verdict -eq 'query_error') {
+        $reason = [string]$script:sharingQueryError
+        if ($reason.Length -gt 240) { $reason = $reason.Substring(0, 240) + '...' }
+        $message = '暂时无法读取 Windows 共享状态，热点保持开启并持续重试；当前出口尚未确认。'
+        if ($reason -ne '') { $message += '（' + $reason + '）' }
+    }
     Publish-State 'running' $message ($verdict -eq 'verified')
 }
 
@@ -519,7 +541,9 @@ public static class HypoMuxHotspotLifetime {
     if (-not $networkReady) { $sharingDetail = $privateNetworkDetail; throw 'Windows 热点未准备好：未能唯一识别本次启动的热点无线网卡及有效 IPv4 网关，已请求关闭热点。' }
     do {
         $verdict = Update-SharingCheck $publicID
-        if ($verdict -in @('verified', 'unobserved')) { break }
+        # A query error proceeds unverified: monitoring keeps retrying, and an
+        # observed mismatch still closes the hotspot.
+        if ($verdict -in @('verified', 'unobserved', 'query_error')) { break }
         if ($stopSignal.Wait(3000)) { throw 'Desktop closed during sharing verification' }
     } while ($true)
     Publish-Running $verdict
@@ -532,9 +556,12 @@ public static class HypoMuxHotspotLifetime {
         if (Test-NetworkDue $publicID) {
             if (-not (Test-HotspotNetwork $publicID)) {
                 if (-not $networkQueryFailed) { throw '热点网卡或 IPv4 网关已失效，正在关闭热点。' }
+                # Unreadable adapter state is not a failed network. WinRT Off and
+                # an observed TUN/gateway loss still stop the hotspot above.
                 $networkFailures++
-                $sharingDetail = $privateNetworkDetail
-                if ($networkFailures -ge 3) { throw '连续三次无法读取热点网络状态，正在关闭热点。' }
+                $sharingDetail = $privateNetworkDetail + '; consecutive_network_query_errors=' + $networkFailures
+                $sharingQueryError = $privateNetworkDetail
+                $nextNetworkCheck = [DateTime]::UtcNow.AddSeconds(10)
                 $verdict = 'query_error'
                 $nextSharingCheck = [DateTime]::MinValue
                 Publish-Running $verdict

@@ -141,7 +141,7 @@ func launchTestHotspot(t *testing.T, mode string, timeout time.Duration) (*hotsp
 	command.Env = append(os.Environ(), "HYPOMUX_HOTSPOT_TEST_WORKER="+mode)
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	return launchHotspot(ctx, command, HotspotConfig{SSID: "HypoMux 手机", Password: "safe-'$`password", Band: "auto"}, func() hotspotSharingReply {
+	return launchHotspot(ctx, command, HotspotConfig{SSID: "HypoMux 手机", Password: "safe-'$`password", Band: "auto"}, func(context.Context) hotspotSharingReply {
 		return hotspotSharingReply{Connections: []hotspotSharingConnection{{Name: "HypoMux-Tun", Role: 0}, {Name: "Wi-Fi Direct", Role: 1}}}
 	})
 }
