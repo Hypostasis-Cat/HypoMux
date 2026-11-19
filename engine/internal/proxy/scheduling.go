@@ -67,6 +67,13 @@ func (s *scheduler) update(config SchedulingConfig) SchedulingConfig {
 }
 
 func (s *Server) UpdateScheduling(config SchedulingConfig) (SchedulingConfig, error) {
+	if s.config.DisableIPv6 {
+		config.Adapters = append([]Adapter(nil), config.Adapters...)
+		for i := range config.Adapters {
+			config.Adapters[i].SourceIPv6 = ""
+			config.Adapters[i].IPv6IfIndex = 0
+		}
+	}
 	next, err := ValidateScheduling(config)
 	if err != nil {
 		return SchedulingConfig{}, err

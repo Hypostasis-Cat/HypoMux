@@ -90,11 +90,12 @@ func TestServerHandshakeStatusAndShutdown(t *testing.T) {
 		t.Fatalf("hello mode_features = %#v", helloResult["mode_features"])
 	}
 	tunFeatures, ok := features["tun_tcp_pool"].([]any)
-	if !ok || len(tunFeatures) != 6 ||
+	if !ok || len(tunFeatures) != 7 ||
 		tunFeatures[2] != "ipv6_egress" ||
 		tunFeatures[3] != "adaptive_health" ||
 		tunFeatures[4] != "managed_tun_lifecycle" ||
-		tunFeatures[5] != "dynamic_nic_channels" {
+		tunFeatures[5] != "dynamic_nic_channels" ||
+		tunFeatures[6] != "disable_ipv6" {
 		t.Fatalf("TUN mode features = %#v", features["tun_tcp_pool"])
 	}
 

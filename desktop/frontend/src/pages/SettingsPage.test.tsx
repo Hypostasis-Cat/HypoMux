@@ -321,6 +321,16 @@ describe("TUN settings", () => {
     fireEvent.click(toggle);
     await waitFor(() => expect(mocks.update).toHaveBeenCalledWith(expect.objectContaining({ hide_virtual_adapters: false }), ["hide_virtual_adapters"]));
   });
+  it("persists the IPv6 switch and explains restart without changing other preferences", async () => {
+    render(<SettingsPage adapterRuntime={[]} onOpenBlockedDomains={() => {}} />);
+    await openCategory("Advanced Network");
+    const toggle = await screen.findByRole("switch", { name: "Disable IPv6" });
+    await waitFor(() => expect(toggle.hasAttribute("disabled")).toBe(false));
+    expect((toggle as HTMLInputElement).checked).toBe(false);
+    fireEvent.click(toggle);
+    await waitFor(() => expect(mocks.update).toHaveBeenCalledWith(expect.objectContaining({ disable_ipv6: true, dns_policy: "auto", strict_route: true }), ["disable_ipv6"]));
+    await waitFor(() => expect(mocks.notify).toHaveBeenCalledWith(expect.objectContaining({ message: "IPv6 preference saved; stop and restart acceleration to apply" })));
+  });
   it.each([
     ["Mixed (hybrid)", "mixed"],
     ["gVisor (userspace)", "gvisor"],

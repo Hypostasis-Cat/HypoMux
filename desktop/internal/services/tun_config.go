@@ -41,6 +41,7 @@ type tunConfigOptions struct {
 	Stack           string
 	DNSPolicy       string
 	IPv6Available   bool
+	DisableIPv6     bool
 	IPv4Unavailable bool
 	ConfigName      string
 	ClashAPI        *clashAPIConfig
@@ -113,6 +114,10 @@ func writeSingBoxConfigWithOptions(
 		return "", "", clashAPIConfig{}, err
 	}
 	dnsPolicy := normalizeTunDNSPolicy(options.DNSPolicy)
+	if options.DisableIPv6 {
+		dnsAdapter.SourceIPv6 = ""
+		dnsAdapter.IPv6IfIndex = 0
+	}
 	var upstream map[string]any
 	if dnsPolicy == "system" {
 		upstream = map[string]any{"type": "local", "tag": "dns-local"}
@@ -132,6 +137,9 @@ func writeSingBoxConfigWithOptions(
 	dnsMode, err := singBoxTunDNSMode(singBox, dnsPolicy)
 	if err != nil {
 		return "", "", clashAPIConfig{}, err
+	}
+	if options.DisableIPv6 && dnsMode != "" {
+		dnsMode = "hijack"
 	}
 	if len(options.DNSUpstreams) > 0 && dnsMode == "" {
 		return "", "", clashAPIConfig{}, fmt.Errorf("多 DNS / 自定义 DoH 需要 sing-box 1.14 或更新版本，请更新运行核心")
@@ -174,19 +182,26 @@ func writeSingBoxConfigWithOptions(
 			"outbound":     "system-direct",
 		},
 	}
-	if dnsPolicy != "system" {
+	if options.DisableIPv6 {
+		// Reject captured literal IPv6 before self-process and user bypasses.
+		routeRules = append([]any{map[string]any{"ip_version": 6, "action": "reject", "method": "default", "no_drop": true}}, routeRules...)
+	}
+	if dnsPolicy != "system" || options.DisableIPv6 {
 		routeRules = append(routeRules,
 			map[string]any{"port": []int{53}, "action": "hijack-dns"},
 			map[string]any{"protocol": []string{"dns"}, "action": "hijack-dns"},
 		)
 	}
-	if dnsPolicy != "system" {
+	if dnsPolicy != "system" || options.DisableIPv6 {
 		// Resolve FakeIP/domain destinations before compatibility IP overrides
 		// decide whether to bypass user routing. DNS and self-process bypasses
 		// above must remain ahead of resolution to avoid routing loops.
 		strategy := "prefer_ipv4"
 		if options.IPv6Available && options.IPv4Unavailable {
 			strategy = "prefer_ipv6"
+		}
+		if options.DisableIPv6 {
+			strategy = "ipv4_only"
 		}
 		resolveRule := map[string]any{"action": "resolve", "server": "dns-local", "strategy": strategy}
 		if len(options.DNSUpstreams) > 0 {
@@ -214,6 +229,9 @@ func writeSingBoxConfigWithOptions(
 	systemDirectAdapter := dnsAdapter
 	if options.SystemDirectAdapter != nil {
 		systemDirectAdapter = *options.SystemDirectAdapter
+	}
+	if options.DisableIPv6 {
+		systemDirectAdapter.SourceIPv6 = ""
 	}
 	outbounds := []any{
 		socksOutbound("nic_ethernet", ethernetPort),
@@ -262,6 +280,12 @@ func writeSingBoxConfigWithOptions(
 		poolRules, _ := dnsConfig["rules"].([]any)
 		dnsConfig["rules"] = append([]any{fakeRule}, poolRules...)
 		dnsConfig["reverse_mapping"] = true
+	}
+	if options.DisableIPv6 {
+		// Precede FakeIP/pool rules and cached responses with explicit NODATA.
+		dnsRules, _ := dnsConfig["rules"].([]any)
+		dnsConfig["rules"] = append([]any{map[string]any{"query_type": []string{"AAAA"}, "action": "predefined", "rcode": "NOERROR"}}, dnsRules...)
+		dnsConfig["strategy"] = "ipv4_only"
 	}
 	ipv4Address := options.IPv4Address
 	if ipv4Address == "" {
@@ -328,6 +352,9 @@ func writeSingBoxConfigWithOptions(
 		// The self-process direct bypass still needs a valid default resolver.
 		// User destinations go through the earlier resolve action and DNS rules.
 		config["route"].(map[string]any)["default_domain_resolver"] = dnsConfig["final"]
+	}
+	if options.DisableIPv6 {
+		config["route"].(map[string]any)["default_domain_resolver"] = map[string]any{"server": dnsConfig["final"], "strategy": "ipv4_only"}
 	}
 	data, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {

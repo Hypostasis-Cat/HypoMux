@@ -34,6 +34,7 @@ type AppSettings struct {
 	Weighted            bool                  `json:"weighted"`
 	StrictRoute         bool                  `json:"strict_route"`
 	TUNStack            string                `json:"tun_stack"`
+	DisableIPv6         bool                  `json:"disable_ipv6"`
 	WFPCompatibility    WFPCompatibilityState `json:"wfp_compatibility_state,omitempty"`
 	ForceTUNBypass      bool                  `json:"force_tun_connectivity_bypass"`
 	BlockedDomainBypass bool                  `json:"blocked_domain_bypass"`
@@ -313,6 +314,8 @@ func (s *SettingsService) UpdateFields(values AppSettings, fields []string) (App
 			next.StrictRoute = values.StrictRoute
 		case "tun_stack":
 			next.TUNStack = values.TUNStack
+		case "disable_ipv6":
+			next.DisableIPv6 = values.DisableIPv6
 		case "force_tun_connectivity_bypass":
 			next.ForceTUNBypass = values.ForceTUNBypass
 		case "blocked_domain_bypass":

@@ -117,6 +117,7 @@ func NewHelloResult(
 				"ipv6_egress",
 				"adaptive_health",
 				"domain_quarantine",
+				"disable_ipv6",
 			},
 			"tun_tcp_pool": {
 				"tcp_connect",
@@ -125,6 +126,7 @@ func NewHelloResult(
 				"adaptive_health",
 				"managed_tun_lifecycle",
 				"dynamic_nic_channels",
+				"disable_ipv6",
 			},
 		},
 		OS:        runtime.GOOS,
@@ -178,6 +180,7 @@ func (p DiagnosticRunParams) Config() diagnostic.Config {
 }
 
 type EngineStartParams struct {
+	DisableIPv6           bool                         `json:"disable_ipv6,omitempty"`
 	SteamCDNEnabled       bool                         `json:"steam_cdn_enabled,omitempty"`
 	Mode                  string                       `json:"mode"`
 	ListenHost            string                       `json:"listen_host"`
@@ -215,10 +218,13 @@ func (c DNSStartConfig) ResolverConfig() dns.Config {
 }
 
 func (p EngineStartParams) ProxyConfig() proxy.Config {
+	dnsConfig := p.DNS.ResolverConfig()
+	dnsConfig.DisableIPv6 = p.DisableIPv6
 	// DomainIsolation and DomainIsolationExpiry stay nil when the client omits
 	// them: proxy.normalizeConfig owns the nil -> true default, and duplicating
 	// it here is how the two would drift apart.
 	return proxy.Config{
+		DisableIPv6:           p.DisableIPv6,
 		SteamCDNEnabled:       p.SteamCDNEnabled,
 		ListenHost:            p.ListenHost,
 		SOCKSPort:             p.SOCKSPort,
@@ -228,7 +234,7 @@ func (p EngineStartParams) ProxyConfig() proxy.Config {
 		Adapters:              p.Adapters,
 		Channels:              p.Channels,
 		ConnectTimeout:        time.Duration(p.ConnectTimeoutMS) * time.Millisecond,
-		DNS:                   p.DNS.ResolverConfig(),
+		DNS:                   dnsConfig,
 		DomainIsolation:       p.DomainIsolation,
 		DomainIsolationExpiry: p.DomainIsolationExpiry,
 		DomainQuarantines:     append([]proxy.DomainQuarantineSeed(nil), p.DomainQuarantines...),
