@@ -60,6 +60,7 @@ const emptySettings: CompleteAppSettings = {
   weighted: false,
   strict_route: true,
   tun_stack: "system",
+  disable_ipv6: false,
   force_tun_connectivity_bypass: false,
   blocked_domain_bypass: false,
   blocked_domain_expiry: true,
@@ -1085,6 +1086,13 @@ export function SettingsPage({
                 </SettingRow>
               </SettingGroup>
               <SettingGroup title={text("TUN 与兼容性", "TUN and compatibility")}>
+                <SettingRow
+                  title={text("禁用 IPv6", "Disable IPv6")}
+                  description={text("仅使用 IPv4 解析和连接；HY DNS 不返回 IPv6 地址，TUN 内已有 IPv6 连接会被拒绝。不修改 Windows 网卡设置，保存后下次启动生效。", "Use IPv4 for resolution and connections. HY DNS returns no IPv6 addresses and existing IPv6 connections inside TUN are rejected. Leaves Windows adapter settings unchanged; applies after restarting acceleration.")}
+                >
+                  <SettingSwitch checked={Boolean(settings.disable_ipv6)} disabled={loading || loadFailed || saving}
+                    onChange={(checked) => patchAndSave({ disable_ipv6: checked }, text("IPv6 设置已保存，请停止并重新启动加速后生效", "IPv6 preference saved; stop and restart acceleration to apply"))} />
+                </SettingRow>
                 <SettingRow
                   title={text("TUN 协议栈", "TUN stack")}
                   description={text(

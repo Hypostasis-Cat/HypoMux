@@ -274,6 +274,9 @@ func (a *udpAssociation) createFlow(
 		return nil, errors.New("UDP target must be a literal IP address")
 	}
 	network := networkForIP("udp", targetIP)
+	if a.server.config.DisableIPv6 && network == "udp6" {
+		return nil, fmt.Errorf("IPv6 is disabled")
+	}
 	if a.channel == ChannelDirect {
 		return a.createDirectFlow(clientAddress, addr, network, firstPayload)
 	}
@@ -399,6 +402,9 @@ func (a *udpAssociation) createDirectFlow(
 	firstPayload []byte,
 ) (*udpFlow, error) {
 	target := addr.String()
+	if a.server.config.DisableIPv6 && network == "udp6" {
+		return nil, fmt.Errorf("IPv6 is disabled")
+	}
 	dialer := &net.Dialer{Timeout: a.server.config.ConnectTimeout}
 	if network == "udp6" {
 		dialer.LocalAddr = &net.UDPAddr{IP: net.IPv6unspecified}

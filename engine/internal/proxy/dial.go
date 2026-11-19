@@ -21,6 +21,9 @@ func (s *Server) dialUpstream(
 		return nil, Adapter{}, fmt.Errorf("target: %w", splitErr)
 	}
 	targetIP := net.ParseIP(host)
+	if s.config.DisableIPv6 && targetIP != nil && targetIP.To4() == nil {
+		return nil, Adapter{}, errors.New("IPv6 is disabled")
+	}
 	if literalIPOnly && targetIP == nil {
 		return nil, Adapter{}, errors.New("TUN TCP pool requires a literal IP target")
 	}

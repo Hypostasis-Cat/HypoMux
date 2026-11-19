@@ -711,6 +711,17 @@ func (s *EngineService) startLocked(ctx context.Context, mode string) (snapshot 
 	if len(selected) == 0 {
 		return EngineSnapshot{}, errors.New("请至少选择一张活动网卡")
 	}
+	observedSelected := cloneRuntimeBindings(selected)
+	captureIPv6 := selectedAdaptersHaveIPv6(selected)
+	if settings.DisableIPv6 {
+		for i := range selected {
+			if selected[i].Address == "" {
+				return EngineSnapshot{}, fmt.Errorf("已禁用 IPv6，但网卡 %s 没有 IPv4 地址", selected[i].Name)
+			}
+			selected[i].SourceIPv6 = ""
+			selected[i].IPv6IfIndex = 0
+		}
+	}
 	if err := validateAdapterSources(selected); err != nil {
 		return EngineSnapshot{}, err
 	}
@@ -767,6 +778,7 @@ func (s *EngineService) startLocked(ctx context.Context, mode string) (snapshot 
 			"strategy":              effectiveSchedulingStrategy(settings),
 			"dns_policy":            settings.DNSPolicy,
 			"dns_egress_mode":       settings.DNSEgressMode,
+			"disable_ipv6":          settings.DisableIPv6,
 		})
 		s.logs.RecordEvent("engine", "start_requested", map[string]any{
 			"mode": mode, "adapters": names,
@@ -843,6 +855,9 @@ func (s *EngineService) startLocked(ctx context.Context, mode string) (snapshot 
 	if settings.SteamCDNEnabled && !slices.Contains(hello.Capabilities, "steam_cdn.configure") {
 		return EngineSnapshot{}, errors.New("当前 Core 不支持 Steam 下载优选，请更新核心或关闭此功能")
 	}
+	if err := validateIPv6PolicyCore(settings.DisableIPv6, hello, mode); err != nil {
+		return EngineSnapshot{}, err
+	}
 	s.recordStartStage("core_connected", map[string]any{
 		"version": hello.EngineVersion, "elevated": hello.Elevated,
 		"launcher": hello.Launcher, "fallback": hello.Fallback,
@@ -886,7 +901,8 @@ func (s *EngineService) startLocked(ctx context.Context, mode string) (snapshot 
 		_ = s.client.Request(ctx, "engine.stop", nil, &ignored)
 	}
 	startPayload := map[string]any{
-		"mode": mode, "listen_host": "127.0.0.1", "weighted": settings.Weighted, "strategy": effectiveSchedulingStrategy(settings),
+		"disable_ipv6": settings.DisableIPv6,
+		"mode":         mode, "listen_host": "127.0.0.1", "weighted": settings.Weighted, "strategy": effectiveSchedulingStrategy(settings),
 		"connect_timeout_ms": 6000,
 		"dns": map[string]any{
 			"policy": effectiveDNSPolicy, "legacy_servers": settingsDNSServers(settings), "doh_servers": settings.DoHServers, "dot_servers": settings.DoTServers,
@@ -1019,8 +1035,9 @@ func (s *EngineService) startLocked(ctx context.Context, mode string) (snapshot 
 			ForceStart:          settings.ForceTUNBypass,
 			IPv4Address:         tunAddress,
 			Stack:               settings.TUNStack,
+			DisableIPv6:         settings.DisableIPv6,
 			DNSPolicy:           effectiveDNSPolicy,
-			IPv6Available:       selectedAdaptersHaveIPv6(selected),
+			IPv6Available:       captureIPv6,
 			IPv4Unavailable:     !selectedAdaptersHaveIPv4(selected),
 			ConfigName:          "sing-box.json",
 			RuleSets:            settings.RuleSets,
@@ -1153,7 +1170,14 @@ func (s *EngineService) startLocked(ctx context.Context, mode string) (snapshot 
 	s.lastCDNLog = time.Time{}
 	s.lastPerformanceLog = time.Time{}
 	s.lastTUNHealthCheck = time.Now()
-	s.rememberRuntimeBindingsLocked(mode, selected, dnsEgress.Adapter)
+	observedDNS := dnsEgress.Adapter
+	for _, adapter := range observedSelected {
+		if adapter.ID == observedDNS.ID {
+			observedDNS = adapter
+			break
+		}
+	}
+	s.rememberRuntimeBindingsLocked(mode, observedSelected, observedDNS)
 	connectivityNotice := s.tunConnectivityNotice
 	s.mu.Unlock()
 	if s.logs != nil {

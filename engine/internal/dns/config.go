@@ -104,6 +104,7 @@ var providerEndpoints = map[string][]Endpoint{
 }
 
 type Config struct {
+	DisableIPv6      bool
 	Policy           string
 	LegacyServers    []string
 	DoHServers       []string

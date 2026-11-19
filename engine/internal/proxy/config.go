@@ -36,6 +36,7 @@ type Channel struct {
 }
 
 type Config struct {
+	DisableIPv6           bool                   `json:"disable_ipv6,omitempty"`
 	SteamCDNEnabled       bool                   `json:"steam_cdn_enabled,omitempty"`
 	ListenHost            string                 `json:"listen_host"`
 	SOCKSPort             int                    `json:"socks_port"`
@@ -64,6 +65,7 @@ type Endpoints struct {
 }
 
 func normalizeConfig(config Config) (Config, error) {
+	config.DNS.DisableIPv6 = config.DisableIPv6
 	strategy, err := NormalizeStrategy(config.Strategy, config.Weighted)
 	if err != nil {
 		return Config{}, err
@@ -105,6 +107,13 @@ func normalizeConfig(config Config) (Config, error) {
 	seenIPv6 := make(map[string]struct{}, len(config.Adapters))
 	adapters := make([]Adapter, 0, len(config.Adapters))
 	for _, adapter := range config.Adapters {
+		if config.DisableIPv6 {
+			adapter.SourceIPv6 = ""
+			adapter.IPv6IfIndex = 0
+			if strings.TrimSpace(adapter.SourceIP) == "" {
+				return Config{}, fmt.Errorf("IPv6 is disabled but adapter %q has no IPv4 address", adapter.Name)
+			}
+		}
 		adapter.Name = strings.TrimSpace(adapter.Name)
 		adapter.SourceIP = strings.TrimSpace(adapter.SourceIP)
 		adapter.SourceIPv6 = strings.TrimSpace(adapter.SourceIPv6)

@@ -109,7 +109,7 @@ func usableTUNDNSAddress(adapter AdapterView, address string) bool {
 // fallback semantics as the Core. Two encrypted endpoints race per batch;
 // traditional DNS is evaluated only after the encrypted batches fail.
 func buildTUNDNSPool(adapter AdapterView, options tunConfigOptions) (map[string]any, error) {
-	if !options.IPv6Available {
+	if !options.IPv6Available || options.DisableIPv6 {
 		adapter.SourceIPv6 = ""
 	}
 	if options.IPv4Unavailable {

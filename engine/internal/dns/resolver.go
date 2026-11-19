@@ -182,6 +182,9 @@ func (r *Resolver) Resolve(ctx context.Context, query Query) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	if r.config.DisableIPv6 && recordType == RecordAAAA {
+		return Result{Domain: domain, RecordType: RecordAAAA, Adapter: binding.Name, Transport: "disabled-ipv6"}, nil
+	}
 	key := cacheKey{
 		adapter:     binding.Name,
 		sourceIP:    binding.SourceIP,

@@ -561,6 +561,9 @@ func (s *Server) dialDirectTCP(ctx context.Context, target string) (net.Conn, er
 	if err != nil {
 		return nil, fmt.Errorf("direct target: %w", err)
 	}
+	if ip := net.ParseIP(host); s.config.DisableIPv6 && ip != nil && ip.To4() == nil {
+		return nil, fmt.Errorf("IPv6 is disabled")
+	}
 	dialer := &net.Dialer{Timeout: s.config.ConnectTimeout}
 	if ip := net.ParseIP(host); ip != nil && ip.To4() == nil {
 		dialer.LocalAddr = &net.TCPAddr{IP: net.IPv6unspecified}

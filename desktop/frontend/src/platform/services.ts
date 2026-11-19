@@ -66,7 +66,7 @@ export type RoutingSnapshot = Omit<GeneratedRoutingSnapshot, "match_order" | "re
 
 export type AdapterView = GeneratedAdapterView & { is_virtual?: boolean; ipv6_gateway?: string; ipv6_metric?: number; ipv6_automatic_metric?: boolean };
 
-export type CompleteAppSettings = Omit<AppSettings, "ai_enabled" | "default_outbound" | "dns_servers" | "doh_servers" | "dot_servers"> & {
+export type CompleteAppSettings = Omit<AppSettings, "ai_enabled" | "default_outbound" | "dns_servers" | "doh_servers" | "dot_servers" | "disable_ipv6"> & {
 	// Optional for settings written before configurable resolver lists.
 	dns_servers?: string[];
 	doh_servers?: string[];
@@ -78,6 +78,7 @@ export type CompleteAppSettings = Omit<AppSettings, "ai_enabled" | "default_outb
   steam_cdn_enabled?: boolean;
   hide_virtual_adapters?: boolean;
   tun_stack: string;
+  disable_ipv6?: boolean;
   language: "zh" | "en";
   force_tun_connectivity_bypass: boolean;
   blocked_domain_bypass: boolean;
