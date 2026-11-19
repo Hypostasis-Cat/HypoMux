@@ -31,6 +31,7 @@ type dnsResolveResult struct {
 	Server       string   `json:"server"`
 	DoHPath      string   `json:"doh_path,omitempty"`
 	RelayAddress string   `json:"relay_address,omitempty"`
+	Probe        bool     `json:"probe,omitempty"`
 	Cached       bool     `json:"cached"`
 }
 

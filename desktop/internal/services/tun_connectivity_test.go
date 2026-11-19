@@ -36,7 +36,12 @@ func TestAggregationAlternativesResolveAllDomainsAndTryBackupIP(t *testing.T) {
 		return dnsResolveResult{Domain: domain, Address: "127.0.0.2", Addresses: []string{"127.0.0.2", "127.0.0.1"}}, nil
 	}
 	report, err := probeTUNConnectivityThroughChannels(context.Background(), startTestSOCKS5(t),
-		dnsResolveResult{Adapter: "Ethernet", Transport: "udp", Server: startTestDNSUDP(t)}, resolver)
+		dnsResolveResult{Adapter: "Ethernet", Transport: "udp", Server: "192.168.11.1:53"}, func(_ context.Context, target dnsResolveResult) error {
+			if target.Server != "192.168.11.1:53" || target.Adapter != "Ethernet" || target.Transport != "udp" {
+				t.Errorf("wrong core probe target: %#v", target)
+			}
+			return nil
+		}, resolver)
 	if err != nil || report.Checks[1].OK || !report.Checks[2].OK {
 		t.Fatalf("backup should pass: %#v %v", report, err)
 	}
@@ -142,7 +147,7 @@ func TestChannelConnectivitySeparatesDNSBootstrapAndAggregation(t *testing.T) {
 	t.Cleanup(func() { tunConnectivityURLs = original })
 	report, err := probeTUNConnectivityThroughChannels(
 		context.Background(), "not-a-socks-endpoint",
-		dnsResolveResult{Transport: "udp", Server: "not-a-literal-dns-endpoint"},
+		dnsResolveResult{Transport: "udp", Server: "192.168.11.1:53"}, failedCoreDNSProbe,
 	)
 	if err == nil {
 		t.Fatal("expected both channel checks to fail")
@@ -150,7 +155,7 @@ func TestChannelConnectivitySeparatesDNSBootstrapAndAggregation(t *testing.T) {
 	if len(report.Checks) != 3 {
 		t.Fatalf("checks = %#v", report.Checks)
 	}
-	if report.Checks[0].Stage != "dns_bootstrap" || report.Checks[0].Outbound != "system-direct" {
+	if report.Checks[0].Stage != "dns_bootstrap" || report.Checks[0].Outbound != "core-dns" {
 		t.Fatalf("DNS bootstrap check = %#v", report.Checks[0])
 	}
 	if report.Checks[1].Stage != "aggregation_data" || report.Checks[1].Outbound != "aggregation" {
@@ -171,7 +176,7 @@ func TestChannelConnectivityAllowsAnyAggregationHTTPAlternative(t *testing.T) {
 	}))
 	defer server.Close()
 	socksEndpoint := startTestSOCKS5(t)
-	dnsEndpoint := startTestDNSUDP(t)
+	dnsEndpoint := "192.168.11.1:53"
 	failedEndpoint := closedTestHTTPURL(t)
 	original := tunConnectivityURLs
 	tunConnectivityURLs = []string{failedEndpoint, server.URL}
@@ -179,7 +184,7 @@ func TestChannelConnectivityAllowsAnyAggregationHTTPAlternative(t *testing.T) {
 
 	report, err := probeTUNConnectivityThroughChannels(
 		context.Background(), socksEndpoint,
-		dnsResolveResult{Transport: "udp", Server: dnsEndpoint},
+		dnsResolveResult{Transport: "udp", Server: dnsEndpoint}, successfulCoreDNSProbe,
 	)
 	if err != nil {
 		t.Fatalf("one successful aggregation endpoint should pass: %v", err)
@@ -206,7 +211,7 @@ func TestChannelConnectivityRequiresDNSBootstrapEvenWhenHTTPWorks(t *testing.T) 
 
 	report, err := probeTUNConnectivityThroughChannels(
 		context.Background(), socksEndpoint,
-		dnsResolveResult{Transport: "udp", Server: "not-a-literal-dns-endpoint"},
+		dnsResolveResult{Transport: "udp", Server: "192.168.11.1:53"}, failedCoreDNSProbe,
 	)
 	if err == nil || report.Checks[0].OK || !report.Checks[1].OK {
 		t.Fatalf("DNS bootstrap must be required: report=%#v err=%v", report.Checks, err)
@@ -219,7 +224,7 @@ func TestChannelConnectivityRequiresDNSBootstrapEvenWhenHTTPWorks(t *testing.T) 
 func TestChannelConnectivityReportsAllFailedAggregationEndpoints(t *testing.T) {
 	stubTUNDataPathProbe(t, true)
 	socksEndpoint := startTestSOCKS5(t)
-	dnsEndpoint := startTestDNSUDP(t)
+	dnsEndpoint := "192.168.11.1:53"
 	first := closedTestHTTPURL(t)
 	second := closedTestHTTPURL(t)
 	original := tunConnectivityURLs
@@ -228,7 +233,7 @@ func TestChannelConnectivityReportsAllFailedAggregationEndpoints(t *testing.T) {
 
 	report, err := probeTUNConnectivityThroughChannels(
 		context.Background(), socksEndpoint,
-		dnsResolveResult{Transport: "udp", Server: dnsEndpoint},
+		dnsResolveResult{Transport: "udp", Server: dnsEndpoint}, successfulCoreDNSProbe,
 	)
 	if err == nil || !report.Checks[0].OK {
 		t.Fatalf("all aggregation endpoints should fail: report=%#v err=%v", report.Checks, err)
@@ -245,14 +250,14 @@ func TestChannelConnectivityRequiresRealTunDataPath(t *testing.T) {
 	}))
 	defer server.Close()
 	socksEndpoint := startTestSOCKS5(t)
-	dnsEndpoint := startTestDNSUDP(t)
+	dnsEndpoint := "192.168.11.1:53"
 	original := tunConnectivityURLs
 	tunConnectivityURLs = []string{server.URL}
 	t.Cleanup(func() { tunConnectivityURLs = original })
 
 	report, err := probeTUNConnectivityThroughChannels(
 		context.Background(), socksEndpoint,
-		dnsResolveResult{Transport: "udp", Server: dnsEndpoint},
+		dnsResolveResult{Transport: "udp", Server: dnsEndpoint}, successfulCoreDNSProbe,
 	)
 	if err == nil || len(report.Checks) != 3 || !report.Checks[0].OK ||
 		!report.Checks[1].OK || report.Checks[2].OK {
@@ -339,26 +344,10 @@ func startTestSOCKS5(t *testing.T) string {
 	return listener.Addr().String()
 }
 
-func startTestDNSUDP(t *testing.T) string {
-	t.Helper()
-	listener, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1")})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = listener.Close() })
-	go func() {
-		query := make([]byte, 4096)
-		count, address, readErr := listener.ReadFromUDP(query)
-		if readErr != nil || count < 2 {
-			return
-		}
-		response := make([]byte, 12)
-		response[0], response[1] = query[0], query[1]
-		response[2], response[3] = 0x81, 0x80
-		response[4], response[5] = 0, 1
-		_, _ = listener.WriteToUDP(response, address)
-	}()
-	return listener.LocalAddr().String()
+func successfulCoreDNSProbe(_ context.Context, _ dnsResolveResult) error { return nil }
+
+func failedCoreDNSProbe(_ context.Context, _ dnsResolveResult) error {
+	return errors.New("core DNS query failed")
 }
 
 func closedTestHTTPURL(t *testing.T) string {

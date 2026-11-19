@@ -10,6 +10,7 @@ import (
 	"mime"
 	"net"
 	"net/http"
+	"net/netip"
 	"strconv"
 	"strings"
 	"sync"
@@ -45,6 +46,7 @@ type Result struct {
 	Transport  string     `json:"transport"`
 	Server     string     `json:"server"`
 	DoHPath    string     `json:"doh_path,omitempty"`
+	Probe      bool       `json:"probe,omitempty"`
 	Cached     bool       `json:"cached"`
 	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
 }
@@ -242,6 +244,59 @@ func (r *Resolver) Resolve(ctx context.Context, query Query) (Result, error) {
 	case <-r.root.Done():
 		return Result{}, r.root.Err()
 	}
+}
+
+// Probe performs a fresh A query against the exact selected upstream using the
+// same interface-bound sockets as regular Core DNS. It bypasses cache and fallback.
+func (r *Resolver) Probe(ctx context.Context, domain string, binding Binding, server, transport, dohPath string) (Result, error) {
+	binding, err := NormalizeBinding(binding)
+	if err != nil {
+		return Result{}, err
+	}
+	domain, err = normalizeDomain(domain)
+	if err != nil {
+		return Result{}, err
+	}
+
+	name, address, encrypted := strings.Cut(server, "@")
+	if !encrypted {
+		address = name
+	}
+	host, portText, err := net.SplitHostPort(address)
+	if err != nil {
+		return Result{}, err
+	}
+	_, ipErr := netip.ParseAddr(host)
+	port, err := strconv.Atoi(portText)
+	if ipErr != nil || err != nil || port < 1 || port > 65535 ||
+		!supportsEndpoint(binding, host) {
+		return Result{}, fmt.Errorf("invalid DNS probe endpoint %q for adapter %q", server, binding.Name)
+	}
+	if encrypted != (transport == "doh" || transport == "dot") || (encrypted && name == "") {
+		return Result{}, fmt.Errorf("DNS probe endpoint does not match transport %q", transport)
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, r.config.QueryTimeout)
+	defer cancel()
+	_, wireType, _ := normalizeRecordType(RecordA)
+	var result Result
+	switch transport {
+	case "udp":
+		result, _, err = r.queryUDP(ctx, domain, wireType, binding, host, address)
+	case "tcp":
+		result, _, err = r.queryTCP(ctx, domain, wireType, binding, host, address)
+	case "doh":
+		result, _, err = r.queryDoH(ctx, domain, wireType, binding, Endpoint{IP: host, Host: name, Port: port, Path: dohPath})
+	case "dot":
+		result, _, err = r.resolveDoT(ctx, domain, wireType, binding, []Endpoint{{IP: host, Host: name, Port: port}})
+	default:
+		return Result{}, fmt.Errorf("unsupported DNS probe transport %q", transport)
+	}
+	if err != nil {
+		return Result{}, err
+	}
+	result.Domain, result.RecordType, result.Adapter, result.Probe = domain, RecordA, binding.Name, true
+	return result, nil
 }
 
 func (r *Resolver) Status() Status {
@@ -574,7 +629,7 @@ func (r *Resolver) resolveLegacyUsing(ctx context.Context, domain string, record
 		// server drops UDP instead of returning an error.
 		attemptBudget := remainingQueryBudget(ctx, r.config.QueryTimeout) / time.Duration(2*(len(servers)-index))
 		udpCtx, cancelUDP := context.WithTimeout(ctx, attemptBudget)
-		result, ttl, err := r.queryUDP(udpCtx, domain, recordType, binding, server)
+		result, ttl, err := r.queryUDP(udpCtx, domain, recordType, binding, server, net.JoinHostPort(server, "53"))
 		cancelUDP()
 		if err == nil {
 			r.legacySuccesses.Add(1)
@@ -582,7 +637,7 @@ func (r *Resolver) resolveLegacyUsing(ctx context.Context, domain string, record
 		}
 		failures = append(failures, fmt.Errorf("udp/%s: %w", server, err))
 		tcpCtx, cancelTCP := context.WithTimeout(ctx, attemptBudget)
-		result, ttl, err = r.queryTCP(tcpCtx, domain, recordType, binding, server)
+		result, ttl, err = r.queryTCP(tcpCtx, domain, recordType, binding, server, net.JoinHostPort(server, "53"))
 		cancelTCP()
 		if err == nil {
 			r.legacySuccesses.Add(1)
@@ -612,13 +667,12 @@ func (r *Resolver) queryUDP(
 	domain string,
 	recordType uint16,
 	binding Binding,
-	server string,
+	server, address string,
 ) (Result, time.Duration, error) {
 	packet, queryID, err := buildQuery(domain, recordType)
 	if err != nil {
 		return Result{}, 0, err
 	}
-	address := net.JoinHostPort(server, "53")
 	connection, err := r.dial(ctx, endpointNetwork("udp", server), address, binding)
 	if err != nil {
 		return Result{}, 0, err
@@ -652,13 +706,12 @@ func (r *Resolver) queryTCP(
 	domain string,
 	recordType uint16,
 	binding Binding,
-	server string,
+	server, address string,
 ) (Result, time.Duration, error) {
 	packet, queryID, err := buildQuery(domain, recordType)
 	if err != nil {
 		return Result{}, 0, err
 	}
-	address := net.JoinHostPort(server, "53")
 	connection, err := r.dial(ctx, endpointNetwork("tcp", server), address, binding)
 	if err != nil {
 		return Result{}, 0, err
