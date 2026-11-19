@@ -291,11 +291,14 @@ type LogRecordData struct {
 }
 
 type DNSResolveParams struct {
-	Bootstrap  bool           `json:"bootstrap,omitempty"`
-	TimeoutMS  int            `json:"timeout_ms,omitempty"`
-	Domain     string         `json:"domain"`
-	Adapter    string         `json:"adapter"`
-	RecordType dns.RecordType `json:"record_type"`
+	ProbeServer    string         `json:"probe_server,omitempty"`
+	ProbeTransport string         `json:"probe_transport,omitempty"`
+	ProbeDoHPath   string         `json:"probe_doh_path,omitempty"`
+	Bootstrap      bool           `json:"bootstrap,omitempty"`
+	TimeoutMS      int            `json:"timeout_ms,omitempty"`
+	Domain         string         `json:"domain"`
+	Adapter        string         `json:"adapter"`
+	RecordType     dns.RecordType `json:"record_type"`
 }
 
 type DNSFallbackRequiredData struct {

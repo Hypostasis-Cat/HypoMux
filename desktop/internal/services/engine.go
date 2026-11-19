@@ -572,7 +572,7 @@ func (s *EngineService) Snapshot() (EngineSnapshot, error) {
 		var tunReport tunConnectivityReport
 		var tunErr error
 		if aggregationEndpoint != "" {
-			tunReport, tunErr = probeTUNConnectivityThroughChannels(probeContext, aggregationEndpoint, dnsBootstrap, s.resolveConnectivityDNS)
+			tunReport, tunErr = probeTUNConnectivityThroughChannels(probeContext, aggregationEndpoint, dnsBootstrap, s.probeConnectivityDNS, s.resolveConnectivityDNS)
 			tunReport, tunErr = discountRejectedTUNDataPath(tunReport, tunErr, defaultOutbound)
 		} else {
 			tunErr = errors.New("aggregation channel endpoint is unavailable")
@@ -1125,7 +1125,7 @@ func (s *EngineService) startLocked(ctx context.Context, mode string) (snapshot 
 		if !settings.ForceTUNBypass {
 			s.recordStartStage("connectivity_validating", nil)
 			validationReport, validationErr := probeTUNConnectivityThroughChannels(
-				ctx, started.Endpoints.Channels["aggregation"], dnsResult, s.resolveConnectivityDNS,
+				ctx, started.Endpoints.Channels["aggregation"], dnsResult, s.probeConnectivityDNS, s.resolveConnectivityDNS,
 			)
 			validationReport, validationErr = discountRejectedTUNDataPath(validationReport, validationErr, settings.DefaultOutbound)
 			s.recordTUNConnectivityOutcome(validationErr)

@@ -374,6 +374,14 @@ func (s *Server) ResolveDNS(
 	return resolver.Resolve(ctx, dns.Query{Domain: domain, RecordType: recordType, Binding: adapterDNSBinding(*selected), LegacyDNS: len(bootstrap) > 0 && bootstrap[0]})
 }
 
+func (s *Server) ProbeDNS(ctx context.Context, domain, adapterName, server, transport, dohPath string) (dns.Result, error) {
+	resolver, adapter, err := s.dnsResolverAdapter(adapterName)
+	if err != nil {
+		return dns.Result{}, err
+	}
+	return resolver.Probe(ctx, domain, adapterDNSBinding(*adapter), server, transport, dohPath)
+}
+
 func (s *Server) StartDNSDoHRelay(adapterName string, endpoint dns.Endpoint) (string, error) {
 	resolver, adapter, err := s.dnsResolverAdapter(adapterName)
 	if err != nil {

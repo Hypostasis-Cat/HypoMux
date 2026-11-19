@@ -1,18 +1,14 @@
 package services
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"crypto/tls"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -24,6 +20,8 @@ var tunConnectivityURLs = []string{
 	"http://www.msftconnecttest.com/connecttest.txt",
 	"https://www.baidu.com/",
 }
+
+const connectivityDNSDomain = "www.msftconnecttest.com"
 
 const tunDataPathURL = "http://www.msftconnecttest.com/connecttest.txt"
 
@@ -127,16 +125,17 @@ func probeTUNConnectivity(parent context.Context) (string, error) {
 }
 
 // probeTUNConnectivityThroughChannels verifies the two independent startup
-// paths: the DNS bootstrap endpoint is reached directly through its literal
-// IP, while public HTTP is sent through the aggregation SOCKS channel.
+// paths: Core queries the selected DNS endpoint on its bound adapter, while
+// public HTTP is sent through the aggregation SOCKS channel.
 func probeTUNConnectivityThroughChannels(
 	parent context.Context,
 	aggregationEndpoint string,
 	dnsResult dnsResolveResult,
+	probe func(context.Context, dnsResolveResult) error,
 	resolvers ...connectivityDNSResolver,
 ) (tunConnectivityReport, error) {
 	probes := make([]func() tunConnectivityCheck, 0, len(tunConnectivityURLs)+2)
-	probes = append(probes, func() tunConnectivityCheck { return probeDNSBootstrap(parent, dnsResult) })
+	probes = append(probes, func() tunConnectivityCheck { return probeDNSBootstrap(parent, dnsResult, probe) })
 	aggregationTargets := 0
 	for _, endpoint := range tunConnectivityURLs {
 		if len(resolvers) > 0 && resolvers[0] != nil {
@@ -316,206 +315,33 @@ func (s *EngineService) resolveConnectivityDNS(ctx context.Context, domain, adap
 	return result, err
 }
 
-func probeDNSBootstrap(parent context.Context, result dnsResolveResult) tunConnectivityCheck {
-	check := tunConnectivityCheck{
-		Stage:    "dns_bootstrap",
-		Endpoint: result.Server,
-		Outbound: "system-direct",
-	}
-	transport := strings.ToLower(strings.TrimSpace(result.Transport))
-	if transport == "" || strings.TrimSpace(result.Server) == "" {
-		check.Error = "DNS bootstrap result is incomplete"
-		return check
-	}
-	server := strings.TrimSpace(result.Server)
-	serverName := ""
-	if parts := strings.SplitN(server, "@", 2); len(parts) == 2 {
-		serverName = strings.TrimSpace(parts[0])
-		server = strings.TrimSpace(parts[1])
-	}
-	defaultPort := 53
-	if transport == "doh" {
-		defaultPort = 443
-	} else if transport == "dot" {
-		defaultPort = 853
-	}
-	host, port, err := splitEndpoint(server, defaultPort)
+func (s *EngineService) probeConnectivityDNS(ctx context.Context, target dnsResolveResult) error {
+	var result dnsResolveResult
+	err := s.client.Request(ctx, "dns.resolve", map[string]any{
+		"domain": connectivityDNSDomain, "adapter": target.Adapter, "record_type": "A",
+		"timeout_ms": 3500, "probe_server": target.Server, "probe_transport": target.Transport,
+		"probe_doh_path": target.DoHPath,
+	}, &result)
 	if err != nil {
+		return err
+	}
+	if !result.Probe {
+		return errors.New("HY Core does not support fresh DNS probes")
+	}
+	return nil
+}
+
+func probeDNSBootstrap(parent context.Context, target dnsResolveResult, probe func(context.Context, dnsResolveResult) error) tunConnectivityCheck {
+	check := tunConnectivityCheck{Stage: "dns_bootstrap", Endpoint: target.Server, Outbound: "core-dns"}
+	ctx, cancel := context.WithTimeout(parent, 4*time.Second)
+	defer cancel()
+	if err := probe(ctx, target); err != nil {
 		check.Error = err.Error()
 		return check
 	}
-	ip := net.ParseIP(host)
-	if ip == nil {
-		check.Error = "DNS bootstrap endpoint is not a literal IP"
-		return check
-	}
-	dialer := &net.Dialer{Timeout: 3 * time.Second}
-	network := "tcp4"
-	if ip.To4() == nil {
-		network = "tcp6"
-	}
-	address := net.JoinHostPort(ip.String(), fmt.Sprintf("%d", port))
-	ctx, cancel := context.WithTimeout(parent, 4*time.Second)
-	defer cancel()
-	switch transport {
-	case "doh", "dot":
-		connection, dialErr := dialer.DialContext(ctx, network, address)
-		if dialErr != nil {
-			check.Error = dialErr.Error()
-			return check
-		}
-		defer connection.Close()
-		if serverName == "" {
-			serverName = host
-		}
-		tlsConnection := tls.Client(connection, &tls.Config{
-			MinVersion: tls.VersionTLS12, ServerName: serverName,
-		})
-		if deadline, ok := ctx.Deadline(); ok {
-			_ = tlsConnection.SetDeadline(deadline)
-		}
-		if handshakeErr := tlsConnection.HandshakeContext(ctx); handshakeErr != nil {
-			check.Error = handshakeErr.Error()
-			return check
-		}
-		query := buildConnectivityDNSQuery()
-		if transport == "doh" {
-			path := result.DoHPath
-			if path == "" {
-				path = "/dns-query"
-			}
-			request, requestErr := http.NewRequestWithContext(
-				ctx, http.MethodPost, "https://dns-bootstrap.invalid"+path, bytes.NewReader(query),
-			)
-			if requestErr != nil {
-				check.Error = requestErr.Error()
-				return check
-			}
-			request.Host = serverName
-			if port != 443 {
-				request.Host = net.JoinHostPort(serverName, strconv.Itoa(port))
-			}
-			request.Header.Set("Accept", "application/dns-message")
-			request.Header.Set("Content-Type", "application/dns-message")
-			request.Header.Set("User-Agent", "HypoMux-Desktop/1")
-			request.Close = true
-			if requestErr = request.Write(tlsConnection); requestErr != nil {
-				check.Error = requestErr.Error()
-				return check
-			}
-			response, responseErr := http.ReadResponse(bufio.NewReader(tlsConnection), request)
-			if responseErr != nil {
-				check.Error = responseErr.Error()
-				return check
-			}
-			body, readErr := io.ReadAll(io.LimitReader(response.Body, 4097))
-			_ = response.Body.Close()
-			if readErr != nil {
-				check.Error = readErr.Error()
-				return check
-			}
-			if response.StatusCode != http.StatusOK {
-				check.Error = fmt.Sprintf("DoH HTTP %d", response.StatusCode)
-				return check
-			}
-			if len(body) < 12 {
-				check.Error = "DoH returned a truncated DNS response"
-				return check
-			}
-		} else {
-			if err := binary.Write(tlsConnection, binary.BigEndian, uint16(len(query))); err != nil {
-				check.Error = err.Error()
-				return check
-			}
-			if _, err := tlsConnection.Write(query); err != nil {
-				check.Error = err.Error()
-				return check
-			}
-			var length uint16
-			if err := binary.Read(tlsConnection, binary.BigEndian, &length); err != nil {
-				check.Error = err.Error()
-				return check
-			}
-			if length < 12 {
-				check.Error = "DoT returned a truncated DNS response"
-				return check
-			}
-			response := make([]byte, int(length))
-			if _, err := io.ReadFull(tlsConnection, response); err != nil {
-				check.Error = err.Error()
-				return check
-			}
-		}
-		check.OK = true
-		check.Detail = fmt.Sprintf("%s DNS response via %s", strings.ToUpper(transport), address)
-		return check
-	case "udp":
-		connection, dialErr := dialer.DialContext(ctx, "udp"+ipVersionSuffix(ip), address)
-		if dialErr != nil {
-			check.Error = dialErr.Error()
-			return check
-		}
-		defer connection.Close()
-		if deadline, ok := ctx.Deadline(); ok {
-			_ = connection.SetDeadline(deadline)
-		}
-		query := buildConnectivityDNSQuery()
-		if _, writeErr := connection.Write(query); writeErr != nil {
-			check.Error = writeErr.Error()
-			return check
-		}
-		response := make([]byte, 4096)
-		count, readErr := connection.Read(response)
-		if readErr != nil {
-			check.Error = readErr.Error()
-			return check
-		}
-		if count < 12 {
-			check.Error = "DNS bootstrap returned a truncated response"
-			return check
-		}
-		check.OK = true
-		check.Detail = fmt.Sprintf("UDP DNS response via %s", address)
-		return check
-	case "tcp":
-		connection, dialErr := dialer.DialContext(ctx, network, address)
-		if dialErr != nil {
-			check.Error = dialErr.Error()
-			return check
-		}
-		defer connection.Close()
-		if deadline, ok := ctx.Deadline(); ok {
-			_ = connection.SetDeadline(deadline)
-		}
-		query := buildConnectivityDNSQuery()
-		if err := binary.Write(connection, binary.BigEndian, uint16(len(query))); err != nil {
-			check.Error = err.Error()
-			return check
-		}
-		if _, err := connection.Write(query); err != nil {
-			check.Error = err.Error()
-			return check
-		}
-		var length uint16
-		if err := binary.Read(connection, binary.BigEndian, &length); err != nil {
-			check.Error = err.Error()
-			return check
-		}
-		if length < 12 {
-			check.Error = "DNS bootstrap returned a truncated TCP response"
-			return check
-		}
-		if _, err := io.CopyN(io.Discard, connection, int64(length)); err != nil {
-			check.Error = err.Error()
-			return check
-		}
-		check.OK = true
-		check.Detail = fmt.Sprintf("TCP DNS response via %s", address)
-		return check
-	default:
-		check.Error = "unsupported DNS bootstrap transport: " + result.Transport
-		return check
-	}
+	check.OK = true
+	check.Detail = fmt.Sprintf("Core resolved %s through %s on %s", connectivityDNSDomain, target.Server, target.Adapter)
+	return check
 }
 
 func probeHTTPURL(
@@ -655,26 +481,4 @@ func resolveAggregationTarget(
 		parsed.Host = "[" + selected.String() + "]"
 	}
 	return parsed.String(), originalHost, true, nil
-}
-
-func buildConnectivityDNSQuery() []byte {
-	const domain = "www.msftconnecttest.com"
-	query := make([]byte, 12)
-	query[0] = byte(time.Now().UnixNano() >> 8)
-	query[1] = byte(time.Now().UnixNano())
-	query[2] = 1
-	query[5] = 1
-	for _, label := range strings.Split(domain, ".") {
-		query = append(query, byte(len(label)))
-		query = append(query, label...)
-	}
-	query = append(query, 0, 0, 1, 0, 1)
-	return query
-}
-
-func ipVersionSuffix(ip net.IP) string {
-	if ip.To4() == nil {
-		return "6"
-	}
-	return "4"
 }

@@ -560,7 +560,13 @@ func (s *Server) resolveDNS(ctx context.Context, request protocol.Request) proto
 		defer cancel()
 		ctx = lookupCtx
 	}
-	result, err := s.proxy.ResolveDNS(ctx, params.Domain, params.Adapter, params.RecordType, params.Bootstrap)
+	var result dns.Result
+	var err error
+	if params.ProbeServer != "" || params.ProbeTransport != "" {
+		result, err = s.proxy.ProbeDNS(ctx, params.Domain, params.Adapter, params.ProbeServer, params.ProbeTransport, params.ProbeDoHPath)
+	} else {
+		result, err = s.proxy.ResolveDNS(ctx, params.Domain, params.Adapter, params.RecordType, params.Bootstrap)
+	}
 	if err != nil {
 		return protocol.Failure(
 			request.ID,

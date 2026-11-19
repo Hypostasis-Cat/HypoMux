@@ -442,3 +442,29 @@ func TestDoHRaceAdvancesToLaterEndpoints(t *testing.T) {
 		t.Fatal("later endpoint was dialed with an already-canceled context; it never got a chance to answer")
 	}
 }
+
+func TestProbeQueriesExactBoundUpstreamWithoutUsingCacheOrFallback(t *testing.T) {
+	var dials atomic.Int64
+	answer := answeringDialer(t, &dials, "192.0.2.44", 60, 0)
+	binding := loopbackBinding
+	binding.DNSServers = []string{"192.0.2.53"}
+	dial := func(ctx context.Context, network, address string, got Binding) (net.Conn, error) {
+		if network != "udp4" || address != "192.168.11.1:53" || got.SourceIP != binding.SourceIP || got.IfIndex != binding.IfIndex {
+			t.Errorf("unexpected dial: %s %s %+v", network, address, got)
+		}
+		return answer(ctx, network, address, got)
+	}
+	resolver, err := New(context.Background(), Config{Policy: PolicyOff}, dial)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		result, err := resolver.Probe(context.Background(), "www.msftconnecttest.com", binding, "192.168.11.1:53", "udp", "")
+		if err != nil || !result.Probe || result.Cached || result.Server != "192.168.11.1:53" || result.Address != "192.0.2.44" {
+			t.Fatalf("unexpected probe result: %+v, %v", result, err)
+		}
+	}
+	if got := dials.Load(); got != 2 || resolver.Status().CacheEntries != 0 {
+		t.Fatalf("expected two fresh queries and no cache entries, got %d queries", got)
+	}
+}
