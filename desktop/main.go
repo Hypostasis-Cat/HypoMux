@@ -197,6 +197,7 @@ func main() {
 	app.RegisterService(application.NewService(ruleSetService))
 	app.RegisterService(application.NewService(diagnosticsService))
 	app.RegisterService(application.NewService(services.NewMTUService(engineService, settingsService)))
+	app.RegisterService(application.NewService(services.NewDownloaderService()))
 	app.RegisterService(application.NewService(tunService))
 	app.RegisterService(application.NewService(blockedDomainService))
 	app.RegisterService(application.NewService(updaterService))
