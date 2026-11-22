@@ -28,6 +28,7 @@ import {
 
 const AppearanceLab = lazy(() => import("./pages/AppearanceLab").then((module) => ({ default: module.AppearanceLab })));
 const AboutPage = lazy(() => import("./pages/AboutPage").then((module) => ({ default: module.AboutPage })));
+const DownloaderPage = lazy(() => import("./pages/DownloaderPage").then((module) => ({ default: module.DownloaderPage })));
 const BlockedDomainsPage = lazy(() => import("./pages/BlockedDomainsPage").then((module) => ({ default: module.BlockedDomainsPage })));
 const HealthPage = lazy(() => import("./pages/HealthPage").then((module) => ({ default: module.HealthPage })));
 const ConnectionsPage = lazy(() => import("./pages/ConnectionsPage").then((module) => ({ default: module.ConnectionsPage })));
@@ -98,6 +99,7 @@ function HypoMuxWindow() {
     "routing",
     "health",
     "connections",
+    "downloader",
     "tools",
     "settings",
     "blocked-domains",
@@ -168,13 +170,15 @@ function HypoMuxWindow() {
                   ? <BlockedDomainsPage onBack={() => navigate("settings")} />
             : target === "health"
               ? <HealthPage adapterRuntime={connectionAdapters} enginePhase={enginePhase} />
-              : target === "connections"
-                ? <ConnectionsPage
-                  initialAdapter={connectionsNavigation.adapter}
-                  adapterRevision={connectionsNavigation.revision}
-                  adapterRuntime={connectionAdapters ?? []}
-                />
-            : target === "routing"
+            : target === "connections"
+              ? <ConnectionsPage
+                initialAdapter={connectionsNavigation.adapter}
+                adapterRevision={connectionsNavigation.revision}
+                adapterRuntime={connectionAdapters ?? []}
+              />
+            : target === "downloader"
+              ? <DownloaderPage />
+              : target === "routing"
               ? <RoutingPage />
               : null}
           </Suspense>

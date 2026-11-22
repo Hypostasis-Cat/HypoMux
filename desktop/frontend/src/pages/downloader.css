@@ -1,0 +1,33 @@
+.downloader-page {
+  display: grid;
+  min-height: 0;
+  gap: 16px;
+  align-content: start;
+  overflow: auto;
+  padding: 2px 2px 16px;
+}
+.downloader-panel { min-width: 0; padding: 24px; }
+.downloader-panel h2 { margin: 6px 0 12px; font-size: var(--fontSizeBase500); font-weight: var(--fontWeightSemibold); }
+.downloader-form { display: grid; gap: 12px; }
+.downloader-url, .downloader-output, .downloader-segments { min-width: 0; }
+.downloader-url { width: 100%; }
+.downloader-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 12px; align-items: center; }
+.downloader-probe { display: flex; align-items: center; gap: 12px; font-size: var(--fontSizeBase300); }
+.downloader-probe span { color: var(--hm-text-tertiary); font-variant-numeric: tabular-nums; }
+.downloader-error { padding: 8px 12px; border-radius: var(--borderRadiusMedium); background: var(--colorPaletteRedBackground2); color: var(--colorPaletteRedForeground1); font-size: var(--fontSizeBase200); overflow-wrap: anywhere; }
+.downloader-empty { margin: 0; color: var(--hm-text-tertiary); font-size: var(--fontSizeBase200); }
+.downloader-tasks { display: grid; gap: 14px; margin: 0; padding: 0; list-style: none; }
+.downloader-task { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 14px 16px; border-radius: var(--borderRadiusLarge); background: var(--colorNeutralBackground3); }
+.downloader-task-main { display: grid; min-width: 0; gap: 8px; }
+.downloader-task-title { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.downloader-task-title strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.downloader-task-progress { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.downloader-bar { flex: 1; min-width: 80px; height: 6px; border-radius: 999px; background: var(--colorNeutralBackground5); overflow: hidden; }
+.downloader-bar span { display: block; height: 100%; border-radius: 999px; background: var(--hm-accent-strong); transition: width .5s ease; }
+.downloader-nums { flex-shrink: 0; font-size: var(--fontSizeBase200); color: var(--hm-text-secondary); font-variant-numeric: tabular-nums; }
+.downloader-task-actions { display: flex; gap: 6px; }
+.downloader-task-error { grid-column: 1 / -1; margin: 0; color: var(--colorPaletteRedForeground1); font-size: var(--fontSizeBase200); overflow-wrap: anywhere; }
+
+@media (max-width: 720px) {
+  .downloader-row { grid-template-columns: 1fr; }
+}
